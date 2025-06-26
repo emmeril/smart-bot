@@ -598,8 +598,13 @@ client.on("message", async (msg) => {
     saveDB();
     msg.reply(`✅ Pair set to ${db.pair}`);
   } else if (txt === "!status") {
-    const cooldownLong = Math.round(mins(now() - db.lastLongEntryTime));
-    const cooldownShort = Math.round(mins(now() - db.lastShortEntryTime));
+    const cooldownLong = db.lastLongEntryTime
+  ? Math.round(mins(now() - db.lastLongEntryTime)) + "m"
+  : "Belum pernah entry";
+
+const cooldownShort = db.lastShortEntryTime
+  ? Math.round(mins(now() - db.lastShortEntryTime)) + "m"
+  : "Belum pernah entry";
     const posLong = db.positionLong
       ? `📍 Entry @ ${db.positionLong.entry.toFixed(
           4
@@ -616,12 +621,14 @@ client.on("message", async (msg) => {
 🧭 Leverage: *${db.leverage}x* (${db.marginMode.toUpperCase()})
 
 📉 *LONG*
-⏱ Cooldown: ${cooldownLong}m
+⏱ Cooldown: ${cooldownLong}
+✅ Profit Count: ${db.winCountLong}
 ❌ Loss Count: ${db.lossCountLong}
 ${posLong}
 
 📈 *SHORT*
-⏱ Cooldown: ${cooldownShort}m
+⏱ Cooldown: ${cooldownShort}
+✅ Profit Count: ${db.winCountShort}
 ❌ Loss Count: ${db.lossCountShort}
 ${posShort}`);
   } else if (txt.startsWith("!leverage")) {
