@@ -1,0 +1,6 @@
+2025/06/26-15:30:22.622 1164 Reusing MANIFEST C:\xampp\htdocs\smart-bot\.wwebjs_auth\session\Default\Local Storage\leveldb/MANIFEST-000001
+2025/06/26-15:30:22.624 1164 Recovering log #4
+2025/06/26-15:30:22.626 1164 Reusing old log C:\xampp\htdocs\smart-bot\.wwebjs_auth\session\Default\Local Storage\leveldb/000004.log 
+2025/06/26-15:33:23.326 4df8 Level-0 table #6: started
+2025/06/26-15:33:23.333 4df8 Level-0 table #6: 20079 bytes OK
+2025/06/26-15:33:23.335 4df8 Delete type=0 #4

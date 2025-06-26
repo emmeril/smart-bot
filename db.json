@@ -1,0 +1,15 @@
+{
+  "pair": "DOGE/USDT:USDT",
+  "balancePercent": 10,
+  "trailingOffset": 0.003,
+  "positionLong": null,
+  "positionShort": null,
+  "lastLongEntryTime": 0,
+  "lastShortEntryTime": 1750926688095,
+  "lossCountLong": 0,
+  "lossCountShort": 0,
+  "leverage": 5,
+  "marginMode": "isolated",
+  "totalProfit": 0,
+  "totalLoss": 0
+}
