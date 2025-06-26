@@ -117,11 +117,15 @@ const sendMsg = async (text) => {
 const updatePnL = (type, entry, exit, amount, result) => {
   const diff = type === "long" ? exit - entry : entry - exit;
   const pnl = diff * amount;
+
   if (result === "sl_hit" || result === "cut_timeout") {
     db.totalLoss += Math.abs(pnl);
   } else {
     db.totalProfit += pnl;
+    if (type === "long") db.winCountLong++;
+    else db.winCountShort++;
   }
+
   saveDB();
 };
 
