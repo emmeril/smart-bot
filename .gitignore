@@ -4,4 +4,4 @@ node_modules
 /data
 pnpm-lock.yaml
 pnpm-workspace.yaml
-.env
+.env.local
