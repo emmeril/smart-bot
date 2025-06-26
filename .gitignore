@@ -1,5 +1,5 @@
-.wwwebjs_auth
-.wwwebjs_cache
+/.wwwebjs_auth
+/.wwwebjs_cache
 node_modules
 /data
 pnpm-lock.yaml
