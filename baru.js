@@ -398,24 +398,27 @@ client.on("message", async (msg) => {
     db.lastShortEntryTime = 0;
     saveDB();
     msg.reply(`✅ Pair diubah ke *${db.pair}*.`);
-  }
+ } else if (txt === "!status") {
+  const cooldownLong = db.lastLongEntryTime
+    ? Math.round(mins(now() - db.lastLongEntryTime)) + "m"
+    : "Belum pernah entry";
 
-  else if (txt === "!status") {
-    const cooldownLong = db.lastLongEntryTime
-      ? Math.round(mins(now() - db.lastLongEntryTime)) + "m"
-      : "Belum pernah entry";
-    const cooldownShort = db.lastShortEntryTime
-      ? Math.round(mins(now() - db.lastShortEntryTime)) + "m"
-      : "Belum pernah entry";
+  const cooldownShort = db.lastShortEntryTime
+    ? Math.round(mins(now() - db.lastShortEntryTime)) + "m"
+    : "Belum pernah entry";
 
-    const posLong = db.positionLong
-      ? `📍 Entry @ ${db.positionLong.entry.toFixed(4)} | SL: ${db.positionLong.sl.toFixed(4)}`
-      : "🚫 Belum ada";
-    const posShort = db.positionShort
-      ? `📍 Entry @ ${db.positionShort.entry.toFixed(4)} | SL: ${db.positionShort.sl.toFixed(4)}`
-      : "🚫 Belum ada";
+  const fltLong = await calcFloatingPnl("long");
+  const fltShort = await calcFloatingPnl("short");
 
-    msg.reply(`📊 *Status Bot*
+  const posLong = db.positionLong
+    ? `📍 Entry @ ${db.positionLong.entry.toFixed(4)} | SL: ${db.positionLong.sl.toFixed(4)}\n📊 Floating PnL: ${fltLong >= 0 ? "+" : "-"}$${Math.abs(fltLong).toFixed(4)}`
+    : "🚫 Belum ada";
+
+  const posShort = db.positionShort
+    ? `📍 Entry @ ${db.positionShort.entry.toFixed(4)} | SL: ${db.positionShort.sl.toFixed(4)}\n📊 Floating PnL: ${fltShort >= 0 ? "+" : "-"}$${Math.abs(fltShort).toFixed(4)}`
+    : "🚫 Belum ada";
+
+  msg.reply(`📊 *Status Bot*
 📌 Pair: *${db.pair}*
 🧭 Leverage: *${db.leverage}x* (${db.marginMode.toUpperCase()})
 
@@ -430,7 +433,7 @@ ${posLong}
 ✅ Profit Count: ${db.winCountShort || 0}
 ❌ Loss Count: ${db.lossCountShort}
 ${posShort}`);
-  }
+}
 
   else if (txt.startsWith("!leverage ")) {
     const [, lev, mode] = txt.split(" ");
