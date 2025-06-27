@@ -144,6 +144,20 @@ const getPrice = async () => {
   return ticker.last;
 };
 
+const calcFloatingPnl = async (type) => {
+  const key = type === "long" ? "positionLong" : "positionShort";
+  const position = db[key];
+  if (!position) return null;
+
+  const price = await getPrice();
+  const entry = position.entry;
+  const amount = position.amount;
+  const diff = type === "long" ? price - entry : entry - price;
+  const pnl = diff * amount;
+
+  return pnl;
+};
+
 const analyzeSignal = async () => {
   const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
   const close = ohlcv.map((c) => c[4]);
