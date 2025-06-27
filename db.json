@@ -11,5 +11,7 @@
   "leverage": 5,
   "marginMode": "isolated",
   "totalProfit": 0,
-  "totalLoss": 0
+  "totalLoss": 0,
+  "winCountLong": 0,
+"winCountShort": 0
 }
