@@ -36,7 +36,7 @@ const TP_PERCENT = 0.03;
 const SL_PERCENT = 0.02;
 const COOLDOWN_MINUTES = 30;
 const LOSS_LIMIT = 3;
-const MAX_HOLD_MINUTES = 24 * 60;
+const MAX_HOLD_MINUTES = 180;
 
 const exchange = new ccxt.binance({
   apiKey: isBacktest ? undefined : process.env.API_KEY,
