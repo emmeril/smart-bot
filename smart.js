@@ -36,7 +36,7 @@ const TP_PERCENT = 0.03;
 const SL_PERCENT = 0.02;
 const COOLDOWN_MINUTES = 30;
 const LOSS_LIMIT = 3;
-const MAX_HOLD_MINUTES = 45;
+const MAX_HOLD_MINUTES = 720;
 
 const exchange = new ccxt.binance({
   apiKey: isBacktest ? undefined : process.env.API_KEY,
@@ -188,12 +188,27 @@ const analyzeSignal = async () => {
   }).pop();
 
   const prevCandle = ohlcv[ohlcv.length - 2];
+  const prevPrevCandle = ohlcv[ohlcv.length - 3];
+
   const candleBody = Math.abs(prevCandle[4] - prevCandle[1]);
   const candleRange = prevCandle[2] - prevCandle[3];
   const isStrongCandle = candleBody / candleRange >= 0.4;
   const candleUp = prevCandle[4] > prevCandle[1];
   const candleDown = prevCandle[4] < prevCandle[1];
   const price = ohlcv.at(-1)[4];
+
+  // Engulfing pattern
+  const isBullishEngulfing =
+    prevPrevCandle[1] > prevPrevCandle[4] &&
+    prevCandle[1] < prevCandle[4] &&
+    prevCandle[1] < prevPrevCandle[4] &&
+    prevCandle[4] > prevPrevCandle[1];
+
+  const isBearishEngulfing =
+    prevPrevCandle[1] < prevPrevCandle[4] &&
+    prevCandle[1] > prevCandle[4] &&
+    prevCandle[1] > prevPrevCandle[4] &&
+    prevCandle[4] < prevPrevCandle[1];
 
   const countTrue = (...conds) => conds.filter(Boolean).length;
 
@@ -215,14 +230,15 @@ const analyzeSignal = async () => {
     candleDown
   );
 
-  const canLong = scoreLong >= 4 && price > ma200;
-  const canShort = scoreShort >= 4 && price < ma200;
+  const canLong = scoreLong >= 4 && price > ma200 && isBullishEngulfing;
+  const canShort = scoreShort >= 4 && price < ma200 && isBearishEngulfing;
 
   return { canLong, canShort };
 };
 
 const openPosition = async (type) => {
   const nowTime = now();
+
   if (type === "long") db.lastLongEntryTime = nowTime;
   else db.lastShortEntryTime = nowTime;
 
@@ -241,7 +257,18 @@ const openPosition = async (type) => {
     return;
   }
 
-  const price = await getPrice();
+  const ticker = await exchange.fetchTicker(db.pair);
+  const price = ticker.last;
+
+  // 🔍 Spread Filter
+  const spread = (ticker.ask - ticker.bid) / ticker.last;
+  if (spread > 0.003) {
+    console.log(
+      `⚠️ SPREAD terlalu tinggi (${(spread * 100).toFixed(2)}%), skip entry.`
+    );
+    return;
+  }
+
   const market = await exchange.market(db.pair);
   const amountRaw = amountUSDT / price;
   const amount = exchange.amountToPrecision(db.pair, amountRaw);
@@ -253,8 +280,8 @@ const openPosition = async (type) => {
   );
 
   const entry = order.average;
-
   const usedUSDT = amountUSDT;
+
   const position = {
     entry,
     sl: type === "long" ? entry * (1 - SL_PERCENT) : entry * (1 + SL_PERCENT),
