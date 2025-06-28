@@ -484,6 +484,7 @@ client.on("message", async (msg) => {
     msg.reply(`📊 *Status Bot*
 📌 Pair: *${db.pair}*
 🧭 Leverage: *${db.leverage}x* (${db.marginMode.toUpperCase()})
+📎 Mode Entry: *${db.entryMode.toUpperCase()}*
 
 📉 *LONG*
 ⏱ Cooldown: ${cooldownLong}
