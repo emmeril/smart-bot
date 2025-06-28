@@ -230,8 +230,21 @@ const analyzeSignal = async () => {
     candleDown
   );
 
-  const canLong = scoreLong >= 4 && price > ma200 && isBullishEngulfing;
-  const canShort = scoreShort >= 4 && price < ma200 && isBearishEngulfing;
+  const canLong = (() => {
+    if (db.entryMode === "agresif") {
+      return (scoreLong >= 3 || (scoreLong >= 2 && isBullishEngulfing)) && price > ma200;
+    } else {
+      return scoreLong >= 4 && price > ma200 && isBullishEngulfing;
+    }
+  })();
+
+  const canShort = (() => {
+    if (db.entryMode === "agresif") {
+      return (scoreShort >= 3 || (scoreShort >= 2 && isBearishEngulfing)) && price < ma200;
+    } else {
+      return scoreShort >= 4 && price < ma200 && isBearishEngulfing;
+    }
+  })();
 
   return { canLong, canShort };
 };
