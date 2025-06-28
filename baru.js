@@ -280,49 +280,54 @@ const checkTP_SL = async (type) => {
   const position = db[key];
   if (!position) return;
 
-  const { entry, trailingActive, trailingStop, entryTime, amount, usedUSDT } = position;
+  const { entry, trailingActive, trailingStop, entryTime, amount } = position;
   const holdMins = mins(now() - entryTime);
 
-  const pnlUSD = type === "long" ? (price - entry) * amount : (entry - price) * amount;
-  const roi = pnlUSD / usedUSDT;
+  const profit =
+    type === "long" ? (price - entry) / entry : (entry - price) / entry;
+
+  const slHit =
+    type === "long"
+      ? price <= entry * (1 - SL_PERCENT)
+      : price >= entry * (1 + SL_PERCENT);
 
   const timeExpired = holdMins >= MAX_HOLD_MINUTES;
 
-  // ❌ Stop Loss by ROI
-  if (roi <= -SL_PERCENT) {
+  // ✅ Exit by Stop Loss
+  if (slHit) {
     db[key] = null;
     db[lossKey]++;
     saveDB();
-    sendMsg(`⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(roi * 100).toFixed(2)}%)`);
-    logTrade(type, entry, "-", "-", price, "sl_hit", amount, usedUSDT);
+    sendMsg(`⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price}`);
+    logTrade(type, entry, "-", "-", price, "sl_hit", amount, position.usedUSDT);
     updatePnL(type, entry, price, amount, "sl_hit");
     return;
   }
 
-  // ⏱ Exit by timeout
+  // ⏱ Timeout
   if (timeExpired) {
     db[key] = null;
     db[lossKey]++;
     saveDB();
-    sendMsg(`⌛ ${type.toUpperCase()} auto-close (timeout ${MAX_HOLD_MINUTES}m) @ ${price}`);
-    logTrade(type, entry, "-", "-", price, "cut_timeout", amount, usedUSDT);
+    sendMsg(`⌛ ${type.toUpperCase()} close by timeout @ ${price}`);
+    logTrade(type, entry, "-", "-", price, "cut_timeout", amount, position.usedUSDT);
     updatePnL(type, entry, price, amount, "cut_timeout");
     return;
   }
 
-  // 🎯 Activate trailing TP
-  if (!trailingActive && roi >= TP_PERCENT) {
+  // 🟢 Activate Trailing
+  if (!trailingActive && profit >= TP_PERCENT) {
     position.trailingActive = true;
     position.trailingStop =
       type === "long"
         ? price * (1 - db.trailingOffset)
         : price * (1 + db.trailingOffset);
     saveDB();
-    sendMsg(`🎯 ${type.toUpperCase()} profit ≥ ${(TP_PERCENT * 100).toFixed(0)}%. Trailing ON @ ${price}`);
+    sendMsg(`🎯 ${type.toUpperCase()} profit > 3%. Trailing ON @ ${price}`);
     return;
   }
 
-  // 🏁 Exit by trailing stop
+  // 🏁 Exit by Trailing
   if (trailingActive) {
     const stopHit =
       type === "long"
@@ -341,10 +346,11 @@ const checkTP_SL = async (type) => {
         price,
         "trailing_exit",
         amount,
-        usedUSDT
+        position.usedUSDT
       );
       updatePnL(type, entry, price, amount, "trailing_exit");
     } else {
+      // Update trailing stop
       position.trailingStop =
         type === "long"
           ? Math.max(position.trailingStop, price * (1 - db.trailingOffset))
