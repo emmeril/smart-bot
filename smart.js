@@ -524,4 +524,14 @@ ${posShort}`);
 📉 Loss: $${(db.totalLoss || 0).toFixed(2)}
 📊 Net: $${net.toFixed(2)} ${net >= 0 ? "🟢" : "🔴"}`);
   }
+  else if (txt.startsWith("!mode ")) {
+    const mode = txt.split(" ")[1];
+    if (["agresif", "konservatif"].includes(mode)) {
+      db.entryMode = mode;
+      saveDB();
+      msg.reply(`✅ Mode entry diatur ke *${mode.toUpperCase()}*`);
+    } else {
+      msg.reply("⚠️ Pilih mode: `!mode agresif` atau `!mode konservatif`");
+    }
+  }
 });
