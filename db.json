@@ -1,5 +1,5 @@
 {
-  "pair": "DOGE/USDT:USDT",
+  "pair": "XRP/USDT:USDT",
   "balancePercent": 100,
   "entryMode": "konservatif",
   "trailingOffset": 0.003,
