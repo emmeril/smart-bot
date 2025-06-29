@@ -15,21 +15,22 @@ const logPath = "./log.csv";
 const db = fs.existsSync(dbPath)
   ? JSON.parse(fs.readFileSync(dbPath))
   : {
-      pair: "DOGE/USDT:USDT",
-      trailingOffset: 0.003,
-      balancePercent: 100,
-      positionLong: null,
-      positionShort: null,
-      lastLongEntryTime: 0,
-      lastShortEntryTime: 0,
-      lossCountLong: 0,
-      lossCountShort: 0,
-      winCountLong: 0,
-      winCountShort: 0,
-      leverage: 10,
-      marginMode: "isolated",
-      totalProfit: 0,
-      totalLoss: 0,
+  "pair": "XRP/USDT:USDT",
+  "balancePercent": 100,
+  "entryMode": "konservatif",
+  "trailingOffset": 0.003,
+  "positionLong": null,
+  "positionShort": null,
+  "lastLongEntryTime": 0,
+  "lastShortEntryTime": 0,
+  "lossCountLong": 0,
+  "lossCountShort": 0,
+  "winCountLong": 0,
+  "winCountShort": 0,
+  "leverage": 10,
+  "marginMode": "isolated",
+  "totalProfit": 0,
+  "totalLoss": 0,
     };
 
 const TP_PERCENT = 0.03;
