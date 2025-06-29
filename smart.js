@@ -30,7 +30,7 @@ const db = fs.existsSync(dbPath)
       leverage: 10,
       marginMode: "isolated",
       totalProfit: 0,
-      totalLoss: 0,
+      totalLoss: 0
     };
 
 const TP_PERCENT = 0.03;
