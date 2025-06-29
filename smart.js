@@ -15,10 +15,9 @@ const logPath = "./log.csv";
 const db = fs.existsSync(dbPath)
   ? JSON.parse(fs.readFileSync(dbPath))
   : {
-      pair: "XRP/USDT:USDT",
-      balancePercent: 100,
-      entryMode: "konservatif",
+      pair: "DOGE/USDT:USDT",
       trailingOffset: 0.003,
+      balancePercent: 100,
       positionLong: null,
       positionShort: null,
       lastLongEntryTime: 0,
@@ -30,7 +29,7 @@ const db = fs.existsSync(dbPath)
       leverage: 10,
       marginMode: "isolated",
       totalProfit: 0,
-      totalLoss: 0
+      totalLoss: 0,
     };
 
 const TP_PERCENT = 0.03;
@@ -427,13 +426,11 @@ setInterval(async () => {
   try {
     await checkTP_SL("long");
     await checkTP_SL("short");
-
     const day = new Date().getUTCDay();
     if (day === 6 || day === 0) {
       console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
       return;
     }
-
     const { canLong, canShort } = await analyzeSignal();
 
     const nowTime = now();
