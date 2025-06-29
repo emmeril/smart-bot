@@ -1,43 +1,4 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Smart Bot - Binance Futures AI Trading Bot</title>
-  <style>
-    body {
-      font-family: "Segoe UI", sans-serif;
-      line-height: 1.6;
-      padding: 2rem;
-      max-width: 800px;
-      margin: auto;
-      color: #333;
-    }
-    h1, h2 {
-      color: #1e88e5;
-    }
-    code {
-      background: #f5f5f5;
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-    pre {
-      background: #f5f5f5;
-      padding: 1rem;
-      border-radius: 6px;
-      overflow: auto;
-    }
-    .badge {
-      display: inline-block;
-      background: #4caf50;
-      color: white;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 12px;
-      margin-left: 8px;
-    }
-  </style>
-</head>
 <body>
   <h1>🤖 Smart Bot Trading - Binance Futures</h1>
   <p><strong>Smart.js</strong> adalah bot trading <strong>Binance Futures</strong> yang bekerja otomatis berbasis kombinasi <em>technical indicators</em>, trailing stop, dan pengendalian risiko.</p>
