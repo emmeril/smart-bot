@@ -15,22 +15,22 @@ const logPath = "./log.csv";
 const db = fs.existsSync(dbPath)
   ? JSON.parse(fs.readFileSync(dbPath))
   : {
-  "pair": "XRP/USDT:USDT",
-  "balancePercent": 100,
-  "entryMode": "konservatif",
-  "trailingOffset": 0.003,
-  "positionLong": null,
-  "positionShort": null,
-  "lastLongEntryTime": 0,
-  "lastShortEntryTime": 0,
-  "lossCountLong": 0,
-  "lossCountShort": 0,
-  "winCountLong": 0,
-  "winCountShort": 0,
-  "leverage": 10,
-  "marginMode": "isolated",
-  "totalProfit": 0,
-  "totalLoss": 0,
+      pair: "XRP/USDT:USDT",
+      balancePercent: 100,
+      entryMode: "konservatif",
+      trailingOffset: 0.003,
+      positionLong: null,
+      positionShort: null,
+      lastLongEntryTime: 0,
+      lastShortEntryTime: 0,
+      lossCountLong: 0,
+      lossCountShort: 0,
+      winCountLong: 0,
+      winCountShort: 0,
+      leverage: 10,
+      marginMode: "isolated",
+      totalProfit: 0,
+      totalLoss: 0,
     };
 
 const TP_PERCENT = 0.03;
@@ -233,7 +233,10 @@ const analyzeSignal = async () => {
 
   const canLong = (() => {
     if (db.entryMode === "agresif") {
-      return (scoreLong >= 3 || (scoreLong >= 2 && isBullishEngulfing)) && price > ma200;
+      return (
+        (scoreLong >= 3 || (scoreLong >= 2 && isBullishEngulfing)) &&
+        price > ma200
+      );
     } else {
       return scoreLong >= 4 && price > ma200 && isBullishEngulfing;
     }
@@ -241,7 +244,10 @@ const analyzeSignal = async () => {
 
   const canShort = (() => {
     if (db.entryMode === "agresif") {
-      return (scoreShort >= 3 || (scoreShort >= 2 && isBearishEngulfing)) && price < ma200;
+      return (
+        (scoreShort >= 3 || (scoreShort >= 2 && isBearishEngulfing)) &&
+        price < ma200
+      );
     } else {
       return scoreShort >= 4 && price < ma200 && isBearishEngulfing;
     }
@@ -423,10 +429,10 @@ setInterval(async () => {
     await checkTP_SL("short");
 
     const day = new Date().getUTCDay();
-if (day === 6 || day === 0) {
-  console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
-  return;
-}
+    if (day === 6 || day === 0) {
+      console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
+      return;
+    }
 
     const { canLong, canShort } = await analyzeSignal();
 
@@ -531,8 +537,7 @@ ${posShort}`);
 📈 Profit: $${(db.totalProfit || 0).toFixed(2)}
 📉 Loss: $${(db.totalLoss || 0).toFixed(2)}
 📊 Net: $${net.toFixed(2)} ${net >= 0 ? "🟢" : "🔴"}`);
-  }
-  else if (txt.startsWith("!mode ")) {
+  } else if (txt.startsWith("!mode ")) {
     const mode = txt.split(" ")[1];
     if (["agresif", "konservatif"].includes(mode)) {
       db.entryMode = mode;
