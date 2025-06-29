@@ -15,7 +15,7 @@ const logPath = "./log.csv";
 const db = fs.existsSync(dbPath)
   ? JSON.parse(fs.readFileSync(dbPath))
   : {
-      pair: "DOGE/USDT:USDT",
+      pair: "XRP/USDT:USDT",
       trailingOffset: 0.003,
       balancePercent: 100,
       positionLong: null,
