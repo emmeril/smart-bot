@@ -421,6 +421,12 @@ setInterval(async () => {
     await checkTP_SL("long");
     await checkTP_SL("short");
 
+    const day = new Date().getUTCDay();
+if (day === 6 || day === 0) {
+  console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
+  return;
+}
+
     const { canLong, canShort } = await analyzeSignal();
 
     const nowTime = now();
