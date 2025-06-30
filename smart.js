@@ -32,8 +32,8 @@ const db = fs.existsSync(dbPath)
       totalLoss: 0,
     };
 
-const TP_PERCENT = 0.05;
-const SL_PERCENT = 0.025;
+db.tpPercent ??= 0.03;
+db.slPercent ??= 0.02;
 const COOLDOWN_MINUTES = 30;
 const LOSS_LIMIT = 3;
 const MAX_HOLD_MINUTES = 1440;
@@ -128,8 +128,8 @@ client.on("message", async (msg) => {
 
     const posLong = db.positionLong
       ? `📍 Entry @ ${db.positionLong.entry.toFixed(4)}\n🎯 ROI TP: ${(
-          TP_PERCENT * 100
-        ).toFixed(1)}% | SL: ${(SL_PERCENT * 100).toFixed(
+          db.tpPercent * 100
+        ).toFixed(1)}% | SL: ${(db.slPercent * 100).toFixed(
           1
         )}%\n📊 Floating PnL: ${fltLong >= 0 ? "+" : "-"}$${Math.abs(
           fltLong
@@ -138,8 +138,8 @@ client.on("message", async (msg) => {
 
     const posShort = db.positionShort
       ? `📍 Entry @ ${db.positionShort.entry.toFixed(4)}\n🎯 ROI TP: ${(
-          TP_PERCENT * 100
-        ).toFixed(1)}% | SL: ${(SL_PERCENT * 100).toFixed(
+          db.tpPercent * 100
+        ).toFixed(1)}% | SL: ${(db.slPercent * 100).toFixed(
           1
         )}%\n📊 Floating PnL: ${fltShort >= 0 ? "+" : "-"}$${Math.abs(
           fltShort
@@ -209,6 +209,42 @@ ${posShort}`);
       msg.reply(`✅ Mode entry diatur ke *${mode.toUpperCase()}*`);
     } else {
       msg.reply("⚠️ Pilih mode: `!mode agresif` atau `!mode konservatif`");
+    }
+  }
+
+  // Set TP persen
+  else if (txt.startsWith("!tp ")) {
+    const val = parseFloat(txt.split(" ")[1]);
+    if (isNaN(val) || val < 0.5 || val > 20) {
+      msg.reply("⚠️ Format salah. Contoh: !tp 5");
+    } else {
+      db.tpPercent = val / 100;
+      saveDB();
+      msg.reply(`✅ Take Profit diatur ke *${val}%* ROI.`);
+    }
+  }
+
+  // Set SL persen
+  else if (txt.startsWith("!sl ")) {
+    const val = parseFloat(txt.split(" ")[1]);
+    if (isNaN(val) || val < 0.5 || val > 10) {
+      msg.reply("⚠️ Format salah. Contoh: !sl 2.5");
+    } else {
+      db.slPercent = val / 100;
+      saveDB();
+      msg.reply(`✅ Stop Loss diatur ke *${val}%* ROI.`);
+    }
+  }
+
+  // Set trailing offset
+  else if (txt.startsWith("!offset ")) {
+    const val = parseFloat(txt.split(" ")[1]);
+    if (isNaN(val) || val < 0.1 || val > 10) {
+      msg.reply("⚠️ Format salah. Contoh: !offset 1.5");
+    } else {
+      db.trailingOffset = val / 100;
+      saveDB();
+      msg.reply(`✅ Trailing Offset diatur ke *${val}%* dari harga.`);
     }
   }
 });
@@ -438,7 +474,8 @@ const openPosition = async (type) => {
 
   const position = {
     entry,
-    sl: type === "long" ? entry * (1 - SL_PERCENT) : entry * (1 + SL_PERCENT),
+    sl:
+      type === "long" ? entry * (1 - db.slPercent) : entry * (1 + db.slPercent),
     trailingActive: false,
     trailingStop: 0,
     entryTime: nowTime,
@@ -480,8 +517,8 @@ const checkTP_SL = async (type) => {
   const roi = pnlUSD / margin;
 
   const timeExpired = holdMins >= MAX_HOLD_MINUTES;
-  const ROI_TP = TP_PERCENT;
-  const ROI_SL = SL_PERCENT;
+  const ROI_TP = db.tpPercent;
+  const ROI_SL = db.slPercent;
 
   // ❌ Stop Loss by ROI
   if (roi <= -ROI_SL) {
