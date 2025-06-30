@@ -503,6 +503,16 @@ const openPosition = async (type) => {
   );
 };
 
+const closePosition = async (type, amount) => {
+  const side = type === "long" ? "sell" : "buy";
+  try {
+    await exchange.createMarketOrder(db.pair, side, amount);
+  } catch (e) {
+    console.log(`❌ Gagal close posisi ${type}:`, e.message);
+    await sendMsg(`❌ Gagal close posisi ${type}: ${e.message}`);
+  }
+};
+
 const checkTP_SL = async (type) => {
   const price = await getPrice();
   const key = type === "long" ? "positionLong" : "positionShort";
@@ -510,32 +520,25 @@ const checkTP_SL = async (type) => {
   const position = db[key];
   if (!position) return;
 
-  const { entry, trailingActive, trailingStop, entryTime, amount, usedUSDT } =
-    position;
+  const { entry, trailingActive, trailingStop, entryTime, amount, usedUSDT } = position;
   const holdMins = mins(now() - entryTime);
 
-  const pnlUSD =
-    type === "long" ? (price - entry) * amount : (entry - price) * amount;
-
-  // 🔁 ROI berdasarkan margin aktual: notional / leverage
+  const pnlUSD = type === "long" ? (price - entry) * amount : (entry - price) * amount;
   const notional = entry * amount;
   const margin = notional / db.leverage;
   const roi = pnlUSD / margin;
 
-  const timeExpired = holdMins >= MAX_HOLD_MINUTES;
   const ROI_TP = db.tpPercent;
   const ROI_SL = db.slPercent;
+  const timeExpired = holdMins >= MAX_HOLD_MINUTES;
 
   // ❌ Stop Loss by ROI
   if (roi <= -ROI_SL) {
+    await closePosition(type, amount);
     db[key] = null;
     db[lossKey]++;
     saveDB();
-    sendMsg(
-      `⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(
-        roi * 100
-      ).toFixed(2)}%)`
-    );
+    sendMsg(`⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(roi * 100).toFixed(2)}%)`);
     logTrade(type, entry, "-", "-", price, "sl_hit", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "sl_hit");
     return;
@@ -543,6 +546,7 @@ const checkTP_SL = async (type) => {
 
   // ⏱ Timeout
   if (timeExpired) {
+    await closePosition(type, amount);
     db[key] = null;
     db[lossKey]++;
     saveDB();
@@ -560,15 +564,11 @@ const checkTP_SL = async (type) => {
         ? price * (1 - db.trailingOffset)
         : price * (1 + db.trailingOffset);
     saveDB();
-    sendMsg(
-      `🎯 ${type.toUpperCase()} ROI > ${(ROI_TP * 100).toFixed(
-        2
-      )}%. Trailing ON @ ${price}`
-    );
+    sendMsg(`🎯 ${type.toUpperCase()} ROI > ${(ROI_TP * 100).toFixed(2)}%. Trailing ON @ ${price}`);
     return;
   }
 
-  // 🏁 Trailing Exit
+  // 🏁 Exit by Trailing
   if (trailingActive) {
     const stopHit =
       type === "long"
@@ -576,6 +576,7 @@ const checkTP_SL = async (type) => {
         : price >= position.trailingStop;
 
     if (stopHit) {
+      await closePosition(type, amount);
       db[key] = null;
       db[lossKey] = 0;
       saveDB();
@@ -583,6 +584,7 @@ const checkTP_SL = async (type) => {
       logTrade(type, entry, "-", "-", price, "trailing_exit", amount, usedUSDT);
       updatePnL(type, entry, price, amount, "trailing_exit");
     } else {
+      // update trailing stop level
       position.trailingStop =
         type === "long"
           ? Math.max(position.trailingStop, price * (1 - db.trailingOffset))
