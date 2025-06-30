@@ -102,26 +102,32 @@ client.on("message", async (msg) => {
     const fltLong = await calcFloatingPnl("long");
     const fltShort = await calcFloatingPnl("short");
 
+    const roiLong = db.positionLong
+      ? ((fltLong / db.positionLong.usedUSDT) * 100).toFixed(2)
+      : null;
+
+    const roiShort = db.positionShort
+      ? ((fltShort / db.positionShort.usedUSDT) * 100).toFixed(2)
+      : null;
+
     const posLong = db.positionLong
-      ? `📍 Entry @ ${db.positionLong.entry.toFixed(4)}\n🎯 TP: ${(
-          db.positionLong.entry *
-          (1 + TP_PERCENT)
-        ).toFixed(4)} | SL: ${db.positionLong.sl.toFixed(
-          4
-        )}\n📊 Floating PnL: ${fltLong >= 0 ? "+" : "-"}$${Math.abs(
+      ? `📍 Entry @ ${db.positionLong.entry.toFixed(4)}\n🎯 ROI TP: ${(
+          TP_PERCENT * 100
+        ).toFixed(1)}% | SL: ${(SL_PERCENT * 100).toFixed(
+          1
+        )}%\n📊 Floating PnL: ${fltLong >= 0 ? "+" : "-"}$${Math.abs(
           fltLong
-        ).toFixed(4)}`
+        ).toFixed(4)} (${roiLong}%)`
       : "🚫 Belum ada";
 
     const posShort = db.positionShort
-      ? `📍 Entry @ ${db.positionShort.entry.toFixed(4)}\n🎯 TP: ${(
-          db.positionShort.entry *
-          (1 - TP_PERCENT)
-        ).toFixed(4)} | SL: ${db.positionShort.sl.toFixed(
-          4
-        )}\n📊 Floating PnL: ${fltShort >= 0 ? "+" : "-"}$${Math.abs(
+      ? `📍 Entry @ ${db.positionShort.entry.toFixed(4)}\n🎯 ROI TP: ${(
+          TP_PERCENT * 100
+        ).toFixed(1)}% | SL: ${(SL_PERCENT * 100).toFixed(
+          1
+        )}%\n📊 Floating PnL: ${fltShort >= 0 ? "+" : "-"}$${Math.abs(
           fltShort
-        ).toFixed(4)}`
+        ).toFixed(4)} (${roiShort}%)`
       : "🚫 Belum ada";
 
     msg.reply(`📊 *Status Bot*
