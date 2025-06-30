@@ -78,6 +78,101 @@ client.on("disconnected", (reason) => {
   process.exit();
 });
 
+client.on("message", async (msg) => {
+  const txt = msg.body.toLowerCase();
+  if (!msg.fromMe && !msg.from.includes(process.env.ADMIN_PHONE)) return;
+
+  if (txt.startsWith("!pair ")) {
+    db.pair = txt.split(" ")[1].toUpperCase();
+    db.positionLong = null;
+    db.positionShort = null;
+    db.lastLongEntryTime = 0;
+    db.lastShortEntryTime = 0;
+    saveDB();
+    msg.reply(`✅ Pair diubah ke *${db.pair}*.`);
+  } else if (txt === "!status") {
+    const cooldownLong = db.lastLongEntryTime
+      ? Math.round(mins(now() - db.lastLongEntryTime)) + "m"
+      : "Belum pernah entry";
+
+    const cooldownShort = db.lastShortEntryTime
+      ? Math.round(mins(now() - db.lastShortEntryTime)) + "m"
+      : "Belum pernah entry";
+
+    const fltLong = await calcFloatingPnl("long");
+    const fltShort = await calcFloatingPnl("short");
+
+    const posLong = db.positionLong
+      ? `📍 Entry @ ${db.positionLong.entry.toFixed(
+          4
+        )} | SL: ${db.positionLong.sl.toFixed(4)}\n📊 Floating PnL: ${
+          fltLong >= 0 ? "+" : "-"
+        }$${Math.abs(fltLong).toFixed(4)}`
+      : "🚫 Belum ada";
+
+    const posShort = db.positionShort
+      ? `📍 Entry @ ${db.positionShort.entry.toFixed(
+          4
+        )} | SL: ${db.positionShort.sl.toFixed(4)}\n📊 Floating PnL: ${
+          fltShort >= 0 ? "+" : "-"
+        }$${Math.abs(fltShort).toFixed(4)}`
+      : "🚫 Belum ada";
+
+    msg.reply(`📊 *Status Bot*
+📌 Pair: *${db.pair}*
+🧭 Leverage: *${db.leverage}x* (${db.marginMode.toUpperCase()})
+📎 Mode Entry: *${db.entryMode.toUpperCase()}*
+
+📉 *LONG*
+⏱ Cooldown: ${cooldownLong}
+✅ Profit Count: ${db.winCountLong || 0}
+❌ Loss Count: ${db.lossCountLong}
+${posLong}
+
+📈 *SHORT*
+⏱ Cooldown: ${cooldownShort}
+✅ Profit Count: ${db.winCountShort || 0}
+❌ Loss Count: ${db.lossCountShort}
+${posShort}`);
+  } else if (txt.startsWith("!leverage ")) {
+    const [, lev, mode] = txt.split(" ");
+    const leverage = parseInt(lev);
+    const validMode = mode === "cross" || mode === "isolated";
+    if (!leverage || !validMode) {
+      msg.reply("⚠️ Format salah. Contoh: !leverage 10 isolated");
+    } else {
+      db.leverage = leverage;
+      db.marginMode = mode;
+      saveDB();
+      msg.reply(`✅ Leverage diatur: *${leverage}x* (${mode.toUpperCase()})`);
+    }
+  } else if (txt.startsWith("!balance ")) {
+    const val = parseFloat(txt.split(" ")[1]);
+    if (isNaN(val) || val < 1 || val > 100) {
+      msg.reply("⚠️ Format salah. Contoh: !balance 20");
+    } else {
+      db.balancePercent = val;
+      saveDB();
+      msg.reply(`✅ Bot akan gunakan *${val}%* dari saldo USDT.`);
+    }
+  } else if (txt === "!pnl") {
+    const net = (db.totalProfit || 0) - (db.totalLoss || 0);
+    msg.reply(`💹 *PNL Summary*
+📈 Profit: $${(db.totalProfit || 0).toFixed(2)}
+📉 Loss: $${(db.totalLoss || 0).toFixed(2)}
+📊 Net: $${net.toFixed(2)} ${net >= 0 ? "🟢" : "🔴"}`);
+  } else if (txt.startsWith("!mode ")) {
+    const mode = txt.split(" ")[1];
+    if (["agresif", "konservatif"].includes(mode)) {
+      db.entryMode = mode;
+      saveDB();
+      msg.reply(`✅ Mode entry diatur ke *${mode.toUpperCase()}*`);
+    } else {
+      msg.reply("⚠️ Pilih mode: `!mode agresif` atau `!mode konservatif`");
+    }
+  }
+});
+
 client.initialize();
 
 app.get("/qr", async (req, res) => {
@@ -420,101 +515,6 @@ const checkTP_SL = async (type) => {
     }
   }
 };
-
-client.on("message", async (msg) => {
-  const txt = msg.body.toLowerCase();
-  if (!msg.fromMe && !msg.from.includes(process.env.ADMIN_PHONE)) return;
-
-  if (txt.startsWith("!pair ")) {
-    db.pair = txt.split(" ")[1].toUpperCase();
-    db.positionLong = null;
-    db.positionShort = null;
-    db.lastLongEntryTime = 0;
-    db.lastShortEntryTime = 0;
-    saveDB();
-    msg.reply(`✅ Pair diubah ke *${db.pair}*.`);
-  } else if (txt === "!status") {
-    const cooldownLong = db.lastLongEntryTime
-      ? Math.round(mins(now() - db.lastLongEntryTime)) + "m"
-      : "Belum pernah entry";
-
-    const cooldownShort = db.lastShortEntryTime
-      ? Math.round(mins(now() - db.lastShortEntryTime)) + "m"
-      : "Belum pernah entry";
-
-    const fltLong = await calcFloatingPnl("long");
-    const fltShort = await calcFloatingPnl("short");
-
-    const posLong = db.positionLong
-      ? `📍 Entry @ ${db.positionLong.entry.toFixed(
-          4
-        )} | SL: ${db.positionLong.sl.toFixed(4)}\n📊 Floating PnL: ${
-          fltLong >= 0 ? "+" : "-"
-        }$${Math.abs(fltLong).toFixed(4)}`
-      : "🚫 Belum ada";
-
-    const posShort = db.positionShort
-      ? `📍 Entry @ ${db.positionShort.entry.toFixed(
-          4
-        )} | SL: ${db.positionShort.sl.toFixed(4)}\n📊 Floating PnL: ${
-          fltShort >= 0 ? "+" : "-"
-        }$${Math.abs(fltShort).toFixed(4)}`
-      : "🚫 Belum ada";
-
-    msg.reply(`📊 *Status Bot*
-📌 Pair: *${db.pair}*
-🧭 Leverage: *${db.leverage}x* (${db.marginMode.toUpperCase()})
-📎 Mode Entry: *${db.entryMode.toUpperCase()}*
-
-📉 *LONG*
-⏱ Cooldown: ${cooldownLong}
-✅ Profit Count: ${db.winCountLong || 0}
-❌ Loss Count: ${db.lossCountLong}
-${posLong}
-
-📈 *SHORT*
-⏱ Cooldown: ${cooldownShort}
-✅ Profit Count: ${db.winCountShort || 0}
-❌ Loss Count: ${db.lossCountShort}
-${posShort}`);
-  } else if (txt.startsWith("!leverage ")) {
-    const [, lev, mode] = txt.split(" ");
-    const leverage = parseInt(lev);
-    const validMode = mode === "cross" || mode === "isolated";
-    if (!leverage || !validMode) {
-      msg.reply("⚠️ Format salah. Contoh: !leverage 10 isolated");
-    } else {
-      db.leverage = leverage;
-      db.marginMode = mode;
-      saveDB();
-      msg.reply(`✅ Leverage diatur: *${leverage}x* (${mode.toUpperCase()})`);
-    }
-  } else if (txt.startsWith("!balance ")) {
-    const val = parseFloat(txt.split(" ")[1]);
-    if (isNaN(val) || val < 1 || val > 100) {
-      msg.reply("⚠️ Format salah. Contoh: !balance 20");
-    } else {
-      db.balancePercent = val;
-      saveDB();
-      msg.reply(`✅ Bot akan gunakan *${val}%* dari saldo USDT.`);
-    }
-  } else if (txt === "!pnl") {
-    const net = (db.totalProfit || 0) - (db.totalLoss || 0);
-    msg.reply(`💹 *PNL Summary*
-📈 Profit: $${(db.totalProfit || 0).toFixed(2)}
-📉 Loss: $${(db.totalLoss || 0).toFixed(2)}
-📊 Net: $${net.toFixed(2)} ${net >= 0 ? "🟢" : "🔴"}`);
-  } else if (txt.startsWith("!mode ")) {
-    const mode = txt.split(" ")[1];
-    if (["agresif", "konservatif"].includes(mode)) {
-      db.entryMode = mode;
-      saveDB();
-      msg.reply(`✅ Mode entry diatur ke *${mode.toUpperCase()}*`);
-    } else {
-      msg.reply("⚠️ Pilih mode: `!mode agresif` atau `!mode konservatif`");
-    }
-  }
-});
 
 // Eksekusi bot tiap 1 menit
 setInterval(async () => {
