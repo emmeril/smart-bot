@@ -164,7 +164,7 @@ ${posLong}
 ${posShort}`);
   }
 
-  // Set leverage dan mode margin
+  // Set leverage dan margin mode
   else if (txt.startsWith("!leverage ")) {
     const [, lev, mode] = txt.split(" ");
     const leverage = parseInt(lev);
@@ -179,7 +179,7 @@ ${posShort}`);
     }
   }
 
-  // Set persentase balance
+  // Atur persentase balance
   else if (txt.startsWith("!balance ")) {
     const val = parseFloat(txt.split(" ")[1]);
     if (isNaN(val) || val < 1 || val > 100) {
@@ -191,7 +191,7 @@ ${posShort}`);
     }
   }
 
-  // Laporan PnL
+  // Cek PnL total
   else if (txt === "!pnl") {
     const net = (db.totalProfit || 0) - (db.totalLoss || 0);
     msg.reply(`💹 *PNL Summary*
@@ -200,7 +200,7 @@ ${posShort}`);
 📊 Net: $${net.toFixed(2)} ${net >= 0 ? "🟢" : "🔴"}`);
   }
 
-  // Set mode agresif / konservatif
+  // Set mode entry agresif/konservatif
   else if (txt.startsWith("!mode ")) {
     const mode = txt.split(" ")[1];
     if (["agresif", "konservatif"].includes(mode)) {
