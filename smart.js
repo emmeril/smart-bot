@@ -640,6 +640,27 @@ setInterval(async () => {
       console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
       return;
     }
+
+    const canResetLong =
+      db.lossCountLong >= LOSS_LIMIT &&
+      nowTime - db.lastLongEntryTime >= LOSS_WAIT_MINUTES * 60 * 1000;
+
+    const canResetShort =
+      db.lossCountShort >= LOSS_LIMIT &&
+      nowTime - db.lastShortEntryTime >= LOSS_WAIT_MINUTES * 60 * 1000;
+
+    if (canResetLong) {
+      db.lossCountLong = 0;
+      saveDB();
+      console.log("🔁 Reset lossCountLong setelah tunggu 30 menit");
+    }
+
+    if (canResetShort) {
+      db.lossCountShort = 0;
+      saveDB();
+      console.log("🔁 Reset lossCountShort setelah tunggu 30 menit");
+    }
+
     const { canLong, canShort } = await analyzeSignal();
 
     const nowTime = now();
