@@ -32,8 +32,8 @@ const db = fs.existsSync(dbPath)
       totalLoss: 0,
     };
 
-const TP_PERCENT = 0.03;
-const SL_PERCENT = 0.02;
+const TP_PERCENT = 0.05;
+const SL_PERCENT = 0.025;
 const COOLDOWN_MINUTES = 30;
 const LOSS_LIMIT = 3;
 const MAX_HOLD_MINUTES = 1440;
