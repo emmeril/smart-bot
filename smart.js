@@ -103,11 +103,13 @@ client.on("message", async (msg) => {
     const fltShort = await calcFloatingPnl("short");
 
     const roiLong = db.positionLong
-      ? ((fltLong / db.positionLong.usedUSDT) * 100).toFixed(2)
+      ? ((fltLong / (db.positionLong.usedUSDT / db.leverage)) * 100).toFixed(2)
       : null;
 
     const roiShort = db.positionShort
-      ? ((fltShort / db.positionShort.usedUSDT) * 100).toFixed(2)
+      ? ((fltShort / (db.positionShort.usedUSDT / db.leverage)) * 100).toFixed(
+          2
+        )
       : null;
 
     const posLong = db.positionLong
