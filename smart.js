@@ -677,4 +677,4 @@ setInterval(async () => {
   } catch (e) {
     console.log("⚠️ Bot error:", e.message);
   }
-}, 60 * 1000); // per menit
+}, 10 * 1000); // per menit
