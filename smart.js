@@ -103,19 +103,25 @@ client.on("message", async (msg) => {
     const fltShort = await calcFloatingPnl("short");
 
     const posLong = db.positionLong
-      ? `📍 Entry @ ${db.positionLong.entry.toFixed(
+      ? `📍 Entry @ ${db.positionLong.entry.toFixed(4)}\n🎯 TP: ${(
+          db.positionLong.entry *
+          (1 + TP_PERCENT)
+        ).toFixed(4)} | SL: ${db.positionLong.sl.toFixed(
           4
-        )} | SL: ${db.positionLong.sl.toFixed(4)}\n📊 Floating PnL: ${
-          fltLong >= 0 ? "+" : "-"
-        }$${Math.abs(fltLong).toFixed(4)}`
+        )}\n📊 Floating PnL: ${fltLong >= 0 ? "+" : "-"}$${Math.abs(
+          fltLong
+        ).toFixed(4)}`
       : "🚫 Belum ada";
 
     const posShort = db.positionShort
-      ? `📍 Entry @ ${db.positionShort.entry.toFixed(
+      ? `📍 Entry @ ${db.positionShort.entry.toFixed(4)}\n🎯 TP: ${(
+          db.positionShort.entry *
+          (1 - TP_PERCENT)
+        ).toFixed(4)} | SL: ${db.positionShort.sl.toFixed(
           4
-        )} | SL: ${db.positionShort.sl.toFixed(4)}\n📊 Floating PnL: ${
-          fltShort >= 0 ? "+" : "-"
-        }$${Math.abs(fltShort).toFixed(4)}`
+        )}\n📊 Floating PnL: ${fltShort >= 0 ? "+" : "-"}$${Math.abs(
+          fltShort
+        ).toFixed(4)}`
       : "🚫 Belum ada";
 
     msg.reply(`📊 *Status Bot*
@@ -123,13 +129,13 @@ client.on("message", async (msg) => {
 🧭 Leverage: *${db.leverage}x* (${db.marginMode.toUpperCase()})
 📎 Mode Entry: *${db.entryMode.toUpperCase()}*
 
-📉 *LONG*
+📈 *LONG*
 ⏱ Cooldown: ${cooldownLong}
 ✅ Profit Count: ${db.winCountLong || 0}
 ❌ Loss Count: ${db.lossCountLong}
 ${posLong}
 
-📈 *SHORT*
+📉 *SHORT*
 ⏱ Cooldown: ${cooldownShort}
 ✅ Profit Count: ${db.winCountShort || 0}
 ❌ Loss Count: ${db.lossCountShort}
