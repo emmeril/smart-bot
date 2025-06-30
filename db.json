@@ -3,6 +3,8 @@
   "balancePercent": 100,
   "entryMode": "konservatif",
   "trailingOffset": 0.003,
+   "tpPercent": 0.03,
+  "slPercent": 0.02,
   "positionLong": null,
   "positionShort": null,
   "lastLongEntryTime": 0,
