@@ -607,6 +607,25 @@ const forceClose = async (type, reason = "manual_close") => {
   updatePnL(type, entry, price, amount, reason);
 };
 
+const syncPositionWithBinance = async () => {
+  const positions = await exchange.fetchPositions([db.pair]);
+
+  const longPos = positions.find((p) => p.side === "long" && p.contracts > 0);
+  const shortPos = positions.find((p) => p.side === "short" && p.contracts > 0);
+
+  if (!longPos && db.positionLong) {
+    console.log("🔄 LONG sudah ditutup manual. Sinkronisasi...");
+    db.positionLong = null;
+  }
+
+  if (!shortPos && db.positionShort) {
+    console.log("🔄 SHORT sudah ditutup manual. Sinkronisasi...");
+    db.positionShort = null;
+  }
+
+  saveDB();
+};
+
 // Eksekusi bot tiap 1 menit
 setInterval(async () => {
   try {
