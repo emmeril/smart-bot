@@ -507,6 +507,7 @@ const closePosition = async (type, amount) => {
   const side = type === "long" ? "sell" : "buy";
   try {
     await exchange.createMarketOrder(db.pair, side, amount);
+    console.log(`✅ Posisi ${type.toUpperCase()} ditutup (side: ${side})`);
   } catch (e) {
     console.log(`❌ Gagal close posisi ${type}:`, e.message);
     await sendMsg(`❌ Gagal close posisi ${type}: ${e.message}`);
@@ -536,12 +537,11 @@ const checkTP_SL = async (type) => {
 
   // ❌ Stop Loss
   if (roi <= -ROI_SL) {
+    await closePosition(type, amount);
     db[key] = null;
     db[lossKey]++;
     saveDB();
-    sendMsg(
-      `⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(roi * 100).toFixed(2)}%)`
-    );
+    sendMsg(`⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(roi * 100).toFixed(2)}%)`);
     logTrade(type, entry, "-", "-", price, "sl_hit", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "sl_hit");
     return;
@@ -549,12 +549,11 @@ const checkTP_SL = async (type) => {
 
   // ✅ Take Profit
   if (roi >= ROI_TP) {
+    await closePosition(type, amount);
     db[key] = null;
     db[lossKey] = 0;
     saveDB();
-    sendMsg(
-      `✅ ${type.toUpperCase()} TAKE PROFIT hit @ ${price} (ROI ${(roi * 100).toFixed(2)}%)`
-    );
+    sendMsg(`✅ ${type.toUpperCase()} TAKE PROFIT hit @ ${price} (ROI ${(roi * 100).toFixed(2)}%)`);
     logTrade(type, entry, "-", "-", price, "tp_hit", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "tp_hit");
     return;
@@ -562,6 +561,7 @@ const checkTP_SL = async (type) => {
 
   // ⏱ Timeout
   if (timeExpired) {
+    await closePosition(type, amount);
     db[key] = null;
     db[lossKey]++;
     saveDB();
