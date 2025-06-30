@@ -635,6 +635,7 @@ setInterval(async () => {
     
     await checkTP_SL("long");
     await checkTP_SL("short");
+    const nowTime = now();
     const day = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).getDay();
     if (day === 6 || day === 0) {
       console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
@@ -662,8 +663,6 @@ setInterval(async () => {
     }
 
     const { canLong, canShort } = await analyzeSignal();
-
-    const nowTime = now();
 
     if (canLong && db.positionShort) {
       console.log(
