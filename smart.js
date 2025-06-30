@@ -629,6 +629,9 @@ const syncPositionWithBinance = async () => {
 // Eksekusi bot tiap 1 menit
 setInterval(async () => {
   try {
+    // 🔄 Sinkronisasi manual close
+    await syncPositionWithBinance();
+    
     await checkTP_SL("long");
     await checkTP_SL("short");
     const day = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).getDay();
