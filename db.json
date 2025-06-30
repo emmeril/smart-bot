@@ -1,8 +1,8 @@
 {
   "pair": "XRP/USDT:USDT",
-  "balancePercent": 100,
-  "entryMode": "konservatif",
-  "trailingOffset": 0.003,
+  "balancePercent": 75,
+  "entryMode": "agresif",
+  "trailingOffset": 0.012,
   "tpPercent": 0.03,
   "slPercent": 0.02,
   "positionLong": null,
