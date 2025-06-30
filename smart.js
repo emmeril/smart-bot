@@ -239,16 +239,16 @@ ${posShort}`);
     }
 
     // Set trailing offset
-    else if (txt.startsWith("!offset ")) {
-      const val = parseFloat(txt.split(" ")[1]);
-      if (isNaN(val) || val < 0.1 || val > 10) {
-        msg.reply("⚠️ Format salah. Contoh: !offset 1.5");
-      } else {
-        db.trailingOffset = val / 100;
-        saveDB();
-        msg.reply(`✅ Trailing Offset diatur ke *${val}%* dari harga.`);
-      }
-    }
+    // else if (txt.startsWith("!offset ")) {
+    //   const val = parseFloat(txt.split(" ")[1]);
+    //   if (isNaN(val) || val < 0.1 || val > 10) {
+    //     msg.reply("⚠️ Format salah. Contoh: !offset 1.5");
+    //   } else {
+    //     db.trailingOffset = val / 100;
+    //     saveDB();
+    //     msg.reply(`✅ Trailing Offset diatur ke *${val}%* dari harga.`);
+    //   }
+    // }
   } catch (err) {
     console.error("❌ WA Command Error:", err.message);
     msg.reply("⚠️ Terjadi error saat memproses perintah.");
@@ -497,7 +497,7 @@ const openPosition = async (type) => {
   sendMsg(
     `${type === "long" ? "🟢 LONG" : "🔴 SHORT"} opened @ ${entry.toFixed(
       5
-    )} | SL: ${position.sl.toFixed(5)}\n💰 Size: ~${amount} ${
+    )}\n💰 Size: ~${amount} ${
       market.base
     } ($${usedUSDT.toFixed(2)})`
   );
