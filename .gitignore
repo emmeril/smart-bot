@@ -6,4 +6,3 @@ pnpm-lock.yaml
 pnpm-workspace.yaml
 .env.local
 .env
-db.json
