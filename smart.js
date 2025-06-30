@@ -103,13 +103,20 @@ client.on("message", async (msg) => {
     const fltShort = await calcFloatingPnl("short");
 
     const roiLong = db.positionLong
-      ? ((fltLong / (db.positionLong.usedUSDT / db.leverage)) * 100).toFixed(2)
+      ? (
+          (fltLong /
+            ((db.positionLong.entry * db.positionLong.amount) / db.leverage)) *
+          100
+        ).toFixed(2)
       : null;
 
     const roiShort = db.positionShort
-      ? ((fltShort / (db.positionShort.usedUSDT / db.leverage)) * 100).toFixed(
-          2
-        )
+      ? (
+          (fltShort /
+            ((db.positionShort.entry * db.positionShort.amount) /
+              db.leverage)) *
+          100
+        ).toFixed(2)
       : null;
 
     const posLong = db.positionLong
@@ -135,7 +142,7 @@ client.on("message", async (msg) => {
     msg.reply(`📊 *Status Bot*
 📌 Pair: *${db.pair}*
 🧭 Leverage: *${db.leverage}x* (${db.marginMode.toUpperCase()})
-📎 Mode Entry: *${db.entryMode.toUpperCase()}*
+📎 Mode Entry: *${(db.entryMode || "default").toUpperCase()}*
 
 📈 *LONG*
 ⏱ Cooldown: ${cooldownLong}
@@ -448,12 +455,14 @@ const checkTP_SL = async (type) => {
   const pnlUSD =
     type === "long" ? (price - entry) * amount : (entry - price) * amount;
 
-  const margin = usedUSDT / db.leverage; // ✅ koreksi ROI dengan leverage
+  // 🔁 ROI berdasarkan margin aktual: notional / leverage
+  const notional = entry * amount;
+  const margin = notional / db.leverage;
   const roi = pnlUSD / margin;
-  const timeExpired = holdMins >= MAX_HOLD_MINUTES;
 
-  const ROI_TP = TP_PERCENT; // contoh: 0.03 → 3%
-  const ROI_SL = SL_PERCENT; // contoh: 0.02 → -2%
+  const timeExpired = holdMins >= MAX_HOLD_MINUTES;
+  const ROI_TP = TP_PERCENT;
+  const ROI_SL = SL_PERCENT;
 
   // ❌ Stop Loss by ROI
   if (roi <= -ROI_SL) {
@@ -470,7 +479,7 @@ const checkTP_SL = async (type) => {
     return;
   }
 
-  // ⏱ Exit by Timeout
+  // ⏱ Timeout
   if (timeExpired) {
     db[key] = null;
     db[lossKey]++;
@@ -481,7 +490,7 @@ const checkTP_SL = async (type) => {
     return;
   }
 
-  // 🎯 Activate Trailing by ROI
+  // 🎯 Activate Trailing
   if (!trailingActive && roi >= ROI_TP) {
     position.trailingActive = true;
     position.trailingStop =
