@@ -1,7 +1,7 @@
-/.wwwebjs_auth
-/.wwwebjs_cache
+.wwwebjs_auth
+.wwwebjs_cache
 node_modules
-/data
+data
 pnpm-lock.yaml
 pnpm-workspace.yaml
 .env.local
