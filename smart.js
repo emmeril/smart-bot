@@ -421,36 +421,6 @@ const checkTP_SL = async (type) => {
   }
 };
 
-// Eksekusi bot tiap 1 menit
-setInterval(async () => {
-  try {
-    await checkTP_SL("long");
-    await checkTP_SL("short");
-    const day = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).getDay();
-    if (day === 6 || day === 0) {
-      console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
-      return;
-    }
-    const { canLong, canShort } = await analyzeSignal();
-
-    const nowTime = now();
-    const readyLong =
-      !db.positionLong &&
-      nowTime - db.lastLongEntryTime >= COOLDOWN_MINUTES * 60 * 1000 &&
-      db.lossCountLong < LOSS_LIMIT;
-
-    const readyShort =
-      !db.positionShort &&
-      nowTime - db.lastShortEntryTime >= COOLDOWN_MINUTES * 60 * 1000 &&
-      db.lossCountShort < LOSS_LIMIT;
-
-    if (canLong && readyLong) await openPosition("long");
-    if (canShort && readyShort) await openPosition("short");
-  } catch (e) {
-    console.log("⚠️ Bot error:", e.message);
-  }
-}, 60 * 1000); // per menit
-
 client.on("message", async (msg) => {
   const txt = msg.body.toLowerCase();
   if (!msg.fromMe && !msg.from.includes(process.env.ADMIN_PHONE)) return;
@@ -545,3 +515,33 @@ ${posShort}`);
     }
   }
 });
+
+// Eksekusi bot tiap 1 menit
+setInterval(async () => {
+  try {
+    await checkTP_SL("long");
+    await checkTP_SL("short");
+    const day = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).getDay();
+    if (day === 6 || day === 0) {
+      console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
+      return;
+    }
+    const { canLong, canShort } = await analyzeSignal();
+
+    const nowTime = now();
+    const readyLong =
+      !db.positionLong &&
+      nowTime - db.lastLongEntryTime >= COOLDOWN_MINUTES * 60 * 1000 &&
+      db.lossCountLong < LOSS_LIMIT;
+
+    const readyShort =
+      !db.positionShort &&
+      nowTime - db.lastShortEntryTime >= COOLDOWN_MINUTES * 60 * 1000 &&
+      db.lossCountShort < LOSS_LIMIT;
+
+    if (canLong && readyLong) await openPosition("long");
+    if (canShort && readyShort) await openPosition("short");
+  } catch (e) {
+    console.log("⚠️ Bot error:", e.message);
+  }
+}, 60 * 1000); // per menit
