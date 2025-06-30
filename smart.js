@@ -433,86 +433,74 @@ const checkTP_SL = async (type) => {
   const position = db[key];
   if (!position) return;
 
-  const { entry, trailingActive, trailingStop, entryTime, amount } = position;
+  const { entry, trailingActive, trailingStop, entryTime, amount, usedUSDT } =
+    position;
   const holdMins = mins(now() - entryTime);
 
-  const profit =
-    type === "long" ? (price - entry) / entry : (entry - price) / entry;
+  const pnlUSD =
+    type === "long" ? (price - entry) * amount : (entry - price) * amount;
 
-  const slHit =
-    type === "long"
-      ? price <= entry * (1 - SL_PERCENT)
-      : price >= entry * (1 + SL_PERCENT);
-
+  const roi = pnlUSD / usedUSDT;
   const timeExpired = holdMins >= MAX_HOLD_MINUTES;
 
-  // ✅ Exit by Stop Loss
-  if (slHit) {
+  const ROI_TP = TP_PERCENT; // contoh: 0.03 → 3%
+  const ROI_SL = SL_PERCENT; // contoh: 0.02 → -2%
+
+  // ❌ Stop Loss by ROI
+  if (roi <= -ROI_SL) {
     db[key] = null;
     db[lossKey]++;
     saveDB();
-    sendMsg(`⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price}`);
-    logTrade(type, entry, "-", "-", price, "sl_hit", amount, position.usedUSDT);
+    sendMsg(
+      `⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(
+        roi * 100
+      ).toFixed(2)}%)`
+    );
+    logTrade(type, entry, "-", "-", price, "sl_hit", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "sl_hit");
     return;
   }
 
-  // ⏱ Timeout
+  // ⏱ Exit by Timeout
   if (timeExpired) {
     db[key] = null;
     db[lossKey]++;
     saveDB();
-    sendMsg(`⌛ ${type.toUpperCase()} close by timeout @ ${price}`);
-    logTrade(
-      type,
-      entry,
-      "-",
-      "-",
-      price,
-      "cut_timeout",
-      amount,
-      position.usedUSDT
-    );
+    sendMsg(`⌛ ${type.toUpperCase()} auto-close (timeout) @ ${price}`);
+    logTrade(type, entry, "-", "-", price, "cut_timeout", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "cut_timeout");
     return;
   }
 
-  // 🟢 Activate Trailing
-  if (!trailingActive && profit >= TP_PERCENT) {
+  // 🎯 Activate Trailing by ROI
+  if (!trailingActive && roi >= ROI_TP) {
     position.trailingActive = true;
     position.trailingStop =
       type === "long"
         ? price * (1 - db.trailingOffset)
         : price * (1 + db.trailingOffset);
     saveDB();
-    sendMsg(`🎯 ${type.toUpperCase()} profit > 3%. Trailing ON @ ${price}`);
+    sendMsg(
+      `🎯 ${type.toUpperCase()} ROI > ${ROI_TP * 100}%. Trailing ON @ ${price}`
+    );
     return;
   }
 
-  // 🏁 Exit by Trailing
+  // 🏁 Trailing Exit
   if (trailingActive) {
     const stopHit =
       type === "long"
         ? price <= position.trailingStop
         : price >= position.trailingStop;
+
     if (stopHit) {
       db[key] = null;
       db[lossKey] = 0;
       saveDB();
       sendMsg(`🏁 ${type.toUpperCase()} Trailing Stop HIT @ ${price}`);
-      logTrade(
-        type,
-        entry,
-        "-",
-        "-",
-        price,
-        "trailing_exit",
-        amount,
-        position.usedUSDT
-      );
+      logTrade(type, entry, "-", "-", price, "trailing_exit", amount, usedUSDT);
       updatePnL(type, entry, price, amount, "trailing_exit");
     } else {
-      // Update trailing stop
       position.trailingStop =
         type === "long"
           ? Math.max(position.trailingStop, price * (1 - db.trailingOffset))
@@ -520,6 +508,22 @@ const checkTP_SL = async (type) => {
       saveDB();
     }
   }
+};
+
+const forceClose = async (type, reason = "manual_close") => {
+  const key = type === "long" ? "positionLong" : "positionShort";
+  const position = db[key];
+  if (!position) return;
+
+  const price = await getPrice();
+  const { entry, amount, usedUSDT } = position;
+
+  db[key] = null;
+  saveDB();
+
+  sendMsg(`🔁 ${type.toUpperCase()} closed (switch signal) @ ${price}`);
+  logTrade(type, entry, "-", "-", price, reason, amount, usedUSDT);
+  updatePnL(type, entry, price, amount, reason);
 };
 
 // Eksekusi bot tiap 1 menit
@@ -535,6 +539,25 @@ setInterval(async () => {
     const { canLong, canShort } = await analyzeSignal();
 
     const nowTime = now();
+
+    if (canLong && db.positionShort) {
+      console.log(
+        "🔁 Sinyal LONG muncul saat SHORT terbuka → Close SHORT & ganti ke LONG"
+      );
+      await forceClose("short", "switch_to_long");
+      await openPosition("long");
+      return;
+    }
+
+    if (canShort && db.positionLong) {
+      console.log(
+        "🔁 Sinyal SHORT muncul saat LONG terbuka → Close LONG & ganti ke SHORT"
+      );
+      await forceClose("long", "switch_to_short");
+      await openPosition("short");
+      return;
+    }
+
     const readyLong =
       !db.positionLong &&
       nowTime - db.lastLongEntryTime >= COOLDOWN_MINUTES * 60 * 1000 &&
