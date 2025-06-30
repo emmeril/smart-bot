@@ -446,7 +446,8 @@ const checkTP_SL = async (type) => {
   const pnlUSD =
     type === "long" ? (price - entry) * amount : (entry - price) * amount;
 
-  const roi = pnlUSD / usedUSDT;
+  const margin = usedUSDT / db.leverage; // ✅ koreksi ROI dengan leverage
+  const roi = pnlUSD / margin;
   const timeExpired = holdMins >= MAX_HOLD_MINUTES;
 
   const ROI_TP = TP_PERCENT; // contoh: 0.03 → 3%
@@ -487,7 +488,9 @@ const checkTP_SL = async (type) => {
         : price * (1 + db.trailingOffset);
     saveDB();
     sendMsg(
-      `🎯 ${type.toUpperCase()} ROI > ${ROI_TP * 100}%. Trailing ON @ ${price}`
+      `🎯 ${type.toUpperCase()} ROI > ${(ROI_TP * 100).toFixed(
+        2
+      )}%. Trailing ON @ ${price}`
     );
     return;
   }
