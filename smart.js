@@ -553,7 +553,7 @@ const checkTP_SL = async (type) => {
   if (roi >= ROI_TP) {
     await closePosition(type, amount);
     db[key] = null;
-    //db[lossKey] = 0;
+    db[lossKey] = 0;
     saveDB();
     sendMsg(
       `✅ ${type.toUpperCase()} TAKE PROFIT hit @ ${price} (ROI ${(
