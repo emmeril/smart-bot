@@ -34,9 +34,9 @@ const db = fs.existsSync(dbPath)
 
 db.tpPercent ??= 0.03;
 db.slPercent ??= 0.02;
-const COOLDOWN_MINUTES = 30;
+const COOLDOWN_MINUTES = 15;
 const LOSS_LIMIT = 3;
-const LOSS_WAIT_MINUTES = 30;
+const LOSS_WAIT_MINUTES = 15;
 const MAX_HOLD_MINUTES = 1440;
 
 const exchange = new ccxt.binance({
