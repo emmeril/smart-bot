@@ -34,9 +34,9 @@ const db = fs.existsSync(dbPath)
 
 db.tpPercent ??= 0.03;
 db.slPercent ??= 0.02;
-const COOLDOWN_MINUTES = 5;
+const COOLDOWN_MINUTES = 15;
 const LOSS_LIMIT = 3;
-const LOSS_WAIT_MINUTES = 5;
+const LOSS_WAIT_MINUTES = 15;
 const MAX_HOLD_MINUTES = 1440;
 
 const exchange = new ccxt.binance({
@@ -111,16 +111,20 @@ client.on("message", async (msg) => {
       const roiLong =
         db.positionLong && fltLong != null
           ? (
-              fltLong /
-              ((db.positionLong.entry * db.positionLong.amount) / db.leverage)
+              (fltLong /
+                ((db.positionLong.entry * db.positionLong.amount) /
+                  db.leverage)) *
+              100
             ).toFixed(2)
           : null;
 
       const roiShort =
         db.positionShort && fltShort != null
           ? (
-              fltShort /
-              ((db.positionShort.entry * db.positionShort.amount) / db.leverage)
+              (fltShort /
+                ((db.positionShort.entry * db.positionShort.amount) /
+                  db.leverage)) *
+              100
             ).toFixed(2)
           : null;
 
@@ -416,22 +420,22 @@ const analyzeSignal = async () => {
     const lower = bbLast.lower;
     const upper = bbLast.upper;
     const middle = bbLast.middle;
-    const multiplier = 1.5;
 
     if (price <= lower) {
       // LONG di dekat lower band
       const tpPrice = middle;
       const slPrice = lower - (middle - lower) * 0.5;
-
-      db.tpPercent = ((tpPrice - price) / price) * multiplier;
-      db.slPercent = ((price - slPrice) / price) * multiplier;
+      db.tpPercent = (tpPrice - price) / price;
+      db.slPercent = (price - slPrice) / price;
     } else if (price >= upper) {
       // SHORT di dekat upper band
       const tpPrice = middle;
       const slPrice = upper + (upper - middle) * 0.5;
-      db.tpPercent = ((price - tpPrice) / price) * multiplier;
-      db.slPercent = ((slPrice - price) / price) * multiplier;
-    } 
+      db.tpPercent = (price - tpPrice) / price;
+      db.slPercent = (slPrice - price) / price;
+    } else {
+      // fallback: tetap gunakan yang di db (default)
+    }
     saveDB();
   }
 
@@ -659,7 +663,7 @@ setInterval(async () => {
       return;
     }
 
-    if (minute % 5 !== 0) return;
+    if (minute % 15 !== 0) return;
     const canResetLong =
       db.lossCountLong >= LOSS_LIMIT &&
       nowTime - db.lastLongEntryTime >= LOSS_WAIT_MINUTES * 60 * 1000;
