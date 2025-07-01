@@ -416,20 +416,21 @@ const analyzeSignal = async () => {
     const lower = bbLast.lower;
     const upper = bbLast.upper;
     const middle = bbLast.middle;
+    const multiplier = 1.5;
 
     if (price <= lower) {
       // LONG di dekat lower band
       const tpPrice = middle;
       const slPrice = lower - (middle - lower) * 0.5;
 
-      db.tpPercent = (tpPrice - price) / price;
-      db.slPercent = (price - slPrice) / price;
+      db.tpPercent = ((tpPrice - price) / price) * multiplier;
+      db.slPercent = ((price - slPrice) / price) * multiplier;
     } else if (price >= upper) {
       // SHORT di dekat upper band
       const tpPrice = middle;
       const slPrice = upper + (upper - middle) * 0.5;
-      db.tpPercent = (price - tpPrice) / price;
-      db.slPercent = (slPrice - price) / price;
+      db.tpPercent = ((price - tpPrice) / price) * multiplier;
+      db.slPercent = ((slPrice - price) / price) * multiplier;
     } else {
       // fallback: tetap gunakan yang di db (default)
     }
