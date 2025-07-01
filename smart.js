@@ -111,20 +111,16 @@ client.on("message", async (msg) => {
       const roiLong =
         db.positionLong && fltLong != null
           ? (
-              (fltLong /
-                ((db.positionLong.entry * db.positionLong.amount) /
-                  db.leverage)) *
-              100
+              fltLong /
+              ((db.positionLong.entry * db.positionLong.amount) / db.leverage)
             ).toFixed(2)
           : null;
 
       const roiShort =
         db.positionShort && fltShort != null
           ? (
-              (fltShort /
-                ((db.positionShort.entry * db.positionShort.amount) /
-                  db.leverage)) *
-              100
+              fltShort /
+              ((db.positionShort.entry * db.positionShort.amount) / db.leverage)
             ).toFixed(2)
           : null;
 
