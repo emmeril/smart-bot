@@ -1,7 +1,7 @@
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
-const { RSI, EMA, MACD, ADX } = require("technicalindicators");
+const { RSI, EMA, MACD, ADX , ATR} = require("technicalindicators");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const express = require("express");
 const QRCode = require("qrcode");
@@ -522,16 +522,32 @@ const checkTP_SL = async (type) => {
   const { entry, entryTime, amount, usedUSDT } = position;
   const holdMins = mins(now() - entryTime);
 
-  const pnlUSD =
-    type === "long" ? (price - entry) * amount : (entry - price) * amount;
+  // 📈 Ambil ATR (volatilitas pasar)
+  const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 50);
+  const high = ohlcv.map((c) => c[2]);
+  const low = ohlcv.map((c) => c[3]);
+  const close = ohlcv.map((c) => c[4]);
 
+  const atr = ATR.calculate({
+    high: high.slice(-14),
+    low: low.slice(-14),
+    close: close.slice(-14),
+    period: 14,
+  }).pop();
+
+  const atrPercent = atr / price;
+
+  // 📊 Hitung ROI dan margin
+  const pnlUSD = type === "long" ? (price - entry) * amount : (entry - price) * amount;
   const notional = entry * amount;
   const margin = notional / db.leverage;
   const roi = pnlUSD / margin;
 
   const timeExpired = holdMins >= MAX_HOLD_MINUTES;
-  const ROI_TP = db.tpPercent;
-  const ROI_SL = db.slPercent;
+
+  // 🎯 Gunakan ATR sebagai baseline untuk TP/SL adaptif
+  const ROI_TP = Math.min(db.tpPercent, atrPercent * db.leverage * 0.8); // Batas maksimal tetap db.tpPercent
+  const ROI_SL = Math.min(db.slPercent, atrPercent * db.leverage * 0.5); // Lebih ketat dari TP
 
   // ❌ Stop Loss
   if (roi <= -ROI_SL) {
@@ -539,11 +555,7 @@ const checkTP_SL = async (type) => {
     db[key] = null;
     db[lossKey]++;
     saveDB();
-    sendMsg(
-      `⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(
-        roi * 100
-      ).toFixed(2)}%)`
-    );
+    sendMsg(`⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(roi * 100).toFixed(2)}%)`);
     logTrade(type, entry, "-", "-", price, "sl_hit", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "sl_hit");
     return;
@@ -555,11 +567,7 @@ const checkTP_SL = async (type) => {
     db[key] = null;
     db[lossKey] = 0;
     saveDB();
-    sendMsg(
-      `✅ ${type.toUpperCase()} TAKE PROFIT hit @ ${price} (ROI ${(
-        roi * 100
-      ).toFixed(2)}%)`
-    );
+    sendMsg(`✅ ${type.toUpperCase()} TAKE PROFIT hit @ ${price} (ROI ${(roi * 100).toFixed(2)}%)`);
     logTrade(type, entry, "-", "-", price, "tp_hit", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "tp_hit");
     return;
@@ -577,6 +585,7 @@ const checkTP_SL = async (type) => {
     return;
   }
 };
+
 
 const forceClose = async (type, reason = "manual_close") => {
   const key = type === "long" ? "positionLong" : "positionShort";
