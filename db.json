@@ -1,6 +1,6 @@
 {
   "pair": "DOGE/USDT:USDT",
-  "balancePercent": 75,
+  "balancePercent": 100,
   "entryMode": "agresif",
   "useBBRoi": true,
   "tpPercent": 0.10,
