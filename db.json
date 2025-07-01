@@ -2,7 +2,7 @@
   "pair": "DOGE/USDT:USDT",
   "balancePercent": 75,
   "entryMode": "agresif",
-  "trailingOffset": 0.012,
+  "useBBRoi": true,
   "tpPercent": 0.10,
   "slPercent": 0.05,
   "positionLong": null,
