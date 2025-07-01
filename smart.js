@@ -628,6 +628,7 @@ setInterval(async () => {
       return;
     }
 
+    if (minute % 15 !== 0) return;
     const canResetLong =
       db.lossCountLong >= LOSS_LIMIT &&
       nowTime - db.lastLongEntryTime >= LOSS_WAIT_MINUTES * 60 * 1000;
