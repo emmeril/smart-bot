@@ -416,7 +416,7 @@ const analyzeSignal = async () => {
     const lower = bbLast.lower;
     const upper = bbLast.upper;
     const middle = bbLast.middle;
-    const multiplier = 2;
+    const multiplier = 5;
 
     if (price <= lower) {
       // LONG di dekat lower band
