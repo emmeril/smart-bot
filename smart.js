@@ -622,6 +622,7 @@ setInterval(async () => {
     await checkTP_SL("long");
     await checkTP_SL("short");
     const nowTime = now();
+    const minute = now.getUTCMinutes();
     const day = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).getDay();
     if (day === 6 || day === 0) {
       console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
