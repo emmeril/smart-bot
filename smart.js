@@ -1,7 +1,7 @@
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
-const { RSI, EMA, MACD, ADX, BollingerBands } = require("technicalindicators");
+const { RSI, EMA, MACD, ADX } = require("technicalindicators");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const express = require("express");
 const QRCode = require("qrcode");
@@ -111,16 +111,20 @@ client.on("message", async (msg) => {
       const roiLong =
         db.positionLong && fltLong != null
           ? (
-              fltLong /
-              ((db.positionLong.entry * db.positionLong.amount) / db.leverage)
+              (fltLong /
+                ((db.positionLong.entry * db.positionLong.amount) /
+                  db.leverage)) *
+              100
             ).toFixed(2)
           : null;
 
       const roiShort =
         db.positionShort && fltShort != null
           ? (
-              fltShort /
-              ((db.positionShort.entry * db.positionShort.amount) / db.leverage)
+              (fltShort /
+                ((db.positionShort.entry * db.positionShort.amount) /
+                  db.leverage)) *
+              100
             ).toFixed(2)
           : null;
 
@@ -342,7 +346,6 @@ const analyzeSignal = async () => {
   const close = ohlcv.map((c) => c[4]);
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
-  const price = close.at(-1);
 
   const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
   const ema20 = EMA.calculate({ values: close.slice(-50), period: 20 }).pop();
@@ -361,7 +364,6 @@ const analyzeSignal = async () => {
     period: 14,
   }).pop();
 
-  // === CANDLE KONFIRMASI ===
   const prevCandle = ohlcv[ohlcv.length - 2];
   const prevPrevCandle = ohlcv[ohlcv.length - 3];
 
@@ -370,7 +372,9 @@ const analyzeSignal = async () => {
   const isStrongCandle = candleBody / candleRange >= 0.4;
   const candleUp = prevCandle[4] > prevCandle[1];
   const candleDown = prevCandle[4] < prevCandle[1];
+  const price = ohlcv.at(-1)[4];
 
+  // Engulfing pattern
   const isBullishEngulfing =
     prevPrevCandle[1] > prevPrevCandle[4] &&
     prevCandle[1] < prevCandle[4] &&
@@ -383,7 +387,6 @@ const analyzeSignal = async () => {
     prevCandle[1] > prevPrevCandle[4] &&
     prevCandle[4] < prevPrevCandle[1];
 
-  // === SCORING INDIKATOR ===
   const countTrue = (...conds) => conds.filter(Boolean).length;
 
   const scoreLong = countTrue(
@@ -404,38 +407,6 @@ const analyzeSignal = async () => {
     candleDown
   );
 
-  // === ROI DINAMIS DARI BOLLINGER BANDS ===
-  const bb = BollingerBands.calculate({
-    values: close,
-    period: 20,
-    stdDev: 2,
-  });
-
-  const bbLast = bb.at(-1);
-  if (bbLast && db.useBBRoi) {
-    const lower = bbLast.lower;
-    const upper = bbLast.upper;
-    const middle = bbLast.middle;
-
-    if (price <= lower) {
-      // LONG di dekat lower band
-      const tpPrice = middle;
-      const slPrice = lower - (middle - lower) * 0.5;
-      db.tpPercent = (tpPrice - price) / price;
-      db.slPercent = (price - slPrice) / price;
-    } else if (price >= upper) {
-      // SHORT di dekat upper band
-      const tpPrice = middle;
-      const slPrice = upper + (upper - middle) * 0.5;
-      db.tpPercent = (price - tpPrice) / price;
-      db.slPercent = (slPrice - price) / price;
-    } else {
-      // fallback: tetap gunakan yang di db (default)
-    }
-    saveDB();
-  }
-
-  // === LOGIKA ENTRY FINAL ===
   const canLong = (() => {
     if (db.entryMode === "agresif") {
       return (
