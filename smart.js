@@ -431,9 +431,7 @@ const analyzeSignal = async () => {
       const slPrice = upper + (upper - middle) * 0.5;
       db.tpPercent = ((price - tpPrice) / price) * multiplier;
       db.slPercent = ((slPrice - price) / price) * multiplier;
-    } else {
-      // fallback: tetap gunakan yang di db (default)
-    }
+    } 
     saveDB();
   }
 
