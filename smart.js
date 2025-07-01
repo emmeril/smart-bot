@@ -51,7 +51,7 @@ let isReady = false;
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
-    executablePath: "/snap/bin/chromium",
+    executablePath: "/usr/bin/chromium",
     headless: true,
     args: [
       "--no-sandbox",
@@ -497,9 +497,7 @@ const openPosition = async (type) => {
   sendMsg(
     `${type === "long" ? "🟢 LONG" : "🔴 SHORT"} opened @ ${entry.toFixed(
       5
-    )}\n💰 Size: ~${amount} ${
-      market.base
-    } ($${usedUSDT.toFixed(2)})`
+    )}\n💰 Size: ~${amount} ${market.base} ($${usedUSDT.toFixed(2)})`
   );
 };
 
@@ -541,7 +539,11 @@ const checkTP_SL = async (type) => {
     db[key] = null;
     db[lossKey]++;
     saveDB();
-    sendMsg(`⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(roi * 100).toFixed(2)}%)`);
+    sendMsg(
+      `⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(
+        roi * 100
+      ).toFixed(2)}%)`
+    );
     logTrade(type, entry, "-", "-", price, "sl_hit", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "sl_hit");
     return;
@@ -553,7 +555,11 @@ const checkTP_SL = async (type) => {
     db[key] = null;
     db[lossKey] = 0;
     saveDB();
-    sendMsg(`✅ ${type.toUpperCase()} TAKE PROFIT hit @ ${price} (ROI ${(roi * 100).toFixed(2)}%)`);
+    sendMsg(
+      `✅ ${type.toUpperCase()} TAKE PROFIT hit @ ${price} (ROI ${(
+        roi * 100
+      ).toFixed(2)}%)`
+    );
     logTrade(type, entry, "-", "-", price, "tp_hit", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "tp_hit");
     return;
@@ -612,7 +618,7 @@ setInterval(async () => {
   try {
     // 🔄 Sinkronisasi manual close
     await syncPositionWithBinance();
-    
+
     await checkTP_SL("long");
     await checkTP_SL("short");
     const nowTime = now();
