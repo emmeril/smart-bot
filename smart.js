@@ -407,7 +407,7 @@ const analyzeSignal = async () => {
     ema20 > ema50,
     adx?.adx > 20,
     isStrongCandle,
-    candleUp,
+    // candleUp,
     macdCrossUp,
     isBullishEngulfing, // 👈 sekarang jadi skor
     price > ma200
@@ -419,7 +419,7 @@ const analyzeSignal = async () => {
     ema20 < ema50,
     adx?.adx > 20,
     isStrongCandle,
-    candleDown,
+    // candleDown,
     macdCrossDown,
     isBearishEngulfing, // 👈 sekarang jadi skor
     price < ma200
