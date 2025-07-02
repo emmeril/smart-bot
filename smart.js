@@ -352,20 +352,17 @@ const analyzeSignal = async () => {
   const close = ohlcv.map((c) => c[4]);
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
-  const price = close.at(-1);
 
   const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
   const ema20 = EMA.calculate({ values: close.slice(-50), period: 20 }).pop();
   const ema50 = EMA.calculate({ values: close.slice(-50), period: 50 }).pop();
   const ma200 = EMA.calculate({ values: close, period: 200 }).pop();
-  const macdList = MACD.calculate({
+  const macd = MACD.calculate({
     values: close.slice(-50),
     fastPeriod: 12,
     slowPeriod: 26,
     signalPeriod: 9,
-  });
-  const macd = macdList.at(-1);
-  const prevMacd = macdList.at(-2);
+  }).pop();
   const adx = ADX.calculate({
     close: close.slice(-50),
     high: high.slice(-50),
@@ -373,16 +370,17 @@ const analyzeSignal = async () => {
     period: 14,
   }).pop();
 
-  // === CANDLE CONFIRMATION ===
-  const prevCandle = ohlcv.at(-2);
-  const prevPrevCandle = ohlcv.at(-3);
+  const prevCandle = ohlcv[ohlcv.length - 2];
+  const prevPrevCandle = ohlcv[ohlcv.length - 3];
 
   const candleBody = Math.abs(prevCandle[4] - prevCandle[1]);
   const candleRange = prevCandle[2] - prevCandle[3];
-  const isStrongCandle = candleBody / candleRange >= 0.6;
+  const isStrongCandle = candleBody / candleRange >= 0.4;
   const candleUp = prevCandle[4] > prevCandle[1];
   const candleDown = prevCandle[4] < prevCandle[1];
+  const price = ohlcv.at(-1)[4];
 
+  // Engulfing pattern
   const isBullishEngulfing =
     prevPrevCandle[1] > prevPrevCandle[4] &&
     prevCandle[1] < prevCandle[4] &&
@@ -395,10 +393,6 @@ const analyzeSignal = async () => {
     prevCandle[1] > prevPrevCandle[4] &&
     prevCandle[4] < prevPrevCandle[1];
 
-  const macdCrossUp = prevMacd && prevMacd.histogram < 0 && macd?.histogram > 0;
-  const macdCrossDown =
-    prevMacd && prevMacd.histogram > 0 && macd?.histogram < 0;
-
   const countTrue = (...conds) => conds.filter(Boolean).length;
 
   const scoreLong = countTrue(
@@ -407,8 +401,7 @@ const analyzeSignal = async () => {
     ema20 > ema50,
     adx?.adx > 20,
     isStrongCandle,
-    macdCrossUp,
-    isBullishEngulfing // 👈 sekarang jadi skor
+    candleUp
   );
 
   const scoreShort = countTrue(
@@ -417,41 +410,28 @@ const analyzeSignal = async () => {
     ema20 < ema50,
     adx?.adx > 20,
     isStrongCandle,
-    macdCrossDown,
-    isBearishEngulfing // 👈 sekarang jadi skor
+    candleDown
   );
 
   const canLong = (() => {
     if (db.entryMode === "agresif") {
       return (
-        ((scoreLong >= 3 && rsi < 35) ||
-          (scoreLong >= 3 && macd?.histogram > 0) ||
-          (scoreLong >= 3 && ema20 > ema50) ||
-          (scoreLong >= 3 && adx?.adx > 20) ||
-          (scoreLong >= 3 && isStrongCandle) ||
-          (scoreLong >= 3 && isBullishEngulfing)) &&
-        candleUp &&
+        (scoreLong >= 3 || (scoreLong >= 2 && isBullishEngulfing)) &&
         price > ma200
       );
     } else {
-      return scoreLong >= 6 && candleUp && price > ma200;
+      return scoreLong >= 4 && price > ma200 && isBullishEngulfing;
     }
   })();
 
   const canShort = (() => {
     if (db.entryMode === "agresif") {
       return (
-        ((scoreShort >= 3 && rsi > 65) ||
-          (scoreShort >= 3 && macd?.histogram < 0) ||
-          (scoreShort >= 3 && ema20 < ema50) ||
-          (scoreShort >= 3 && adx?.adx > 20) ||
-          (scoreShort >= 3 && isStrongCandle) ||
-          (scoreShort >= 3 && isBearishEngulfing)) &&
-        candleDown &&
+        (scoreShort >= 3 || (scoreShort >= 2 && isBearishEngulfing)) &&
         price < ma200
       );
     } else {
-      return scoreShort >= 6 && candleDown && price < ma200;
+      return scoreShort >= 4 && price < ma200 && isBearishEngulfing;
     }
   })();
 
