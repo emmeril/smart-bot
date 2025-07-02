@@ -409,7 +409,7 @@ const analyzeSignal = async () => {
     isStrongCandle,
     candleUp,
     macdCrossUp,
-    isBullishEngulfing,// 👈 sekarang jadi skor
+    isBullishEngulfing, // 👈 sekarang jadi skor
     price > ma200
   );
 
@@ -427,17 +427,35 @@ const analyzeSignal = async () => {
 
   const canLong = (() => {
     if (db.entryMode === "agresif") {
-      return scoreLong >= 4 && candleUp && price > ma200;
+      return (
+        ((scoreLong >= 4 && rsi < 35) ||
+          (scoreLong >= 4 && macd?.histogram > 0) ||
+          (scoreLong >= 4 && ema20 > ema50) ||
+          (scoreLong >= 4 && adx?.adx > 20) ||
+          (scoreLong >= 4 && isStrongCandle) ||
+          (scoreLong >= 4 && isBullishEngulfing) ||
+          (scoreLong >= 4 && price > ma200)) &&
+        candleUp
+      );
     } else {
-      return scoreLong >= 6 && candleUp && price > ma200;;
+      return scoreLong >= 6 && candleUp && price > ma200;
     }
   })();
 
   const canShort = (() => {
     if (db.entryMode === "agresif") {
-      return scoreShort >= 4 && candleDown && price < ma200;;
+      return (
+        ((scoreShort >= 4 && rsi > 65) ||
+          (scoreShort >= 4 && macd?.histogram < 0) ||
+          (scoreShort >= 4 && ema20 < ema50) ||
+          (scoreShort >= 4 && adx?.adx > 20) ||
+          (scoreShort >= 4 && isStrongCandle) ||
+          (scoreShort >= 4 && isBearishEngulfing) ||
+          (scoreShort >= 4 && price < ma200)) &&
+        candleDown
+      );
     } else {
-      return scoreShort >= 6 && candleDown && price < ma200;;
+      return scoreShort >= 6 && candleDown;
     }
   })();
 
