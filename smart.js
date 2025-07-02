@@ -427,17 +427,17 @@ const analyzeSignal = async () => {
 
   const canLong = (() => {
     if (db.entryMode === "agresif") {
-      return scoreLong >= 4 ;
+      return scoreLong >= 4 && candleUp;
     } else {
-      return scoreLong >= 6 ;
+      return scoreLong >= 6 && candleUp;
     }
   })();
 
   const canShort = (() => {
     if (db.entryMode === "agresif") {
-      return scoreShort >= 4 ;
+      return scoreShort >= 4 && candleDown;
     } else {
-      return scoreShort >= 6 ;
+      return scoreShort >= 6 && candleDown;
     }
   })();
 
