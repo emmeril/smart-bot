@@ -409,7 +409,8 @@ const analyzeSignal = async () => {
     isStrongCandle,
     candleUp,
     macdCrossUp,
-    isBullishEngulfing // 👈 sekarang jadi skor
+    isBullishEngulfing,// 👈 sekarang jadi skor
+    price > ma200
   );
 
   const scoreShort = countTrue(
@@ -420,22 +421,23 @@ const analyzeSignal = async () => {
     isStrongCandle,
     candleDown,
     macdCrossDown,
-    isBearishEngulfing // 👈 sekarang jadi skor
+    isBearishEngulfing, // 👈 sekarang jadi skor
+    price < ma200
   );
 
   const canLong = (() => {
     if (db.entryMode === "agresif") {
-      return scoreLong >= 3 && price > ma200;
+      return scoreLong >= 4 ;
     } else {
-      return scoreLong >= 5 && price > ma200;
+      return scoreLong >= 6 ;
     }
   })();
 
   const canShort = (() => {
     if (db.entryMode === "agresif") {
-      return scoreShort >= 3 && price < ma200;
+      return scoreShort >= 4 ;
     } else {
-      return scoreShort >= 5 && price < ma200;
+      return scoreShort >= 6 ;
     }
   })();
 
