@@ -128,12 +128,16 @@ client.on("message", async (msg) => {
             ).toFixed(2)
           : null;
 
+      const trailingOffset = ((db.tpPercent / 2) * 100).toFixed(1);
+
       const posLong = db.positionLong
         ? `📍 Entry @ ${db.positionLong.entry.toFixed(4)}\n🎯 ROI TP: ${(
             db.tpPercent * 100
           ).toFixed(1)}% | SL: ${(db.slPercent * 100).toFixed(
             1
-          )}%\n📊 Floating PnL: ${fltLong >= 0 ? "+" : "-"}$${Math.abs(
+          )}%\n🎯 Trailing Offset: ${trailingOffset}% ${
+            db.positionLong.trailingActive ? "(ON)" : "(OFF)"
+          }\n📊 Floating PnL: ${fltLong >= 0 ? "+" : "-"}$${Math.abs(
             fltLong
           ).toFixed(4)} (${roiLong}%)`
         : "🚫 Belum ada";
@@ -143,7 +147,9 @@ client.on("message", async (msg) => {
             db.tpPercent * 100
           ).toFixed(1)}% | SL: ${(db.slPercent * 100).toFixed(
             1
-          )}%\n📊 Floating PnL: ${fltShort >= 0 ? "+" : "-"}$${Math.abs(
+          )}%\n🎯 Trailing Offset: ${trailingOffset}% ${
+            db.positionShort.trailingActive ? "(ON)" : "(OFF)"
+          }\n📊 Floating PnL: ${fltShort >= 0 ? "+" : "-"}$${Math.abs(
             fltShort
           ).toFixed(4)} (${roiShort}%)`
         : "🚫 Belum ada";
@@ -343,9 +349,9 @@ const calcFloatingPnl = async (type) => {
 
 const analyzeSignal = async () => {
   const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
-  const close = ohlcv.map(c => c[4]);
-  const high = ohlcv.map(c => c[2]);
-  const low = ohlcv.map(c => c[3]);
+  const close = ohlcv.map((c) => c[4]);
+  const high = ohlcv.map((c) => c[2]);
+  const low = ohlcv.map((c) => c[3]);
   const price = close.at(-1);
 
   const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
@@ -390,7 +396,8 @@ const analyzeSignal = async () => {
     prevCandle[4] < prevPrevCandle[1];
 
   const macdCrossUp = prevMacd && prevMacd.histogram < 0 && macd?.histogram > 0;
-  const macdCrossDown = prevMacd && prevMacd.histogram > 0 && macd?.histogram < 0;
+  const macdCrossDown =
+    prevMacd && prevMacd.histogram > 0 && macd?.histogram < 0;
 
   const countTrue = (...conds) => conds.filter(Boolean).length;
 
@@ -433,26 +440,26 @@ const analyzeSignal = async () => {
   })();
 
   console.log("📊 [Indikator LONG]");
-console.log(`  RSI < 35          : ${rsi < 35 ? "✅" : "❌"}`);
-console.log(`  MACD > 0          : ${macd?.histogram > 0 ? "✅" : "❌"}`);
-console.log(`  EMA20 > EMA50     : ${ema20 > ema50 ? "✅" : "❌"}`);
-console.log(`  ADX > 20          : ${adx?.adx > 20 ? "✅" : "❌"}`);
-console.log(`  Candle Strong     : ${isStrongCandle ? "✅" : "❌"}`);
-console.log(`  Candle Up         : ${candleUp ? "✅" : "❌"}`);
-console.log(`  Bull Engulfing    : ${isBullishEngulfing ? "✅" : "❌"}`);
-console.log(`  Price > MA200     : ${price > ma200 ? "✅" : "❌"}`);
-console.log(`  → Skor LONG       : ${scoreLong}\n`);
+  console.log(`  RSI < 35          : ${rsi < 35 ? "✅" : "❌"}`);
+  console.log(`  MACD > 0          : ${macd?.histogram > 0 ? "✅" : "❌"}`);
+  console.log(`  EMA20 > EMA50     : ${ema20 > ema50 ? "✅" : "❌"}`);
+  console.log(`  ADX > 20          : ${adx?.adx > 20 ? "✅" : "❌"}`);
+  console.log(`  Candle Strong     : ${isStrongCandle ? "✅" : "❌"}`);
+  console.log(`  Candle Up         : ${candleUp ? "✅" : "❌"}`);
+  console.log(`  Bull Engulfing    : ${isBullishEngulfing ? "✅" : "❌"}`);
+  console.log(`  Price > MA200     : ${price > ma200 ? "✅" : "❌"}`);
+  console.log(`  → Skor LONG       : ${scoreLong}\n`);
 
-console.log("📊 [Indikator SHORT]");
-console.log(`  RSI > 65          : ${rsi > 65 ? "✅" : "❌"}`);
-console.log(`  MACD < 0          : ${macd?.histogram < 0 ? "✅" : "❌"}`);
-console.log(`  EMA20 < EMA50     : ${ema20 < ema50 ? "✅" : "❌"}`);
-console.log(`  ADX > 20          : ${adx?.adx > 20 ? "✅" : "❌"}`);
-console.log(`  Candle Strong     : ${isStrongCandle ? "✅" : "❌"}`);
-console.log(`  Candle Down       : ${candleDown ? "✅" : "❌"}`);
-console.log(`  Bear Engulfing    : ${isBearishEngulfing ? "✅" : "❌"}`);
-console.log(`  Price < MA200     : ${price < ma200 ? "✅" : "❌"}`);
-console.log(`  → Skor SHORT      : ${scoreShort}\n`);
+  console.log("📊 [Indikator SHORT]");
+  console.log(`  RSI > 65          : ${rsi > 65 ? "✅" : "❌"}`);
+  console.log(`  MACD < 0          : ${macd?.histogram < 0 ? "✅" : "❌"}`);
+  console.log(`  EMA20 < EMA50     : ${ema20 < ema50 ? "✅" : "❌"}`);
+  console.log(`  ADX > 20          : ${adx?.adx > 20 ? "✅" : "❌"}`);
+  console.log(`  Candle Strong     : ${isStrongCandle ? "✅" : "❌"}`);
+  console.log(`  Candle Down       : ${candleDown ? "✅" : "❌"}`);
+  console.log(`  Bear Engulfing    : ${isBearishEngulfing ? "✅" : "❌"}`);
+  console.log(`  Price < MA200     : ${price < ma200 ? "✅" : "❌"}`);
+  console.log(`  → Skor SHORT      : ${scoreShort}\n`);
 
   return { canLong, canShort };
 };
@@ -544,19 +551,19 @@ const checkTP_SL = async (type) => {
   const position = db[key];
   if (!position) return;
 
-  const { entry, entryTime, amount, usedUSDT } = position;
+  const { entry, entryTime, amount, usedUSDT, trailingActive, trailingStop } =
+    position;
   const holdMins = mins(now() - entryTime);
-
-  const pnlUSD =
-    type === "long" ? (price - entry) * amount : (entry - price) * amount;
-
   const notional = entry * amount;
   const margin = notional / db.leverage;
+  const pnlUSD =
+    type === "long" ? (price - entry) * amount : (entry - price) * amount;
   const roi = pnlUSD / margin;
 
-  const timeExpired = holdMins >= MAX_HOLD_MINUTES;
   const ROI_TP = db.tpPercent;
   const ROI_SL = db.slPercent;
+  const trailingOffset = ROI_TP / 2; // 📌 offset otomatis: setengah dari TP (contoh: 4% → 2%)
+  const timeExpired = holdMins >= MAX_HOLD_MINUTES;
 
   // ❌ Stop Loss
   if (roi <= -ROI_SL) {
@@ -574,22 +581,6 @@ const checkTP_SL = async (type) => {
     return;
   }
 
-  // ✅ Take Profit
-  if (roi >= ROI_TP) {
-    await closePosition(type, amount);
-    db[key] = null;
-    db[lossKey] = 0;
-    saveDB();
-    sendMsg(
-      `✅ ${type.toUpperCase()} TAKE PROFIT hit @ ${price} (ROI ${(
-        roi * 100
-      ).toFixed(2)}%)`
-    );
-    logTrade(type, entry, "-", "-", price, "tp_hit", amount, usedUSDT);
-    updatePnL(type, entry, price, amount, "tp_hit");
-    return;
-  }
-
   // ⏱ Timeout
   if (timeExpired) {
     await closePosition(type, amount);
@@ -600,6 +591,47 @@ const checkTP_SL = async (type) => {
     logTrade(type, entry, "-", "-", price, "cut_timeout", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "cut_timeout");
     return;
+  }
+
+  // 🎯 Activate Trailing (ON)
+  if (!trailingActive && roi >= ROI_TP) {
+    position.trailingActive = true;
+    position.trailingStop =
+      type === "long"
+        ? price * (1 - trailingOffset)
+        : price * (1 + trailingOffset);
+    saveDB();
+    sendMsg(
+      `🎯 ${type.toUpperCase()} TP tercapai. Trailing aktif @ ${price} (offset ${(
+        trailingOffset * 100
+      ).toFixed(2)}%)`
+    );
+    return;
+  }
+
+  // 🏁 Trailing Exit
+  if (trailingActive) {
+    const stopHit =
+      type === "long"
+        ? price <= position.trailingStop
+        : price >= position.trailingStop;
+
+    if (stopHit) {
+      await closePosition(type, amount);
+      db[key] = null;
+      db[lossKey] = 0;
+      saveDB();
+      sendMsg(`🏁 ${type.toUpperCase()} Trailing STOP HIT @ ${price}`);
+      logTrade(type, entry, "-", "-", price, "trailing_exit", amount, usedUSDT);
+      updatePnL(type, entry, price, amount, "trailing_exit");
+    } else {
+      // 🔁 Update trailing stop
+      position.trailingStop =
+        type === "long"
+          ? Math.max(position.trailingStop, price * (1 - trailingOffset))
+          : Math.min(position.trailingStop, price * (1 + trailingOffset));
+      saveDB();
+    }
   }
 };
 
