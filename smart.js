@@ -578,21 +578,6 @@ const checkTP_SL = async (type) => {
   }
 };
 
-const forceClose = async (type, reason = "manual_close") => {
-  const key = type === "long" ? "positionLong" : "positionShort";
-  const position = db[key];
-  if (!position) return;
-
-  const price = await getPrice();
-  const { entry, amount, usedUSDT } = position;
-
-  db[key] = null;
-  saveDB();
-
-  sendMsg(`🔁 ${type.toUpperCase()} closed (switch signal) @ ${price}`);
-  logTrade(type, entry, "-", "-", price, reason, amount, usedUSDT);
-  updatePnL(type, entry, price, amount, reason);
-};
 
 const syncPositionWithBinance = async () => {
   const positions = await exchange.fetchPositions([db.pair]);
@@ -657,8 +642,7 @@ setInterval(async () => {
       console.log(
         "🔁 Sinyal LONG muncul saat SHORT terbuka → Close SHORT & ganti ke LONG"
       );
-      await forceClose("short", "switch_to_long");
-      await openPosition("long");
+      await closePosition(type, amount);
       return;
     }
 
@@ -666,8 +650,7 @@ setInterval(async () => {
       console.log(
         "🔁 Sinyal SHORT muncul saat LONG terbuka → Close LONG & ganti ke SHORT"
       );
-      await forceClose("long", "switch_to_short");
-      await openPosition("short");
+      await closePosition(type, amount);
       return;
     }
 
