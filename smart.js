@@ -128,6 +128,14 @@ client.on("message", async (msg) => {
             ).toFixed(2)
           : null;
 
+      const trailingLong = db.positionLong?.trailingActive
+        ? `\n🔁 Trailing aktif @ ${db.positionLong.trailingStop.toFixed(4)}`
+        : "";
+
+      const trailingShort = db.positionShort?.trailingActive
+        ? `\n🔁 Trailing aktif @ ${db.positionShort.trailingStop.toFixed(4)}`
+        : "";
+
       const posLong = db.positionLong
         ? `📍 Entry @ ${db.positionLong.entry.toFixed(4)}\n🎯 ROI TP: ${(
             db.tpPercent * 100
@@ -135,7 +143,7 @@ client.on("message", async (msg) => {
             1
           )}%\n📊 Floating PnL: ${fltLong >= 0 ? "+" : "-"}$${Math.abs(
             fltLong
-          ).toFixed(4)} (${roiLong}%)`
+          ).toFixed(4)} (${roiLong}%)${trailingLong}`
         : "🚫 Belum ada";
 
       const posShort = db.positionShort
@@ -145,7 +153,7 @@ client.on("message", async (msg) => {
             1
           )}%\n📊 Floating PnL: ${fltShort >= 0 ? "+" : "-"}$${Math.abs(
             fltShort
-          ).toFixed(4)} (${roiShort}%)`
+          ).toFixed(4)} (${roiShort}%)${trailingShort}`
         : "🚫 Belum ada";
 
       msg.reply(`📊 *Status Bot*
@@ -519,7 +527,8 @@ const checkTP_SL = async (type) => {
   const position = db[key];
   if (!position) return;
 
-  const { entry, entryTime, amount, usedUSDT } = position;
+  const { entry, entryTime, amount, usedUSDT, trailingActive, trailingStop } =
+    position;
   const holdMins = mins(now() - entryTime);
 
   const pnlUSD =
@@ -532,6 +541,7 @@ const checkTP_SL = async (type) => {
   const timeExpired = holdMins >= MAX_HOLD_MINUTES;
   const ROI_TP = db.tpPercent;
   const ROI_SL = db.slPercent;
+  const offset = (ROI_TP + ROI_SL) / 2;
 
   // ❌ Stop Loss
   if (roi <= -ROI_SL) {
@@ -549,20 +559,49 @@ const checkTP_SL = async (type) => {
     return;
   }
 
-  // ✅ Take Profit
-  if (roi >= ROI_TP) {
-    await closePosition(type, amount);
-    db[key] = null;
-    db[lossKey] = 0;
+  // ✅ Aktifkan Trailing saat profit sudah menyentuh ROI_TP
+  if (!trailingActive && roi >= ROI_TP) {
+    const stopPrice =
+      type === "long" ? price * (1 - offset) : price * (1 + offset);
+    position.trailingActive = true;
+    position.trailingStop = stopPrice;
+    db[key] = position;
     saveDB();
     sendMsg(
-      `✅ ${type.toUpperCase()} TAKE PROFIT hit @ ${price} (ROI ${(
-        roi * 100
-      ).toFixed(2)}%)`
+      `🎯 ${type.toUpperCase()} ROI ${(roi * 100).toFixed(
+        2
+      )}% hit. Trailing ON @ ${price} (Offset ${(offset * 100).toFixed(2)}%)`
     );
-    logTrade(type, entry, "-", "-", price, "tp_hit", amount, usedUSDT);
-    updatePnL(type, entry, price, amount, "tp_hit");
     return;
+  }
+
+  // 🏁 Trailing Stop Exit
+  if (trailingActive) {
+    const stopHit =
+      type === "long" ? price <= trailingStop : price >= trailingStop;
+
+    if (stopHit) {
+      await closePosition(type, amount);
+      db[key] = null;
+      db[lossKey] = 0;
+      saveDB();
+      sendMsg(`🏁 ${type.toUpperCase()} Trailing Stop HIT @ ${price}`);
+      logTrade(type, entry, "-", "-", price, "trailing_exit", amount, usedUSDT);
+      updatePnL(type, entry, price, amount, "trailing_exit");
+      return;
+    }
+
+    // 🔁 Update trailing stop ke harga terbaru jika masih naik
+    const newStop =
+      type === "long" ? price * (1 - offset) : price * (1 + offset);
+
+    position.trailingStop =
+      type === "long"
+        ? Math.max(position.trailingStop, newStop)
+        : Math.min(position.trailingStop, newStop);
+
+    db[key] = position;
+    saveDB();
   }
 
   // ⏱ Timeout
@@ -574,10 +613,8 @@ const checkTP_SL = async (type) => {
     sendMsg(`⌛ ${type.toUpperCase()} auto-close (timeout) @ ${price}`);
     logTrade(type, entry, "-", "-", price, "cut_timeout", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "cut_timeout");
-    return;
   }
 };
-
 
 const syncPositionWithBinance = async () => {
   const positions = await exchange.fetchPositions([db.pair]);
