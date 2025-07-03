@@ -605,7 +605,7 @@ const checkTP_SL = async (type) => {
   }
 
   // ⏱ Timeout
-  if (timeExpired) {
+  if (timeExpired && !trailingActive) {
     await closePosition(type, amount);
     db[key] = null;
     db[lossKey]++;
