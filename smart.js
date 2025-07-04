@@ -535,17 +535,16 @@ const checkTP_SL = async (type) => {
 
   const pnlUSD =
     type === "long" ? (price - entry) * amount : (entry - price) * amount;
-
   const notional = entry * amount;
   const margin = notional / db.leverage;
   const roi = pnlUSD / margin;
 
-  const timeExpired = holdMins >= MAX_HOLD_MINUTES;
   const ROI_TP = db.tpPercent;
   const ROI_SL = db.slPercent;
   const offset = (ROI_TP + ROI_SL) / 2;
+  const timeExpired = holdMins >= MAX_HOLD_MINUTES;
 
-  // ❌ Stop Loss
+  // ❌ STOP LOSS
   if (roi <= -ROI_SL) {
     await closePosition(type, amount);
     db[key] = null;
@@ -561,17 +560,19 @@ const checkTP_SL = async (type) => {
     return;
   }
 
-  // ✅ Aktifkan Trailing saat profit sudah menyentuh ROI_TP
+  // ✅ Aktifkan Trailing saat ROI menyentuh TP
   if (!trailingActive && roi >= ROI_TP) {
     const stopPrice =
-      type === "long" ? price * (1 - offset) : price * (1 + offset);
+      type === "long"
+        ? entry * (1 + ROI_TP - offset)
+        : entry * (1 - ROI_TP + offset);
 
-    // 🚫 Validasi: trailing stop tidak boleh lebih buruk dari entry
+    // Pastikan trailing stop lebih baik dari entry
     if (
       (type === "long" && stopPrice <= entry) ||
       (type === "short" && stopPrice >= entry)
     ) {
-      console.log("⚠️ Trailing Stop terlalu dekat dengan entry. Diabaikan.");
+      console.log("⚠️ Trailing Stop dari entry terlalu dekat. Diabaikan.");
       return;
     }
 
@@ -582,12 +583,14 @@ const checkTP_SL = async (type) => {
     sendMsg(
       `🎯 ${type.toUpperCase()} ROI ${(roi * 100).toFixed(
         2
-      )}% hit. Trailing ON @ ${price} (Offset ${(offset * 100).toFixed(2)}%)`
+      )}% hit. Trailing ON dari ENTRY @ ${entry.toFixed(
+        4
+      )} (Stop @ ${stopPrice.toFixed(4)}, Offset ${(offset * 100).toFixed(2)}%)`
     );
     return;
   }
 
-  // 🏁 Trailing Stop Exit
+  // 🏁 Trailing Exit
   if (trailingActive) {
     const stopHit =
       type === "long" ? price <= trailingStop : price >= trailingStop;
@@ -603,9 +606,11 @@ const checkTP_SL = async (type) => {
       return;
     }
 
-    // 🔁 Update trailing stop ke harga terbaru jika masih naik
+    // 🔁 Update trailing stop jika naik terus
     const newStop =
-      type === "long" ? price * (1 - offset) : price * (1 + offset);
+      type === "long"
+        ? entry * (1 + ROI_TP - offset)
+        : entry * (1 - ROI_TP + offset);
 
     position.trailingStop =
       type === "long"
@@ -616,7 +621,7 @@ const checkTP_SL = async (type) => {
     saveDB();
   }
 
-  // ⏱ Timeout (tidak berlaku jika trailing aktif)
+  // ⏱ Timeout hanya jika trailing tidak aktif
   if (timeExpired && !trailingActive) {
     await closePosition(type, amount);
     db[key] = null;
@@ -628,6 +633,7 @@ const checkTP_SL = async (type) => {
   }
 };
 
+// Fungsi untuk sinkronisasi posisi dengan Binance
 const syncPositionWithBinance = async () => {
   const positions = await exchange.fetchPositions([db.pair]);
 
