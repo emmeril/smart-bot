@@ -667,13 +667,13 @@ setInterval(async () => {
     if (canResetLong) {
       db.lossCountLong = 0;
       saveDB();
-      console.log("🔁 Reset lossCountLong setelah tunggu 30 menit");
+      console.log("🔁 Reset lossCountLong");
     }
 
     if (canResetShort) {
       db.lossCountShort = 0;
       saveDB();
-      console.log("🔁 Reset lossCountShort setelah tunggu 30 menit");
+      console.log("🔁 Reset lossCountShort");
     }
 
     const { canLong, canShort } = await analyzeSignal();
