@@ -709,4 +709,4 @@ setInterval(async () => {
   } catch (e) {
     console.log("⚠️ Bot error:", e.message);
   }
-}, 5 * 1000); // per menit
+}, 5 * 1000); // periksa setiap 5 detik
