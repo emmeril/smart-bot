@@ -642,7 +642,7 @@ setInterval(async () => {
     const nowDate = new Date();
     const nowTime = nowDate.getTime();
     const minute = nowDate.getUTCMinutes();
-    const day = new Date(nowTime + 7 * 60 * 60 * 1000).getDay();
+    const day = new Date(nowTime + 7 * 60 * 60 * 1000).getUTCDay();
 
     // Sinkronisasi manual close
     await syncPositionWithBinance();
