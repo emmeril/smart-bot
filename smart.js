@@ -690,7 +690,13 @@ setInterval(async () => {
       console.log(
         "🔁 Sinyal LONG muncul saat SHORT terbuka → Close SHORT & ganti ke LONG"
       );
+      const type = "short";
+      const amount = db.positionShort.amount;
       await closePosition(type, amount);
+      db.positionShort = null;
+      db.lossCountShort = 0;
+      saveDB();
+      await openPosition("long");
       return;
     }
 
@@ -698,7 +704,13 @@ setInterval(async () => {
       console.log(
         "🔁 Sinyal SHORT muncul saat LONG terbuka → Close LONG & ganti ke SHORT"
       );
+      const type = "long";
+      const amount = db.positionLong.amount;
       await closePosition(type, amount);
+      db.positionLong = null;
+      db.lossCountLong = 0;
+      saveDB();
+      await openPosition("short");
       return;
     }
 
