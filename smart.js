@@ -565,6 +565,16 @@ const checkTP_SL = async (type) => {
   if (!trailingActive && roi >= ROI_TP) {
     const stopPrice =
       type === "long" ? price * (1 - offset) : price * (1 + offset);
+
+    // 🚫 Validasi: trailing stop tidak boleh lebih buruk dari entry
+    if (
+      (type === "long" && stopPrice <= entry) ||
+      (type === "short" && stopPrice >= entry)
+    ) {
+      console.log("⚠️ Trailing Stop terlalu dekat dengan entry. Diabaikan.");
+      return;
+    }
+
     position.trailingActive = true;
     position.trailingStop = stopPrice;
     db[key] = position;
@@ -606,7 +616,7 @@ const checkTP_SL = async (type) => {
     saveDB();
   }
 
-  // ⏱ Timeout
+  // ⏱ Timeout (tidak berlaku jika trailing aktif)
   if (timeExpired && !trailingActive) {
     await closePosition(type, amount);
     db[key] = null;
