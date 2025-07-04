@@ -529,20 +529,20 @@ const checkTP_SL = async (type) => {
   const position = db[key];
   if (!position) return;
 
-  const { entry, entryTime, amount, usedUSDT, trailingActive, trailingStop } =
-    position;
+  const { entry, entryTime, amount, usedUSDT, trailingActive, trailingStop } = position;
   const holdMins = mins(now() - entryTime);
 
   const pnlUSD =
     type === "long" ? (price - entry) * amount : (entry - price) * amount;
+
   const notional = entry * amount;
   const margin = notional / db.leverage;
   const roi = pnlUSD / margin;
 
+  const timeExpired = holdMins >= MAX_HOLD_MINUTES;
   const ROI_TP = db.tpPercent;
   const ROI_SL = db.slPercent;
   const offset = (ROI_TP + ROI_SL) / 2;
-  const timeExpired = holdMins >= MAX_HOLD_MINUTES;
 
   // ❌ Stop Loss
   if (roi <= -ROI_SL) {
@@ -550,34 +550,27 @@ const checkTP_SL = async (type) => {
     db[key] = null;
     db[lossKey]++;
     saveDB();
-    sendMsg(
-      `⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(
-        roi * 100
-      ).toFixed(2)}%)`
-    );
+    sendMsg(`⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(roi * 100).toFixed(2)}%)`);
     logTrade(type, entry, "-", "-", price, "sl_hit", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "sl_hit");
     return;
   }
 
-  // ✅ Aktifkan Trailing saat TP tercapai
+  // 🎯 Aktifkan Trailing saat ROI >= TP
   if (!trailingActive && roi >= ROI_TP) {
     const stopPrice =
-      type === "long" ? entry + entry * offset : entry - entry * offset;
-
+      type === "long" ? entry * (1 + offset) : entry * (1 - offset);
     position.trailingActive = true;
     position.trailingStop = stopPrice;
     db[key] = position;
     saveDB();
     sendMsg(
-      `🎯 ${type.toUpperCase()} ROI ${(roi * 100).toFixed(
-        2
-      )}% hit. Trailing ON @ ${price} (Stop @ ${stopPrice.toFixed(4)})`
+      `🎯 ${type.toUpperCase()} ROI ${(roi * 100).toFixed(2)}% hit. Trailing ON @ ${price} (Offset ${(offset * 100).toFixed(2)}%)`
     );
     return;
   }
 
-  // 🏁 Trailing aktif → cek apakah kena stop, atau update posisi stop
+  // 🏁 Trailing Stop Exit
   if (trailingActive) {
     const stopHit =
       type === "long" ? price <= trailingStop : price >= trailingStop;
@@ -593,20 +586,22 @@ const checkTP_SL = async (type) => {
       return;
     }
 
-    // 🔁 Update trailing stop jika harga makin profit
+    // 🔁 Update trailing stop berdasarkan entry
     const newStop =
-      type === "long" ? price - price * offset : price + price * offset;
+      type === "long"
+        ? entry * (1 + offset)
+        : entry * (1 - offset);
 
     position.trailingStop =
       type === "long"
-        ? Math.max(trailingStop, newStop)
-        : Math.min(trailingStop, newStop);
+        ? Math.max(position.trailingStop, newStop)
+        : Math.min(position.trailingStop, newStop);
 
     db[key] = position;
     saveDB();
   }
 
-  // ⏱ Timeout hanya berlaku jika trailing belum aktif
+  // ⏱ Timeout, hanya berlaku jika belum trailing
   if (timeExpired && !trailingActive) {
     await closePosition(type, amount);
     db[key] = null;
@@ -617,6 +612,9 @@ const checkTP_SL = async (type) => {
     updatePnL(type, entry, price, amount, "cut_timeout");
   }
 };
+
+  
+
 
 // Fungsi untuk sinkronisasi posisi dengan Binance
 const syncPositionWithBinance = async () => {
