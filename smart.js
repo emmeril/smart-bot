@@ -638,7 +638,7 @@ const syncPositionWithBinance = async () => {
   saveDB();
 };
 
-// Eksekusi bot tiap 1 menit
+// Eksekusi bot 
 setInterval(async () => {
   try {
     // 🔄 Sinkronisasi manual close
