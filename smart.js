@@ -544,7 +544,7 @@ const checkTP_SL = async (type) => {
   const offset = (ROI_TP + ROI_SL) / 2;
   const timeExpired = holdMins >= MAX_HOLD_MINUTES;
 
-  // ❌ STOP LOSS
+  // ❌ Stop Loss
   if (roi <= -ROI_SL) {
     await closePosition(type, amount);
     db[key] = null;
@@ -560,21 +560,10 @@ const checkTP_SL = async (type) => {
     return;
   }
 
-  // ✅ Aktifkan Trailing saat ROI menyentuh TP
+  // ✅ Aktifkan Trailing saat TP tercapai
   if (!trailingActive && roi >= ROI_TP) {
     const stopPrice =
-      type === "long"
-        ? entry * (1 + ROI_TP - offset)
-        : entry * (1 - ROI_TP + offset);
-
-    // Pastikan trailing stop lebih baik dari entry
-    if (
-      (type === "long" && stopPrice <= entry) ||
-      (type === "short" && stopPrice >= entry)
-    ) {
-      console.log("⚠️ Trailing Stop dari entry terlalu dekat. Diabaikan.");
-      return;
-    }
+      type === "long" ? entry + entry * offset : entry - entry * offset;
 
     position.trailingActive = true;
     position.trailingStop = stopPrice;
@@ -583,14 +572,12 @@ const checkTP_SL = async (type) => {
     sendMsg(
       `🎯 ${type.toUpperCase()} ROI ${(roi * 100).toFixed(
         2
-      )}% hit. Trailing ON dari ENTRY @ ${entry.toFixed(
-        4
-      )} (Stop @ ${stopPrice.toFixed(4)}, Offset ${(offset * 100).toFixed(2)}%)`
+      )}% hit. Trailing ON @ ${price} (Stop @ ${stopPrice.toFixed(4)})`
     );
     return;
   }
 
-  // 🏁 Trailing Exit
+  // 🏁 Trailing aktif → cek apakah kena stop, atau update posisi stop
   if (trailingActive) {
     const stopHit =
       type === "long" ? price <= trailingStop : price >= trailingStop;
@@ -606,22 +593,20 @@ const checkTP_SL = async (type) => {
       return;
     }
 
-    // 🔁 Update trailing stop jika naik terus
+    // 🔁 Update trailing stop jika harga makin profit
     const newStop =
-      type === "long"
-        ? entry * (1 + ROI_TP - offset)
-        : entry * (1 - ROI_TP + offset);
+      type === "long" ? price - price * offset : price + price * offset;
 
     position.trailingStop =
       type === "long"
-        ? Math.max(position.trailingStop, newStop)
-        : Math.min(position.trailingStop, newStop);
+        ? Math.max(trailingStop, newStop)
+        : Math.min(trailingStop, newStop);
 
     db[key] = position;
     saveDB();
   }
 
-  // ⏱ Timeout hanya jika trailing tidak aktif
+  // ⏱ Timeout hanya berlaku jika trailing belum aktif
   if (timeExpired && !trailingActive) {
     await closePosition(type, amount);
     db[key] = null;
