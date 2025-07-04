@@ -45,8 +45,14 @@ const exchange = new ccxt.binance({
   options: { defaultType: "future" },
 });
 
+const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+const now = () => Date.now();
+const mins = (ms) => ms / 1000 / 60;
+
 let currentQR = null;
 let isReady = false;
+
+// Inisialisasi WhatsApp client
 
 const client = new Client({
   authStrategy: new LocalAuth(),
@@ -248,8 +254,6 @@ ${posShort}`);
         msg.reply(`✅ Stop Loss diatur ke *${val}%* ROI.`);
       }
     }
-
-  
   } catch (err) {
     console.error("❌ WA Command Error:", err.message);
     msg.reply("⚠️ Terjadi error saat memproses perintah.");
@@ -276,10 +280,7 @@ app.get("/qr", async (req, res) => {
   `);
 });
 
-const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
-const now = () => Date.now();
-const mins = (ms) => ms / 1000 / 60;
-
+// fungsi untuk mengirim pesan ke admin
 const sendMsg = async (text) => {
   const chats = await client.getChats();
   const chat = chats.find(
@@ -288,6 +289,7 @@ const sendMsg = async (text) => {
   if (chat) chat.sendMessage(text);
 };
 
+// Fungsi untuk update PnL
 const updatePnL = (type, entry, exit, amount, result) => {
   const diff = type === "long" ? exit - entry : entry - exit;
   const pnl = diff * amount;
@@ -301,6 +303,7 @@ const updatePnL = (type, entry, exit, amount, result) => {
   saveDB();
 };
 
+// Fungsi untuk mencatat trade ke log
 const logTrade = (
   type,
   entry,
@@ -323,11 +326,13 @@ const logTrade = (
   fs.appendFileSync(logPath, row);
 };
 
+// Fungsi untuk mendapatkan harga terkini
 const getPrice = async () => {
   const ticker = await exchange.fetchTicker(db.pair);
   return ticker.last;
 };
 
+// Fungsi untuk menghitung floating PnL
 const calcFloatingPnl = async (type) => {
   const key = type === "long" ? "positionLong" : "positionShort";
   const position = db[key];
@@ -342,6 +347,7 @@ const calcFloatingPnl = async (type) => {
   return pnl;
 };
 
+// Fungsi untuk menganalisis sinyal trading
 const analyzeSignal = async () => {
   const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
   const close = ohlcv.map((c) => c[4]);
@@ -433,6 +439,7 @@ const analyzeSignal = async () => {
   return { canLong, canShort };
 };
 
+// Fungsi untuk membuka posisi
 const openPosition = async (type) => {
   const nowTime = now();
 
@@ -502,6 +509,7 @@ const openPosition = async (type) => {
   );
 };
 
+// Fungsi untuk menutup posisi
 const closePosition = async (type, amount) => {
   const side = type === "long" ? "sell" : "buy";
   try {
@@ -513,6 +521,7 @@ const closePosition = async (type, amount) => {
   }
 };
 
+// Fungsi untuk mengecek Take Profit dan Stop Loss
 const checkTP_SL = async (type) => {
   const price = await getPrice();
   const key = type === "long" ? "positionLong" : "positionShort";
@@ -628,25 +637,31 @@ const syncPositionWithBinance = async () => {
   saveDB();
 };
 
-// Eksekusi bot 
+// Eksekusi bot
 setInterval(async () => {
   try {
-    // 🔄 Sinkronisasi manual close
-    await syncPositionWithBinance();
-    await checkTP_SL("long");
-    await checkTP_SL("short");
-
     const nowDate = new Date();
     const nowTime = nowDate.getTime();
     const minute = nowDate.getUTCMinutes();
     const day = new Date(nowTime + 7 * 60 * 60 * 1000).getDay();
 
+    // Sinkronisasi manual close
+    await syncPositionWithBinance();
+
+    // Cek take profit dan stop loss
+    await checkTP_SL("long");
+    await checkTP_SL("short");
+
+    // Cek apakah hari kerja dan jam trading
     if (day === 6 || day === 0) {
       console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
       return;
     }
 
+    // cek entry posisi setiap 5 menit open order long/short
     if (minute % 5 !== 0) return;
+
+    // cek reset lossCount Long/Short jika sudah 3 kali loss
     const canResetLong =
       db.lossCountLong >= LOSS_LIMIT &&
       nowTime - db.lastLongEntryTime >= LOSS_WAIT_MINUTES * 60 * 1000;
@@ -667,6 +682,7 @@ setInterval(async () => {
       console.log("🔁 Reset lossCountShort");
     }
 
+    // Cek sinyal trading
     const { canLong, canShort } = await analyzeSignal();
 
     if (canLong && db.positionShort) {
