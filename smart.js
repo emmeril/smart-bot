@@ -97,6 +97,8 @@ client.on("message", async (msg) => {
 
     // Cek status bot
     else if (txt === "!status") {
+      const price = await getPrice();
+
       const cooldownLong = db.lastLongEntryTime
         ? Math.round(mins(now() - db.lastLongEntryTime)) + "m"
         : "Belum pernah entry";
@@ -158,6 +160,7 @@ client.on("message", async (msg) => {
 
       msg.reply(`📊 *Status Bot*
 📌 Pair: *${db.pair}*
+📈 Harga Saat Ini: *${price.toFixed(4)}*
 🧭 Leverage: *${db.leverage}x* (${db.marginMode?.toUpperCase() || "?"})
 📎 Mode Entry: *${(db.entryMode || "DEFAULT").toUpperCase()}*
 
