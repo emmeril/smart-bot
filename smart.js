@@ -353,6 +353,7 @@ const analyzeSignal = async () => {
   const close = ohlcv.map((c) => c[4]);
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
+  const price = close.at(-1);
 
   const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
   const ema20 = EMA.calculate({ values: close.slice(-50), period: 20 }).pop();
@@ -379,7 +380,6 @@ const analyzeSignal = async () => {
   const isStrongCandle = candleBody / candleRange >= 0.4;
   const candleUp = prevCandle[4] > prevCandle[1];
   const candleDown = prevCandle[4] < prevCandle[1];
-  const price = ohlcv.at(-1)[4];
 
   // Engulfing pattern
   const isBullishEngulfing =
@@ -402,7 +402,8 @@ const analyzeSignal = async () => {
     ema20 > ema50,
     adx?.adx > 20,
     isStrongCandle,
-    candleUp
+    candleUp,
+    isBullishEngulfing
   );
 
   const scoreShort = countTrue(
@@ -411,28 +412,45 @@ const analyzeSignal = async () => {
     ema20 < ema50,
     adx?.adx > 20,
     isStrongCandle,
-    candleDown
+    candleDown,
+    isBearishEngulfing
   );
 
+  // === Tambahan logika anti-entry tengah ===
+  const tpPercent = db.tpPercent || 0.05;
+  const slPercent = db.slPercent || 0.025;
+  const minRuangTP = tpPercent * 0.5; // harus ada ruang 50% dari TP
+  let isRuangCukupLong = true;
+  let isRuangCukupShort = true;
+
+  // Untuk LONG
+  const targetTP_L = price * (1 + tpPercent);
+  const targetSL_L = price * (1 - slPercent);
+  const distTP_L = (targetTP_L - price) / price;
+  const distSL_L = (price - targetSL_L) / price;
+  isRuangCukupLong = distTP_L >= minRuangTP && distSL_L >= slPercent * 0.8;
+
+  // Untuk SHORT
+  const targetTP_S = price * (1 - tpPercent);
+  const targetSL_S = price * (1 + slPercent);
+  const distTP_S = (price - targetTP_S) / price;
+  const distSL_S = (targetSL_S - price) / price;
+  isRuangCukupShort = distTP_S >= minRuangTP && distSL_S >= slPercent * 0.8;
+
+  // === FINAL FILTER ===
   const canLong = (() => {
     if (db.entryMode === "agresif") {
-      return (
-        (scoreLong >= 3 || (scoreLong >= 2 && isBullishEngulfing)) &&
-        price > ma200
-      );
+      return scoreLong >= 3 && price > ma200 && isRuangCukupLong;
     } else {
-      return scoreLong >= 4 && price > ma200 && isBullishEngulfing;
+      return scoreLong >= 4 && price > ma200 && isRuangCukupLong;
     }
   })();
 
   const canShort = (() => {
     if (db.entryMode === "agresif") {
-      return (
-        (scoreShort >= 3 || (scoreShort >= 2 && isBearishEngulfing)) &&
-        price < ma200
-      );
+      return scoreShort >= 3 && price < ma200 && isRuangCukupShort;
     } else {
-      return scoreShort >= 4 && price < ma200 && isBearishEngulfing;
+      return scoreShort >= 4 && price < ma200 && isRuangCukupShort;
     }
   })();
 
