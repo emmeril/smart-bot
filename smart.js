@@ -529,7 +529,8 @@ const checkTP_SL = async (type) => {
   const position = db[key];
   if (!position) return;
 
-  const { entry, entryTime, amount, usedUSDT, trailingActive, trailingStop } = position;
+  const { entry, entryTime, amount, usedUSDT, trailingActive, trailingStop } =
+    position;
   const holdMins = mins(now() - entryTime);
 
   const pnlUSD =
@@ -550,7 +551,11 @@ const checkTP_SL = async (type) => {
     db[key] = null;
     db[lossKey]++;
     saveDB();
-    sendMsg(`⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(roi * 100).toFixed(2)}%)`);
+    sendMsg(
+      `⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(
+        roi * 100
+      ).toFixed(2)}%)`
+    );
     logTrade(type, entry, "-", "-", price, "sl_hit", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "sl_hit");
     return;
@@ -565,7 +570,9 @@ const checkTP_SL = async (type) => {
     db[key] = position;
     saveDB();
     sendMsg(
-      `🎯 ${type.toUpperCase()} ROI ${(roi * 100).toFixed(2)}% hit. Trailing ON @ ${price} (Offset ${(offset * 100).toFixed(2)}%)`
+      `🎯 ${type.toUpperCase()} ROI ${(roi * 100).toFixed(
+        2
+      )}% hit. Trailing ON @ ${price} (Offset ${(offset * 100).toFixed(2)}%)`
     );
     return;
   }
@@ -588,9 +595,7 @@ const checkTP_SL = async (type) => {
 
     // 🔁 Update trailing stop berdasarkan entry
     const newStop =
-      type === "long"
-        ? entry * (1 + offset)
-        : entry * (1 - offset);
+      type === "long" ? entry * (1 + offset) : entry * (1 - offset);
 
     position.trailingStop =
       type === "long"
@@ -612,9 +617,6 @@ const checkTP_SL = async (type) => {
     updatePnL(type, entry, price, amount, "cut_timeout");
   }
 };
-
-  
-
 
 // Fungsi untuk sinkronisasi posisi dengan Binance
 const syncPositionWithBinance = async () => {
