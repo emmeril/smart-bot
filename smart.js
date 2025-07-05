@@ -657,6 +657,18 @@ const syncPositionWithBinance = async () => {
 };
 
 // Eksekusi bot
+// 🕒 Cek TP/SL & Sinkronisasi posisi setiap 5 detik
+setInterval(async () => {
+  try {
+    await syncPositionWithBinance();
+    await checkTP_SL("long");
+    await checkTP_SL("short");
+  } catch (e) {
+    console.log("⚠️ TP/SL check error:", e.message);
+  }
+}, 5 * 1000);
+
+// 📊 Analisa sinyal dan entry posisi setiap 60 detik
 setInterval(async () => {
   try {
     const nowDate = new Date();
@@ -664,23 +676,15 @@ setInterval(async () => {
     const minute = nowDate.getUTCMinutes();
     const day = new Date(nowTime + 7 * 60 * 60 * 1000).getUTCDay();
 
-    // Sinkronisasi manual close
-    await syncPositionWithBinance();
-
-    // Cek take profit dan stop loss
-    await checkTP_SL("long");
-    await checkTP_SL("short");
-
-    // Cek apakah hari kerja dan jam trading
+    // ⛔ Lewati saat weekend
     if (day === 6 || day === 0) {
       console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
       return;
     }
 
-    // cek entry posisi setiap 5 menit open order long/short
     if (minute % 5 !== 0) return;
 
-    // cek reset lossCount Long/Short jika sudah 3 kali loss
+    // 🔁 Reset loss count
     const canResetLong =
       db.lossCountLong >= LOSS_LIMIT &&
       nowTime - db.lastLongEntryTime >= LOSS_WAIT_MINUTES * 60 * 1000;
@@ -701,13 +705,12 @@ setInterval(async () => {
       console.log("🔁 Reset lossCountShort");
     }
 
-    // Cek sinyal trading
+    // 📈 Analisa sinyal
     const { canLong, canShort } = await analyzeSignal();
 
+    // 🔄 Switch posisi jika sinyal berlawanan muncul
     if (canLong && db.positionShort) {
-      console.log(
-        "🔁 Sinyal LONG muncul saat SHORT terbuka → Close SHORT & ganti ke LONG"
-      );
+      console.log("🔁 Close SHORT & ganti ke LONG");
       const type = "short";
       const amount = db.positionShort.amount;
       await closePosition(type, amount);
@@ -719,9 +722,7 @@ setInterval(async () => {
     }
 
     if (canShort && db.positionLong) {
-      console.log(
-        "🔁 Sinyal SHORT muncul saat LONG terbuka → Close LONG & ganti ke SHORT"
-      );
+      console.log("🔁 Close LONG & ganti ke SHORT");
       const type = "long";
       const amount = db.positionLong.amount;
       await closePosition(type, amount);
@@ -732,6 +733,7 @@ setInterval(async () => {
       return;
     }
 
+    // 📥 Entry baru jika siap
     const readyLong =
       !db.positionLong &&
       nowTime - db.lastLongEntryTime >= COOLDOWN_MINUTES * 60 * 1000 &&
@@ -745,6 +747,6 @@ setInterval(async () => {
     if (canLong && readyLong) await openPosition("long");
     if (canShort && readyShort) await openPosition("short");
   } catch (e) {
-    console.log("⚠️ Bot error:", e.message);
+    console.log("⚠️ Signal/entry error:", e.message);
   }
-}, 60 * 1000); // periksa setiap 1 menit
+}, 60 * 1000);
