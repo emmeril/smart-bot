@@ -280,6 +280,29 @@ app.get("/qr", async (req, res) => {
   `);
 });
 
+
+// Fungsi untuk menguji koneksi ke Binance
+const testBinanceConnection = async () => {
+  let retry = 0;
+  while (retry < 10) {
+    try {
+      await exchange.fetchTime(); // simple ping
+      console.log("✅ Terhubung ke Binance.");
+      break;
+    } catch (e) {
+      retry++;
+      console.log(`⏳ Gagal konek ke Binance (${retry}/10). Coba lagi...`);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+
+  if (retry === 10) {
+    console.log("❌ Gagal terhubung ke Binance setelah 10x percobaan. Exit.");
+    process.exit(1);
+  }
+};
+
+
 // fungsi untuk mengirim pesan ke admin
 const sendMsg = async (text) => {
   const chats = await client.getChats();
@@ -660,6 +683,7 @@ const syncPositionWithBinance = async () => {
 // 🕒 Cek TP/SL & Sinkronisasi posisi setiap 5 detik
 setInterval(async () => {
   try {
+    await testBinanceConnection();
     await syncPositionWithBinance();
     await checkTP_SL("long");
     await checkTP_SL("short");
@@ -671,6 +695,7 @@ setInterval(async () => {
 // 📊 Analisa sinyal dan entry posisi setiap 60 detik
 setInterval(async () => {
   try {
+    await testBinanceConnection();
     const nowDate = new Date();
     const nowTime = nowDate.getTime();
     const minute = nowDate.getUTCMinutes();
