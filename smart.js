@@ -691,7 +691,7 @@ setInterval(async () => {
   } catch (e) {
     console.log("⚠️ TP/SL check error:", e.message);
   }
-}, 5 * 1000);
+}, 30 * 1000);
 
 // 📊 Analisa sinyal dan entry posisi setiap 60 detik
 setInterval(async () => {
