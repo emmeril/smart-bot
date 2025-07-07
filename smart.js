@@ -696,7 +696,6 @@ setInterval(async () => {
 // 📊 Analisa sinyal dan entry posisi setiap 60 detik
 setInterval(async () => {
   try {
-    await testBinanceConnection();
     const nowDate = new Date();
     const nowTime = nowDate.getTime();
     const minute = nowDate.getUTCMinutes();
