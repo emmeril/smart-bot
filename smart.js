@@ -280,7 +280,6 @@ app.get("/qr", async (req, res) => {
   `);
 });
 
-
 // Fungsi untuk menguji koneksi ke Binance
 const testBinanceConnection = async () => {
   let retry = 0;
@@ -301,7 +300,6 @@ const testBinanceConnection = async () => {
     process.exit(1);
   }
 };
-
 
 // fungsi untuk mengirim pesan ke admin
 const sendMsg = async (text) => {
@@ -576,7 +574,6 @@ const checkTP_SL = async (type) => {
 
   const pnlUSD =
     type === "long" ? (price - entry) * amount : (entry - price) * amount;
-
   const notional = entry * amount;
   const margin = notional / db.leverage;
   const roi = pnlUSD / margin;
@@ -606,6 +603,7 @@ const checkTP_SL = async (type) => {
   if (!trailingActive && roi >= ROI_TP) {
     const stopPrice =
       type === "long" ? entry * (1 + offset) : entry * (1 - offset);
+
     position.trailingActive = true;
     position.trailingStop = stopPrice;
     db[key] = position;
@@ -634,9 +632,12 @@ const checkTP_SL = async (type) => {
       return;
     }
 
-    // 🔁 Update trailing stop berdasarkan entry
+    // 🔁 Update trailing stop berdasarkan entry + offset sesuai harga terbaru
+    const dynamicOffset = offset * (roi / ROI_TP || 1); // semakin tinggi ROI, semakin tinggi offset
     const newStop =
-      type === "long" ? entry * (1 + offset) : entry * (1 - offset);
+      type === "long"
+        ? entry * (1 + dynamicOffset)
+        : entry * (1 - dynamicOffset);
 
     position.trailingStop =
       type === "long"
@@ -647,7 +648,7 @@ const checkTP_SL = async (type) => {
     saveDB();
   }
 
-  // ⏱ Timeout, hanya berlaku jika belum trailing
+  // ⏱ Timeout (hanya jika belum trailing aktif)
   if (timeExpired && !trailingActive) {
     await closePosition(type, amount);
     db[key] = null;
