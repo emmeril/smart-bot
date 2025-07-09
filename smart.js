@@ -745,6 +745,9 @@ setInterval(async () => {
       return;
     }
 
+    // 📈 Analisa sinyal
+    const { canLong, canShort } = await analyzeSignal();
+
     if (minute % 1 !== 0) return;
 
     // 🔁 Reset loss count
@@ -768,9 +771,7 @@ setInterval(async () => {
       console.log("🔁 Reset lossCountShort");
     }
 
-    // 📈 Analisa sinyal
-    const { canLong, canShort } = await analyzeSignal();
-
+    
     // 🔄 Switch posisi jika sinyal berlawanan muncul
     if (canLong && db.positionShort) {
       console.log("🔁 Close SHORT & ganti ke LONG");
