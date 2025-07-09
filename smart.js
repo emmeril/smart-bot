@@ -281,22 +281,32 @@ app.get("/qr", async (req, res) => {
 });
 
 // Fungsi untuk menguji koneksi ke Binance
+let isBinanceConnected = true;
+let lastBinanceStatus = true;
+let failCount = 0;
+const MAX_FAIL = 3;
+
 const testBinanceConnection = async () => {
-  let retry = 0;
-  while (retry < 10) {
-    try {
-      await exchange.fetchTime(); // simple ping
-      console.log("✅ Terhubung ke Binance.");
-      break;
-    } catch (e) {
-      retry++;
-      console.log(`⏳ Gagal konek ke Binance (${retry}/10). Coba lagi...`);
-      await new Promise((r) => setTimeout(r, 3000));
-    }
+  try {
+    await exchange.fetchTime(); // ping Binance
+    isBinanceConnected = true;
+    failCount = 0;
+  } catch (e) {
+    isBinanceConnected = false;
+    failCount++;
   }
 
-  if (retry === 10) {
-    console.log("❌ Gagal terhubung ke Binance setelah 10x percobaan. Exit.");
+  if (isBinanceConnected !== lastBinanceStatus) {
+    if (isBinanceConnected) {
+      console.log("✅ Reconnected to Binance.");
+    } else {
+      console.log("⚠️ Lost connection to Binance.");
+    }
+    lastBinanceStatus = isBinanceConnected;
+  }
+
+  if (failCount >= MAX_FAIL) {
+    console.log("❌ Binance connection failed 3x berturut-turut. Exit & restart via PM2.");
     process.exit(1);
   }
 };
@@ -723,6 +733,10 @@ const syncPositionWithBinance = async () => {
 setInterval(async () => {
   try {
     // await testBinanceConnection();
+     await testBinanceConnection();
+
+    if (!isBinanceConnected) return; // jangan lanjut eksekusi trading
+
     await syncPositionWithBinance();
     await checkTP_SL("long");
     await checkTP_SL("short");
