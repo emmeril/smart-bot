@@ -804,7 +804,7 @@ setInterval(async () => {
 
     if (canLong && readyLong) await openPosition("long");
     if (canShort && readyShort) await openPosition("short");
-    await testBinanceConnection();
+    
   } catch (e) {
     console.log("⚠️ Signal/entry error:", e.message);
   }
