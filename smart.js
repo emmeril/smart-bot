@@ -444,7 +444,6 @@ const analyzeSignal = async () => {
     candleDown
   );
 
-  // === ROI Validasi (berdasarkan rata-rata target TP)
   const leverage = db.leverage || 10;
   const tpPercent = db.tpPercent || 0.05;
   const slPercent = db.slPercent || 0.025;
@@ -453,15 +452,23 @@ const analyzeSignal = async () => {
   const high10 = Math.max(...high.slice(-10));
   const low10 = Math.min(...low.slice(-10));
 
-  const targetLong = (ma200 + ema50 + high10) / 3;
-  const targetShort = (ma200 + ema50 + low10) / 3;
+  const targetLong = Math.max(price * 1.01, (ma200 + ema50 + high10) / 3);
+  const targetShort = Math.min(price * 0.99, (ma200 + ema50 + low10) / 3);
+
+  const stopLossLong = ema20;
+  const stopLossShort = ema20;
 
   const potentialProfitLong = Math.max(targetLong - price, 0);
   const potentialProfitShort = Math.max(price - targetShort, 0);
+  const potentialLossLong = Math.max(price - stopLossLong, 0);
+  const potentialLossShort = Math.max(stopLossShort - price, 0);
 
   const roiProfitLong = (potentialProfitLong / margin) * 100;
+  const roiLossLong = (potentialLossLong / margin) * 100;
   const roiProfitShort = (potentialProfitShort / margin) * 100;
+  const roiLossShort = (potentialLossShort / margin) * 100;
 
+  // ✅ Validasi hanya berdasarkan ROI TP
   const validLong = potentialProfitLong >= tpPercent * margin;
   const validShort = potentialProfitShort >= tpPercent * margin;
 
@@ -476,6 +483,7 @@ const analyzeSignal = async () => {
   console.log("  Bull Engulfing    :", isBullishEngulfing ? "✅" : "❌");
   console.log("  Price > MA200     :", price > ma200 ? "✅" : "❌");
   console.log(`  Est. ROI TP Long  : ${roiProfitLong.toFixed(2)}%`);
+  console.log(`  Est. ROI SL Long  : ${roiLossLong.toFixed(2)}%`);
   console.log(`  ROI Valid         : ${validLong ? "✅" : "❌"}`);
   console.log(`  → Skor LONG       : ${scoreLong}`);
 
@@ -489,6 +497,7 @@ const analyzeSignal = async () => {
   console.log("  Bear Engulfing    :", isBearishEngulfing ? "✅" : "❌");
   console.log("  Price < MA200     :", price < ma200 ? "✅" : "❌");
   console.log(`  Est. ROI TP Short : ${roiProfitShort.toFixed(2)}%`);
+  console.log(`  Est. ROI SL Short : ${roiLossShort.toFixed(2)}%`);
   console.log(`  ROI Valid         : ${validShort ? "✅" : "❌"}`);
   console.log(`  → Skor SHORT      : ${scoreShort}`);
 
@@ -500,9 +509,7 @@ const analyzeSignal = async () => {
         validLong
       );
     } else {
-      return (
-        scoreLong >= 4 && price > ma200 && isBullishEngulfing && validLong
-      );
+      return scoreLong >= 4 && price > ma200 && isBullishEngulfing && validLong;
     }
   })();
 
@@ -514,9 +521,7 @@ const analyzeSignal = async () => {
         validShort
       );
     } else {
-      return (
-        scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort
-      );
+      return scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort;
     }
   })();
 
