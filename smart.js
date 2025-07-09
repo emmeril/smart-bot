@@ -434,7 +434,6 @@ const analyzeSignal = async () => {
     candleDown
   );
 
-  // === ROI Validasi Berdasarkan Arah dan Jarak ===
   const leverage = db.leverage || 10;
   const tpPercent = db.tpPercent || 0.05;
   const slPercent = db.slPercent || 0.025;
@@ -442,10 +441,10 @@ const analyzeSignal = async () => {
   const estProfit = tpPercent * margin;
   const estLoss = slPercent * margin;
 
-  const potentialProfitLong = ma200 > price ? ma200 - price : 0;
-  const potentialLossLong = price > ema20 ? price - ema20 : 0;
-  const potentialProfitShort = price > ma200 ? price - ma200 : 0;
-  const potentialLossShort = ema20 > price ? ema20 - price : 0;
+  const potentialProfitLong = Math.abs(ma200 - price);
+  const potentialLossLong = Math.abs(price - ema20);
+  const potentialProfitShort = Math.abs(price - ma200);
+  const potentialLossShort = Math.abs(ema20 - price);
 
   const roiProfitLong = (potentialProfitLong / margin) * 100;
   const roiLossLong = (potentialLossLong / margin) * 100;
@@ -805,6 +804,7 @@ setInterval(async () => {
 
     if (canLong && readyLong) await openPosition("long");
     if (canShort && readyShort) await openPosition("short");
+    await testBinanceConnection();
   } catch (e) {
     console.log("⚠️ Signal/entry error:", e.message);
   }
