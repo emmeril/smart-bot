@@ -724,6 +724,7 @@ setInterval(async () => {
       db.positionShort = null;
       db.lossCountShort = 0;
       saveDB();
+      sendMsg(`🔁 Close SHORT & ganti ke LONG`);
       await openPosition("long");
       return;
     }
@@ -736,6 +737,7 @@ setInterval(async () => {
       db.positionLong = null;
       db.lossCountLong = 0;
       saveDB();
+      sendMsg(`🔁 Close LONG & ganti ke SHORT`);
       await openPosition("short");
       return;
     }
