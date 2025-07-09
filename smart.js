@@ -719,21 +719,13 @@ const syncPositionWithBinance = async () => {
 };
 
 // Eksekusi bot
-// 🕒 Cek TP/SL & Sinkronisasi posisi setiap 5 detik
 setInterval(async () => {
   try {
     await testBinanceConnection();
     await syncPositionWithBinance();
     await checkTP_SL("long");
     await checkTP_SL("short");
-  } catch (e) {
-    console.log("⚠️ TP/SL check error:", e.message);
-  }
-}, 10 * 1000);
 
-// 📊 Analisa sinyal dan entry posisi setiap 60 detik
-setInterval(async () => {
-  try {
     const nowDate = new Date();
     const nowTime = nowDate.getTime();
     const minute = nowDate.getUTCMinutes();
@@ -814,4 +806,4 @@ setInterval(async () => {
   } catch (e) {
     console.log("⚠️ Signal/entry error:", e.message);
   }
-}, 30 * 1000);
+}, 10 * 1000);
