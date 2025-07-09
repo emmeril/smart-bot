@@ -434,7 +434,7 @@ const analyzeSignal = async () => {
     candleDown
   );
 
-  // Validasi jarak ROI dengan kondisi chart
+  // === ROI Validasi Berdasarkan Arah dan Jarak ===
   const leverage = db.leverage || 10;
   const tpPercent = db.tpPercent || 0.05;
   const slPercent = db.slPercent || 0.025;
@@ -442,20 +442,20 @@ const analyzeSignal = async () => {
   const estProfit = tpPercent * margin;
   const estLoss = slPercent * margin;
 
-  const potentialProfitLong = ma200 - price;
-  const potentialLossLong = price - ema20;
-  const validLong =
-    potentialProfitLong >= estProfit && potentialLossLong <= estLoss * 2;
-
-  const potentialProfitShort = price - ma200;
-  const potentialLossShort = ema20 - price;
-  const validShort =
-    potentialProfitShort >= estProfit && potentialLossShort <= estLoss * 2;
+  const potentialProfitLong = ma200 > price ? ma200 - price : 0;
+  const potentialLossLong = price > ema20 ? price - ema20 : 0;
+  const potentialProfitShort = price > ma200 ? price - ma200 : 0;
+  const potentialLossShort = ema20 > price ? ema20 - price : 0;
 
   const roiProfitLong = (potentialProfitLong / margin) * 100;
   const roiLossLong = (potentialLossLong / margin) * 100;
   const roiProfitShort = (potentialProfitShort / margin) * 100;
   const roiLossShort = (potentialLossShort / margin) * 100;
+
+  const validLong =
+    potentialProfitLong >= estProfit && potentialLossLong <= estLoss * 2;
+  const validShort =
+    potentialProfitShort >= estProfit && potentialLossShort <= estLoss * 2;
 
   // === LOGGING ===
   console.log("📊 [Indikator LONG]");
