@@ -402,7 +402,6 @@ const analyzeSignal = async () => {
   const candleDown = prevCandle[4] < prevCandle[1];
   const price = ohlcv.at(-1)[4];
 
-  // Engulfing pattern
   const isBullishEngulfing =
     prevPrevCandle[1] > prevPrevCandle[4] &&
     prevCandle[1] < prevCandle[4] &&
@@ -435,26 +434,28 @@ const analyzeSignal = async () => {
     candleDown
   );
 
-  // 💡 Validasi jarak TP dan SL logis terhadap harga sekarang
+  // Validasi jarak ROI dengan kondisi chart
   const leverage = db.leverage || 10;
   const tpPercent = db.tpPercent || 0.05;
   const slPercent = db.slPercent || 0.025;
-
   const margin = price / leverage;
   const estProfit = tpPercent * margin;
   const estLoss = slPercent * margin;
 
-  const validLong = (() => {
-    const potentialProfit = ma200 - price;
-    const potentialLoss = price - ema20;
-    return potentialProfit >= estProfit && potentialLoss <= estLoss * 2;
-  })();
+  const potentialProfitLong = ma200 - price;
+  const potentialLossLong = price - ema20;
+  const validLong =
+    potentialProfitLong >= estProfit && potentialLossLong <= estLoss * 2;
 
-  const validShort = (() => {
-    const potentialProfit = price - ma200;
-    const potentialLoss = ema20 - price;
-    return potentialProfit >= estProfit && potentialLoss <= estLoss * 2;
-  })();
+  const potentialProfitShort = price - ma200;
+  const potentialLossShort = ema20 - price;
+  const validShort =
+    potentialProfitShort >= estProfit && potentialLossShort <= estLoss * 2;
+
+  const roiProfitLong = (potentialProfitLong / margin) * 100;
+  const roiLossLong = (potentialLossLong / margin) * 100;
+  const roiProfitShort = (potentialProfitShort / margin) * 100;
+  const roiLossShort = (potentialLossShort / margin) * 100;
 
   // === LOGGING ===
   console.log("📊 [Indikator LONG]");
@@ -466,11 +467,10 @@ const analyzeSignal = async () => {
   console.log("  Candle Up         :", candleUp ? "✅" : "❌");
   console.log("  Bull Engulfing    :", isBullishEngulfing ? "✅" : "❌");
   console.log("  Price > MA200     :", price > ma200 ? "✅" : "❌");
-  console.log(
-    `  ROI Valid         : ${
-      validLong ? "✅" : "❌"
-    }\n  → Skor LONG       : ${scoreLong}`
-  );
+  console.log(`  Est. ROI TP Long  : ${roiProfitLong.toFixed(2)}%`);
+  console.log(`  Est. ROI SL Long  : ${roiLossLong.toFixed(2)}%`);
+  console.log(`  ROI Valid         : ${validLong ? "✅" : "❌"}`);
+  console.log(`  → Skor LONG       : ${scoreLong}`);
 
   console.log("📊 [Indikator SHORT]");
   console.log("  RSI > 65          :", rsi > 65 ? "✅" : "❌");
@@ -481,11 +481,10 @@ const analyzeSignal = async () => {
   console.log("  Candle Down       :", candleDown ? "✅" : "❌");
   console.log("  Bear Engulfing    :", isBearishEngulfing ? "✅" : "❌");
   console.log("  Price < MA200     :", price < ma200 ? "✅" : "❌");
-  console.log(
-    `  ROI Valid         : ${
-      validShort ? "✅" : "❌"
-    }\n  → Skor SHORT      : ${scoreShort}`
-  );
+  console.log(`  Est. ROI TP Short : ${roiProfitShort.toFixed(2)}%`);
+  console.log(`  Est. ROI SL Short : ${roiLossShort.toFixed(2)}%`);
+  console.log(`  ROI Valid         : ${validShort ? "✅" : "❌"}`);
+  console.log(`  → Skor SHORT      : ${scoreShort}`);
 
   const canLong = (() => {
     if (db.entryMode === "agresif") {
@@ -495,7 +494,9 @@ const analyzeSignal = async () => {
         validLong
       );
     } else {
-      return scoreLong >= 4 && price > ma200 && isBullishEngulfing && validLong;
+      return (
+        scoreLong >= 4 && price > ma200 && isBullishEngulfing && validLong
+      );
     }
   })();
 
@@ -515,6 +516,7 @@ const analyzeSignal = async () => {
 
   return { canLong, canShort };
 };
+
 
 // Fungsi untuk membuka posisi
 const openPosition = async (type) => {
