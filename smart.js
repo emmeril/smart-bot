@@ -435,14 +435,36 @@ const analyzeSignal = async () => {
     candleDown
   );
 
+  // 💡 Validasi jarak TP dan SL logis terhadap harga sekarang
+  const leverage = db.leverage || 10;
+  const tpPercent = db.tpPercent || 0.05;
+  const slPercent = db.slPercent || 0.025;
+
+  const margin = price / leverage;
+  const estProfit = tpPercent * margin;
+  const estLoss = slPercent * margin;
+
+  const validLong = (() => {
+    const potentialProfit = ma200 - price;
+    const potentialLoss = price - ema20;
+    return potentialProfit >= estProfit && potentialLoss <= estLoss * 2;
+  })();
+
+  const validShort = (() => {
+    const potentialProfit = price - ma200;
+    const potentialLoss = ema20 - price;
+    return potentialProfit >= estProfit && potentialLoss <= estLoss * 2;
+  })();
+
   const canLong = (() => {
     if (db.entryMode === "agresif") {
       return (
         (scoreLong >= 3 || (scoreLong >= 2 && isBullishEngulfing)) &&
-        price > ma200
+        price > ma200 &&
+        validLong
       );
     } else {
-      return scoreLong >= 4 && price > ma200 && isBullishEngulfing;
+      return scoreLong >= 4 && price > ma200 && isBullishEngulfing && validLong;
     }
   })();
 
@@ -450,15 +472,17 @@ const analyzeSignal = async () => {
     if (db.entryMode === "agresif") {
       return (
         (scoreShort >= 3 || (scoreShort >= 2 && isBearishEngulfing)) &&
-        price < ma200
+        price < ma200 &&
+        validShort
       );
     } else {
-      return scoreShort >= 4 && price < ma200 && isBearishEngulfing;
+      return scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort;
     }
   })();
 
   return { canLong, canShort };
 };
+
 
 // Fungsi untuk membuka posisi
 const openPosition = async (type) => {
