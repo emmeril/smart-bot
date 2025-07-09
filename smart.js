@@ -723,7 +723,7 @@ const syncPositionWithBinance = async () => {
 // Eksekusi bot
 setInterval(async () => {
   try {
-    await testBinanceConnection();
+    // await testBinanceConnection();
     await syncPositionWithBinance();
     await checkTP_SL("long");
     await checkTP_SL("short");
