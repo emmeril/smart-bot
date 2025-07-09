@@ -448,23 +448,20 @@ const analyzeSignal = async () => {
   const tpPercent = db.tpPercent || 0.05;
   const slPercent = db.slPercent || 0.025;
   const margin = price / leverage;
-  const estProfit = tpPercent * margin;
-  const estLoss = slPercent * margin;
 
-  const potentialProfitLong = Math.abs(ma200 - price);
-  const potentialLossLong = Math.abs(price - ema20);
-  const potentialProfitShort = Math.abs(price - ma200);
-  const potentialLossShort = Math.abs(ema20 - price);
+  const potentialProfitLong = Math.max(ma200 - price, 0);
+  const potentialLossLong = Math.max(price - ema20, 0);
+  const potentialProfitShort = Math.max(price - ma200, 0);
+  const potentialLossShort = Math.max(ema20 - price, 0);
 
   const roiProfitLong = (potentialProfitLong / margin) * 100;
   const roiLossLong = (potentialLossLong / margin) * 100;
   const roiProfitShort = (potentialProfitShort / margin) * 100;
   const roiLossShort = (potentialLossShort / margin) * 100;
 
-  const validLong =
-    potentialProfitLong >= estProfit && potentialLossLong <= estLoss * 2;
-  const validShort =
-    potentialProfitShort >= estProfit && potentialLossShort <= estLoss * 2;
+  // ✅ Validasi hanya berdasarkan TP
+  const validLong = potentialProfitLong >= tpPercent * margin;
+  const validShort = potentialProfitShort >= tpPercent * margin;
 
   // === LOGGING ===
   console.log("📊 [Indikator LONG]");
@@ -503,9 +500,7 @@ const analyzeSignal = async () => {
         validLong
       );
     } else {
-      return (
-        scoreLong >= 4 && price > ma200 && isBullishEngulfing && validLong
-      );
+      return scoreLong >= 4 && price > ma200 && isBullishEngulfing && validLong;
     }
   })();
 
@@ -517,9 +512,7 @@ const analyzeSignal = async () => {
         validShort
       );
     } else {
-      return (
-        scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort
-      );
+      return scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort;
     }
   })();
 
