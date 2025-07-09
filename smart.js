@@ -476,13 +476,46 @@ const analyzeSignal = async () => {
         validShort
       );
     } else {
-      return scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort;
+      return (
+        scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort
+      );
     }
   })();
 
+  console.log("📊 [Indikator LONG]");
+  console.log(`  RSI < 35          : ${rsi < 35 ? "✅" : "❌"}`);
+  console.log(`  MACD > 0          : ${macd?.histogram > 0 ? "✅" : "❌"}`);
+  console.log(`  EMA20 > EMA50     : ${ema20 > ema50 ? "✅" : "❌"}`);
+  console.log(`  ADX > 20          : ${adx?.adx > 20 ? "✅" : "❌"}`);
+  console.log(`  Candle Strong     : ${isStrongCandle ? "✅" : "❌"}`);
+  console.log(`  Candle Up         : ${candleUp ? "✅" : "❌"}`);
+  console.log(`  Bull Engulfing    : ${isBullishEngulfing ? "✅" : "❌"}`);
+  console.log(`  Price > MA200     : ${price > ma200 ? "✅" : "❌"}`);
+  console.log(
+    `  Est. ROI (TP)     : ${roiEstLong.toFixed(2)} vs Target ${(
+      tpTarget * 100
+    ).toFixed(2)}%`
+  );
+  console.log(`  → Skor LONG       : ${scoreLong}`);
+
+  console.log("📊 [Indikator SHORT]");
+  console.log(`  RSI > 65          : ${rsi > 65 ? "✅" : "❌"}`);
+  console.log(`  MACD < 0          : ${macd?.histogram < 0 ? "✅" : "❌"}`);
+  console.log(`  EMA20 < EMA50     : ${ema20 < ema50 ? "✅" : "❌"}`);
+  console.log(`  ADX > 20          : ${adx?.adx > 20 ? "✅" : "❌"}`);
+  console.log(`  Candle Strong     : ${isStrongCandle ? "✅" : "❌"}`);
+  console.log(`  Candle Down       : ${candleDown ? "✅" : "❌"}`);
+  console.log(`  Bear Engulfing    : ${isBearishEngulfing ? "✅" : "❌"}`);
+  console.log(`  Price < MA200     : ${price < ma200 ? "✅" : "❌"}`);
+  console.log(
+    `  Est. ROI (TP)     : ${roiEstShort.toFixed(2)} vs Target ${(
+      tpTarget * 100
+    ).toFixed(2)}%`
+  );
+  console.log(`  → Skor SHORT      : ${scoreShort}`);
+
   return { canLong, canShort };
 };
-
 
 // Fungsi untuk membuka posisi
 const openPosition = async (type) => {
