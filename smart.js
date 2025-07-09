@@ -745,7 +745,7 @@ setInterval(async () => {
       return;
     }
 
-    if (minute % 5 !== 0) return;
+    if (minute % 1 !== 0) return;
 
     // 🔁 Reset loss count
     const canResetLong =
