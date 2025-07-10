@@ -448,20 +448,24 @@ const analyzeSignal = async () => {
 
   const leverage = db.leverage || 10;
   const tpPercent = db.tpPercent || 0.05;
-  const slPercent = db.slPercent || 0.025;
   const margin = price / leverage;
 
+  // Rata-rata target TP dari indikator (lebih fleksibel)
   const high10 = Math.max(...high.slice(-10));
-  const low10 = Math.min(...low.slice(-10));
+  const close10avg =
+    close.slice(-10).reduce((a, b) => a + b, 0) / close.slice(-10).length;
 
-  const targetLong = Math.max(price * 1.01, (ma200 + ema50 + high10) / 3);
-  const targetShort = Math.min(price * 0.99, (ma200 + ema50 + low10) / 3);
+  const tpTargetLong =
+    (ma200 + ema50 + high10 + close10avg + prevCandle[2]) / 5;
+  const tpTargetShort =
+    (ma200 + ema50 + Math.min(...low.slice(-10)) + close10avg + prevCandle[3]) /
+    5;
 
   const stopLossLong = ema20;
   const stopLossShort = ema20;
 
-  const potentialProfitLong = Math.max(targetLong - price, 0);
-  const potentialProfitShort = Math.max(price - targetShort, 0);
+  const potentialProfitLong = Math.max(tpTargetLong - price, 0);
+  const potentialProfitShort = Math.max(price - tpTargetShort, 0);
   const potentialLossLong = Math.max(price - stopLossLong, 0);
   const potentialLossShort = Math.max(stopLossShort - price, 0);
 
@@ -470,7 +474,6 @@ const analyzeSignal = async () => {
   const roiProfitShort = (potentialProfitShort / margin) * 100;
   const roiLossShort = (potentialLossShort / margin) * 100;
 
-  // ✅ Validasi hanya berdasarkan ROI TP
   const validLong = potentialProfitLong >= tpPercent * margin;
   const validShort = potentialProfitShort >= tpPercent * margin;
 
