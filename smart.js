@@ -406,13 +406,16 @@ const analyzeSignal = async () => {
 
   const prevCandle = ohlcv[ohlcv.length - 2];
   const prevPrevCandle = ohlcv[ohlcv.length - 3];
-  const price = ohlcv.at(-1)[4];
+  const close10avg = close.slice(-10).reduce((a, b) => a + b, 0) / 10;
+  const high10 = Math.max(...high.slice(-10));
+  const low10 = Math.min(...low.slice(-10));
 
   const candleBody = Math.abs(prevCandle[4] - prevCandle[1]);
   const candleRange = prevCandle[2] - prevCandle[3];
   const isStrongCandle = candleBody / candleRange >= 0.4;
   const candleUp = prevCandle[4] > prevCandle[1];
   const candleDown = prevCandle[4] < prevCandle[1];
+  const price = ohlcv.at(-1)[4];
 
   const isBullishEngulfing =
     prevPrevCandle[1] > prevPrevCandle[4] &&
@@ -447,24 +450,32 @@ const analyzeSignal = async () => {
   );
 
   const leverage = db.leverage || 10;
-  const tpPercent = db.tpPercent || 0.02;
-  const slPercent = db.slPercent || 0.01;
+  const tpPercent = db.tpPercent || 0.05;
+  const slPercent = db.slPercent || 0.025;
   const margin = price / leverage;
 
-  const high10 = Math.max(...high.slice(-10));
-  const low10 = Math.min(...low.slice(-10));
-  const close10avg = close.slice(-10).reduce((a, b) => a + b, 0) / 10;
+  // Ambil kandidat TP yang valid (harus di atas/bawah harga saat ini)
+  const longTPs = [ma200, ema50, high10, close10avg, prevCandle[2]].filter(
+    (v) => v > price
+  );
+  const shortTPs = [ma200, ema50, low10, close10avg, prevCandle[3]].filter(
+    (v) => v < price
+  );
 
-  const tpTargetLong =
-    (ma200 + ema50 + high10 + close10avg + prevCandle[2]) / 5;
-  const tpTargetShort =
-    (ma200 + ema50 + low10 + close10avg + prevCandle[3]) / 5;
+  const targetLong =
+    longTPs.length > 0
+      ? longTPs.reduce((a, b) => a + b, 0) / longTPs.length
+      : price;
+  const targetShort =
+    shortTPs.length > 0
+      ? shortTPs.reduce((a, b, i, arr) => a + b, 0) / shortTPs.length
+      : price;
 
   const stopLossLong = ema20;
   const stopLossShort = ema20;
 
-  const potentialProfitLong = Math.max(tpTargetLong - price, 0);
-  const potentialProfitShort = Math.max(price - tpTargetShort, 0);
+  const potentialProfitLong = Math.max(targetLong - price, 0);
+  const potentialProfitShort = Math.max(price - targetShort, 0);
   const potentialLossLong = Math.max(price - stopLossLong, 0);
   const potentialLossShort = Math.max(stopLossShort - price, 0);
 
