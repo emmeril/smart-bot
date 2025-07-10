@@ -465,12 +465,8 @@ const analyzeSignal = async () => {
   const targetLong = longTPs.length > 0 ? Math.max(...longTPs) : price;
   const targetShort = shortTPs.length > 0 ? Math.min(...shortTPs) : price;
 
-  // Cari kandidat SL dari indikator di bawah harga (untuk long) atau di atas harga (untuk short)
-  const stopLossLong =
-    longTPs.filter((v) => v < price).sort((a, b) => b - a)[0] || ema20;
-
-  const stopLossShort =
-    shortTPs.filter((v) => v > price).sort((a, b) => a - b)[0] || ema20;
+  const stopLossLong = ema20;
+  const stopLossShort = ema20;
 
   const potentialProfitLong = Math.max(targetLong - price, 0);
   const potentialProfitShort = Math.max(price - targetShort, 0);
