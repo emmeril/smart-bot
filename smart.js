@@ -406,13 +406,13 @@ const analyzeSignal = async () => {
 
   const prevCandle = ohlcv[ohlcv.length - 2];
   const prevPrevCandle = ohlcv[ohlcv.length - 3];
+  const price = ohlcv.at(-1)[4];
 
   const candleBody = Math.abs(prevCandle[4] - prevCandle[1]);
   const candleRange = prevCandle[2] - prevCandle[3];
   const isStrongCandle = candleBody / candleRange >= 0.4;
   const candleUp = prevCandle[4] > prevCandle[1];
   const candleDown = prevCandle[4] < prevCandle[1];
-  const price = ohlcv.at(-1)[4];
 
   const isBullishEngulfing =
     prevPrevCandle[1] > prevPrevCandle[4] &&
@@ -447,19 +447,18 @@ const analyzeSignal = async () => {
   );
 
   const leverage = db.leverage || 10;
-  const tpPercent = db.tpPercent || 0.05;
+  const tpPercent = db.tpPercent || 0.02;
+  const slPercent = db.slPercent || 0.01;
   const margin = price / leverage;
 
-  // Rata-rata target TP dari indikator (lebih fleksibel)
   const high10 = Math.max(...high.slice(-10));
-  const close10avg =
-    close.slice(-10).reduce((a, b) => a + b, 0) / close.slice(-10).length;
+  const low10 = Math.min(...low.slice(-10));
+  const close10avg = close.slice(-10).reduce((a, b) => a + b, 0) / 10;
 
   const tpTargetLong =
     (ma200 + ema50 + high10 + close10avg + prevCandle[2]) / 5;
   const tpTargetShort =
-    (ma200 + ema50 + Math.min(...low.slice(-10)) + close10avg + prevCandle[3]) /
-    5;
+    (ma200 + ema50 + low10 + close10avg + prevCandle[3]) / 5;
 
   const stopLossLong = ema20;
   const stopLossShort = ema20;
