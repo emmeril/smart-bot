@@ -455,14 +455,22 @@ const analyzeSignal = async () => {
   const margin = price / leverage;
 
   // === Estimasi Target Price ===
-  const longTPs = [ma200, ema50, high10, close10avg, prevCandle[2]].filter((v) => v > price);
-  const shortTPs = [ma200, ema50, low10, close10avg, prevCandle[3]].filter((v) => v < price);
+  const longTPs = [ma200, ema50, high10, close10avg, prevCandle[2]].filter(
+    (v) => v > price
+  );
+  const shortTPs = [ma200, ema50, low10, close10avg, prevCandle[3]].filter(
+    (v) => v < price
+  );
 
   const targetLong = longTPs.length > 0 ? Math.max(...longTPs) : price;
   const targetShort = shortTPs.length > 0 ? Math.min(...shortTPs) : price;
 
-  const stopLossLong = ema20;
-  const stopLossShort = ema20;
+  // Cari kandidat SL dari indikator di bawah harga (untuk long) atau di atas harga (untuk short)
+  const stopLossLong =
+    longTPs.filter((v) => v < price).sort((a, b) => b - a)[0] || ema20;
+
+  const stopLossShort =
+    shortTPs.filter((v) => v > price).sort((a, b) => a - b)[0] || ema20;
 
   const potentialProfitLong = Math.max(targetLong - price, 0);
   const potentialProfitShort = Math.max(price - targetShort, 0);
@@ -526,13 +534,14 @@ const analyzeSignal = async () => {
         validShort
       );
     } else {
-      return scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort;
+      return (
+        scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort
+      );
     }
   })();
 
   return { canLong, canShort };
 };
-
 
 // Fungsi untuk membuka posisi
 const openPosition = async (type) => {
