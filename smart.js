@@ -306,7 +306,9 @@ const testBinanceConnection = async () => {
   }
 
   if (failCount >= MAX_FAIL) {
-    console.log("❌ Binance connection failed 3x berturut-turut. Exit & restart via PM2.");
+    console.log(
+      "❌ Binance connection failed 3x berturut-turut. Exit & restart via PM2."
+    );
     process.exit(1);
   }
 };
@@ -521,7 +523,9 @@ const analyzeSignal = async () => {
         validShort
       );
     } else {
-      return scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort;
+      return (
+        scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort
+      );
     }
   })();
 
@@ -734,7 +738,7 @@ const syncPositionWithBinance = async () => {
 setInterval(async () => {
   try {
     // await testBinanceConnection();
-     await testBinanceConnection();
+    await testBinanceConnection();
 
     if (!isBinanceConnected) return; // jangan lanjut eksekusi trading
 
@@ -779,7 +783,6 @@ setInterval(async () => {
       console.log("🔁 Reset lossCountShort");
     }
 
-    
     // 🔄 Switch posisi jika sinyal berlawanan muncul
     if (canLong && db.positionShort) {
       console.log("🔁 Close SHORT & ganti ke LONG");
@@ -820,7 +823,6 @@ setInterval(async () => {
 
     if (canLong && readyLong) await openPosition("long");
     if (canShort && readyShort) await openPosition("short");
-    
   } catch (e) {
     console.log("⚠️ Signal/entry error:", e.message);
   }
