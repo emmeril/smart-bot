@@ -409,13 +409,13 @@ const analyzeSignal = async () => {
   const close10avg = close.slice(-10).reduce((a, b) => a + b, 0) / 10;
   const high10 = Math.max(...high.slice(-10));
   const low10 = Math.min(...low.slice(-10));
+  const price = ohlcv.at(-1)[4];
 
   const candleBody = Math.abs(prevCandle[4] - prevCandle[1]);
   const candleRange = prevCandle[2] - prevCandle[3];
   const isStrongCandle = candleBody / candleRange >= 0.4;
   const candleUp = prevCandle[4] > prevCandle[1];
   const candleDown = prevCandle[4] < prevCandle[1];
-  const price = ohlcv.at(-1)[4];
 
   const isBullishEngulfing =
     prevPrevCandle[1] > prevPrevCandle[4] &&
@@ -454,22 +454,12 @@ const analyzeSignal = async () => {
   const slPercent = db.slPercent || 0.025;
   const margin = price / leverage;
 
-  // Ambil kandidat TP yang valid (harus di atas/bawah harga saat ini)
-  const longTPs = [ma200, ema50, high10, close10avg, prevCandle[2]].filter(
-    (v) => v > price
-  );
-  const shortTPs = [ma200, ema50, low10, close10avg, prevCandle[3]].filter(
-    (v) => v < price
-  );
+  // === Estimasi Target Price ===
+  const longTPs = [ma200, ema50, high10, close10avg, prevCandle[2]].filter((v) => v > price);
+  const shortTPs = [ma200, ema50, low10, close10avg, prevCandle[3]].filter((v) => v < price);
 
-  const targetLong =
-    longTPs.length > 0
-      ? longTPs.reduce((a, b) => a + b, 0) / longTPs.length
-      : price;
-  const targetShort =
-    shortTPs.length > 0
-      ? shortTPs.reduce((a, b, i, arr) => a + b, 0) / shortTPs.length
-      : price;
+  const targetLong = longTPs.length > 0 ? Math.max(...longTPs) : price;
+  const targetShort = shortTPs.length > 0 ? Math.min(...shortTPs) : price;
 
   const stopLossLong = ema20;
   const stopLossShort = ema20;
@@ -536,14 +526,13 @@ const analyzeSignal = async () => {
         validShort
       );
     } else {
-      return (
-        scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort
-      );
+      return scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort;
     }
   })();
 
   return { canLong, canShort };
 };
+
 
 // Fungsi untuk membuka posisi
 const openPosition = async (type) => {
