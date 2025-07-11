@@ -759,10 +759,10 @@ setInterval(async () => {
     const day = new Date(nowTime + 7 * 60 * 60 * 1000).getUTCDay();
 
     // ⛔ Lewati saat weekend
-    if (day === 6 || day === 0) {
-      console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
-      return;
-    }
+    // if (day === 6 || day === 0) {
+    //  console.log("⛔ Weekend detected (Saturday/Sunday). Trading skipped.");
+    //  return;
+    // }
 
     // 📈 Analisa sinyal
     const { canLong, canShort } = await analyzeSignal();
