@@ -642,7 +642,8 @@ const checkTP_SL = async (type) => {
   const timeExpired = holdMins >= MAX_HOLD_MINUTES;
   const ROI_TP = db.tpPercent;
   const ROI_SL = db.slPercent;
-  const offset = (ROI_TP + ROI_SL) / 2;
+  //const offset = (ROI_TP + ROI_SL) / 2;
+  const offset = ROI_TP / 2;
 
   // ❌ Stop Loss
   if (roi <= -ROI_SL) {
