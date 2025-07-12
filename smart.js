@@ -381,156 +381,156 @@ const calcFloatingPnl = async (type) => {
 };
 
 // Fungsi untuk menganalisis sinyal trading
-// ===============================================
-//  ANALYZE SIGNAL  —  Versi dengan TP/SL dinamis
-// ===============================================
 const analyzeSignal = async () => {
   const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
+
+  // --- harga penutup, high, low ---
   const close = ohlcv.map(c => c[4]);
   const high  = ohlcv.map(c => c[2]);
   const low   = ohlcv.map(c => c[3]);
+  const price = close.at(-1);
 
-  /* === 1.  INDICATORS ======================================== */
+  // --- indikator utama ---
   const rsi   = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
   const ema20 = EMA.calculate({ values: close.slice(-50), period: 20 }).pop();
   const ema50 = EMA.calculate({ values: close.slice(-50), period: 50 }).pop();
-  const ma200 = EMA.calculate({ values: close,        period: 200 }).pop();
+  const ma200 = EMA.calculate({ values: close,          period: 200 }).pop();
   const macd  = MACD.calculate({
-    values: close.slice(-50), fastPeriod: 12, slowPeriod: 26, signalPeriod: 9,
+    values: close.slice(-50),
+    fastPeriod: 12, slowPeriod: 26, signalPeriod: 9,
   }).pop();
   const adx   = ADX.calculate({
-    close: close.slice(-50), high: high.slice(-50), low: low.slice(-50),
+    close: close.slice(-50),
+    high : high .slice(-50),
+    low  : low  .slice(-50),
     period: 14,
   }).pop();
 
-  /* === 2.  PRICE ACTION ====================================== */
-  const prevCandle     = ohlcv.at(-2);
-  const prevPrevCandle = ohlcv.at(-3);
-  const price          = close.at(-1);
-  const high10         = Math.max(...high.slice(-10));
-  const low10          = Math.min(...low.slice(-10));
-  const close10avg     = close.slice(-10).reduce((a,b)=>a+b,0) / 10;
+  // --- candle pattern ---
+  const prev       = ohlcv.at(-2);
+  const prevPrev   = ohlcv.at(-3);
+  const body       = Math.abs(prev[4] - prev[1]);
+  const range      = prev[2] - prev[3];
+  const strong     = body / range >= 0.4;
 
-  const candleBody     = Math.abs(prevCandle[4] - prevCandle[1]);
-  const candleRange    = prevCandle[2] - prevCandle[3];
-  const isStrongCandle = candleBody / candleRange >= 0.4;
-  const candleUp       = prevCandle[4] > prevCandle[1];
-  const candleDown     = prevCandle[4] < prevCandle[1];
+  const candleUp   = prev[4] > prev[1];
+  const candleDown = prev[4] < prev[1];
 
-  const isBullishEngulfing =
-    prevPrevCandle[1] > prevPrevCandle[4] &&
-    prevCandle[1]       < prevCandle[4]   &&
-    prevCandle[1]       < prevPrevCandle[4] &&
-    prevCandle[4]       > prevPrevCandle[1];
+  const bullEngulf =
+    prevPrev[1] > prevPrev[4] &&
+    prev[1]     < prev[4]     &&
+    prev[1]     < prevPrev[4] &&
+    prev[4]     > prevPrev[1];
 
-  const isBearishEngulfing =
-    prevPrevCandle[1] < prevPrevCandle[4] &&
-    prevCandle[1]     > prevCandle[4]   &&
-    prevCandle[1]     > prevPrevCandle[4] &&
-    prevCandle[4]     < prevPrevCandle[1];
+  const bearEngulf =
+    prevPrev[1] < prevPrev[4] &&
+    prev[1]     > prev[4]     &&
+    prev[1]     > prevPrev[4] &&
+    prev[4]     < prevPrev[1];
 
-  /* === 3.  SCORE ============================================= */
-  const countTrue  = (...conds) => conds.filter(Boolean).length;
-  const scoreLong  = countTrue(rsi < 35, macd?.histogram > 0,
-                               ema20 > ema50, adx?.adx > 20,
-                               isStrongCandle, candleUp);
-  const scoreShort = countTrue(rsi > 65, macd?.histogram < 0,
-                               ema20 < ema50, adx?.adx > 20,
-                               isStrongCandle, candleDown);
+  // --- skor indikator ---
+  const scoreLong  = [ rsi < 35,  macd?.histogram > 0, ema20 > ema50,
+                       adx?.adx > 20, strong, candleUp ].filter(Boolean).length;
 
-  /* === 4.  DYNAMIC TP / SL % ================================= */
-  const parsePercent = (raw, fallback) => {
-    let v = raw ?? fallback;          // default kalau null / undefined
-    if (typeof v === "string") v = parseFloat(v);
-    if (v > 1)  v = v / 100;          //  "4.5"  ->  0.045
-    return v;
-  };
-  const tpPercent = parsePercent(db.tpPercent, 0.05);   // default 5 %
-  const slPercent = parsePercent(db.slPercent, 0.025);  // default 2.5 %
+  const scoreShort = [ rsi > 65,  macd?.histogram < 0, ema20 < ema50,
+                       adx?.adx > 20, strong, candleDown ].filter(Boolean).length;
 
-  /*  👉  Simpan balik bila semula berupa string > 1  */
-  if (typeof db.tpPercent === "string" || typeof db.slPercent === "string") {
-    db.tpPercent = tpPercent;
-    db.slPercent = slPercent;
-    saveDB(); // persist supaya ke depannya berbentuk rasio angka
-  }
+  // ------------------------------------------------------------------
+  // === Estimasi Target-Price & Loss =====================================================================
+  // ------------------------------------------------------------------
+  const high10  = Math.max(...high.slice(-10));
+  const low10   = Math.min(...low.slice(-10));
+  const avg10   = close.slice(-10).reduce((a,b)=>a+b,0)/10;
 
+  const longTPCandidates  = [ma200, ema50, high10, avg10, prev[2]].filter(v => v > price);
+  const shortTPCandidates = [ma200, ema50,  low10, avg10, prev[3]].filter(v => v < price);
+
+  const targetLong  = longTPCandidates .length ? Math.max(...longTPCandidates ) : price;
+  const targetShort = shortTPCandidates.length ? Math.min(...shortTPCandidates) : price;
+
+  // Gunakan EMA-20 sebagai garis “bahaya”; pastikan untuk sisi yg benar
+  const stopLong  = Math.min(price, ema20);      // harus di bawah harga sekarang
+  const stopShort = Math.max(price, ema20);      // harus di atas harga sekarang
+
+  // --- hitung margin (notional/leverage) & ROI ---
   const leverage = db.leverage || 10;
   const margin   = price / leverage;
 
-  /* === 5.  TARGET & STOP ===================================== */
-  const longTPs  = [ma200, ema50, high10, close10avg, prevCandle[2]].filter(v => v > price);
-  const shortTPs = [ma200, ema50, low10,  close10avg, prevCandle[3]].filter(v => v < price);
+  const profitLongUSD  = Math.max(targetLong  - price, 0);
+  const profitShortUSD = Math.max(price - targetShort, 0);
+  const lossLongUSD    = Math.max(price - stopLong ,   0);
+  const lossShortUSD   = Math.max(stopShort - price,   0);
 
-  const targetLong  = longTPs.length  ? Math.max(...longTPs) : price;
-  const targetShort = shortTPs.length ? Math.min(...shortTPs) : price;
+  const roiTpLong  =  profitLongUSD / margin; // desimal (0.02 = 2%)
+  const roiTpShort =  profitShortUSD / margin;
+  const roiSlLong  =  lossLongUSD   / margin;
+  const roiSlShort =  lossShortUSD  / margin;
 
-  const stopLossLong  = ema20; // masih EMA-20 (bisa disetel lagi nanti)
-  const stopLossShort = ema20;
+  // ------------------------------------------------------------------
+  // === Update TP/SL dinamis ke DB (ambil skenario TERBAIK) ==============================================
+  // ------------------------------------------------------------------
+  //  • Ambil TP dengan ROI terbesar di kedua sisi
+  //  • Ambil SL dengan ROI TERKECIL (paling ketat) di kedua sisi
+  const newTp = Math.max(roiTpLong,  roiTpShort);
+  const newSl = Math.min(
+                 roiSlLong  || Number.MAX_VALUE,
+                 roiSlShort || Number.MAX_VALUE);
 
-  /* === 6.  ROI ESTIMATION ==================================== */
-  const potentialProfitLong  = Math.max(targetLong  - price, 0);
-  const potentialLossLong    = Math.max(price - stopLossLong, 0);
-  const potentialProfitShort = Math.max(price - targetShort, 0);
-  const potentialLossShort   = Math.max(stopLossShort - price, 0);
+  // Pastikan batas minimal (mis. 0.002 = 0.2 %) supaya nggak terlalu kecil
+  const minTP = 0.002, minSL = 0.001;
+  db.tpPercent = parseFloat(Math.max(newTp, minTP).toFixed(4));
+  db.slPercent = parseFloat(Math.max(newSl, minSL).toFixed(4));
+  saveDB();   // ⬅️ simpan perubahan
 
-  const roiProfitLong  = (potentialProfitLong  / margin) * 100;
-  const roiLossLong    = (potentialLossLong    / margin) * 100;
-  const roiProfitShort = (potentialProfitShort / margin) * 100;
-  const roiLossShort   = (potentialLossShort   / margin) * 100;
+  // ------------------------------------------------------------------
+  // === Validasi layak entry =================================================
+  // ------------------------------------------------------------------
+  const validLong  = roiTpLong  >= db.tpPercent;
+  const validShort = roiTpShort >= db.tpPercent;
 
-  const validLong  = roiProfitLong  >= tpPercent * 100;
-  const validShort = roiProfitShort >= tpPercent * 100;
+  const canLong  =
+    (db.entryMode === "agresif"
+        ? (scoreLong  >= 3 || (scoreLong  >= 2 && bullEngulf))
+        :  scoreLong  >= 4 && bullEngulf) &&
+      price > ma200 && validLong;
 
-  /* === 7.  LOGGING =========================================== */
+  const canShort =
+    (db.entryMode === "agresif"
+        ? (scoreShort >= 3 || (scoreShort >= 2 && bearEngulf))
+        :  scoreShort >= 4 && bearEngulf) &&
+      price < ma200 && validShort;
+
+  // ------------------------------------------------------------------
+  // === LOG ==========================================================
+  // ------------------------------------------------------------------
+  const logBool = v => (v ? "✅" : "❌");
   console.log("📊 [Indikator LONG]");
-  console.log("  RSI < 35          :", rsi < 35 ? "✅" : "❌");
-  console.log("  MACD > 0          :", macd?.histogram > 0 ? "✅" : "❌");
-  console.log("  EMA20 > EMA50     :", ema20 > ema50 ? "✅" : "❌");
-  console.log("  ADX > 20          :", adx?.adx > 20 ? "✅" : "❌");
-  console.log("  Candle Strong     :", isStrongCandle ? "✅" : "❌");
-  console.log("  Candle Up         :", candleUp ? "✅" : "❌");
-  console.log("  Bull Engulfing    :", isBullishEngulfing ? "✅" : "❌");
-  console.log("  Price > MA200     :", price > ma200 ? "✅" : "❌");
-  console.log(`  Est. ROI TP Long  : ${roiProfitLong.toFixed(2)}%`);
-  console.log(`  Est. ROI SL Long  : ${roiLossLong.toFixed(2)}%`);
-  console.log(`  ROI Valid         : ${validLong ? "✅" : "❌"}`);
-  console.log(`  → Skor LONG       : ${scoreLong}`);
+  console.log("  RSI < 35         :", logBool(rsi < 35));
+  console.log("  MACD > 0         :", logBool(macd?.histogram > 0));
+  console.log("  EMA20 > EMA50    :", logBool(ema20 > ema50));
+  console.log("  ADX > 20         :", logBool(adx?.adx > 20));
+  console.log("  Candle Strong    :", logBool(strong));
+  console.log("  Candle Up        :", logBool(candleUp));
+  console.log("  Bull Engulfing   :", logBool(bullEngulf));
+  console.log("  Price > MA200    :", logBool(price > ma200));
+  console.log(`  Est. ROI TP Long : ${(roiTpLong *100).toFixed(2)}%`);
+  console.log(`  Est. ROI SL Long : ${(roiSlLong *100).toFixed(2)}%`);
+  console.log(`  ROI Valid        : ${logBool(validLong)}`);
+  console.log(`  → Skor LONG      : ${scoreLong}\n`);
 
   console.log("📊 [Indikator SHORT]");
-  console.log("  RSI > 65          :", rsi > 65 ? "✅" : "❌");
-  console.log("  MACD < 0          :", macd?.histogram < 0 ? "✅" : "❌");
-  console.log("  EMA20 < EMA50     :", ema20 < ema50 ? "✅" : "❌");
-  console.log("  ADX > 20          :", adx?.adx > 20 ? "✅" : "❌");
-  console.log("  Candle Strong     :", isStrongCandle ? "✅" : "❌");
-  console.log("  Candle Down       :", candleDown ? "✅" : "❌");
-  console.log("  Bear Engulfing    :", isBearishEngulfing ? "✅" : "❌");
-  console.log("  Price < MA200     :", price < ma200 ? "✅" : "❌");
-  console.log(`  Est. ROI TP Short : ${roiProfitShort.toFixed(2)}%`);
-  console.log(`  Est. ROI SL Short : ${roiLossShort.toFixed(2)}%`);
-  console.log(`  ROI Valid         : ${validShort ? "✅" : "❌"}`);
-  console.log(`  → Skor SHORT      : ${scoreShort}`);
-
-  /* === 8.  FINAL DECISION ==================================== */
-  const canLong = (() => {
-    if (db.entryMode === "agresif") {
-      return (
-        (scoreLong >= 3 || (scoreLong >= 2 && isBullishEngulfing)) &&
-        price > ma200 && validLong
-      );
-    }
-    return scoreLong >= 4 && price > ma200 && isBullishEngulfing && validLong;
-  })();
-
-  const canShort = (() => {
-    if (db.entryMode === "agresif") {
-      return (
-        (scoreShort >= 3 || (scoreShort >= 2 && isBearishEngulfing)) &&
-        price < ma200 && validShort
-      );
-    }
-    return scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort;
-  })();
+  console.log("  RSI > 65         :", logBool(rsi > 65));
+  console.log("  MACD < 0         :", logBool(macd?.histogram < 0));
+  console.log("  EMA20 < EMA50    :", logBool(ema20 < ema50));
+  console.log("  ADX > 20         :", logBool(adx?.adx > 20));
+  console.log("  Candle Strong    :", logBool(strong));
+  console.log("  Candle Down      :", logBool(candleDown));
+  console.log("  Bear Engulfing   :", logBool(bearEngulf));
+  console.log("  Price < MA200    :", logBool(price < ma200));
+  console.log(`  Est. ROI TP Sht  : ${(roiTpShort*100).toFixed(2)}%`);
+  console.log(`  Est. ROI SL Sht  : ${(roiSlShort*100).toFixed(2)}%`);
+  console.log(`  ROI Valid        : ${logBool(validShort)}`);
+  console.log(`  → Skor SHORT     : ${scoreShort}`);
 
   return { canLong, canShort };
 };
