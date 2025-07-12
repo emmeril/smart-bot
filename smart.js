@@ -381,106 +381,108 @@ const calcFloatingPnl = async (type) => {
 };
 
 // Fungsi untuk menganalisis sinyal trading
-// ---------- ANALYZE SIGNAL -----------------------------------------------
+// ===============================================
+//  ANALYZE SIGNAL  —  Versi dengan TP/SL dinamis
+// ===============================================
 const analyzeSignal = async () => {
-  /* 1️⃣ D A T A  ---------------------------------------------------------------- */
   const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
   const close = ohlcv.map(c => c[4]);
   const high  = ohlcv.map(c => c[2]);
   const low   = ohlcv.map(c => c[3]);
 
-  /* 2️⃣ I N D I K A T O R  ------------------------------------------------------ */
+  /* === 1.  INDICATORS ======================================== */
   const rsi   = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
   const ema20 = EMA.calculate({ values: close.slice(-50), period: 20 }).pop();
   const ema50 = EMA.calculate({ values: close.slice(-50), period: 50 }).pop();
-  const ma200 = EMA.calculate({ values: close,           period: 200 }).pop();
+  const ma200 = EMA.calculate({ values: close,        period: 200 }).pop();
   const macd  = MACD.calculate({
     values: close.slice(-50), fastPeriod: 12, slowPeriod: 26, signalPeriod: 9,
   }).pop();
   const adx   = ADX.calculate({
-    close: close.slice(-50), high: high.slice(-50), low: low.slice(-50), period: 14,
+    close: close.slice(-50), high: high.slice(-50), low: low.slice(-50),
+    period: 14,
   }).pop();
 
-  /* 3️⃣ C A N D L E - P A T T E R N  ------------------------------------------- */
-  const price         = close.at(-1);
-  const prevCandle    = ohlcv.at(-2);
-  const prevPrevCandle= ohlcv.at(-3);
+  /* === 2.  PRICE ACTION ====================================== */
+  const prevCandle     = ohlcv.at(-2);
+  const prevPrevCandle = ohlcv.at(-3);
+  const price          = close.at(-1);
+  const high10         = Math.max(...high.slice(-10));
+  const low10          = Math.min(...low.slice(-10));
+  const close10avg     = close.slice(-10).reduce((a,b)=>a+b,0) / 10;
 
-  const candleBody    = Math.abs(prevCandle[4] - prevCandle[1]);
-  const candleRange   = prevCandle[2]  - prevCandle[3];
-  const isStrongCandle= candleBody / candleRange >= 0.4;
-  const candleUp      = prevCandle[4] >  prevCandle[1];
-  const candleDown    = prevCandle[4] <  prevCandle[1];
+  const candleBody     = Math.abs(prevCandle[4] - prevCandle[1]);
+  const candleRange    = prevCandle[2] - prevCandle[3];
+  const isStrongCandle = candleBody / candleRange >= 0.4;
+  const candleUp       = prevCandle[4] > prevCandle[1];
+  const candleDown     = prevCandle[4] < prevCandle[1];
 
   const isBullishEngulfing =
-      prevPrevCandle[1] > prevPrevCandle[4] &&
-      prevCandle[1]     < prevCandle[4]   &&
-      prevCandle[1]     < prevPrevCandle[4] &&
-      prevCandle[4]     > prevPrevCandle[1];
+    prevPrevCandle[1] > prevPrevCandle[4] &&
+    prevCandle[1]       < prevCandle[4]   &&
+    prevCandle[1]       < prevPrevCandle[4] &&
+    prevCandle[4]       > prevPrevCandle[1];
 
   const isBearishEngulfing =
-      prevPrevCandle[1] < prevPrevCandle[4] &&
-      prevCandle[1]     > prevCandle[4]   &&
-      prevCandle[1]     > prevPrevCandle[4] &&
-      prevCandle[4]     < prevPrevCandle[1];
+    prevPrevCandle[1] < prevPrevCandle[4] &&
+    prevCandle[1]     > prevCandle[4]   &&
+    prevCandle[1]     > prevPrevCandle[4] &&
+    prevCandle[4]     < prevPrevCandle[1];
 
-  /* 4️⃣ S C O R I N G  --------------------------------------------------------- */
-  const countTrue = (...conds) => conds.filter(Boolean).length;
+  /* === 3.  SCORE ============================================= */
+  const countTrue  = (...conds) => conds.filter(Boolean).length;
+  const scoreLong  = countTrue(rsi < 35, macd?.histogram > 0,
+                               ema20 > ema50, adx?.adx > 20,
+                               isStrongCandle, candleUp);
+  const scoreShort = countTrue(rsi > 65, macd?.histogram < 0,
+                               ema20 < ema50, adx?.adx > 20,
+                               isStrongCandle, candleDown);
 
-  const scoreLong  = countTrue(
-    rsi < 35, macd?.histogram > 0, ema20 > ema50,
-    adx?.adx > 20, isStrongCandle, candleUp
-  );
-  const scoreShort = countTrue(
-    rsi > 65, macd?.histogram < 0, ema20 < ema50,
-    adx?.adx > 20, isStrongCandle, candleDown
-  );
+  /* === 4.  DYNAMIC TP / SL % ================================= */
+  const parsePercent = (raw, fallback) => {
+    let v = raw ?? fallback;          // default kalau null / undefined
+    if (typeof v === "string") v = parseFloat(v);
+    if (v > 1)  v = v / 100;          //  "4.5"  ->  0.045
+    return v;
+  };
+  const tpPercent = parsePercent(db.tpPercent, 0.05);   // default 5 %
+  const slPercent = parsePercent(db.slPercent, 0.025);  // default 2.5 %
 
-  /* 5️⃣ D Y N A M I C   T P / S L  ------------------------------------------- */
-  const leverage    = db.leverage || 10;
-  const margin      = price / leverage;                  // nilai jaminan per 1 coin
+  /*  👉  Simpan balik bila semula berupa string > 1  */
+  if (typeof db.tpPercent === "string" || typeof db.slPercent === "string") {
+    db.tpPercent = tpPercent;
+    db.slPercent = slPercent;
+    saveDB(); // persist supaya ke depannya berbentuk rasio angka
+  }
 
-  // --- ambil konfigurasi TP & SL dalam persen (mis. 4.5 = 4,5 %)
-  const cfgTpPct    = parseFloat(db.tpPercent ?? "5");   // default 5 %
-  const cfgSlPct    = parseFloat(db.slPercent ?? "2.5"); // default 2,5 %
-  const tpPct       = Math.max(cfgTpPct, 0.1);           // minimal 0,1 %
-  const slPct       = Math.max(cfgSlPct, 0.1);
+  const leverage = db.leverage || 10;
+  const margin   = price / leverage;
 
-  // --- kandidat TP & SL
-  const high10      = Math.max(...high.slice(-10));
-  const low10       = Math.min(...low.slice(-10));
-  const avg10       = close.slice(-10).reduce((a,b)=>a+b,0) / 10;
+  /* === 5.  TARGET & STOP ===================================== */
+  const longTPs  = [ma200, ema50, high10, close10avg, prevCandle[2]].filter(v => v > price);
+  const shortTPs = [ma200, ema50, low10,  close10avg, prevCandle[3]].filter(v => v < price);
 
-  const longTPs  = [ma200, ema50, high10, avg10, prevCandle[2]].filter(v => v > price);
-  const shortTPs = [ma200, ema50, low10,  avg10, prevCandle[3]].filter(v => v < price);
-
-  const targetLong  = longTPs .length ? Math.max(...longTPs) : price;
+  const targetLong  = longTPs.length  ? Math.max(...longTPs) : price;
   const targetShort = shortTPs.length ? Math.min(...shortTPs) : price;
 
-  /*  stop-loss = level terdekat BERLAWANAN arah harga  */
-  const longSLs  = [ema20, low10,  avg10, prevCandle[3]].filter(v => v < price);
-  const shortSLs = [ema20, high10, avg10, prevCandle[2]].filter(v => v > price);
+  const stopLossLong  = ema20; // masih EMA-20 (bisa disetel lagi nanti)
+  const stopLossShort = ema20;
 
-  const stopLossLong  = longSLs .length ? Math.max(...longSLs)  : price;
-  const stopLossShort = shortSLs.length ? Math.min(...shortSLs) : price;
+  /* === 6.  ROI ESTIMATION ==================================== */
+  const potentialProfitLong  = Math.max(targetLong  - price, 0);
+  const potentialLossLong    = Math.max(price - stopLossLong, 0);
+  const potentialProfitShort = Math.max(price - targetShort, 0);
+  const potentialLossShort   = Math.max(stopLossShort - price, 0);
 
-  /* 6️⃣ R O I   E S T I M A T E  --------------------------------------------- */
-  const pnlLong   = Math.max(targetLong  - price, 0);
-  const pnlShort  = Math.max(price - targetShort, 0);
-  const lossLong  = Math.max(price - stopLossLong , 0);
-  const lossShort = Math.max(stopLossShort - price, 0);
+  const roiProfitLong  = (potentialProfitLong  / margin) * 100;
+  const roiLossLong    = (potentialLossLong    / margin) * 100;
+  const roiProfitShort = (potentialProfitShort / margin) * 100;
+  const roiLossShort   = (potentialLossShort   / margin) * 100;
 
-  const roiLongTP  = (pnlLong  / margin) * 100;
-  const roiShortTP = (pnlShort / margin) * 100;
-  const roiLongSL  = (lossLong  / margin) * 100;
-  const roiShortSL = (lossShort / margin) * 100;
+  const validLong  = roiProfitLong  >= tpPercent * 100;
+  const validShort = roiProfitShort >= tpPercent * 100;
 
-  const validLong  = roiLongTP  >= tpPct;
-  const validShort = roiShortTP >= tpPct;
-
-  saveDB();
-
-  /* 7️⃣ L O G - O U T P U T  -------------------------------------------------- */
+  /* === 7.  LOGGING =========================================== */
   console.log("📊 [Indikator LONG]");
   console.log("  RSI < 35          :", rsi < 35 ? "✅" : "❌");
   console.log("  MACD > 0          :", macd?.histogram > 0 ? "✅" : "❌");
@@ -490,10 +492,10 @@ const analyzeSignal = async () => {
   console.log("  Candle Up         :", candleUp ? "✅" : "❌");
   console.log("  Bull Engulfing    :", isBullishEngulfing ? "✅" : "❌");
   console.log("  Price > MA200     :", price > ma200 ? "✅" : "❌");
-  console.log(`  Est. ROI TP Long  : ${roiLongTP .toFixed(2)}%`);
-  console.log(`  Est. ROI SL Long  : ${roiLongSL .toFixed(2)}%`);
+  console.log(`  Est. ROI TP Long  : ${roiProfitLong.toFixed(2)}%`);
+  console.log(`  Est. ROI SL Long  : ${roiLossLong.toFixed(2)}%`);
   console.log(`  ROI Valid         : ${validLong ? "✅" : "❌"}`);
-  console.log(`  → Skor LONG       : ${scoreLong}\n`);
+  console.log(`  → Skor LONG       : ${scoreLong}`);
 
   console.log("📊 [Indikator SHORT]");
   console.log("  RSI > 65          :", rsi > 65 ? "✅" : "❌");
@@ -504,27 +506,35 @@ const analyzeSignal = async () => {
   console.log("  Candle Down       :", candleDown ? "✅" : "❌");
   console.log("  Bear Engulfing    :", isBearishEngulfing ? "✅" : "❌");
   console.log("  Price < MA200     :", price < ma200 ? "✅" : "❌");
-  console.log(`  Est. ROI TP Short : ${roiShortTP.toFixed(2)}%`);
-  console.log(`  Est. ROI SL Short : ${roiShortSL.toFixed(2)}%`);
+  console.log(`  Est. ROI TP Short : ${roiProfitShort.toFixed(2)}%`);
+  console.log(`  Est. ROI SL Short : ${roiLossShort.toFixed(2)}%`);
   console.log(`  ROI Valid         : ${validShort ? "✅" : "❌"}`);
   console.log(`  → Skor SHORT      : ${scoreShort}`);
 
-  /* 8️⃣ S I G N A L  ---------------------------------------------------------- */
-  const canLong = db.entryMode === "agresif"
-      ? (scoreLong >= 3 || (scoreLong >= 2 && isBullishEngulfing)) &&
+  /* === 8.  FINAL DECISION ==================================== */
+  const canLong = (() => {
+    if (db.entryMode === "agresif") {
+      return (
+        (scoreLong >= 3 || (scoreLong >= 2 && isBullishEngulfing)) &&
         price > ma200 && validLong
-      : scoreLong >= 4 && price > ma200 && isBullishEngulfing && validLong;
+      );
+    }
+    return scoreLong >= 4 && price > ma200 && isBullishEngulfing && validLong;
+  })();
 
-  const canShort = db.entryMode === "agresif"
-      ? (scoreShort >= 3 || (scoreShort >= 2 && isBearishEngulfing)) &&
+  const canShort = (() => {
+    if (db.entryMode === "agresif") {
+      return (
+        (scoreShort >= 3 || (scoreShort >= 2 && isBearishEngulfing)) &&
         price < ma200 && validShort
-      : scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort;
-  
+      );
+    }
+    return scoreShort >= 4 && price < ma200 && isBearishEngulfing && validShort;
+  })();
 
-  /* 9️⃣ K E M B A L I K A N  -------------------------------------------------- */
   return { canLong, canShort };
 };
-// ---------------------------------------------------------------------------
+
 // Fungsi untuk membuka posisi
 const openPosition = async (type) => {
   const nowTime = now();
