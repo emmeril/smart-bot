@@ -13,5 +13,8 @@
       "leverage": 10,
       "marginMode": "isolated",
       "totalProfit": 0,
-      "totalLoss": 0
+      "totalLoss": 0,
+      "tpPercent": 0.03, 
+      "slPercent": 0.02, 
+      "entryMode": "agresif"
 }
