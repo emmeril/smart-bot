@@ -136,7 +136,7 @@ client.on("message", async (msg) => {
   try {
     const txt = msg.body.toLowerCase();
     if (!msg.fromMe && !msg.from.includes(process.env.ADMIN_PHONE)) return;
-    
+
     // Command handling
     const [command, ...args] = txt.split(" ");
     switch (command) {
@@ -281,7 +281,7 @@ const analyzeSignal = async () => {
   const canLong = scoreLong >= 3 && price > ma200 && isBullishEngulfing;
   const canShort = scoreShort >= 3 && price < ma200 && isBearishEngulfing;
 
-  return { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort };
+  return { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing };
 };
 
 // -----------------------------------------------------------------------------
@@ -290,14 +290,14 @@ const analyzeSignal = async () => {
 setInterval(async () => {
   try {
     const nowTime = now();
-    const price = await getPrice();
-    if (!price) {
-      console.log("❌ Tidak bisa mendapatkan harga, mencoba lagi...");
+    const result = await analyzeSignal();
+    const { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing } = result;
+    
+    if (!price || !ma200) {
+      console.log("❌ Data harga atau MA200 belum tersedia, mencoba lagi...");
       return;
     }
-    
-    const { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort } = await analyzeSignal();
-    
+
     console.log(`📊 Sinyal Analisis:
     LONG: ${canLong} (score ${canLong ? '>=3' : '<3'}, price ${formatPrice(price)} > MA200 ${formatPrice(ma200)}, engulfing ${isBullishEngulfing})
     SHORT: ${canShort} (score ${canShort ? '>=3' : '<3'}, price ${formatPrice(price)} < MA200 ${formatPrice(ma200)}, engulfing ${isBearishEngulfing})
