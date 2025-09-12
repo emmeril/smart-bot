@@ -1,5 +1,6 @@
 require("dotenv").config();
 const fs = require("fs");
+const path = require("path");
 const ccxt = require("ccxt");
 const { RSI, EMA, MACD, ADX } = require("technicalindicators");
 const { Client, LocalAuth } = require("whatsapp-web.js");
@@ -11,9 +12,18 @@ const QRCode = require("qrcode");
 // -----------------------------------------------------------------------------
 const app = express();
 const dbPath = "./db.json";
+const logPath = "./log.csv";
 const serverPort = 7890;
 
 const COOLDOWN_MINUTES = 5;
+
+// Pastikan file log ada
+if (!fs.existsSync(logPath)) {
+  fs.writeFileSync(
+    logPath,
+    "timestamp,pair,type,entryPrice,tp,sl,status\n"
+  );
+}
 
 // -----------------------------------------------------------------------------
 // 2. INITIALISASI
@@ -84,6 +94,14 @@ const getPrice = async () => {
     console.error("❌ Gagal fetch harga:", e.message);
     return null;
   }
+};
+
+// Fungsi baru untuk mencatat sinyal ke log.csv
+const logSignal = (type, entry, tp, sl) => {
+  const timestamp = new Date().toISOString();
+  const logLine = `${timestamp},${db.pair},${type},${entry},${tp},${sl},SIGNAL_SENT\n`;
+  fs.appendFileSync(logPath, logLine);
+  console.log(`✅ Sinyal tercatat ke ${logPath}`);
 };
 
 // -----------------------------------------------------------------------------
@@ -260,6 +278,9 @@ const analyzeSignal = async () => {
 setInterval(async () => {
   try {
     const nowTime = now();
+    const price = await getPrice();
+    if (!price) return;
+    
     const { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort } = await analyzeSignal();
 
     const readyLong = !db.lastLongEntryTime || mins(nowTime - db.lastLongEntryTime) >= COOLDOWN_MINUTES;
@@ -270,10 +291,11 @@ setInterval(async () => {
       saveDB();
       sendMsg(
         `🟢 *Sinyal LONG* untuk ${db.pair}\n` +
-        `Entry: Sekarang\n` +
+        `Entry: ${formatPrice(price)}\n` +
         `TP: ${formatPrice(targetLong)}\n` +
         `SL: ${formatPrice(stopLossLong)}`
       );
+      logSignal("LONG", price, targetLong, stopLossLong);
     }
 
     if (canShort && readyShort) {
@@ -281,10 +303,11 @@ setInterval(async () => {
       saveDB();
       sendMsg(
         `🔴 *Sinyal SHORT* untuk ${db.pair}\n` +
-        `Entry: Sekarang\n` +
+        `Entry: ${formatPrice(price)}\n` +
         `TP: ${formatPrice(targetShort)}\n` +
         `SL: ${formatPrice(stopLossShort)}`
       );
+      logSignal("SHORT", price, targetShort, stopLossShort);
     }
   } catch (e) {
     console.error("⚠️ Global Loop Error:", e.message);
