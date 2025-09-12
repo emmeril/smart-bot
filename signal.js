@@ -294,7 +294,8 @@ const analyzeSignal = async () => {
   const canLong = scoreLong >= 3 && isFinite(price) && isFinite(ma200) && price > ma200 && isBullishEngulfing;
   const canShort = scoreShort >= 3 && isFinite(price) && isFinite(ma200) && price < ma200 && isBearishEngulfing;
 
-  return { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing };
+  // Mengembalikan nilai scoreLong dan scoreShort
+  return { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing, scoreLong, scoreShort };
 };
 
 // -----------------------------------------------------------------------------
@@ -310,17 +311,17 @@ setInterval(async () => {
       return;
     }
     
-    const { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing } = result;
+    // Menerima nilai scoreLong dan scoreShort dari hasil analisis
+    const { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing, scoreLong, scoreShort } = result;
 
     if (!isFinite(price) || !isFinite(ma200)) {
       console.log("❌ Data harga atau MA200 tidak valid (NaN/Infinity). Menunggu data valid...");
       return;
     }
 
-    // PENTING: Menggunakan toFixed() untuk log agar tidak menyebabkan error.
     console.log(`📊 Sinyal Analisis:
-    LONG: ${canLong} (score ${canLong ? '>=3' : '<3'}, price ${price.toFixed(5)} > MA200 ${ma200.toFixed(5)}, engulfing ${isBullishEngulfing})
-    SHORT: ${canShort} (score ${canShort ? '>=3' : '<3'}, price ${price.toFixed(5)} < MA200 ${ma200.toFixed(5)}, engulfing ${isBearishEngulfing})
+    LONG: ${canLong} (score ${scoreLong}, price ${price.toFixed(5)} > MA200 ${ma200.toFixed(5)}, engulfing ${isBullishEngulfing})
+    SHORT: ${canShort} (score ${scoreShort}, price ${price.toFixed(5)} < MA200 ${ma200.toFixed(5)}, engulfing ${isBearishEngulfing})
     `);
 
     const readyLong = !db.lastLongEntryTime || mins(nowTime - db.lastLongEntryTime) >= COOLDOWN_MINUTES;
