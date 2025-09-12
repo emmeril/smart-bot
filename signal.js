@@ -72,7 +72,10 @@ const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 const now = () => Date.now();
 const mins = (ms) => ms / 1000 / 60;
 const formatPrice = (price) => {
-  if (!price) return "N/A"; // Tambahkan pengecekan ini
+  // Pengecekan lebih kuat untuk memastikan input adalah angka
+  if (typeof price !== 'number' || !isFinite(price)) {
+    return "N/A";
+  }
   return exchange.decimalToPrecision(price, "currency", 5, ccxt.ROUND_HALF_UP);
 };
 
@@ -213,7 +216,7 @@ const analyzeSignal = async () => {
   const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
   
   if (!ohlcv || ohlcv.length < 200) {
-    console.log("⚠️ Data OHLCV tidak mencukupi untuk analisis.");
+    console.log("⚠️ Data OHLCV tidak mencukupi untuk analisis. Diperlukan 200 candle.");
     return {};
   }
   
@@ -302,7 +305,7 @@ setInterval(async () => {
     const { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing } = result;
 
     if (!isFinite(price) || !isFinite(ma200)) {
-      console.log("❌ Data harga atau MA200 tidak valid, mencoba lagi...");
+      console.log("❌ Data harga atau MA200 tidak valid. Menunggu data cukup...");
       return;
     }
 
