@@ -214,9 +214,9 @@ app.get("/qr", async (req, res) => {
 const analyzeSignal = async () => {
   console.log("🔍 Menganalisis sinyal...");
   const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
-  
+
   if (!ohlcv || ohlcv.length < 200) {
-    console.log("⚠️ Data OHLCV tidak mencukupi untuk analisis. Diperlukan 200 candle.");
+    console.log("⚠️ Data OHLCV tidak mencukupi untuk analisis (diperlukan 200 candle).");
     return {};
   }
   
@@ -224,24 +224,29 @@ const analyzeSignal = async () => {
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
 
+  // Pastikan data yang digunakan untuk indikator cukup
+  if (close.length < 200) {
+    console.log(`⚠️ Data close tidak mencukupi. Length: ${close.length}.`);
+    return {};
+  }
+
+  // Perhitungan Indikator
   const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
   const ema20 = EMA.calculate({ values: close.slice(-50), period: 20 }).pop();
   const ema50 = EMA.calculate({ values: close.slice(-50), period: 50 }).pop();
   const ma200 = EMA.calculate({ values: close, period: 200 }).pop();
+  const macd = MACD.calculate({ values: close.slice(-50), fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }).pop();
+  const adx = ADX.calculate({ close: close.slice(-50), high: high.slice(-50), low: low.slice(-50), period: 14 }).pop();
 
-  const macd = MACD.calculate({
-    values: close.slice(-50),
-    fastPeriod: 12,
-    slowPeriod: 26,
-    signalPeriod: 9,
-  }).pop();
-
-  const adx = ADX.calculate({
-    close: close.slice(-50),
-    high: high.slice(-50),
-    low: low.slice(-50),
-    period: 14,
-  }).pop();
+  // Tambahkan log untuk mengecek nilai indikator
+  console.log(`Debug Indikator:
+    RSI: ${rsi}
+    EMA20: ${ema20}
+    EMA50: ${ema50}
+    MA200: ${ma200}
+    MACD Histogram: ${macd?.histogram}
+    ADX: ${adx?.adx}
+  `);
 
   const price = close.at(-1);
   const prevCandle = ohlcv.at(-2);
@@ -266,18 +271,18 @@ const analyzeSignal = async () => {
     prevCandle[4] < prevPrevCandle[1];
 
   let scoreLong = 0;
-  if (rsi < 35) scoreLong++;
-  if (macd?.histogram > 0) scoreLong++;
-  if (ema20 > ema50) scoreLong++;
-  if (adx?.adx > 20) scoreLong++;
+  if (isFinite(rsi) && rsi < 35) scoreLong++;
+  if (isFinite(macd?.histogram) && macd?.histogram > 0) scoreLong++;
+  if (isFinite(ema20) && isFinite(ema50) && ema20 > ema50) scoreLong++;
+  if (isFinite(adx?.adx) && adx?.adx > 20) scoreLong++;
   if (isStrongCandle && candleUp) scoreLong++;
   if (isBullishEngulfing) scoreLong += 2;
 
   let scoreShort = 0;
-  if (rsi > 65) scoreShort++;
-  if (macd?.histogram < 0) scoreShort++;
-  if (ema20 < ema50) scoreShort++;
-  if (adx?.adx > 20) scoreShort++;
+  if (isFinite(rsi) && rsi > 65) scoreShort++;
+  if (isFinite(macd?.histogram) && macd?.histogram < 0) scoreShort++;
+  if (isFinite(ema20) && isFinite(ema50) && ema20 < ema50) scoreShort++;
+  if (isFinite(adx?.adx) && adx?.adx > 20) scoreShort++;
   if (isStrongCandle && candleDown) scoreShort++;
   if (isBearishEngulfing) scoreShort += 2;
 
@@ -289,8 +294,8 @@ const analyzeSignal = async () => {
   const stopLossLong = Math.min(...low.slice(-5));
   const stopLossShort = Math.max(...high.slice(-5));
 
-  const canLong = scoreLong >= 3 && price > ma200 && isBullishEngulfing;
-  const canShort = scoreShort >= 3 && price < ma200 && isBearishEngulfing;
+  const canLong = scoreLong >= 3 && isFinite(price) && isFinite(ma200) && price > ma200 && isBullishEngulfing;
+  const canShort = scoreShort >= 3 && isFinite(price) && isFinite(ma200) && price < ma200 && isBearishEngulfing;
 
   return { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing };
 };
@@ -302,10 +307,18 @@ setInterval(async () => {
   try {
     const nowTime = now();
     const result = await analyzeSignal();
-    const { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing } = result;
 
+    // Pastikan hasil analisis tidak kosong
+    if (Object.keys(result).length === 0) {
+      console.log("⏳ Analisis sinyal tidak dapat diselesaikan, menunggu data cukup.");
+      return;
+    }
+    
+    const { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing } = result;
+    
+    // Pengecekan akhir sebelum mencetak log
     if (!isFinite(price) || !isFinite(ma200)) {
-      console.log("❌ Data harga atau MA200 tidak valid. Menunggu data cukup...");
+      console.log("❌ Data harga atau MA200 tidak valid (NaN/Infinity). Menunggu data valid...");
       return;
     }
 
