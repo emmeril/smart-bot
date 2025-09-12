@@ -89,6 +89,7 @@ const formatUSD = (amount) =>
   exchange.decimalToPrecision(amount, "currency", 2, 2);
 
 const sendMsg = async (text) => {
+  if (isBacktest) return;
   try {
     const chats = await client.getChats();
     const adminPhone = process.env.ADMIN_PHONE;
@@ -184,6 +185,7 @@ client.on("disconnected", (reason) => {
 });
 
 client.on("message", async (msg) => {
+  if (isBacktest) return;
   try {
     const txt = msg.body.toLowerCase();
     if (!msg.fromMe && !msg.from.includes(process.env.ADMIN_PHONE)) return;
@@ -502,19 +504,22 @@ const analyzeSignal = async () => {
 
   const aggressive = db.entryMode === "agresif";
   const canLong = aggressive
-    ? scoreLong >= 3 && price > ma200 && roiTpLong >= db.tpPercent * 100
+    ? // ? scoreLong >= 3 && price > ma200 && roiTpLong >= db.tpPercent * 100
+      scoreLong >= 3 && roiTpLong >= db.tpPercent * 100
     : scoreLong >= 4 &&
       price > ma200 &&
       isBullishEngulfing &&
       roiTpLong >= db.tpPercent * 100;
 
   const canShort = aggressive
-    ? scoreShort >= 3 && price < ma200 && roiTpShort >= db.tpPercent * 100
+    ? // ? scoreShort >= 3 && price < ma200 && roiTpShort >= db.tpPercent * 100
+      scoreShort >= 3 && roiTpShort >= db.tpPercent * 100
     : scoreShort >= 4 &&
       price < ma200 &&
       isBearishEngulfing &&
       roiTpShort >= db.tpPercent * 100;
 
+  // Tambahkan baris ini untuk melihat skor sinyal
   console.log(
     `📊 Sinyal Saat Ini: Long Score=${scoreLong}, Short Score=${scoreShort}. Can Long=${canLong}, Can Short=${canShort}`
   );
@@ -523,6 +528,17 @@ const analyzeSignal = async () => {
 };
 
 const openPosition = async (type) => {
+  if (isBacktest) {
+    // Simulasi entry backtest
+    console.log(`✅ [BACKTEST] Posisi ${type.toUpperCase()} akan dibuka`);
+    db[type === "long" ? "positionLong" : "positionShort"] = {
+      entry: 1, //dummy value
+      amount: 1, //dummy value
+      entryTime: now(),
+    };
+    logTrade(type, 1, 1, 1, 1, "OPEN");
+    return;
+  }
   const nowTime = now();
   if (type === "long") db.lastLongEntryTime = nowTime;
   else db.lastShortEntryTime = nowTime;
@@ -607,6 +623,13 @@ const openPosition = async (type) => {
 };
 
 const closePosition = async (type, amount) => {
+  if (isBacktest) {
+    // Simulasi exit backtest
+    console.log(`❌ [BACKTEST] Posisi ${type.toUpperCase()} ditutup`);
+    db[type === "long" ? "positionLong" : "positionShort"] = null;
+    logTrade(type, 1, 1, 1, 1, "CLOSED");
+    return;
+  }
   const side = type === "long" ? "sell" : "buy";
   try {
     await exchange.createMarketOrder(db.pair, side, amount);
@@ -714,6 +737,7 @@ const checkTP_SL = async (type) => {
 };
 
 const syncPositionWithBinance = async () => {
+  if (isBacktest) return;
   const positions = await exchange.fetchPositions([db.pair]);
   const longPos = positions.find((p) => p.side === "long" && p.contracts > 0);
   const shortPos = positions.find((p) => p.side === "short" && p.contracts > 0);
@@ -734,6 +758,10 @@ let failCount = 0;
 const MAX_FAIL = 3;
 
 const testBinanceConnection = async () => {
+  if (isBacktest) {
+    isBinanceConnected = true;
+    return;
+  }
   try {
     await exchange.fetchTime();
     isBinanceConnected = true;
