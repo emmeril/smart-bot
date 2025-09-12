@@ -541,7 +541,7 @@ const openPosition = async (type) => {
     const price = await getPrice();
     if (!price) return;
     const { roiSlLong, roiSlShort } = await analyzeSignal();
-    const slPercent = type === "long" ? roiSlLong / 100 : roiSlShort / 100;
+    let slPercent = type === "long" ? roiSlLong / 100 : roiSlShort / 100;
     const stopLossUSDT = usdt * RISK_PER_TRADE;
     if (slPercent === 0) {
       console.warn("⚠️ SL Percent tidak valid. Menggunakan default.");
@@ -564,7 +564,7 @@ const openPosition = async (type) => {
 
     const market = await exchange.market(db.pair);
     const amountRaw = amountUSDT / price;
-    const amount = exchange.amountToPrecision(db.pair, amountRaw);
+    const amount = exchange.amountToPrecision(market.symbol, amountRaw);
 
     const order = await exchange.createMarketOrder(
       db.pair,
@@ -572,7 +572,7 @@ const openPosition = async (type) => {
       parseFloat(amount)
     );
     const entry = order.average;
-    const usedUSDT = amountUSDT;
+    const usedUSDT = amount * entry;
 
     const position = {
       entry,
