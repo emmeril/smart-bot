@@ -84,9 +84,9 @@ const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 const now = () => Date.now();
 const mins = (ms) => ms / 1000 / 60;
 const formatPrice = (price) =>
-  exchange.decimalToPrecision(price, "currency", 5, 5);
+  exchange.priceToPrecision(db.pair, price);
 const formatUSD = (amount) =>
-  exchange.decimalToPrecision(amount, "currency", 2, 2);
+  exchange.decimalToPrecision(amount, ccxt.ROUND_UP, 2, 2);
 
 const sendMsg = async (text) => {
   if (isBacktest) return;
