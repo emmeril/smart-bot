@@ -171,7 +171,7 @@ client.on("message", async (msg) => {
         console.log("📊 WA Command: Meminta status bot.");
         msg.reply(`📊 *Status Bot Sinyal*
 📌 Pair: *${db.pair}*
-📈 Harga Saat Ini: *${price.toFixed(4)}*
+📈 Harga Saat Ini: *${price ? price.toFixed(4) : "N/A"}*
 ---
 📈 *LONG*
 ⏱ Cooldown: ${cooldownLong}
@@ -224,13 +224,11 @@ const analyzeSignal = async () => {
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
 
-  // Pastikan data yang digunakan untuk indikator cukup
   if (close.length < 200) {
     console.log(`⚠️ Data close tidak mencukupi. Length: ${close.length}.`);
     return {};
   }
 
-  // Perhitungan Indikator
   const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
   const ema20 = EMA.calculate({ values: close.slice(-50), period: 20 }).pop();
   const ema50 = EMA.calculate({ values: close.slice(-50), period: 50 }).pop();
@@ -238,14 +236,13 @@ const analyzeSignal = async () => {
   const macd = MACD.calculate({ values: close.slice(-50), fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }).pop();
   const adx = ADX.calculate({ close: close.slice(-50), high: high.slice(-50), low: low.slice(-50), period: 14 }).pop();
 
-  // Tambahkan log untuk mengecek nilai indikator
   console.log(`Debug Indikator:
-    RSI: ${rsi}
-    EMA20: ${ema20}
-    EMA50: ${ema50}
-    MA200: ${ma200}
-    MACD Histogram: ${macd?.histogram}
-    ADX: ${adx?.adx}
+    RSI: ${isFinite(rsi) ? rsi : "N/A"}
+    EMA20: ${isFinite(ema20) ? ema20 : "N/A"}
+    EMA50: ${isFinite(ema50) ? ema50 : "N/A"}
+    MA200: ${isFinite(ma200) ? ma200 : "N/A"}
+    MACD Histogram: ${isFinite(macd?.histogram) ? macd.histogram : "N/A"}
+    ADX: ${isFinite(adx?.adx) ? adx.adx : "N/A"}
   `);
 
   const price = close.at(-1);
@@ -308,23 +305,22 @@ setInterval(async () => {
     const nowTime = now();
     const result = await analyzeSignal();
 
-    // Pastikan hasil analisis tidak kosong
     if (Object.keys(result).length === 0) {
       console.log("⏳ Analisis sinyal tidak dapat diselesaikan, menunggu data cukup.");
       return;
     }
     
     const { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing } = result;
-    
-    // Pengecekan akhir sebelum mencetak log
+
     if (!isFinite(price) || !isFinite(ma200)) {
       console.log("❌ Data harga atau MA200 tidak valid (NaN/Infinity). Menunggu data valid...");
       return;
     }
 
+    // PENTING: Menggunakan toFixed() untuk log agar tidak menyebabkan error.
     console.log(`📊 Sinyal Analisis:
-    LONG: ${canLong} (score ${canLong ? '>=3' : '<3'}, price ${formatPrice(price)} > MA200 ${formatPrice(ma200)}, engulfing ${isBullishEngulfing})
-    SHORT: ${canShort} (score ${canShort ? '>=3' : '<3'}, price ${formatPrice(price)} < MA200 ${formatPrice(ma200)}, engulfing ${isBearishEngulfing})
+    LONG: ${canLong} (score ${canLong ? '>=3' : '<3'}, price ${price.toFixed(5)} > MA200 ${ma200.toFixed(5)}, engulfing ${isBullishEngulfing})
+    SHORT: ${canShort} (score ${canShort ? '>=3' : '<3'}, price ${price.toFixed(5)} < MA200 ${ma200.toFixed(5)}, engulfing ${isBearishEngulfing})
     `);
 
     const readyLong = !db.lastLongEntryTime || mins(nowTime - db.lastLongEntryTime) >= COOLDOWN_MINUTES;
