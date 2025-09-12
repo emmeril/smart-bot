@@ -32,16 +32,16 @@ const db = fs.existsSync(dbPath)
       pair: "XRP/USDT:USDT",
       pairs: ["XRP/USDT:USDT"],
       balancePercent: 100,
-      positions: {}, // BARU: Objek untuk menyimpan posisi per-pair
-      lastEntryTime: {}, // BARU: Objek untuk menyimpan waktu entry terakhir per-pair
-      lossCount: {}, // BARU: Objek untuk menyimpan jumlah loss per-pair
-      winCount: {}, // BARU: Objek untuk menyimpan jumlah win per-pair
-      leverage: 10,
+      positions: {}, 
+      lastEntryTime: {}, 
+      lossCount: {}, 
+      winCount: {}, 
+      leverage: 2,
       marginMode: "isolated",
       totalProfit: 0,
       totalLoss: 0,
-      tpPercent: 0.03, // TP default
-      slPercent: 0.02, // SL default
+      tpPercent: 0.03, 
+      slPercent: 0.02, 
       entryMode: "agresif",
     };
 
