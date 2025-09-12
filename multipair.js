@@ -32,16 +32,16 @@ const db = fs.existsSync(dbPath)
       pair: "XRP/USDT:USDT",
       pairs: ["XRP/USDT:USDT"],
       balancePercent: 100,
-      positions: {}, 
-      lastEntryTime: {}, 
-      lossCount: {}, 
-      winCount: {}, 
-      leverage: 2,
+      positions: {}, // BARU: Objek untuk menyimpan posisi per-pair
+      lastEntryTime: {}, // BARU: Objek untuk menyimpan waktu entry terakhir per-pair
+      lossCount: {}, // BARU: Objek untuk menyimpan jumlah loss per-pair
+      winCount: {}, // BARU: Objek untuk menyimpan jumlah win per-pair
+      leverage: 10,
       marginMode: "isolated",
       totalProfit: 0,
       totalLoss: 0,
-      tpPercent: 0.03, 
-      slPercent: 0.02, 
+      tpPercent: 0.03, // TP default
+      slPercent: 0.02, // SL default
       entryMode: "agresif",
     };
 
@@ -205,7 +205,7 @@ client.on("message", async (msg) => {
           const allPairs = await exchange.fetchMarkets();
           // Filter yang diperbaiki: cari pasar yang linear (futures) dan quote-nya USDT
           const futurePairs = allPairs
-            .filter((market) => market.linear && market.quote === 'USDT')
+            .filter((market) => market.quote === 'USDT' && market.info.contractType === 'PERPETUAL')
             .map((market) => market.symbol);
 
           if (futurePairs.length > 0) {
@@ -216,7 +216,7 @@ client.on("message", async (msg) => {
             db.lossCount = {};
             saveDB();
             msg.reply(
-              `✅ Mode multi-pair diaktifkan. Bot akan mencari sinyal di ${futurePairs.length} pasangan futures USDT yang tersedia.`
+              `✅ Mode multi-pair diaktifkan. Bot akan mencari sinyal di ${futurePairs.length} pasangan perpetual futures USDT yang tersedia.`
             );
           } else {
             msg.reply(
