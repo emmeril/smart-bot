@@ -515,6 +515,11 @@ const analyzeSignal = async () => {
       isBearishEngulfing &&
       roiTpShort >= db.tpPercent * 100;
 
+  // Tambahkan baris ini untuk melihat skor sinyal
+  console.log(
+    `📊 Sinyal Saat Ini: Long Score=${scoreLong}, Short Score=${scoreShort}. Can Long=${canLong}, Can Short=${canShort}`
+  );
+
   return { canLong, canShort, roiTpLong, roiSlLong, roiTpShort, roiSlShort };
 };
 
