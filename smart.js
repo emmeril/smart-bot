@@ -198,6 +198,18 @@ ${posShort}`);
       }
     }
 
+     // Tambahkan blok ini
+    else if (txt.startsWith("!offset ")) {
+      const val = parseFloat(txt.split(" ")[1]);
+      if (isNaN(val) || val <= 0 || val > 10) {
+        msg.reply("⚠️ Format salah. Contoh: !offset 0.5");
+      } else {
+        db.trailingOffset = val / 100;
+        saveDB();
+        msg.reply(`✅ Trailing Offset diatur ke *${val}%*.`);
+      }
+    }
+
     // Set balance %
     else if (txt.startsWith("!balance ")) {
       const val = parseFloat(txt.split(" ")[1]);
