@@ -43,8 +43,8 @@ const db = fs.existsSync(dbPath)
       marginMode: "isolated",
       totalProfit: 0,
       totalLoss: 0,
-      tpPercent: 0.03, // TP default
-      slPercent: 0.02, // SL default
+      tpPercent: 0.03, 
+      slPercent: 0.02, 
       entryMode: "agresif",
     };
 
