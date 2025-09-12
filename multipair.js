@@ -88,7 +88,8 @@ const mins = (ms) => ms / 1000 / 60;
 
 // Perbaikan: Gunakan toFixed() yang lebih sederhana atau fungsi CCXT yang benar
 const formatPrice = (price, market) => exchange.priceToPrecision(market, price);
-const formatUSD = (amount, market) => exchange.amountToPrecision(market, amount, ccxt.ROUND_DOWN);
+const formatUSD = (amount, market) =>
+  exchange.amountToPrecision(market, amount, ccxt.ROUND_DOWN);
 
 const sendMsg = async (text) => {
   try {
@@ -204,7 +205,11 @@ client.on("message", async (msg) => {
         if (newPair === "ALL") {
           const allPairs = await exchange.fetchMarkets();
           const futurePairs = allPairs
-            .filter((market) => market.quote === 'USDT' && market.info.contractType === 'PERPETUAL')
+            .filter(
+              (market) =>
+                market.quote === "USDT" &&
+                market.info.contractType === "PERPETUAL"
+            )
             .map((market) => market.symbol);
 
           if (futurePairs.length > 0) {
@@ -253,43 +258,64 @@ client.on("message", async (msg) => {
 
           const roiLong =
             longPos && fltLong != null
-              ? ((fltLong / ((longPos.entry * longPos.amount) / db.leverage)) *
-                  100).toFixed(2)
+              ? (
+                  (fltLong / ((longPos.entry * longPos.amount) / db.leverage)) *
+                  100
+                ).toFixed(2)
               : null;
           const roiShort =
             shortPos && fltShort != null
-              ? ((fltShort / ((shortPos.entry * shortPos.amount) / db.leverage)) *
-                  100).toFixed(2)
+              ? (
+                  (fltShort /
+                    ((shortPos.entry * shortPos.amount) / db.leverage)) *
+                  100
+                ).toFixed(2)
               : null;
-          
+
           const market = await exchange.market(pair);
 
           const posLong = longPos
-            ? `\n*LONG*\n📍 Entry @ ${formatPrice(longPos.entry, market)}\n📊 Floating PnL: ${
-                fltLong >= 0 ? "+" : "-"
-              }$${Math.abs(fltLong).toFixed(4)} (${roiLong}%)`
+            ? `\n*LONG*\n📍 Entry @ ${formatPrice(
+                longPos.entry,
+                market
+              )}\n📊 Floating PnL: ${fltLong >= 0 ? "+" : "-"}$${Math.abs(
+                fltLong
+              ).toFixed(4)} (${roiLong}%)`
             : "";
 
           const posShort = shortPos
-            ? `\n*SHORT*\n📍 Entry @ ${formatPrice(shortPos.entry, market)}\n📊 Floating PnL: ${
-                fltShort >= 0 ? "+" : "-"
-              }$${Math.abs(fltShort).toFixed(4)} (${roiShort}%)`
+            ? `\n*SHORT*\n📍 Entry @ ${formatPrice(
+                shortPos.entry,
+                market
+              )}\n📊 Floating PnL: ${fltShort >= 0 ? "+" : "-"}$${Math.abs(
+                fltShort
+              ).toFixed(4)} (${roiShort}%)`
             : "";
 
           statusMsgs.push(
             `📊 *Status Trading di ${pair}*` +
-            `\n📈 Harga: *${price ? price.toFixed(4) : "N/A"}*` +
-            `\n🧭 Leverage: *${db.leverage}x* (${db.marginMode?.toUpperCase() || "?"})` +
-            `\n📎 Mode Entry: *${(db.entryMode || "DEFAULT").toUpperCase()}*` +
-            `\n\n✅ Wins: L:${db.winCount[pair]?.long || 0} | S:${db.winCount[pair]?.short || 0}` +
-            `\n❌ Losses: L:${db.lossCount[pair]?.long || 0} | S:${db.lossCount[pair]?.short || 0}` +
-            (posLong || posShort ? posLong + posShort : "\n\n🚫 Tidak ada posisi aktif.")
+              `\n📈 Harga: *${price ? price.toFixed(4) : "N/A"}*` +
+              `\n🧭 Leverage: *${db.leverage}x* (${
+                db.marginMode?.toUpperCase() || "?"
+              })` +
+              `\n📎 Mode Entry: *${(
+                db.entryMode || "DEFAULT"
+              ).toUpperCase()}*` +
+              `\n\n✅ Wins: L:${db.winCount[pair]?.long || 0} | S:${
+                db.winCount[pair]?.short || 0
+              }` +
+              `\n❌ Losses: L:${db.lossCount[pair]?.long || 0} | S:${
+                db.lossCount[pair]?.short || 0
+              }` +
+              (posLong || posShort
+                ? posLong + posShort
+                : "\n\n🚫 Tidak ada posisi aktif.")
           );
         }
 
         const net = (db.totalProfit || 0) - (db.totalLoss || 0);
         statusMsgs.push(
-            `\n---` +
+          `\n---` +
             `\n💹 *Global PNL Summary*` +
             `\n📈 Profit: $${(db.totalProfit || 0).toFixed(2)}` +
             `\n📉 Loss: $${(db.totalLoss || 0).toFixed(2)}` +
@@ -491,14 +517,16 @@ const analyzeSignal = async (pair) => {
 
   const aggressive = db.entryMode === "agresif";
   const canLong = aggressive
-    ? scoreLong >= 3 && price > ma200 && roiTpLong >= db.tpPercent * 100
+    ? // ? scoreLong >= 3 && price > ma200 && roiTpLong >= db.tpPercent * 100
+      scoreLong >= 3 && roiTpLong >= db.tpPercent * 100
     : scoreLong >= 4 &&
       price > ma200 &&
       isBullishEngulfing &&
       roiTpLong >= db.tpPercent * 100;
 
   const canShort = aggressive
-    ? scoreShort >= 3 && price < ma200 && roiTpShort >= db.tpPercent * 100
+    ? // ? scoreShort >= 3 && price < ma200 && roiTpShort >= db.tpPercent * 100
+      scoreShort >= 3 && roiTpShort >= db.tpPercent * 100
     : scoreShort >= 4 &&
       price < ma200 &&
       isBearishEngulfing &&
@@ -577,9 +605,9 @@ const openPosition = async (pair, type) => {
     saveDB();
 
     sendMsg(
-      `${type === "long" ? "🟢 LONG" : "🔴 SHORT"} dibuka di ${pair} @ ${formatPrice(
-        entry, market
-      )}\n` +
+      `${
+        type === "long" ? "🟢 LONG" : "🔴 SHORT"
+      } dibuka di ${pair} @ ${formatPrice(entry, market)}\n` +
         `💰 Ukuran: ~${formatUSD(usedUSDT, market)} USDT\n` +
         `🎯 TP: ${(db.tpPercent * 100).toFixed(2)}% | SL: ${(
           db.slPercent * 100
@@ -632,9 +660,10 @@ const checkTP_SL = async (pair, type) => {
     }
     saveDB();
     sendMsg(
-      `⚠️ ${type.toUpperCase()} STOP LOSS hit di ${pair} @ ${formatPrice(price, exchange.market(pair))} (ROI ${(
-        roi * 100
-      ).toFixed(2)}%)`
+      `⚠️ ${type.toUpperCase()} STOP LOSS hit di ${pair} @ ${formatPrice(
+        price,
+        exchange.market(pair)
+      )} (ROI ${(roi * 100).toFixed(2)}%)`
     );
     logTrade(type, entry, "-", "-", price, "sl_hit", amount, usedUSDT, pair);
     updatePnL(pair, type, entry, price, amount, "sl_hit");
@@ -672,9 +701,22 @@ const checkTP_SL = async (pair, type) => {
       db.lossCount[pair][type] = 0;
       saveDB();
       sendMsg(
-        `🏁 ${type.toUpperCase()} Trailing Stop HIT di ${pair} @ ${formatPrice(price, exchange.market(pair))}`
+        `🏁 ${type.toUpperCase()} Trailing Stop HIT di ${pair} @ ${formatPrice(
+          price,
+          exchange.market(pair)
+        )}`
       );
-      logTrade(type, entry, "-", "-", price, "trailing_exit", amount, usedUSDT, pair);
+      logTrade(
+        type,
+        entry,
+        "-",
+        "-",
+        price,
+        "trailing_exit",
+        amount,
+        usedUSDT,
+        pair
+      );
       updatePnL(pair, type, entry, price, amount, "trailing_exit");
       return;
     }
@@ -695,13 +737,26 @@ const checkTP_SL = async (pair, type) => {
     await closePosition(pair, type, amount);
     delete db.positions[pair][type];
     if (Object.keys(db.positions[pair]).length === 0) {
-        delete db.positions[pair];
+      delete db.positions[pair];
     }
     saveDB();
     sendMsg(
-      `⌛ ${type.toUpperCase()} auto-close (timeout) di ${pair} @ ${formatPrice(price, exchange.market(pair))}`
+      `⌛ ${type.toUpperCase()} auto-close (timeout) di ${pair} @ ${formatPrice(
+        price,
+        exchange.market(pair)
+      )}`
     );
-    logTrade(type, entry, "-", "-", price, "cut_timeout", amount, usedUSDT, pair);
+    logTrade(
+      type,
+      entry,
+      "-",
+      "-",
+      price,
+      "cut_timeout",
+      amount,
+      usedUSDT,
+      pair
+    );
     updatePnL(pair, type, entry, price, amount, "cut_timeout");
   }
 };
@@ -710,7 +765,9 @@ const syncPositionWithBinance = async (pairs) => {
   for (const pair of pairs) {
     const positions = await exchange.fetchPositions([pair]);
     const longPos = positions.find((p) => p.side === "long" && p.contracts > 0);
-    const shortPos = positions.find((p) => p.side === "short" && p.contracts > 0);
+    const shortPos = positions.find(
+      (p) => p.side === "short" && p.contracts > 0
+    );
 
     if (!db.positions[pair]) db.positions[pair] = {};
     if (!longPos && db.positions[pair]?.long) {
@@ -722,7 +779,7 @@ const syncPositionWithBinance = async (pairs) => {
       delete db.positions[pair].short;
     }
     if (Object.keys(db.positions[pair]).length === 0) {
-        delete db.positions[pair];
+      delete db.positions[pair];
     }
   }
   saveDB();
@@ -778,10 +835,12 @@ setInterval(async () => {
       if (!db.lossCount[pair]) db.lossCount[pair] = { long: 0, short: 0 };
       const canResetLong =
         db.lossCount[pair].long >= LOSS_LIMIT &&
-        mins(nowTime - (db.lastEntryTime[pair]?.long || 0)) >= LOSS_WAIT_MINUTES;
+        mins(nowTime - (db.lastEntryTime[pair]?.long || 0)) >=
+          LOSS_WAIT_MINUTES;
       const canResetShort =
         db.lossCount[pair].short >= LOSS_LIMIT &&
-        mins(nowTime - (db.lastEntryTime[pair]?.short || 0)) >= LOSS_WAIT_MINUTES;
+        mins(nowTime - (db.lastEntryTime[pair]?.short || 0)) >=
+          LOSS_WAIT_MINUTES;
 
       if (canResetLong) {
         db.lossCount[pair].long = 0;
@@ -819,11 +878,13 @@ setInterval(async () => {
 
       const readyLong =
         !longPos &&
-        mins(nowTime - (db.lastEntryTime[pair]?.long || 0)) >= COOLDOWN_MINUTES &&
+        mins(nowTime - (db.lastEntryTime[pair]?.long || 0)) >=
+          COOLDOWN_MINUTES &&
         db.lossCount[pair].long < LOSS_LIMIT;
       const readyShort =
         !shortPos &&
-        mins(nowTime - (db.lastEntryTime[pair]?.short || 0)) >= COOLDOWN_MINUTES &&
+        mins(nowTime - (db.lastEntryTime[pair]?.short || 0)) >=
+          COOLDOWN_MINUTES &&
         db.lossCount[pair].short < LOSS_LIMIT;
 
       if (canLong && readyLong) {
