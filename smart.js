@@ -692,9 +692,9 @@ const checkTP_SL = async (type) => {
     db[lossKey]++;
     saveDB();
     sendMsg(
-      `⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price} (ROI ${(
-        roi * 100
-      ).toFixed(2)}%)`
+      `⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${price.toFixed(
+        5
+      )} (ROI ${(roi * 100).toFixed(2)}%)`
     );
     logTrade(type, entry, "-", "-", price, "sl_hit", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "sl_hit");
@@ -703,17 +703,19 @@ const checkTP_SL = async (type) => {
 
   // 🎯 Aktifkan Trailing saat ROI >= TP
   if (!trailingActive && roi >= ROI_TP) {
-    const stopPrice =
-      type === "long" ? entry * (1 + offset) : entry * (1 - offset);
-
     position.trailingActive = true;
-    position.trailingStop = stopPrice;
+    position.trailingStop =
+      type === "long"
+        ? price * (1 - offset)
+        : price * (1 + offset);
     db[key] = position;
     saveDB();
     sendMsg(
       `🎯 ${type.toUpperCase()} ROI ${(roi * 100).toFixed(
         2
-      )}% hit. Trailing ON @ ${price} (Offset ${(offset * 100).toFixed(2)}%)`
+      )}% hit. Trailing ON @ ${price.toFixed(5)} (Offset ${(
+        offset * 100
+      ).toFixed(2)}%)`
     );
     return;
   }
@@ -728,18 +730,17 @@ const checkTP_SL = async (type) => {
       db[key] = null;
       db[lossKey] = 0;
       saveDB();
-      sendMsg(`🏁 ${type.toUpperCase()} Trailing Stop HIT @ ${price}`);
+      sendMsg(`🏁 ${type.toUpperCase()} Trailing Stop HIT @ ${price.toFixed(5)}`);
       logTrade(type, entry, "-", "-", price, "trailing_exit", amount, usedUSDT);
       updatePnL(type, entry, price, amount, "trailing_exit");
       return;
     }
 
-    // 🔁 Update trailing stop berdasarkan entry + offset sesuai harga terbaru
-    const dynamicOffset = offset * (roi / ROI_TP || 1); // semakin tinggi ROI, semakin tinggi offset
+    // 🔁 Update trailing stop berdasarkan harga tertinggi/terendah terbaru
     const newStop =
       type === "long"
-        ? entry * (1 + dynamicOffset)
-        : entry * (1 - dynamicOffset);
+        ? price * (1 - offset)
+        : price * (1 + offset);
 
     position.trailingStop =
       type === "long"
@@ -756,7 +757,7 @@ const checkTP_SL = async (type) => {
     db[key] = null;
     db[lossKey]++;
     saveDB();
-    sendMsg(`⌛ ${type.toUpperCase()} auto-close (timeout) @ ${price}`);
+    sendMsg(`⌛ ${type.toUpperCase()} auto-close (timeout) @ ${price.toFixed(5)}`);
     logTrade(type, entry, "-", "-", price, "cut_timeout", amount, usedUSDT);
     updatePnL(type, entry, price, amount, "cut_timeout");
   }
