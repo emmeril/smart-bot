@@ -30,28 +30,26 @@ const db = fs.existsSync(dbPath)
   ? JSON.parse(fs.readFileSync(dbPath))
   : {
       pair: "XRP/USDT:USDT",
-      pairs: ["XRP/USDT:USDT"],
       balancePercent: 100,
-      positions: {},
-      lastEntryTime: {},
-      lossCount: {},
-      winCount: {},
+      positionLong: null,
+      positionShort: null,
+      lastLongEntryTime: 0,
+      lastShortEntryTime: 0,
+      lossCountLong: 0,
+      lossCountShort: 0,
+      winCountLong: 0,
+      winCountShort: 0,
       leverage: 10,
       marginMode: "isolated",
       totalProfit: 0,
       totalLoss: 0,
-      tpPercent: 0.03,
-      slPercent: 0.02,
+      tpPercent: 0.03, 
+      slPercent: 0.02, 
       entryMode: "agresif",
     };
 
 db.tpPercent ??= 0.03;
 db.slPercent ??= 0.02;
-db.positions ??= {};
-db.lastEntryTime ??= {};
-db.lossCount ??= {};
-db.winCount ??= {};
-db.pairs ??= [db.pair];
 
 const exchange = new ccxt.binance({
   apiKey: isBacktest ? undefined : process.env.API_KEY,
@@ -85,11 +83,10 @@ app.listen(serverPort, () =>
 const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 const now = () => Date.now();
 const mins = (ms) => ms / 1000 / 60;
-
-// Perbaikan: Gunakan toFixed() yang lebih sederhana atau fungsi CCXT yang benar
-const formatPrice = (price, market) => exchange.priceToPrecision(market, price);
-const formatUSD = (amount, market) =>
-  exchange.amountToPrecision(market, amount, ccxt.ROUND_DOWN);
+const formatPrice = (price) =>
+  exchange.decimalToPrecision(price, "currency", 5, 5);
+const formatUSD = (amount) =>
+  exchange.decimalToPrecision(amount, "currency", 2, 2);
 
 const sendMsg = async (text) => {
   try {
@@ -108,17 +105,17 @@ const sendMsg = async (text) => {
   }
 };
 
-const updatePnL = (pair, type, entry, exit, amount, result) => {
+const updatePnL = (type, entry, exit, amount, result) => {
   const diff = type === "long" ? exit - entry : entry - exit;
   const pnl = diff * amount;
   if (result === "sl_hit" || result === "cut_timeout") {
     db.totalLoss += Math.abs(pnl);
-    if (!db.lossCount[pair]) db.lossCount[pair] = { long: 0, short: 0 };
-    db.lossCount[pair][type]++;
+    if (type === "long") db.lossCountLong++;
+    else db.lossCountShort++;
   } else {
     db.totalProfit += pnl;
-    if (!db.winCount[pair]) db.winCount[pair] = { long: 0, short: 0 };
-    db.winCount[pair][type]++;
+    if (type === "long") db.winCountLong++;
+    else db.winCountShort++;
   }
   saveDB();
 };
@@ -131,10 +128,11 @@ const logTrade = (
   exitPrice,
   result,
   amount = 0,
-  usedUSDT = 0,
-  pair
+  usedUSDT = 0
 ) => {
-  const row = `${new Date().toISOString()},${pair},${type},${entry},${tp},${sl},${result},${exitPrice},${amount},${usedUSDT}\n`;
+  const row = `${new Date().toISOString()},${
+    db.pair
+  },${type},${entry},${tp},${sl},${result},${exitPrice},${amount},${usedUSDT}\n`;
   if (!fs.existsSync(logPath)) {
     fs.writeFileSync(
       logPath,
@@ -144,20 +142,20 @@ const logTrade = (
   fs.appendFileSync(logPath, row);
 };
 
-const getPrice = async (pair) => {
+const getPrice = async () => {
   try {
-    const ticker = await exchange.fetchTicker(pair);
+    const ticker = await exchange.fetchTicker(db.pair);
     return ticker.last;
   } catch (e) {
-    console.error(`❌ Gagal fetch harga untuk ${pair}:`, e.message);
+    console.error("❌ Gagal fetch harga:", e.message);
     return null;
   }
 };
 
-const calcFloatingPnl = async (pair, type) => {
-  if (!db.positions[pair] || !db.positions[pair][type]) return null;
-  const position = db.positions[pair][type];
-  const price = await getPrice(pair);
+const calcFloatingPnl = async (type) => {
+  const position = type === "long" ? db.positionLong : db.positionShort;
+  if (!position) return null;
+  const price = await getPrice();
   if (!price) return null;
   const diff =
     type === "long" ? price - position.entry : position.entry - price;
@@ -190,139 +188,97 @@ client.on("message", async (msg) => {
     const txt = msg.body.toLowerCase();
     if (!msg.fromMe && !msg.from.includes(process.env.ADMIN_PHONE)) return;
 
-    // Command handling
+    // Command handling (gunakan switch case untuk struktur lebih rapi)
     const [command, ...args] = txt.split(" ");
     switch (command) {
       case "!pair": {
         const newPair = args[0]?.toUpperCase();
-        if (!newPair) {
-          msg.reply(
-            "⚠️ Format salah. Contoh: !pair BTC/USDT:USDT atau !pair all"
-          );
-          return;
-        }
-
-        if (newPair === "ALL") {
-          const allPairs = await exchange.fetchMarkets();
-          const futurePairs = allPairs
-            .filter(
-              (market) =>
-                market.quote === "USDT" &&
-                market.info.contractType === "PERPETUAL"
-            )
-            .map((market) => market.symbol);
-
-          if (futurePairs.length > 0) {
-            db.pairs = futurePairs;
-            db.pair = "ALL";
-            db.positions = {};
-            db.lastEntryTime = {};
-            db.lossCount = {};
-            saveDB();
-            msg.reply(
-              `✅ Mode multi-pair diaktifkan. Bot akan mencari sinyal di ${futurePairs.length} pasangan perpetual futures USDT yang tersedia.`
-            );
-          } else {
-            msg.reply(
-              "❌ Gagal menemukan pasangan futures USDT. Pastikan koneksi ke bursa stabil."
-            );
-          }
-        } else {
-          db.pair = newPair;
-          db.pairs = [newPair];
-          db.positions = {};
-          db.lastEntryTime = {};
-          db.lossCount = {};
-          saveDB();
-          msg.reply(`✅ Pair diubah ke *${db.pair}*.`);
-        }
+        if (!newPair)
+          return msg.reply("⚠️ Format salah. Contoh: !pair BTC/USDT:USDT");
+        db.pair = newPair;
+        db.positionLong = null;
+        db.positionShort = null;
+        db.lastLongEntryTime = 0;
+        db.lastShortEntryTime = 0;
+        saveDB();
+        msg.reply(`✅ Pair diubah ke *${db.pair}*.`);
         break;
       }
       case "!status": {
-        const statusMsgs = [];
-        const pairsToDisplay =
-          db.pair === "ALL"
-            ? Object.keys(db.positions)
-            : [db.pair].filter((p) => p !== "ALL");
-        if (pairsToDisplay.length === 0) {
-          statusMsgs.push("📌 Pair: *" + db.pair + "*");
-          statusMsgs.push("🚫 Belum ada posisi aktif.");
-        }
-        for (const pair of pairsToDisplay) {
-          const price = await getPrice(pair);
-          const longPos = db.positions[pair]?.long;
-          const shortPos = db.positions[pair]?.short;
+        const price = await getPrice();
+        const cooldownLong = db.lastLongEntryTime
+          ? Math.round(mins(now() - db.lastLongEntryTime)) + "m"
+          : "Belum pernah entry";
+        const cooldownShort = db.lastShortEntryTime
+          ? Math.round(mins(now() - db.lastShortEntryTime)) + "m"
+          : "Belum pernah entry";
 
-          const fltLong = await calcFloatingPnl(pair, "long");
-          const fltShort = await calcFloatingPnl(pair, "short");
+        const fltLong = await calcFloatingPnl("long");
+        const fltShort = await calcFloatingPnl("short");
 
-          const roiLong =
-            longPos && fltLong != null
-              ? (
-                  (fltLong / ((longPos.entry * longPos.amount) / db.leverage)) *
-                  100
-                ).toFixed(2)
-              : null;
-          const roiShort =
-            shortPos && fltShort != null
-              ? (
-                  (fltShort /
-                    ((shortPos.entry * shortPos.amount) / db.leverage)) *
-                  100
-                ).toFixed(2)
-              : null;
+        const roiLong =
+          db.positionLong && fltLong != null
+            ? (
+                (fltLong /
+                  ((db.positionLong.entry * db.positionLong.amount) /
+                    db.leverage)) *
+                100
+              ).toFixed(2)
+            : null;
+        const roiShort =
+          db.positionShort && fltShort != null
+            ? (
+                (fltShort /
+                  ((db.positionShort.entry * db.positionShort.amount) /
+                    db.leverage)) *
+                100
+              ).toFixed(2)
+            : null;
 
-          const market = await exchange.market(pair);
+        const trailingLong = db.positionLong?.trailingActive
+          ? `\n🔁 Trailing aktif @ ${db.positionLong.trailingStop.toFixed(4)}`
+          : "";
+        const trailingShort = db.positionShort?.trailingActive
+          ? `\n🔁 Trailing aktif @ ${db.positionShort.trailingStop.toFixed(4)}`
+          : "";
 
-          const posLong = longPos
-            ? `\n*LONG*\n📍 Entry @ ${formatPrice(
-                longPos.entry,
-                market
-              )}\n📊 Floating PnL: ${fltLong >= 0 ? "+" : "-"}$${Math.abs(
-                fltLong
-              ).toFixed(4)} (${roiLong}%)`
-            : "";
+        const posLong = db.positionLong
+          ? `📍 Entry @ ${db.positionLong.entry.toFixed(4)}\n🎯 ROI TP: ${(
+              db.tpPercent * 100
+            ).toFixed(1)}% | SL: ${(db.slPercent * 100).toFixed(
+              1
+            )}%\n📊 Floating PnL: ${fltLong >= 0 ? "+" : "-"}$${Math.abs(
+              fltLong
+            ).toFixed(4)} (${roiLong}%)${trailingLong}`
+          : "🚫 Belum ada";
 
-          const posShort = shortPos
-            ? `\n*SHORT*\n📍 Entry @ ${formatPrice(
-                shortPos.entry,
-                market
-              )}\n📊 Floating PnL: ${fltShort >= 0 ? "+" : "-"}$${Math.abs(
-                fltShort
-              ).toFixed(4)} (${roiShort}%)`
-            : "";
+        const posShort = db.positionShort
+          ? `📍 Entry @ ${db.positionShort.entry.toFixed(4)}\n🎯 ROI TP: ${(
+              db.tpPercent * 100
+            ).toFixed(1)}% | SL: ${(db.slPercent * 100).toFixed(
+              1
+            )}%\n📊 Floating PnL: ${fltShort >= 0 ? "+" : "-"}$${Math.abs(
+              fltShort
+            ).toFixed(4)} (${roiShort}%)${trailingShort}`
+          : "🚫 Belum ada";
 
-          statusMsgs.push(
-            `📊 *Status Trading di ${pair}*` +
-              `\n📈 Harga: *${price ? price.toFixed(4) : "N/A"}*` +
-              `\n🧭 Leverage: *${db.leverage}x* (${
-                db.marginMode?.toUpperCase() || "?"
-              })` +
-              `\n📎 Mode Entry: *${(
-                db.entryMode || "DEFAULT"
-              ).toUpperCase()}*` +
-              `\n\n✅ Wins: L:${db.winCount[pair]?.long || 0} | S:${
-                db.winCount[pair]?.short || 0
-              }` +
-              `\n❌ Losses: L:${db.lossCount[pair]?.long || 0} | S:${
-                db.lossCount[pair]?.short || 0
-              }` +
-              (posLong || posShort
-                ? posLong + posShort
-                : "\n\n🚫 Tidak ada posisi aktif.")
-          );
-        }
+        msg.reply(`📊 *Status Bot*
+📌 Pair: *${db.pair}*
+📈 Harga Saat Ini: *${price.toFixed(4)}*
+🧭 Leverage: *${db.leverage}x* (${db.marginMode?.toUpperCase() || "?"})
+📎 Mode Entry: *${(db.entryMode || "DEFAULT").toUpperCase()}*
 
-        const net = (db.totalProfit || 0) - (db.totalLoss || 0);
-        statusMsgs.push(
-          `\n---` +
-            `\n💹 *Global PNL Summary*` +
-            `\n📈 Profit: $${(db.totalProfit || 0).toFixed(2)}` +
-            `\n📉 Loss: $${(db.totalLoss || 0).toFixed(2)}` +
-            `\n📊 Net: $${net.toFixed(2)} ${net >= 0 ? "🟢" : "🔴"}`
-        );
+📈 *LONG*
+⏱ Cooldown: ${cooldownLong}
+✅ Profit Count: ${db.winCountLong || 0}
+❌ Loss Count: ${db.lossCountLong}
+${posLong}
 
-        msg.reply(statusMsgs.join("\n\n"));
+📉 *SHORT*
+⏱ Cooldown: ${cooldownShort}
+✅ Profit Count: ${db.winCountShort || 0}
+❌ Loss Count: ${db.lossCountShort}
+${posShort}`);
         break;
       }
       case "!leverage": {
@@ -424,8 +380,8 @@ app.get("/qr", async (req, res) => {
 // -----------------------------------------------------------------------------
 // 5. LOGIKA INTI BOT (Optimasi)
 // -----------------------------------------------------------------------------
-const analyzeSignal = async (pair) => {
-  const ohlcv = await exchange.fetchOHLCV(pair, "15m", undefined, 200);
+const analyzeSignal = async () => {
+  const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
   const close = ohlcv.map((c) => c[4]);
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
@@ -515,47 +471,77 @@ const analyzeSignal = async (pair) => {
   const roiTpShort = ((price - targetShort) / margin) * 100;
   const roiSlShort = ((stopLossShort - price) / margin) * 100;
 
+  let updated = false;
+  if (
+    (db.positionLong && Math.abs(roiTpLong / 100 - db.tpPercent) > 0.001) ||
+    Math.abs(roiSlLong / 100 - db.slPercent) > 0.001
+  ) {
+    db.tpPercent = +(roiTpLong / 100).toFixed(4);
+    db.slPercent = +(roiSlLong / 100).toFixed(4);
+    updated = true;
+    console.log(
+      `💾 Update TP/SL LONG → TP ${(db.tpPercent * 100).toFixed(2)}% | SL ${(
+        db.slPercent * 100
+      ).toFixed(2)}%`
+    );
+  }
+  if (
+    (db.positionShort && Math.abs(roiTpShort / 100 - db.tpPercent) > 0.001) ||
+    Math.abs(roiSlShort / 100 - db.slPercent) > 0.001
+  ) {
+    db.tpPercent = +(roiTpShort / 100).toFixed(4);
+    db.slPercent = +(roiSlShort / 100).toFixed(4);
+    updated = true;
+    console.log(
+      `💾 Update TP/SL SHORT → TP ${(db.tpPercent * 100).toFixed(2)}% | SL ${(
+        db.slPercent * 100
+      ).toFixed(2)}%`
+    );
+  }
+  if (updated) saveDB();
+
   const aggressive = db.entryMode === "agresif";
   const canLong = aggressive
-    ? // ? scoreLong >= 3 && price > ma200 && roiTpLong >= db.tpPercent * 100
-      scoreLong >= 3 && roiTpLong >= db.tpPercent * 100
+    ? scoreLong >= 3 && price > ma200 && roiTpLong >= db.tpPercent * 100
     : scoreLong >= 4 &&
       price > ma200 &&
       isBullishEngulfing &&
       roiTpLong >= db.tpPercent * 100;
 
   const canShort = aggressive
-    ? // ? scoreShort >= 3 && price < ma200 && roiTpShort >= db.tpPercent * 100
-      scoreShort >= 3 && roiTpShort >= db.tpPercent * 100
+    ? scoreShort >= 3 && price < ma200 && roiTpShort >= db.tpPercent * 100
     : scoreShort >= 4 &&
       price < ma200 &&
       isBearishEngulfing &&
       roiTpShort >= db.tpPercent * 100;
 
+  // Tambahkan baris ini untuk melihat skor sinyal
+  console.log(
+    `📊 Sinyal Saat Ini: Long Score=${scoreLong}, Short Score=${scoreShort}. Can Long=${canLong}, Can Short=${canShort}`
+  );
+
   return { canLong, canShort, roiTpLong, roiSlLong, roiTpShort, roiSlShort };
 };
 
-const openPosition = async (pair, type) => {
+const openPosition = async (type) => {
   const nowTime = now();
-  if (!db.lastEntryTime[pair]) db.lastEntryTime[pair] = { long: 0, short: 0 };
-  db.lastEntryTime[pair][type] = nowTime;
+  if (type === "long") db.lastLongEntryTime = nowTime;
+  else db.lastShortEntryTime = nowTime;
 
   try {
-    const market = await exchange.market(pair);
-
-    await exchange.setLeverage(db.leverage, pair);
+    await exchange.setLeverage(db.leverage, db.pair);
     await exchange
-      .setMarginMode(db.marginMode, pair)
+      .setMarginMode(db.marginMode, db.pair)
       .catch((e) => console.log("⚠️ Gagal set margin mode:", e.message));
 
     const side = type === "long" ? "buy" : "sell";
     const balance = await exchange.fetchBalance();
     const usdt = balance.total.USDT;
 
-    const price = await getPrice(pair);
+    const price = await getPrice();
     if (!price) return;
-    const { roiSlLong, roiSlShort } = await analyzeSignal(pair);
-    const slPercent = type === "long" ? roiSlLong / 100 : roiSlShort / 100;
+    const { roiSlLong, roiSlShort } = await analyzeSignal();
+    let slPercent = type === "long" ? roiSlLong / 100 : roiSlShort / 100;
     const stopLossUSDT = usdt * RISK_PER_TRADE;
     if (slPercent === 0) {
       console.warn("⚠️ SL Percent tidak valid. Menggunakan default.");
@@ -567,7 +553,7 @@ const openPosition = async (pair, type) => {
       return;
     }
 
-    const ticker = await exchange.fetchTicker(pair);
+    const ticker = await exchange.fetchTicker(db.pair);
     const spread = Math.abs(ticker.ask - ticker.bid) / ticker.last;
     if (spread > SPREAD_FILTER) {
       console.log(
@@ -576,16 +562,17 @@ const openPosition = async (pair, type) => {
       return;
     }
 
+    const market = await exchange.market(db.pair);
     const amountRaw = amountUSDT / price;
-    const amount = exchange.amountToPrecision(pair, amountRaw, ccxt.ROUND_DOWN);
+    const amount = exchange.amountToPrecision(market.symbol, amountRaw);
 
     const order = await exchange.createMarketOrder(
-      pair,
+      db.pair,
       side,
       parseFloat(amount)
     );
     const entry = order.average;
-    const usedUSDT = amountUSDT;
+    const usedUSDT = amount * entry;
 
     const position = {
       entry,
@@ -600,41 +587,42 @@ const openPosition = async (pair, type) => {
       usedUSDT: parseFloat(usedUSDT.toFixed(2)),
     };
 
-    if (!db.positions[pair]) db.positions[pair] = {};
-    db.positions[pair][type] = position;
+    if (type === "long") db.positionLong = position;
+    else db.positionShort = position;
+
     saveDB();
 
     sendMsg(
-      `${
-        type === "long" ? "🟢 LONG" : "🔴 SHORT"
-      } dibuka di ${pair} @ ${formatPrice(entry, market)}\n` +
-        `💰 Ukuran: ~${formatUSD(usedUSDT, market)} USDT\n` +
+      `${type === "long" ? "🟢 LONG" : "🔴 SHORT"} dibuka @ ${formatPrice(
+        entry
+      )}\n` +
+        `💰 Ukuran: ~${formatUSD(usedUSDT)} USDT\n` +
         `🎯 TP: ${(db.tpPercent * 100).toFixed(2)}% | SL: ${(
           db.slPercent * 100
         ).toFixed(2)}%`
     );
   } catch (e) {
     console.error("❌ Gagal buka posisi:", e.message);
-    sendMsg(`❌ Gagal buka posisi ${type} di ${pair}: ${e.message}`);
+    sendMsg(`❌ Gagal buka posisi ${type}: ${e.message}`);
   }
 };
 
-const closePosition = async (pair, type, amount) => {
+const closePosition = async (type, amount) => {
   const side = type === "long" ? "sell" : "buy";
   try {
-    await exchange.createMarketOrder(pair, side, amount);
-    console.log(`✅ Posisi ${type.toUpperCase()} di ${pair} ditutup`);
+    await exchange.createMarketOrder(db.pair, side, amount);
+    console.log(`✅ Posisi ${type.toUpperCase()} ditutup (side: ${side})`);
   } catch (e) {
-    console.error(`❌ Gagal close posisi ${type} di ${pair}:`, e.message);
-    await sendMsg(`❌ Gagal close posisi ${type} di ${pair}: ${e.message}`);
+    console.error(`❌ Gagal close posisi ${type}:`, e.message);
+    await sendMsg(`❌ Gagal close posisi ${type}: ${e.message}`);
   }
 };
 
-const checkTP_SL = async (pair, type) => {
-  if (!db.positions[pair] || !db.positions[pair][type]) return;
-  const position = db.positions[pair][type];
+const checkTP_SL = async (type) => {
+  const position = type === "long" ? db.positionLong : db.positionShort;
+  if (!position) return;
 
-  const price = await getPrice(pair);
+  const price = await getPrice();
   if (!price) return;
   const { entry, entryTime, amount, usedUSDT, trailingActive, trailingStop } =
     position;
@@ -653,20 +641,16 @@ const checkTP_SL = async (pair, type) => {
 
   // ❌ Stop Loss
   if (roi <= -ROI_SL) {
-    await closePosition(pair, type, amount);
-    delete db.positions[pair][type];
-    if (Object.keys(db.positions[pair]).length === 0) {
-      delete db.positions[pair];
-    }
+    await closePosition(type, amount);
+    db[type === "long" ? "positionLong" : "positionShort"] = null;
     saveDB();
     sendMsg(
-      `⚠️ ${type.toUpperCase()} STOP LOSS hit di ${pair} @ ${formatPrice(
-        price,
-        exchange.market(pair)
-      )} (ROI ${(roi * 100).toFixed(2)}%)`
+      `⚠️ ${type.toUpperCase()} STOP LOSS hit @ ${formatPrice(price)} (ROI ${(
+        roi * 100
+      ).toFixed(2)}%)`
     );
-    logTrade(type, entry, "-", "-", price, "sl_hit", amount, usedUSDT, pair);
-    updatePnL(pair, type, entry, price, amount, "sl_hit");
+    logTrade(type, entry, "-", "-", price, "sl_hit", amount, usedUSDT);
+    updatePnL(type, entry, price, amount, "sl_hit");
     return;
   }
 
@@ -678,11 +662,12 @@ const checkTP_SL = async (pair, type) => {
         : price * (1 + TRAILING_OFFSET);
     position.trailingActive = true;
     position.trailingStop = stopPrice;
+    db[type === "long" ? "positionLong" : "positionShort"] = position;
     saveDB();
     sendMsg(
-      `🎯 ${type.toUpperCase()} di ${pair} ROI ${(roi * 100).toFixed(
+      `🎯 ${type.toUpperCase()} ROI ${(roi * 100).toFixed(
         2
-      )}% hit. Trailing ON @ ${formatPrice(stopPrice, exchange.market(pair))}`
+      )}% hit. Trailing ON @ ${formatPrice(stopPrice)}`
     );
     return;
   }
@@ -692,32 +677,15 @@ const checkTP_SL = async (pair, type) => {
     const stopHit =
       type === "long" ? price <= trailingStop : price >= trailingStop;
     if (stopHit) {
-      await closePosition(pair, type, amount);
-      delete db.positions[pair][type];
-      if (Object.keys(db.positions[pair]).length === 0) {
-        delete db.positions[pair];
-      }
-      if (!db.lossCount[pair]) db.lossCount[pair] = { long: 0, short: 0 };
-      db.lossCount[pair][type] = 0;
+      await closePosition(type, amount);
+      db[type === "long" ? "positionLong" : "positionShort"] = null;
+      db[type === "long" ? "lossCountLong" : "lossCountShort"] = 0;
       saveDB();
       sendMsg(
-        `🏁 ${type.toUpperCase()} Trailing Stop HIT di ${pair} @ ${formatPrice(
-          price,
-          exchange.market(pair)
-        )}`
+        `🏁 ${type.toUpperCase()} Trailing Stop HIT @ ${formatPrice(price)}`
       );
-      logTrade(
-        type,
-        entry,
-        "-",
-        "-",
-        price,
-        "trailing_exit",
-        amount,
-        usedUSDT,
-        pair
-      );
-      updatePnL(pair, type, entry, price, amount, "trailing_exit");
+      logTrade(type, entry, "-", "-", price, "trailing_exit", amount, usedUSDT);
+      updatePnL(type, entry, price, amount, "trailing_exit");
       return;
     }
     // OPTIMASI: Update trailing stop agar lebih responsif
@@ -729,58 +697,34 @@ const checkTP_SL = async (pair, type) => {
       type === "long"
         ? Math.max(position.trailingStop, newStop)
         : Math.min(position.trailingStop, newStop);
+    db[type === "long" ? "positionLong" : "positionShort"] = position;
     saveDB();
   }
 
   // ⏱ Timeout (hanya jika belum trailing aktif)
   if (timeExpired && !trailingActive) {
-    await closePosition(pair, type, amount);
-    delete db.positions[pair][type];
-    if (Object.keys(db.positions[pair]).length === 0) {
-      delete db.positions[pair];
-    }
+    await closePosition(type, amount);
+    db[type === "long" ? "positionLong" : "positionShort"] = null;
     saveDB();
     sendMsg(
-      `⌛ ${type.toUpperCase()} auto-close (timeout) di ${pair} @ ${formatPrice(
-        price,
-        exchange.market(pair)
-      )}`
+      `⌛ ${type.toUpperCase()} auto-close (timeout) @ ${formatPrice(price)}`
     );
-    logTrade(
-      type,
-      entry,
-      "-",
-      "-",
-      price,
-      "cut_timeout",
-      amount,
-      usedUSDT,
-      pair
-    );
-    updatePnL(pair, type, entry, price, amount, "cut_timeout");
+    logTrade(type, entry, "-", "-", price, "cut_timeout", amount, usedUSDT);
+    updatePnL(type, entry, price, amount, "cut_timeout");
   }
 };
 
-const syncPositionWithBinance = async (pairs) => {
-  for (const pair of pairs) {
-    const positions = await exchange.fetchPositions([pair]);
-    const longPos = positions.find((p) => p.side === "long" && p.contracts > 0);
-    const shortPos = positions.find(
-      (p) => p.side === "short" && p.contracts > 0
-    );
-
-    if (!db.positions[pair]) db.positions[pair] = {};
-    if (!longPos && db.positions[pair]?.long) {
-      console.log(`🔄 LONG di ${pair} sudah ditutup manual. Sinkronisasi...`);
-      delete db.positions[pair].long;
-    }
-    if (!shortPos && db.positions[pair]?.short) {
-      console.log(`🔄 SHORT di ${pair} sudah ditutup manual. Sinkronisasi...`);
-      delete db.positions[pair].short;
-    }
-    if (Object.keys(db.positions[pair]).length === 0) {
-      delete db.positions[pair];
-    }
+const syncPositionWithBinance = async () => {
+  const positions = await exchange.fetchPositions([db.pair]);
+  const longPos = positions.find((p) => p.side === "long" && p.contracts > 0);
+  const shortPos = positions.find((p) => p.side === "short" && p.contracts > 0);
+  if (!longPos && db.positionLong) {
+    console.log("🔄 LONG sudah ditutup manual. Sinkronisasi...");
+    db.positionLong = null;
+  }
+  if (!shortPos && db.positionShort) {
+    console.log("🔄 SHORT sudah ditutup manual. Sinkronisasi...");
+    db.positionShort = null;
   }
   saveDB();
 };
@@ -820,82 +764,64 @@ setInterval(async () => {
     await testBinanceConnection();
     if (!isBinanceConnected) return;
 
-    const pairsToAnalyze = db.pair === "ALL" ? db.pairs : [db.pair];
-    await syncPositionWithBinance(pairsToAnalyze);
+    await syncPositionWithBinance();
+    await checkTP_SL("long");
+    await checkTP_SL("short");
 
-    for (const pair of pairsToAnalyze) {
-      console.log(`⏳ Menganalisis ${pair}...`);
-      const nowTime = now();
-      const longPos = db.positions[pair]?.long;
-      const shortPos = db.positions[pair]?.short;
+    const nowTime = now();
 
-      if (longPos) await checkTP_SL(pair, "long");
-      if (shortPos) await checkTP_SL(pair, "short");
+    const canResetLong =
+      db.lossCountLong >= LOSS_LIMIT &&
+      mins(nowTime - db.lastLongEntryTime) >= LOSS_WAIT_MINUTES;
+    const canResetShort =
+      db.lossCountShort >= LOSS_LIMIT &&
+      mins(nowTime - db.lastShortEntryTime) >= LOSS_WAIT_MINUTES;
 
-      if (!db.lossCount[pair]) db.lossCount[pair] = { long: 0, short: 0 };
-      const canResetLong =
-        db.lossCount[pair].long >= LOSS_LIMIT &&
-        mins(nowTime - (db.lastEntryTime[pair]?.long || 0)) >=
-          LOSS_WAIT_MINUTES;
-      const canResetShort =
-        db.lossCount[pair].short >= LOSS_LIMIT &&
-        mins(nowTime - (db.lastEntryTime[pair]?.short || 0)) >=
-          LOSS_WAIT_MINUTES;
-
-      if (canResetLong) {
-        db.lossCount[pair].long = 0;
-        saveDB();
-        console.log(`🔁 Reset lossCountLong untuk ${pair}`);
-      }
-      if (canResetShort) {
-        db.lossCount[pair].short = 0;
-        saveDB();
-        console.log(`🔁 Reset lossCountShort untuk ${pair}`);
-      }
-
-      const { canLong, canShort } = await analyzeSignal(pair);
-
-      if (canLong && shortPos) {
-        console.log(`🔁 Close SHORT di ${pair} & ganti ke LONG`);
-        await closePosition(pair, "short", shortPos.amount);
-        delete db.positions[pair].short;
-        db.lossCount[pair].short = 0;
-        saveDB();
-        sendMsg(`🔁 Close SHORT di ${pair} & ganti ke LONG`);
-        await openPosition(pair, "long");
-        return;
-      }
-      if (canShort && longPos) {
-        console.log(`🔁 Close LONG di ${pair} & ganti ke SHORT`);
-        await closePosition(pair, "long", longPos.amount);
-        delete db.positions[pair].long;
-        db.lossCount[pair].long = 0;
-        saveDB();
-        sendMsg(`🔁 Close LONG di ${pair} & ganti ke SHORT`);
-        await openPosition(pair, "short");
-        return;
-      }
-
-      const readyLong =
-        !longPos &&
-        mins(nowTime - (db.lastEntryTime[pair]?.long || 0)) >=
-          COOLDOWN_MINUTES &&
-        db.lossCount[pair].long < LOSS_LIMIT;
-      const readyShort =
-        !shortPos &&
-        mins(nowTime - (db.lastEntryTime[pair]?.short || 0)) >=
-          COOLDOWN_MINUTES &&
-        db.lossCount[pair].short < LOSS_LIMIT;
-
-      if (canLong && readyLong) {
-        console.log(`🟢 Sinyal LONG terdeteksi di ${pair}. Membuka posisi...`);
-        await openPosition(pair, "long");
-      }
-      if (canShort && readyShort) {
-        console.log(`🔴 Sinyal SHORT terdeteksi di ${pair}. Membuka posisi...`);
-        await openPosition(pair, "short");
-      }
+    if (canResetLong) {
+      db.lossCountLong = 0;
+      saveDB();
+      console.log("🔁 Reset lossCountLong");
     }
+    if (canResetShort) {
+      db.lossCountShort = 0;
+      saveDB();
+      console.log("🔁 Reset lossCountShort");
+    }
+
+    const { canLong, canShort } = await analyzeSignal();
+
+    if (canLong && db.positionShort) {
+      console.log("🔁 Close SHORT & ganti ke LONG");
+      await closePosition("short", db.positionShort.amount);
+      db.positionShort = null;
+      db.lossCountShort = 0;
+      saveDB();
+      sendMsg(`🔁 Close SHORT & ganti ke LONG`);
+      await openPosition("long");
+      return;
+    }
+    if (canShort && db.positionLong) {
+      console.log("🔁 Close LONG & ganti ke SHORT");
+      await closePosition("long", db.positionLong.amount);
+      db.positionLong = null;
+      db.lossCountLong = 0;
+      saveDB();
+      sendMsg(`🔁 Close LONG & ganti ke SHORT`);
+      await openPosition("short");
+      return;
+    }
+
+    const readyLong =
+      !db.positionLong &&
+      mins(nowTime - db.lastLongEntryTime) >= COOLDOWN_MINUTES &&
+      db.lossCountLong < LOSS_LIMIT;
+    const readyShort =
+      !db.positionShort &&
+      mins(nowTime - db.lastShortEntryTime) >= COOLDOWN_MINUTES &&
+      db.lossCountShort < LOSS_LIMIT;
+
+    if (canLong && readyLong) await openPosition("long");
+    if (canShort && readyShort) await openPosition("short");
   } catch (e) {
     console.error("⚠️ Global Loop Error:", e.message);
   }
