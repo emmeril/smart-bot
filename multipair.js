@@ -32,16 +32,16 @@ const db = fs.existsSync(dbPath)
       pair: "XRP/USDT:USDT",
       pairs: ["XRP/USDT:USDT"],
       balancePercent: 100,
-      positions: {}, // BARU: Objek untuk menyimpan posisi per-pair
-      lastEntryTime: {}, // BARU: Objek untuk menyimpan waktu entry terakhir per-pair
-      lossCount: {}, // BARU: Objek untuk menyimpan jumlah loss per-pair
-      winCount: {}, // BARU: Objek untuk menyimpan jumlah win per-pair
+      positions: {},
+      lastEntryTime: {},
+      lossCount: {},
+      winCount: {},
       leverage: 10,
       marginMode: "isolated",
       totalProfit: 0,
       totalLoss: 0,
-      tpPercent: 0.03, // TP default
-      slPercent: 0.02, // SL default
+      tpPercent: 0.03,
+      slPercent: 0.02,
       entryMode: "agresif",
     };
 
@@ -85,10 +85,10 @@ app.listen(serverPort, () =>
 const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 const now = () => Date.now();
 const mins = (ms) => ms / 1000 / 60;
-const formatPrice = (price) =>
-  exchange.decimalToPrecision(price, "currency", 5, 5);
-const formatUSD = (amount) =>
-  exchange.decimalToPrecision(amount, "currency", 2, 2);
+
+// Perbaikan: Gunakan toFixed() yang lebih sederhana atau fungsi CCXT yang benar
+const formatPrice = (price, market) => exchange.priceToPrecision(market, price);
+const formatUSD = (amount, market) => exchange.amountToPrecision(market, amount, ccxt.ROUND_DOWN);
 
 const sendMsg = async (text) => {
   try {
@@ -189,7 +189,7 @@ client.on("message", async (msg) => {
     const txt = msg.body.toLowerCase();
     if (!msg.fromMe && !msg.from.includes(process.env.ADMIN_PHONE)) return;
 
-    // Command handling (gunakan switch case untuk struktur lebih rapi)
+    // Command handling
     const [command, ...args] = txt.split(" ");
     switch (command) {
       case "!pair": {
@@ -203,14 +203,13 @@ client.on("message", async (msg) => {
 
         if (newPair === "ALL") {
           const allPairs = await exchange.fetchMarkets();
-          // Filter yang diperbaiki: cari pasar yang linear (futures) dan quote-nya USDT
           const futurePairs = allPairs
             .filter((market) => market.quote === 'USDT' && market.info.contractType === 'PERPETUAL')
             .map((market) => market.symbol);
 
           if (futurePairs.length > 0) {
             db.pairs = futurePairs;
-            db.pair = "ALL"; // menandakan mode multi-pair
+            db.pair = "ALL";
             db.positions = {};
             db.lastEntryTime = {};
             db.lossCount = {};
@@ -225,7 +224,7 @@ client.on("message", async (msg) => {
           }
         } else {
           db.pair = newPair;
-          db.pairs = [newPair]; // Atur kembali ke mode single-pair
+          db.pairs = [newPair];
           db.positions = {};
           db.lastEntryTime = {};
           db.lossCount = {};
@@ -262,15 +261,17 @@ client.on("message", async (msg) => {
               ? ((fltShort / ((shortPos.entry * shortPos.amount) / db.leverage)) *
                   100).toFixed(2)
               : null;
+          
+          const market = await exchange.market(pair);
 
           const posLong = longPos
-            ? `\n*LONG*\n📍 Entry @ ${longPos.entry.toFixed(4)}\n📊 Floating PnL: ${
+            ? `\n*LONG*\n📍 Entry @ ${formatPrice(longPos.entry, market)}\n📊 Floating PnL: ${
                 fltLong >= 0 ? "+" : "-"
               }$${Math.abs(fltLong).toFixed(4)} (${roiLong}%)`
             : "";
 
           const posShort = shortPos
-            ? `\n*SHORT*\n📍 Entry @ ${shortPos.entry.toFixed(4)}\n📊 Floating PnL: ${
+            ? `\n*SHORT*\n📍 Entry @ ${formatPrice(shortPos.entry, market)}\n📊 Floating PnL: ${
                 fltShort >= 0 ? "+" : "-"
               }$${Math.abs(fltShort).toFixed(4)} (${roiShort}%)`
             : "";
@@ -512,6 +513,8 @@ const openPosition = async (pair, type) => {
   db.lastEntryTime[pair][type] = nowTime;
 
   try {
+    const market = await exchange.market(pair);
+
     await exchange.setLeverage(db.leverage, pair);
     await exchange
       .setMarginMode(db.marginMode, pair)
@@ -545,9 +548,8 @@ const openPosition = async (pair, type) => {
       return;
     }
 
-    const market = await exchange.market(pair);
     const amountRaw = amountUSDT / price;
-    const amount = exchange.amountToPrecision(pair, amountRaw);
+    const amount = exchange.amountToPrecision(pair, amountRaw, ccxt.ROUND_DOWN);
 
     const order = await exchange.createMarketOrder(
       pair,
@@ -576,9 +578,9 @@ const openPosition = async (pair, type) => {
 
     sendMsg(
       `${type === "long" ? "🟢 LONG" : "🔴 SHORT"} dibuka di ${pair} @ ${formatPrice(
-        entry
+        entry, market
       )}\n` +
-        `💰 Ukuran: ~${formatUSD(usedUSDT)} USDT\n` +
+        `💰 Ukuran: ~${formatUSD(usedUSDT, market)} USDT\n` +
         `🎯 TP: ${(db.tpPercent * 100).toFixed(2)}% | SL: ${(
           db.slPercent * 100
         ).toFixed(2)}%`
@@ -630,7 +632,7 @@ const checkTP_SL = async (pair, type) => {
     }
     saveDB();
     sendMsg(
-      `⚠️ ${type.toUpperCase()} STOP LOSS hit di ${pair} @ ${formatPrice(price)} (ROI ${(
+      `⚠️ ${type.toUpperCase()} STOP LOSS hit di ${pair} @ ${formatPrice(price, exchange.market(pair))} (ROI ${(
         roi * 100
       ).toFixed(2)}%)`
     );
@@ -651,7 +653,7 @@ const checkTP_SL = async (pair, type) => {
     sendMsg(
       `🎯 ${type.toUpperCase()} di ${pair} ROI ${(roi * 100).toFixed(
         2
-      )}% hit. Trailing ON @ ${formatPrice(stopPrice)}`
+      )}% hit. Trailing ON @ ${formatPrice(stopPrice, exchange.market(pair))}`
     );
     return;
   }
@@ -670,7 +672,7 @@ const checkTP_SL = async (pair, type) => {
       db.lossCount[pair][type] = 0;
       saveDB();
       sendMsg(
-        `🏁 ${type.toUpperCase()} Trailing Stop HIT di ${pair} @ ${formatPrice(price)}`
+        `🏁 ${type.toUpperCase()} Trailing Stop HIT di ${pair} @ ${formatPrice(price, exchange.market(pair))}`
       );
       logTrade(type, entry, "-", "-", price, "trailing_exit", amount, usedUSDT, pair);
       updatePnL(pair, type, entry, price, amount, "trailing_exit");
@@ -697,7 +699,7 @@ const checkTP_SL = async (pair, type) => {
     }
     saveDB();
     sendMsg(
-      `⌛ ${type.toUpperCase()} auto-close (timeout) di ${pair} @ ${formatPrice(price)}`
+      `⌛ ${type.toUpperCase()} auto-close (timeout) di ${pair} @ ${formatPrice(price, exchange.market(pair))}`
     );
     logTrade(type, entry, "-", "-", price, "cut_timeout", amount, usedUSDT, pair);
     updatePnL(pair, type, entry, price, amount, "cut_timeout");
