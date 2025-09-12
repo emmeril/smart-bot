@@ -71,8 +71,10 @@ app.listen(serverPort, () =>
 const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 const now = () => Date.now();
 const mins = (ms) => ms / 1000 / 60;
-const formatPrice = (price) =>
-  exchange.decimalToPrecision(price, "currency", 5, ccxt.ROUND_HALF_UP);
+const formatPrice = (price) => {
+  if (!price) return "N/A"; // Tambahkan pengecekan ini
+  return exchange.decimalToPrecision(price, "currency", 5, ccxt.ROUND_HALF_UP);
+};
 
 const sendMsg = async (text) => {
   try {
@@ -209,6 +211,12 @@ app.get("/qr", async (req, res) => {
 const analyzeSignal = async () => {
   console.log("🔍 Menganalisis sinyal...");
   const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
+  
+  if (!ohlcv || ohlcv.length < 200) {
+    console.log("⚠️ Data OHLCV tidak mencukupi untuk analisis.");
+    return {};
+  }
+  
   const close = ohlcv.map((c) => c[4]);
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
@@ -292,9 +300,9 @@ setInterval(async () => {
     const nowTime = now();
     const result = await analyzeSignal();
     const { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing } = result;
-    
-    if (!price || !ma200) {
-      console.log("❌ Data harga atau MA200 belum tersedia, mencoba lagi...");
+
+    if (!isFinite(price) || !isFinite(ma200)) {
+      console.log("❌ Data harga atau MA200 tidak valid, mencoba lagi...");
       return;
     }
 
