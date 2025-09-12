@@ -557,7 +557,12 @@ const openPosition = async (type) => {
     if (!price) return;
     const { roiSlLong, roiSlShort } = await analyzeSignal();
     let slPercent = type === "long" ? roiSlLong / 100 : roiSlShort / 100;
-    const stopLossUSDT = usdt * RISK_PER_TRADE;
+
+    // --- PERBAIKAN: Menggunakan persentase balance yang ditetapkan pengguna ---
+    const capitalToUse = usdt * (db.balancePercent / 100);
+    const stopLossUSDT = capitalToUse * RISK_PER_TRADE;
+    // --- AKHIR PERBAIKAN ---
+
     if (slPercent === 0) {
       console.warn("⚠️ SL Percent tidak valid. Menggunakan default.");
       slPercent = db.slPercent;
