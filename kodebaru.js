@@ -43,8 +43,8 @@ const db = fs.existsSync(dbPath)
       marginMode: "isolated",
       totalProfit: 0,
       totalLoss: 0,
-      tpPercent: 0.03, 
-      slPercent: 0.02, 
+      tpPercent: 0.03,
+      slPercent: 0.02,
       entryMode: "agresif",
     };
 
@@ -502,14 +502,16 @@ const analyzeSignal = async () => {
 
   const aggressive = db.entryMode === "agresif";
   const canLong = aggressive
-    ? scoreLong >= 3 && price > ma200 && roiTpLong >= db.tpPercent * 100
+    ? // ? scoreLong >= 3 && price > ma200 && roiTpLong >= db.tpPercent * 100
+      scoreLong >= 3 && roiTpLong >= db.tpPercent * 100
     : scoreLong >= 4 &&
       price > ma200 &&
       isBullishEngulfing &&
       roiTpLong >= db.tpPercent * 100;
 
   const canShort = aggressive
-    ? scoreShort >= 3 && price < ma200 && roiTpShort >= db.tpPercent * 100
+    ? // ? scoreShort >= 3 && price < ma200 && roiTpShort >= db.tpPercent * 100
+      scoreShort >= 3 && roiTpShort >= db.tpPercent * 100
     : scoreShort >= 4 &&
       price < ma200 &&
       isBearishEngulfing &&
