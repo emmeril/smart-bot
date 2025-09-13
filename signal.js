@@ -357,5 +357,6 @@ setInterval(async () => {
     
   } catch (e) {
     console.error("⚠️ Global Loop Error:", e.message);
+    console.error(e.stack);
   }
 }, 10 * 1000);
