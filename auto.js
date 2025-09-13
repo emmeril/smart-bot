@@ -556,6 +556,7 @@ const openPosition = async (type) => {
 
     const price = await getPrice();
     if (!price) return;
+
     const { roiSlLong, roiSlShort } = await analyzeSignal();
     let slPercent = type === "long" ? roiSlLong / 100 : roiSlShort / 100;
 
@@ -568,13 +569,13 @@ const openPosition = async (type) => {
       slPercent = db.slPercent;
     }
 
-    // Hitung size order
+    // Hitung size order awal
     let amountUSDT = stopLossUSDT / slPercent;
 
-    // Pastikan sesuai minimum Binance
+    // Minimal $5 (dengan buffer biar aman dari rounding)
     if (amountUSDT < MIN_ORDER_USDT) {
       console.warn(`⚠️ Amount < $${MIN_ORDER_USDT}, dipaksa jadi minimal order.`);
-      amountUSDT = MIN_ORDER_USDT;
+      amountUSDT = MIN_ORDER_USDT + 0.1;
     }
 
     // Cek spread
@@ -589,8 +590,18 @@ const openPosition = async (type) => {
 
     // Hitung amount coin
     const market = await exchange.market(db.pair);
-    const amountRaw = amountUSDT / price;
-    const amount = exchange.amountToPrecision(market.symbol, amountRaw);
+    let amountRaw = amountUSDT / price;
+    let amount = exchange.amountToPrecision(market.symbol, amountRaw);
+
+    // Hitung ulang notional
+    let notional = parseFloat(amount) * price;
+
+    // Jika masih < 5, paksa jadi minimal 5.05 USDT
+    if (notional < 5) {
+      const minAmount = 5.05 / price;
+      amount = exchange.amountToPrecision(market.symbol, minAmount);
+      notional = parseFloat(amount) * price;
+    }
 
     // Buat order
     const order = await exchange.createMarketOrder(
@@ -599,9 +610,9 @@ const openPosition = async (type) => {
       parseFloat(amount)
     );
     const entry = order.average;
-    const usedUSDT = amount * entry;
+    const usedUSDT = parseFloat((amount * entry).toFixed(2));
 
-    // Simpan ke DB
+    // Simpan posisi ke DB
     const position = {
       entry,
       sl:
@@ -612,7 +623,7 @@ const openPosition = async (type) => {
       trailingStop: 0,
       entryTime: nowTime,
       amount: parseFloat(amount),
-      usedUSDT: parseFloat(usedUSDT.toFixed(2)),
+      usedUSDT,
     };
 
     if (type === "long") db.positionLong = position;
@@ -634,7 +645,6 @@ const openPosition = async (type) => {
     sendMsg(`❌ Gagal buka posisi ${type}: ${e.message}`);
   }
 };
-
 
 const closePosition = async (type, amount) => {
   if (isBacktest) {
