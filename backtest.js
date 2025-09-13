@@ -73,8 +73,8 @@ const runBacktest = async () => {
     if (adx?.adx > 20) scoreShort++;
     if (isBearishEngulf) scoreShort += 2;
   
-    const canLong = scoreLong >= 3 && isAboveMA200 && isBullishEngulf;
-    const canShort = scoreShort >= 3 && isBelowMA200 && isBearishEngulf;
+    const canLong = scoreLong >= 3 && isAboveMA200;
+    const canShort = scoreShort >= 3 && isBelowMA200;
 
     const targetLong = Math.max(...subsetHigh.slice(-10));
     const stopLossLong = Math.min(...subsetLow.slice(-5));
