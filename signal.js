@@ -45,6 +45,15 @@ const exchange = new ccxt.binance({
   options: { defaultType: "future" },
 });
 
+(async () => {
+  try {
+    await exchange.loadMarkets();
+    console.log("📊 Markets loaded, precision siap dipakai.");
+  } catch (err) {
+    console.error("❌ Gagal load markets:", err.message);
+  }
+})();
+
 let currentQR = null;
 let isReady = false;
 
@@ -71,13 +80,19 @@ app.listen(serverPort, () =>
 const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 const now = () => Date.now();
 const mins = (ms) => ms / 1000 / 60;
-const formatPrice = (price) => {
-  // Pengecekan lebih kuat untuk memastikan input adalah angka
-  if (typeof price !== 'number' || !isFinite(price)) {
-    return "N/A";
+const formatPrice = (price, pair = db.pair) => {
+  if (typeof price !== "number" || !isFinite(price)) return "N/A";
+
+  // fallback default 5 desimal kalau market belum loaded
+  if (!exchange.markets || Object.keys(exchange.markets).length === 0) {
+    return price.toFixed(5);
   }
-  return price.toFixed(5);
+
+  const market = exchange.markets[pair];
+  const decimals = market?.precision?.price ?? 5;
+  return price.toFixed(decimals);
 };
+
 
 const sendMsg = async (text) => {
   try {
