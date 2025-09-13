@@ -21,7 +21,7 @@ const LOSS_WAIT_MINUTES = 15;
 const MAX_HOLD_MINUTES = 1440;
 const SPREAD_FILTER = 0.003; // Maksimal spread yang diizinkan (0.3%)
 const MIN_ORDER_USDT = 5; // Minimal ukuran order dalam USDT
-const RISK_PER_TRADE = 0.01; // Risiko per trade sebagai persentase dari saldo (1%)
+const RISK_PER_TRADE = 0.5; // Risiko per trade sebagai persentase dari saldo (50%)
 
 // -----------------------------------------------------------------------------
 // 2. INITIALISASI
@@ -558,7 +558,7 @@ const openPosition = async (type) => {
     const { roiSlLong, roiSlShort } = await analyzeSignal();
     let slPercent = type === "long" ? roiSlLong / 100 : roiSlShort / 100;
 
-    // --- PERBAIKAN: Menggunakan persentase balance yang ditetapkan pengguna ---
+    // --- Menggunakan persentase balance yang ditetapkan pengguna ---
     const capitalToUse = usdt * (db.balancePercent / 100);
     const stopLossUSDT = capitalToUse * RISK_PER_TRADE;
     // --- AKHIR PERBAIKAN ---
@@ -855,6 +855,6 @@ setInterval(async () => {
     if (canLong && readyLong) await openPosition("long");
     if (canShort && readyShort) await openPosition("short");
   } catch (e) {
-    console.error("⚠️ Global Loop Error:", e.message);
+      console.error("⚠️ Global Loop Error:", e.message);
   }
 }, 10 * 1000);
