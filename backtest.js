@@ -6,7 +6,7 @@ const { RSI, EMA, MACD, ADX } = require("technicalindicators");
 // -------------------- CONFIG --------------------
 const PAIR = "DOGE/USDT:USDT"; // Ganti sesuai pair yang ingin Anda tes
 const TIME_FRAME = "15m";
-const LOOKBACK_MONTHS = 6;
+const LOOKBACK_MONTHS = 12;
 
 // -------------------- EXCHANGE --------------------
 const exchange = new ccxt.binance({
@@ -73,13 +73,13 @@ const runBacktest = async () => {
     if (adx?.adx > 20) scoreShort++;
     if (isBearishEngulf) scoreShort += 2;
   
-    const canLong = scoreLong >= 3 && isAboveMA200;
-    const canShort = scoreShort >= 3 && isBelowMA200;
+    const canLong = scoreLong >= 3 && isAboveMA200 && isBullishEngulf;
+    const canShort = scoreShort >= 3 && isBelowMA200 && isBearishEngulf;
 
     const targetLong = Math.max(...subsetHigh.slice(-10));
-    const stopLossLong = Math.min(...subsetLow.slice(-5));
+    const stopLossLong = Math.min(...subsetLow.slice(-10));
     const targetShort = Math.min(...subsetLow.slice(-10));
-    const stopLossShort = Math.max(...subsetHigh.slice(-5));
+    const stopLossShort = Math.max(...subsetHigh.slice(-10));
     
     // Logika Simulasi Entry/Exit
     if (position === "long" && (price >= targetLong || price <= stopLossLong)) {
