@@ -76,7 +76,7 @@ const formatPrice = (price) => {
   if (typeof price !== 'number' || !isFinite(price)) {
     return "N/A";
   }
-  return exchange.decimalToPrecision(price, "currency", 5, ccxt.ROUND_HALF_UP);
+  return price.toFixed(5);
 };
 
 const sendMsg = async (text) => {
@@ -287,8 +287,8 @@ const analyzeSignal = async () => {
   const low10 = Math.min(...low.slice(-10));
 
   const targetLong = high10;
-  const targetShort = low10;
   const stopLossLong = Math.min(...low.slice(-5));
+  const targetShort = low10;
   const stopLossShort = Math.max(...high.slice(-5));
 
   const canLong = scoreLong >= 3 && isFinite(price) && isFinite(ma200) && price > ma200 && isBullishEngulfing;
