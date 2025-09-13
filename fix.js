@@ -322,6 +322,8 @@ const analyzeSignal = async () => {
 
   const isBullishEngulf = prev2[1] > prev2[4] && prev[1] < prev[4] && prev[1] < prev2[4] && prev[4] > prev2[1];
   const isBearishEngulf = prev2[1] < prev2[4] && prev[1] > prev[4] && prev[1] > prev2[4] && prev[4] < prev2[1];
+  const isAboveMA200 = price > ma200;
+  const isBelowMA200 = price < ma200;
 
   let scoreLong = 0;
   if (rsi < 35) scoreLong++;
@@ -342,18 +344,26 @@ const analyzeSignal = async () => {
   const targetShort = Math.min(...low.slice(-10));
   const stopLossShort = Math.max(...high.slice(-5));
 
-  console.log(`📊 Hasil Analisis ${db.pair}:
-  - Harga: ${formatPrice(price)}
-  - RSI: ${rsi?.toFixed(2)}
-  - MACD Hist: ${macd?.histogram?.toFixed(4)}
-  - EMA20/50: ${ema20?.toFixed(4)}/${ema50?.toFixed(4)}
-  - ADX: ${adx?.adx?.toFixed(2)}
-  - Pola Engulfing: Bullish=${isBullishEngulf} | Bearish=${isBearishEngulf}
-  - Score Long: ${scoreLong} | Score Short: ${scoreShort}`);
+  const canLong = scoreLong >= 3 && isAboveMA200 && isBullishEngulf;
+  const canShort = scoreShort >= 3 && isBelowMA200 && isBearishEngulf;
+
+  console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
+  console.log(`  - Harga: ${formatPrice(price)}`);
+  console.log(`  - Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
+  console.log(`  - Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
+  console.log(`  --- Detail Indikator ---`);
+  console.log(`  - RSI: ${rsi?.toFixed(2)} (${rsi < 35 ? '✅' : '❌'} Long | ${rsi > 65 ? '✅' : '❌'} Short)`);
+  console.log(`  - MACD Hist: ${macd?.histogram?.toFixed(4)} (${macd?.histogram > 0 ? '✅' : '❌'} Long | ${macd?.histogram < 0 ? '✅' : '❌'} Short)`);
+  console.log(`  - EMA20 vs EMA50: ${ema20?.toFixed(4)} vs ${ema50?.toFixed(4)} (${ema20 > ema50 ? '✅' : '❌'} Long | ${ema20 < ema50 ? '✅' : '❌'} Short)`);
+  console.log(`  - MA200: ${ma200?.toFixed(4)} (Harga ${isAboveMA200 ? '✅ di atas' : '❌ di bawah'} | ${isBelowMA200 ? '✅ di bawah' : '❌ di atas'})`);
+  console.log(`  - Pola Engulfing: Bullish=${isBullishEngulf ? '✅' : '❌'} | Bearish=${isBearishEngulf ? '✅' : '❌'}`);
+  console.log(`  - ADX: ${adx?.adx?.toFixed(2)} (${adx?.adx > 20 ? '✅' : '❌'} Tren Kuat)`);
+  console.log(`  - Total Score: Long=${scoreLong} | Short=${scoreShort}`);
+  console.log(`  ---`);
 
   return {
-    canLong: scoreLong >= 3 && price > ma200 && isBullishEngulf,
-    canShort: scoreShort >= 3 && price < ma200 && isBearishEngulf,
+    canLong,
+    canShort,
     targetLong,
     stopLossLong,
     targetShort,
@@ -397,18 +407,23 @@ setInterval(async () => {
     const readyShort = !db.lastShortEntryTime || mins(now - db.lastShortEntryTime) >= COOLDOWN_MINUTES;
 
     if (sig.canLong && readyLong) {
-      console.log("🚀 Sinyal: LONG terdeteksi.");
+      console.log("🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order.");
       db.lastLongEntryTime = now;
       saveDB();
       await placeOrder("buy", sig.targetLong, sig.stopLossLong);
     }
 
     if (sig.canShort && readyShort) {
-      console.log("📉 Sinyal: SHORT terdeteksi.");
+      console.log("📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order.");
       db.lastShortEntryTime = now;
       saveDB();
       await placeOrder("sell", sig.targetShort, sig.stopLossShort);
     }
+    
+    if (!sig.canLong && !sig.canShort) {
+        console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
+    }
+
   } catch (e) {
     console.error("⚠️ Loop: Terjadi kesalahan di loop utama.", e.message);
     console.error(e.stack);
