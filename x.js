@@ -28,6 +28,9 @@ const db = fs.existsSync(dbPath)
   ? JSON.parse(fs.readFileSync(dbPath))
   : { pair: "XRP/USDT:USDT", lastLongEntryTime: 0, lastShortEntryTime: 0 };
 
+// buat nyimpen posisi sebelumnya (0 = no position)
+let prevPosAmt = 0;
+
 console.log(`⚙️ Pair aktif: ${db.pair}`);
 
 // -------------------- EXCHANGE --------------------
@@ -286,9 +289,33 @@ const analyzeSignal = async () => {
   };
 };
 
+// -------------------- CEK POSISI (TP/SL trigger) --------------------
+const checkPositionStatus = async () => {
+  try {
+    const bal = await exchange.fetchBalance();
+    const pos = bal.info?.positions?.find((p) => p.symbol === db.pair.replace("/", ""));
+    const amt = parseFloat(pos?.positionAmt || 0);
+
+    if (prevPosAmt !== 0 && amt === 0) {
+      // posisi sebelumnya ada, sekarang sudah close
+      const side = prevPosAmt > 0 ? "LONG" : "SHORT";
+      const exitPrice = pos?.entryPrice || "N/A";
+      await sendMsg(`📉 Posisi ${side} di ${db.pair} sudah CLOSE @ ${exitPrice}`);
+      console.log(`📉 Posisi ${side} sudah close @ ${exitPrice}`);
+    }
+
+    prevPosAmt = amt;
+  } catch (err) {
+    console.error("❌ Gagal cek posisi:", err.message);
+  }
+};
+
 // -------------------- MAIN LOOP --------------------
 setInterval(async () => {
   try {
+    // cek apakah posisi baru saja close
+    await checkPositionStatus();
+    
     const now = Date.now();
     const sig = await analyzeSignal();
     if (!sig.price) return;
