@@ -85,15 +85,23 @@ const mins = (ms) => ms / 1000 / 60;
 const formatPrice = (price, pair = db.pair) => {
   if (typeof price !== "number" || !isFinite(price)) return "N/A";
 
-  // fallback default 5 desimal kalau market belum loaded
+  // fallback kalau market belum loaded
   if (!exchange.markets || Object.keys(exchange.markets).length === 0) {
     return price.toFixed(5);
   }
 
   const market = exchange.markets[pair];
-  const decimals = market?.precision?.price ?? 5;
+  let decimals = market?.precision?.price ?? 5;
+
+  // jika precision terlalu kecil untuk harga < 1, pakai minimal 5 desimal
+  if (price < 1 && decimals < 5) decimals = 5;
+
+  // kalau precision = 0, fallback juga
+  if (decimals <= 0) decimals = 5;
+
   return price.toFixed(decimals);
 };
+
 
 const sendMsg = async (text) => {
   try {
