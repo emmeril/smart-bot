@@ -532,13 +532,14 @@ const openPosition = async (type) => {
     // Simulasi entry backtest
     console.log(`✅ [BACKTEST] Posisi ${type.toUpperCase()} akan dibuka`);
     db[type === "long" ? "positionLong" : "positionShort"] = {
-      entry: 1, //dummy value
-      amount: 1, //dummy value
+      entry: 1, // dummy value
+      amount: 1, // dummy value
       entryTime: now(),
     };
     logTrade(type, 1, 1, 1, 1, "OPEN");
     return;
   }
+
   const nowTime = now();
   if (type === "long") db.lastLongEntryTime = nowTime;
   else db.lastShortEntryTime = nowTime;
@@ -558,21 +559,25 @@ const openPosition = async (type) => {
     const { roiSlLong, roiSlShort } = await analyzeSignal();
     let slPercent = type === "long" ? roiSlLong / 100 : roiSlShort / 100;
 
-    // --- Menggunakan persentase balance yang ditetapkan pengguna ---
+    // --- Risiko per trade ---
     const capitalToUse = usdt * (db.balancePercent / 100);
     const stopLossUSDT = capitalToUse * RISK_PER_TRADE;
-    // --- AKHIR PERBAIKAN ---
 
     if (slPercent === 0) {
       console.warn("⚠️ SL Percent tidak valid. Menggunakan default.");
       slPercent = db.slPercent;
     }
-    const amountUSDT = stopLossUSDT / slPercent;
+
+    // Hitung size order
+    let amountUSDT = stopLossUSDT / slPercent;
+
+    // Pastikan sesuai minimum Binance
     if (amountUSDT < MIN_ORDER_USDT) {
-      console.log("❌ Ukuran order terlalu kecil (<$5), dilewati.");
-      return;
+      console.warn(`⚠️ Amount < $${MIN_ORDER_USDT}, dipaksa jadi minimal order.`);
+      amountUSDT = MIN_ORDER_USDT;
     }
 
+    // Cek spread
     const ticker = await exchange.fetchTicker(db.pair);
     const spread = Math.abs(ticker.ask - ticker.bid) / ticker.last;
     if (spread > SPREAD_FILTER) {
@@ -582,10 +587,12 @@ const openPosition = async (type) => {
       return;
     }
 
+    // Hitung amount coin
     const market = await exchange.market(db.pair);
     const amountRaw = amountUSDT / price;
     const amount = exchange.amountToPrecision(market.symbol, amountRaw);
 
+    // Buat order
     const order = await exchange.createMarketOrder(
       db.pair,
       side,
@@ -594,6 +601,7 @@ const openPosition = async (type) => {
     const entry = order.average;
     const usedUSDT = amount * entry;
 
+    // Simpan ke DB
     const position = {
       entry,
       sl:
@@ -626,6 +634,7 @@ const openPosition = async (type) => {
     sendMsg(`❌ Gagal buka posisi ${type}: ${e.message}`);
   }
 };
+
 
 const closePosition = async (type, amount) => {
   if (isBacktest) {
