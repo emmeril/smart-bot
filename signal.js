@@ -45,6 +45,7 @@ const exchange = new ccxt.binance({
   options: { defaultType: "future" },
 });
 
+// load markets biar precision tersedia
 (async () => {
   try {
     await exchange.loadMarkets();
@@ -80,6 +81,7 @@ app.listen(serverPort, () =>
 const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 const now = () => Date.now();
 const mins = (ms) => ms / 1000 / 60;
+
 const formatPrice = (price, pair = db.pair) => {
   if (typeof price !== "number" || !isFinite(price)) return "N/A";
 
@@ -92,7 +94,6 @@ const formatPrice = (price, pair = db.pair) => {
   const decimals = market?.precision?.price ?? 5;
   return price.toFixed(decimals);
 };
-
 
 const sendMsg = async (text) => {
   try {
@@ -186,7 +187,7 @@ client.on("message", async (msg) => {
         console.log("📊 WA Command: Meminta status bot.");
         msg.reply(`📊 *Status Bot Sinyal*
 📌 Pair: *${db.pair}*
-📈 Harga Saat Ini: *${price ? price.toFixed(4) : "N/A"}*
+📈 Harga Saat Ini: *${price ? formatPrice(price) : "N/A"}*
 ---
 📈 *LONG*
 ⏱ Cooldown: ${cooldownLong}
@@ -309,7 +310,6 @@ const analyzeSignal = async () => {
   const canLong = scoreLong >= 3 && isFinite(price) && isFinite(ma200) && price > ma200 && isBullishEngulfing;
   const canShort = scoreShort >= 3 && isFinite(price) && isFinite(ma200) && price < ma200 && isBearishEngulfing;
 
-  // Mengembalikan nilai scoreLong dan scoreShort
   return { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing, scoreLong, scoreShort };
 };
 
@@ -326,7 +326,6 @@ setInterval(async () => {
       return;
     }
     
-    // Menerima nilai scoreLong dan scoreShort dari hasil analisis
     const { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing, scoreLong, scoreShort } = result;
 
     if (!isFinite(price) || !isFinite(ma200)) {
@@ -335,8 +334,8 @@ setInterval(async () => {
     }
 
     console.log(`📊 Sinyal Analisis:
-    LONG: ${canLong} (score ${scoreLong}, price ${price.toFixed(5)} > MA200 ${ma200.toFixed(5)}, engulfing ${isBullishEngulfing})
-    SHORT: ${canShort} (score ${scoreShort}, price ${price.toFixed(5)} < MA200 ${ma200.toFixed(5)}, engulfing ${isBearishEngulfing})
+    LONG: ${canLong} (score ${scoreLong}, price ${formatPrice(price)} > MA200 ${formatPrice(ma200)}, engulfing ${isBullishEngulfing})
+    SHORT: ${canShort} (score ${scoreShort}, price ${formatPrice(price)} < MA200 ${formatPrice(ma200)}, engulfing ${isBearishEngulfing})
     `);
 
     const readyLong = !db.lastLongEntryTime || mins(nowTime - db.lastLongEntryTime) >= COOLDOWN_MINUTES;
