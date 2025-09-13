@@ -6,7 +6,7 @@ const { RSI, EMA, MACD, ADX } = require("technicalindicators");
 // -------------------- CONFIG --------------------
 const PAIR = "DOGE/USDT:USDT"; // Ganti sesuai pair yang ingin Anda tes
 const TIME_FRAME = "15m";
-const LOOKBACK_MONTHS = 1;
+const LOOKBACK_MONTHS = 6;
 
 // -------------------- EXCHANGE --------------------
 const exchange = new ccxt.binance({
