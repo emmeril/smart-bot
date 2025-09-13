@@ -92,6 +92,35 @@ client.on("message", async (msg) => {
     console.log(`🔄 Pair diganti ke ${db.pair}`);
     msg.reply(`✅ Pair diganti ke *${db.pair}*`);
   }
+
+  if (cmd === "!status") {
+  try {
+    const price = await getPrice();
+    const bal = await exchange.fetchBalance();
+    const usdt = bal.total.USDT;
+
+    const pos = bal.info?.positions?.find((p) => p.symbol === db.pair.replace("/", ""));
+    let posText = "❌ Tidak ada posisi terbuka";
+    if (pos && parseFloat(pos.positionAmt) !== 0) {
+      posText = `✅ OPEN ${pos.positionAmt > 0 ? "LONG" : "SHORT"} | Amt: ${pos.positionAmt} | Entry: ${pos.entryPrice}`;
+    }
+
+    const msgText = `📊 Bot Status
+Pair: ${db.pair}
+Harga: ${formatPrice(price)}
+Saldo USDT: ${usdt}
+Posisi: ${posText}
+Leverage: ${DEFAULT_LEVERAGE}x (${DEFAULT_MARGIN_MODE})
+Last Long: ${db.lastLongEntryTime ? new Date(db.lastLongEntryTime).toLocaleString() : "-"}
+Last Short: ${db.lastShortEntryTime ? new Date(db.lastShortEntryTime).toLocaleString() : "-"}`;
+
+    await msg.reply(msgText);
+    console.log("📤 WA kirim status.");
+  } catch (err) {
+    console.error("❌ Gagal ambil status:", err.message);
+    await msg.reply("⚠️ Error ambil status.");
+  }
+  }
 });
 
 client.initialize();
