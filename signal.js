@@ -265,7 +265,7 @@ const analyzeSignal = async () => {
     prevPrevCandle[1] < prevPrevCandle[4] &&
     prevCandle[1] > prevCandle[4] &&
     prevCandle[1] > prevPrevCandle[4] &&
-    prevCandle[4] < prevPrevCandle[1];
+    prevCandle[4] < prevCandle[1];
 
   let scoreLong = 0;
   if (isFinite(rsi) && rsi < 35) scoreLong++;
