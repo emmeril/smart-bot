@@ -13,7 +13,7 @@ const dbPath = "./db.json";
 const logPath = "./log.csv";
 const serverPort = 7890;
 
-const COOLDOWN_MINUTES = 5;
+const COOLDOWN_MINUTES = 1;
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
@@ -448,10 +448,10 @@ const analyzeSignal = async () => {
   if (ema20 < ema50) scoreShort++;
   if (adx?.adx > 20) scoreShort++;
 
-  const targetLong = Math.max(...high.slice(-20));
-  const stopLossLong = Math.min(...low.slice(-20));
-  const targetShort = Math.min(...low.slice(-20));
-  const stopLossShort = Math.max(...high.slice(-20));
+  const targetLong = Math.max(...high.slice(-50));
+  const stopLossLong = Math.min(...low.slice(-50));
+  const targetShort = Math.min(...low.slice(-50));
+  const stopLossShort = Math.max(...high.slice(-50));
 
   const canLong = scoreLong >= 3 && isAboveMA200;
   const canShort = scoreShort >= 3 && isBelowMA200;
