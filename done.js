@@ -31,7 +31,7 @@ const db = fs.existsSync(dbPath)
       leverage: 10,
       marginMode: "ISOLATED",
       activePosition: null,
-      prevPosAmt: 0 // Tambahkan variabel ini di sini
+      prevPosAmt: 0 
     };
 
 const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
