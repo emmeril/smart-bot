@@ -14,7 +14,7 @@ const logPath = "./log.csv";
 const serverPort = 7890;
 
 const COOLDOWN_MINUTES = 1;
-const USDT_PER_TRADE = 5.5;
+const USDT_PER_TRADE = 5.1;
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
