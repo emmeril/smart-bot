@@ -33,16 +33,13 @@ const db = fs.existsSync(dbPath)
       usdtPerTrade: 5.1 
     };
 
-const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
-
-let prevPosAmt = 0; // Variabel global untuk melacak status posisi sebelumnya
+let prevPosAmt = 0;
 
 console.log(`⚙️ Konfigurasi Bot:`);
 console.log(`   - Pair Aktif: ${db.pair}`);
 console.log(`   - Leverage: ${db.leverage}x`);
 console.log(`   - Margin Mode: ${db.marginMode}`);
 console.log(`   - USDT per Trade: ${db.usdtPerTrade}`);
-
 
 // -------------------- EXCHANGE --------------------
 const exchange = new ccxt.binance({
@@ -105,7 +102,7 @@ client.on("message", async (msg) => {
     db.pair = newPair;
     db.lastLongEntryTime = 0;
     db.lastShortEntryTime = 0;
-    saveDB();
+    fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
     console.log(`🔄 Perintah: Pair diganti ke ${db.pair}.`);
     msg.reply(`✅ Pair trading berhasil diubah ke *${db.pair}*.`);
   }
@@ -124,7 +121,7 @@ client.on("message", async (msg) => {
     
     db.leverage = newLeverage;
     if (newMarginMode) db.marginMode = newMarginMode;
-    saveDB();
+    fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 
     let replyMsg = `✅ Pengaturan berhasil diperbarui:\n\n*Leverage:* ${db.leverage}x`;
     if (newMarginMode) replyMsg += `\n*Margin Mode:* ${db.marginMode}`;
@@ -134,17 +131,14 @@ client.on("message", async (msg) => {
   }
 
   if (cmd === "!order") {
-    const newUsdtPerTrade = parseFloat(args[0]);
-
-    if (isNaN(newUsdtPerTrade) || newUsdtPerTrade <= 0) {
-      return msg.reply("⚠️ Format salah. Gunakan: *!order [JUMLAH_USDT]*, contoh: *!order 10*");
+    const newAmount = parseFloat(args[0]);
+    if (isNaN(newAmount) || newAmount <= 0) {
+      return msg.reply("⚠️ Format salah. Gunakan: *!order [JUMLAH]*, contoh: *!order 10.5*");
     }
-
-    db.usdtPerTrade = newUsdtPerTrade; // Mengubah di database
-    saveDB();
-
-    console.log(`🔄 Perintah: USDT per trade diganti ke ${db.usdtPerTrade}.`);
-    msg.reply(`✅ Jumlah USDT per trade berhasil diubah ke *${db.usdtPerTrade} USDT*.`);
+    db.usdtPerTrade = newAmount;
+    fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+    console.log(`🔄 Perintah: Jumlah USDT per trade diubah ke ${db.usdtPerTrade}.`);
+    msg.reply(`✅ Jumlah USDT per trade berhasil diubah menjadi *${db.usdtPerTrade} USDT*.`);
   }
 
   if (cmd === "!status") {
@@ -181,7 +175,7 @@ client.on("message", async (msg) => {
   - Tipe: ${db.activePosition.side.toUpperCase()}
   - Entry: ${formatPrice(db.activePosition.entryPrice)}
   - TP: ${formatPrice(db.activePosition.tp)}
-  - SL:* ${db.activePosition.sl ? formatPrice(db.activePosition.sl) : 'N/A'}`;
+  - SL: ${formatPrice(db.activePosition.sl)}`;
       }
 
       await msg.reply(msgText);
@@ -203,6 +197,7 @@ app.get("/qr", async (req, res) => {
 });
 
 // -------------------- UTIL --------------------
+const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 const mins = (ms) => ms / 1000 / 60;
 
 const sendMsg = async (text) => {
@@ -240,11 +235,24 @@ const getPrice = async () => {
 
 const calcQty = (price) => {
   if (!price) return 0;
-  let qty = db.usdtPerTrade / price; // Menggunakan nilai dari database
+  let qty = db.usdtPerTrade / price;
   const prec = exchange.markets[db.pair]?.precision?.amount ?? 3;
   qty = parseFloat(qty.toFixed(prec));
   console.log(`📐 Kalkulasi: Kuantitas dihitung: ${qty} (${db.usdtPerTrade} USDT).`);
   return qty;
+};
+
+const hasOpenPosition = async () => {
+  try {
+    const bal = await exchange.fetchBalance();
+    const pos = bal.info?.positions?.find((p) => p.symbol === db.pair.replace("/", ""));
+    const open = pos && parseFloat(pos.positionAmt) !== 0;
+    console.log(`🔍 Posisi: Cek posisi terbuka: ${open ? "ADA" : "TIDAK ADA"}.`);
+    return open;
+  } catch (err) {
+    console.error("❌ Posisi: Gagal mengecek posisi.", err.message);
+    return false;
+  }
 };
 
 const logSignal = (type, entry, tp, sl, status = "SIGNAL_SENT") => {
@@ -256,6 +264,12 @@ const logSignal = (type, entry, tp, sl, status = "SIGNAL_SENT") => {
 
 // -------------------- ORDER --------------------
 const placeOrder = async (side, tp, sl) => {
+  console.log("🔍 Order: Memeriksa apakah ada posisi aktif...");
+  if (db.activePosition) {
+    console.log("⚠️ Order: Masih ada posisi terbuka yang dimonitor oleh bot, order dibatalkan.");
+    await sendMsg(`⚠️ ${db.pair}: Masih ada posisi terbuka yang dimonitor bot. Order ${side} dibatalkan.`);
+    return;
+  }
   const price = await getPrice();
   if (!price) return console.log("❌ Order: Gagal mendapatkan harga, order dibatalkan.");
   const qty = calcQty(price);
@@ -275,17 +289,19 @@ const placeOrder = async (side, tp, sl) => {
   }
   
   try {
-    await exchange.createOrder(db.pair, "market", side, qty);
-    console.log("✅ Order: Entry market order berhasil dibuat. Menunggu konfirmasi dari Binance...");
+    const order = await exchange.createOrder(db.pair, "market", side, qty);
+    console.log("✅ Order: Entry market order berhasil dibuat.");
     
+    // Simpan detail posisi di database
     db.activePosition = {
         side: side,
         entryPrice: price,
         tp: tp,
         sl: sl,
+        orderId: order.id,
     };
     saveDB();
-    
+
     await sendMsg(`✅ *Order Terkirim!*
 *Pair:* ${db.pair}
 *Tipe:* ${side.toUpperCase()}
@@ -295,7 +311,7 @@ const placeOrder = async (side, tp, sl) => {
 *Leverage:* ${db.leverage}x
 *Catatan:* TP & SL akan dimonitor oleh bot.`);
 
-    logSignal(side === "buy" ? "LONG" : "SHORT", price, tp, sl, "ORDER_SENT_WAITING_CONFIRM");
+    logSignal(side === "buy" ? "LONG" : "SHORT", price, tp, sl, "ORDER_PLACED_MONITOR_BY_BOT");
 
   } catch (e) {
     console.error("❌ Order: Gagal membuat order.", e.message);
@@ -303,9 +319,6 @@ const placeOrder = async (side, tp, sl) => {
 *Pair:* ${db.pair}
 *Tipe:* ${side.toUpperCase()}
 *Pesan Error:* ${e.message}`);
-    
-    db.activePosition = null;
-    saveDB();
   }
 };
 
@@ -336,8 +349,8 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 *Sebab:* ${reason}
 *Pesan Error:* ${err.message}`);
   } finally {
+    // Reset status di database
     db.activePosition = null;
-    prevPosAmt = 0;
     saveDB();
   }
 }
@@ -362,6 +375,9 @@ const analyzeSignal = async () => {
   const adx = ADX.calculate({ close: close.slice(-50), high: high.slice(-50), low: low.slice(-50), period: 14 }).pop();
 
   const price = close.at(-1);
+  const prev = ohlcv.at(-2);
+  const prev2 = ohlcv.at(-3);
+
 
   const isAboveMA200 = price > ma200;
   const isBelowMA200 = price < ma200;
@@ -410,61 +426,71 @@ const analyzeSignal = async () => {
   };
 };
 
-// -------------------- MAIN LOOP --------------------
-setInterval(async () => {
+// -------------------- CEK POSISI (TP/SL trigger) --------------------
+const checkPositionStatus = async () => {
   try {
     const bal = await exchange.fetchBalance();
     const pos = bal.info?.positions?.find((p) => p.symbol === db.pair.replace("/", ""));
     const amt = parseFloat(pos?.positionAmt || 0);
 
-    // Langkah 1: Deteksi penutupan posisi manual atau oleh Binance
+    // Deteksi penutupan posisi manual atau oleh Binance
     if (prevPosAmt !== 0 && amt === 0) {
-        console.log("➡️ Posisi ditutup secara manual, mereset status.");
-        db.activePosition = null;
-        prevPosAmt = 0;
-        saveDB();
-        await sendMsg(`📉 *Posisi Ditutup!*
+      const side = prevPosAmt > 0 ? "LONG" : "SHORT";
+      const exitPrice = pos?.entryPrice || "N/A";
+      await sendMsg(`📉 *Posisi ${side} Ditutup!*
 *Pair:* ${db.pair}
-*Sebab:* Ditutup secara manual.`);
+*Harga Exit:* ${exitPrice}`);
+      console.log(`📉 Posisi ${side} di ${db.pair} sudah ditutup.`);
+      
+      // Reset status di database jika posisi ditutup manual
+      db.activePosition = null;
+      saveDB();
     }
 
-    // Langkah 2: Monitoring TP/SL jika ada posisi yang dimonitor
-    if (db.activePosition) {
-        if (amt !== 0) {
-            const { tp, sl, side, entryPrice } = db.activePosition;
-            const currentPrice = await getPrice();
-            if (!currentPrice) return;
-            
-            if (side === "buy") {
-                if (currentPrice >= tp) { await closePosition("TP tercapai", entryPrice); }
-                else if (currentPrice <= sl) { await closePosition("SL tercapai", entryPrice); }
-            } else if (side === "sell") {
-                if (currentPrice <= tp) { await closePosition("TP tercapai", entryPrice); }
-                else if (currentPrice >= sl) { await closePosition("SL tercapai", entryPrice); }
-            }
-        } else {
-            console.log("➡️ Posisi sudah tidak ada di Binance, mereset database bot.");
-            db.activePosition = null;
-            prevPosAmt = 0;
-            saveDB();
-            await sendMsg(`❌ *Posisi Hilang!*
-*Pair:* ${db.pair}
-*Pesan:* Posisi yang dimonitor bot tidak lagi ditemukan di Binance. Cek manual.`);
+    // Monitoring internal untuk TP/SL dari data di database
+    if (db.activePosition && amt !== 0) {
+      const { tp, sl, side, entryPrice } = db.activePosition;
+      const currentPrice = await getPrice();
+      if (!currentPrice) return;
+
+      if (side === "buy") {
+        if (currentPrice >= tp) {
+          await closePosition("TP tercapai", entryPrice);
+        } else if (currentPrice <= sl) {
+          await closePosition("SL tercapai", entryPrice);
         }
+      } else if (side === "sell") {
+        if (currentPrice <= tp) {
+          await closePosition("TP tercapai", entryPrice);
+        } else if (currentPrice >= sl) {
+          await closePosition("SL tercapai", entryPrice);
+        }
+      }
     }
 
     prevPosAmt = amt;
+  } catch (err) {
+    console.error("❌ Posisi: Gagal mengecek status posisi.", err.message);
+  }
+};
 
-    // Langkah 3: Jika tidak ada posisi aktif, cari sinyal baru
-    if (db.activePosition === null && amt === 0) {
-      console.log("🔍 Loop Utama: Tidak ada posisi aktif. Mencari sinyal baru...");
+// -------------------- MAIN LOOP --------------------
+setInterval(async () => {
+  try {
+    await checkPositionStatus();
+    
+    console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
+    console.log("🔍 Status Posisi Aktif di DB: ", db.activePosition);
+
+    // Hanya cari sinyal baru jika tidak ada posisi yang dimonitor
+    if (db.activePosition === null) {
       const now = Date.now();
       const sig = await analyzeSignal();
       if (!sig.price) {
         console.log("⚠️ Analisis: Sinyal tidak valid, menunggu...");
         return;
       }
-      
+
       const readyLong = !db.lastLongEntryTime || mins(now - db.lastLongEntryTime) >= COOLDOWN_MINUTES;
       const readyShort = !db.lastShortEntryTime || mins(now - db.lastShortEntryTime) >= COOLDOWN_MINUTES;
       
