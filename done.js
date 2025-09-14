@@ -31,7 +31,7 @@ const db = fs.existsSync(dbPath)
       marginMode: "ISOLATED",
       activePosition: null,
       prevPosAmt: 0,
-      usdtPerTrade: 5.1 
+      usdtPerTrade: 5.1
     };
 
 const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
@@ -132,7 +132,6 @@ client.on("message", async (msg) => {
     msg.reply(replyMsg);
   }
 
-  // --- FITUR BARU: !order ---
   if (cmd === "!order") {
     const newUsdtPerTrade = parseFloat(args[0]);
 
@@ -146,7 +145,6 @@ client.on("message", async (msg) => {
     console.log(`🔄 Perintah: USDT per trade diganti ke ${db.usdtPerTrade}.`);
     msg.reply(`✅ Jumlah USDT per trade berhasil diubah ke *${db.usdtPerTrade} USDT*.`);
   }
-  // --- END FITUR BARU ---
 
   if (cmd === "!status") {
     try {
@@ -241,7 +239,7 @@ const getPrice = async () => {
 
 const calcQty = (price) => {
   if (!price) return 0;
-  let qty = db.usdtPerTrade / price; // Menggunakan db.usdtPerTrade
+  let qty = db.usdtPerTrade / price;
   const prec = exchange.markets[db.pair]?.precision?.amount ?? 3;
   qty = parseFloat(qty.toFixed(prec));
   console.log(`📐 Kalkulasi: Kuantitas dihitung: ${qty} (${db.usdtPerTrade} USDT).`);
@@ -298,19 +296,17 @@ const placeOrder = async (side, tp, sl) => {
     const order = await exchange.createOrder(db.pair, "market", side, qty);
     console.log("✅ Order: Entry market order berhasil dibuat.");
     
-    // Validasi posisi setelah order dibuat
     let positionOpened = false;
     let retries = 0;
-    const maxRetries = 5;
+    const maxRetries = 20; 
     
     while (!positionOpened && retries < maxRetries) {
-      await new Promise(resolve => setTimeout(resolve, 5000)); // Tunggu 5 detik
+      await new Promise(resolve => setTimeout(resolve, 5000));
       const bal = await exchange.fetchBalance();
       const pos = bal.info?.positions?.find((p) => p.symbol === db.pair.replace("/", "") && parseFloat(p.positionAmt) !== 0);
 
       if (pos) {
         positionOpened = true;
-        // Simpan detail posisi di database
         db.activePosition = {
             side: side,
             entryPrice: parseFloat(pos.entryPrice),
@@ -382,7 +378,6 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 *Sebab:* ${reason}
 *Pesan Error:* ${err.message}`);
   } finally {
-    // Reset status di database
     db.activePosition = null;
     db.prevPosAmt = 0;
     saveDB();
@@ -466,7 +461,6 @@ const checkPositionStatus = async () => {
     const pos = bal.info?.positions?.find((p) => p.symbol === db.pair.replace("/", ""));
     const amt = parseFloat(pos?.positionAmt || 0);
 
-    // Deteksi penutupan posisi manual atau oleh Binance
     if (db.prevPosAmt !== 0 && amt === 0) {
       const side = db.prevPosAmt > 0 ? "LONG" : "SHORT";
       const exitPrice = pos?.entryPrice || "N/A";
@@ -475,13 +469,11 @@ const checkPositionStatus = async () => {
 *Harga Exit:* ${formatPrice(exitPrice)}`);
       console.log(`📉 Posisi ${side} di ${db.pair} sudah ditutup.`);
       
-      // Reset status di database jika posisi ditutup manual
       db.activePosition = null;
       db.prevPosAmt = 0;
       saveDB();
     }
 
-    // Monitoring internal untuk TP/SL dari data di database
     if (db.activePosition && amt !== 0) {
       const { tp, sl, side, entryPrice } = db.activePosition;
       const currentPrice = await getPrice();
@@ -517,7 +509,6 @@ setInterval(async () => {
     console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
     console.log("🔍 Status Posisi Aktif di DB: ", db.activePosition);
 
-    // Hanya cari sinyal baru jika tidak ada posisi yang dimonitor
     if (db.activePosition === null) {
       const now = Date.now();
       const sig = await analyzeSignal();
