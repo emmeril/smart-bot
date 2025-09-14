@@ -30,7 +30,7 @@ const db = fs.existsSync(dbPath)
       lastShortEntryTime: 0,
       leverage: 10,
       marginMode: "ISOLATED",
-      activePosition: null // Data posisi yang sedang aktif (tp/sl)
+      activePosition: null 
     };
 
 let prevPosAmt = 0;
