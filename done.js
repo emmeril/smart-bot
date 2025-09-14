@@ -140,30 +140,42 @@ client.on("message", async (msg) => {
     console.log(`🔄 Perintah: Jumlah USDT per trade diubah ke ${db.usdtPerTrade}.`);
     msg.reply(`✅ Jumlah USDT per trade berhasil diubah menjadi *${db.usdtPerTrade} USDT*.`);
   }
+  
+  if (cmd === "!reset") {
+    db.activePosition = null;
+    fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+    console.log(`🔄 Perintah: Status posisi bot direset.`);
+    msg.reply("✅ Status posisi bot telah direset. Bot akan mulai mencari sinyal baru.");
+  }
 
   if (cmd === "!status") {
     try {
       const price = await getPrice();
       const bal = await exchange.fetchBalance();
       const usdt = bal.total.USDT;
-      const pos = bal.info?.positions?.find((p) => p.symbol === db.pair.replace("/", ""));
-      let posText = "❌ Tidak ada posisi terbuka.";
-      let posDetails = "";
-      if (pos && parseFloat(pos.positionAmt) !== 0) {
-        const side = parseFloat(pos.positionAmt) > 0 ? "LONG" : "SHORT";
-        posText = `✅ OPEN *${side}*`;
-        posDetails = `\n  - Jumlah: ${pos.positionAmt} ${pos.symbol}
+      const positions = bal.info?.positions?.filter(p => parseFloat(p.positionAmt) !== 0) || [];
+
+      let posText = `*Posisi Terbuka di Binance:*`;
+      if (positions.length === 0) {
+        posText += `\n❌ Tidak ada posisi terbuka di akun Anda.`;
+      } else {
+        positions.forEach(pos => {
+          const side = parseFloat(pos.positionAmt) > 0 ? "LONG" : "SHORT";
+          posText += `\n\n  *Pair:* ${pos.symbol}
+  - Tipe: ${side}
+  - Jumlah: ${parseFloat(pos.positionAmt).toFixed(3)}
   - Entry: ${formatPrice(pos.entryPrice)}
   - PnL (Unrealized): ${parseFloat(pos.unrealizedProfit).toFixed(2)} USDT`;
+        });
       }
+      
       const lastLong = db.lastLongEntryTime ? new Date(db.lastLongEntryTime).toLocaleString() : "-";
       const lastShort = db.lastShortEntryTime ? new Date(db.lastShortEntryTime).toLocaleString() : "-";
-
+      
       let msgText = `📊 *Status Bot Trading*\n
-*Pair:* ${db.pair}
+*Pair Bot:* ${db.pair}
 *Harga Saat Ini:* ${formatPrice(price)}
 *Saldo USDT:* ${usdt?.toFixed(2) || "N/A"} USDT
-*Posisi:* ${posText}${posDetails}
 *Leverage:* ${db.leverage}x (${db.marginMode})
 *USDT per Trade:* ${db.usdtPerTrade}
 *Sinyal Terakhir:*
@@ -171,12 +183,17 @@ client.on("message", async (msg) => {
   - SHORT: ${lastShort}`;
   
       if (db.activePosition) {
-        msgText += `\n*Detail Posisi Bot:*
+        msgText += `\n\n*Posisi yang Dimonitor Bot:*
   - Tipe: ${db.activePosition.side.toUpperCase()}
   - Entry: ${formatPrice(db.activePosition.entryPrice)}
-  - TP: ${formatPrice(db.activePosition.tp)}
-  - SL: ${formatPrice(db.activePosition.sl)}`;
+  - TP: ${db.activePosition.tp ? formatPrice(db.activePosition.tp) : 'N/A'}
+  - SL: ${db.activePosition.sl ? formatPrice(db.activePosition.sl) : 'N/A'}`;
+      } else {
+        msgText += `\n\n*Posisi yang Dimonitor Bot:*
+  - ❌ Tidak ada posisi yang dimonitor bot.`;
       }
+      
+      msgText += `\n\n${posText}`;
 
       await msg.reply(msgText);
       console.log("📤 WhatsApp: Laporan status dikirim.");
