@@ -13,7 +13,7 @@ const dbPath = "./db.json";
 const logPath = "./log.csv";
 const serverPort = 7890;
 
-const COOLDOWN_MINUTES = 1;
+const COOLDOWN_MINUTES = 5;
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
