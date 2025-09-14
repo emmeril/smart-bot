@@ -14,7 +14,7 @@ const logPath = "./log.csv";
 const serverPort = 7890;
 
 const COOLDOWN_MINUTES = 1;
-const USDT_PER_TRADE = 5.5;
+const USDT_PER_TRADE = 5.2;
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
@@ -33,6 +33,9 @@ const db = fs.existsSync(dbPath)
     };
 
 let prevPosAmt = 0;
+let targetPrice = null;
+let stopLossPrice = null;
+let positionSide = null;
 
 console.log(`⚙️ Konfigurasi Bot:`);
 console.log(`   - Pair Aktif: ${db.pair}`);
@@ -269,24 +272,21 @@ const placeOrder = async (side, tp, sl) => {
     await exchange.createOrder(db.pair, "market", side, qty);
     console.log("✅ Order: Entry market order berhasil dibuat.");
     
-    if (side === "buy") {
-      await exchange.createOrder(db.pair, "TAKE_PROFIT_MARKET", "sell", qty, undefined, { stopPrice: tp, reduceOnly: true });
-      await exchange.createOrder(db.pair, "STOP_MARKET", "sell", qty, undefined, { stopPrice: sl, reduceOnly: true });
-    } else {
-      await exchange.createOrder(db.pair, "TAKE_PROFIT_MARKET", "buy", qty, undefined, { stopPrice: tp, reduceOnly: true });
-      await exchange.createOrder(db.pair, "STOP_MARKET", "buy", qty, undefined, { stopPrice: sl, reduceOnly: true });
-    }
-    console.log("✅ Order: TP & SL order berhasil dipasang.");
-    
+    // Simpan TP/SL di variabel global untuk monitoring internal
+    targetPrice = tp;
+    stopLossPrice = sl;
+    positionSide = side;
+
     await sendMsg(`✅ *Order Terkirim!*
 *Pair:* ${db.pair}
 *Tipe:* ${side.toUpperCase()}
 *Entry:* ${formatPrice(price)}
 *TP:* ${formatPrice(tp)}
 *SL:* ${formatPrice(sl)}
-*Leverage:* ${db.leverage}x`);
+*Leverage:* ${db.leverage}x
+*Catatan:* TP & SL akan dimonitor oleh bot.`);
 
-    logSignal(side === "buy" ? "LONG" : "SHORT", price, tp, sl, "ORDER_PLACED");
+    logSignal(side === "buy" ? "LONG" : "SHORT", price, tp, sl, "ORDER_PLACED_MONITOR_BY_BOT");
 
   } catch (e) {
     console.error("❌ Order: Gagal membuat order.", e.message);
@@ -296,6 +296,38 @@ const placeOrder = async (side, tp, sl) => {
 *Pesan Error:* ${e.message}`);
   }
 };
+
+const closePosition = async (reason) => {
+  console.log(`🚨 Posisi: Menutup posisi karena ${reason}.`);
+  try {
+    const bal = await exchange.fetchBalance();
+    const pos = bal.info?.positions?.find((p) => p.symbol === db.pair.replace("/", ""));
+    const qty = parseFloat(pos?.positionAmt);
+
+    if (qty !== 0) {
+      const side = qty > 0 ? "sell" : "buy";
+      await exchange.createOrder(db.pair, "market", side, Math.abs(qty), undefined, { reduceOnly: true });
+      console.log(`✅ Posisi: Order tutup posisi ${positionSide.toUpperCase()} berhasil dibuat.`);
+      
+      const exitPrice = await getPrice();
+      await sendMsg(`📉 *Posisi Ditutup!*
+*Pair:* ${db.pair}
+*Sebab:* ${reason}
+*Harga Exit:* ${formatPrice(exitPrice)}`);
+    }
+
+  } catch (err) {
+    console.error("❌ Posisi: Gagal menutup posisi.", err.message);
+    await sendMsg(`❌ *Gagal Menutup Posisi!*
+*Pair:* ${db.pair}
+*Sebab:* ${reason}
+*Pesan Error:* ${err.message}`);
+  } finally {
+    targetPrice = null;
+    stopLossPrice = null;
+    positionSide = null;
+  }
+}
 
 // -------------------- ANALYSIS --------------------
 const analyzeSignal = async () => {
@@ -339,10 +371,10 @@ const analyzeSignal = async () => {
   if (adx?.adx > 20) scoreShort++;
   if (isBearishEngulf) scoreShort += 2;
 
-  const targetLong = Math.max(...high.slice(-10));
-  const stopLossLong = Math.min(...low.slice(-5));
-  const targetShort = Math.min(...low.slice(-10));
-  const stopLossShort = Math.max(...high.slice(-5));
+  const targetLong = Math.max(...high.slice(-20));
+  const stopLossLong = Math.min(...low.slice(-20));
+  const targetShort = Math.min(...low.slice(-20));
+  const stopLossShort = Math.max(...high.slice(-20));
 
   const canLong = scoreLong >= 3 && isAboveMA200 && isBullishEngulf;
   const canShort = scoreShort >= 3 && isBelowMA200 && isBearishEngulf;
@@ -386,6 +418,31 @@ const checkPositionStatus = async () => {
 *Pair:* ${db.pair}
 *Harga Exit:* ${exitPrice}`);
       console.log(`📉 Posisi ${side} di ${db.pair} sudah ditutup.`);
+      
+      // Reset internal TP/SL monitor jika posisi ditutup secara manual
+      targetPrice = null;
+      stopLossPrice = null;
+      positionSide = null;
+    }
+
+    // Monitoring internal untuk TP/SL
+    if (amt !== 0 && targetPrice && stopLossPrice) {
+      const currentPrice = await getPrice();
+      if (!currentPrice) return;
+
+      if (positionSide === "buy") {
+        if (currentPrice >= targetPrice) {
+          await closePosition("TP tercapai");
+        } else if (currentPrice <= stopLossPrice) {
+          await closePosition("SL tercapai");
+        }
+      } else if (positionSide === "sell") {
+        if (currentPrice <= targetPrice) {
+          await closePosition("TP tercapai");
+        } else if (currentPrice >= stopLossPrice) {
+          await closePosition("SL tercapai");
+        }
+      }
     }
 
     prevPosAmt = amt;
@@ -406,14 +463,14 @@ setInterval(async () => {
     const readyLong = !db.lastLongEntryTime || mins(now - db.lastLongEntryTime) >= COOLDOWN_MINUTES;
     const readyShort = !db.lastShortEntryTime || mins(now - db.lastShortEntryTime) >= COOLDOWN_MINUTES;
 
-    if (sig.canLong && readyLong) {
+    if (sig.canLong && readyLong && !await hasOpenPosition()) {
       console.log("🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order.");
       db.lastLongEntryTime = now;
       saveDB();
       await placeOrder("buy", sig.targetLong, sig.stopLossLong);
     }
 
-    if (sig.canShort && readyShort) {
+    if (sig.canShort && readyShort && !await hasOpenPosition()) {
       console.log("📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order.");
       db.lastShortEntryTime = now;
       saveDB();
