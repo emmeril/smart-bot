@@ -257,6 +257,12 @@ const calcQty = (price) => {
   return qty;
 };
 
+const logSignal = (type, entry, tp, sl, status) => {
+  const line = `${new Date().toISOString()},${db.pair},${type},${entry},${tp},${sl},${status}\n`;
+  fs.appendFileSync(logPath, line);
+  console.log("📝 Log: Sinyal dicatat di log.csv");
+};
+
 // ---------- NEW HELPERS: market id & position fetch ----------
 const getMarketId = () => {
   // Prefer ccxt's market id (exchange.markets[db.pair].id) if available
