@@ -163,8 +163,6 @@ client.on("message", async (msg) => {
           const side = parseFloat(pos.positionAmt) > 0 ? "LONG" : "SHORT";
           posText += `\n\n  *Pair:* ${pos.symbol}
   - Tipe: ${side}
-  - Jumlah: ${parseFloat(pos.positionAmt).toFixed(3)}
-  - Entry: ${formatPrice(pos.entryPrice)}
   - PnL (Unrealized): ${parseFloat(pos.unrealizedProfit).toFixed(2)} USDT`;
         });
       }
