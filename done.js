@@ -13,7 +13,7 @@ const dbPath = "./db.json";
 const logPath = "./log.csv";
 const serverPort = 7890;
 
-const COOLDOWN_MINUTES = 1;
+const COOLDOWN_MINUTES = 15;
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
@@ -23,14 +23,14 @@ if (!fs.existsSync(logPath)) {
 
 const db = fs.existsSync(dbPath)
   ? JSON.parse(fs.readFileSync(dbPath))
-  : { 
-      pair: "XRP/USDT:USDT", 
-      lastLongEntryTime: 0, 
+  : {
+      pair: "XRP/USDT:USDT",
+      lastLongEntryTime: 0,
       lastShortEntryTime: 0,
       leverage: 10,
       marginMode: "ISOLATED",
       activePosition: null,
-      usdtPerTrade: 5.1 
+      usdtPerTrade: 5.1
     };
 
 let prevPosAmt = 0;
@@ -64,7 +64,7 @@ let isReady = false;
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
-    executablePath: process.env.PUPPETEER_PATH || "/usr/bin/chromium",
+    executablePath: "/usr/bin/chromium",
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   },
@@ -93,18 +93,18 @@ client.on("message", async (msg) => {
   if (!msg.from.includes(process.env.ADMIN_PHONE)) return;
   const txt = msg.body.toLowerCase();
   const [cmd, ...args] = txt.split(" ");
-  
+
   if (cmd === "!pair") {
     const newPair = args[0]?.toUpperCase();
     if (!newPair) {
-      return msg.reply("⚠️ Format salah. Gunakan: *!pair [SIMBOL]*, contoh: *!pair BTC/USDT:USDT*");
+      return msg.reply("⚠️ Format perintah salah. Gunakan: *!pair [SIMBOL]*, contohnya: *!pair BTC/USDT:USDT*");
     }
     db.pair = newPair;
     db.lastLongEntryTime = 0;
     db.lastShortEntryTime = 0;
     fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
     console.log(`🔄 Perintah: Pair diganti ke ${db.pair}.`);
-    msg.reply(`✅ Pair trading berhasil diubah ke *${db.pair}*.`);
+    msg.reply(`✅ Pair trading berhasil diubah menjadi *${db.pair}*.`);
   }
 
   if (cmd === "!leverage") {
@@ -113,18 +113,18 @@ client.on("message", async (msg) => {
     const validModes = ["ISOLATED", "CROSSED"];
 
     if (!newLeverage || newLeverage < 1 || newLeverage > 125) {
-      return msg.reply("⚠️ Format salah. Gunakan: *!leverage [1-125] [isolated/crossed]*");
+      return msg.reply("⚠️ Format perintah salah. Gunakan: *!leverage [1-125] [isolated/crossed]*");
     }
     if (newMarginMode && !validModes.includes(newMarginMode)) {
-      return msg.reply(`⚠️ Margin mode tidak valid. Pilihan: *${validModes.join(" atau ")}*.`);
+      return msg.reply(`⚠️ Mode margin tidak valid. Pilihan yang tersedia: *${validModes.join(" atau ")}*.`);
     }
-    
+
     db.leverage = newLeverage;
     if (newMarginMode) db.marginMode = newMarginMode;
     fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 
-    let replyMsg = `✅ Pengaturan berhasil diperbarui:\n\n*Leverage:* ${db.leverage}x`;
-    if (newMarginMode) replyMsg += `\n*Margin Mode:* ${db.marginMode}`;
+    let replyMsg = `✅ Pengaturan leverage berhasil diperbarui:\n\n*Leverage:* ${db.leverage}x`;
+    if (newMarginMode) replyMsg += `\n*Mode Margin:* ${db.marginMode}`;
 
     console.log(`🔄 Perintah: Leverage/margin mode diganti ke ${db.leverage}x (${db.marginMode}).`);
     msg.reply(replyMsg);
@@ -133,19 +133,19 @@ client.on("message", async (msg) => {
   if (cmd === "!order") {
     const newAmount = parseFloat(args[0]);
     if (isNaN(newAmount) || newAmount <= 0) {
-      return msg.reply("⚠️ Format salah. Gunakan: *!order [JUMLAH]*, contoh: *!order 10.5*");
+      return msg.reply("⚠️ Format perintah salah. Gunakan: *!order [JUMLAH]*, contoh: *!order 10.5*");
     }
     db.usdtPerTrade = newAmount;
     fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
     console.log(`🔄 Perintah: Jumlah USDT per trade diubah ke ${db.usdtPerTrade}.`);
     msg.reply(`✅ Jumlah USDT per trade berhasil diubah menjadi *${db.usdtPerTrade} USDT*.`);
   }
-  
+
   if (cmd === "!reset") {
     db.activePosition = null;
     fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
     console.log(`🔄 Perintah: Status posisi bot direset.`);
-    msg.reply("✅ Status posisi bot telah direset. Bot akan mulai mencari sinyal baru.");
+    msg.reply("✅ Status posisi bot telah direset. Bot sekarang akan kembali mencari sinyal trading baru.");
   }
 
   if (cmd === "!status") {
@@ -157,7 +157,7 @@ client.on("message", async (msg) => {
 
       let posText = `*Posisi Terbuka di Binance:*`;
       if (positions.length === 0) {
-        posText += `\n❌ Tidak ada posisi terbuka di akun Anda.`;
+        posText += `\n❌ Saat ini tidak ada posisi terbuka di akun Anda.`;
       } else {
         positions.forEach(pos => {
           const side = parseFloat(pos.positionAmt) > 0 ? "LONG" : "SHORT";
@@ -166,38 +166,38 @@ client.on("message", async (msg) => {
   - PnL (Unrealized): ${parseFloat(pos.unrealizedProfit).toFixed(2)} USDT`;
         });
       }
-      
+
       const lastLong = db.lastLongEntryTime ? new Date(db.lastLongEntryTime).toLocaleString() : "-";
       const lastShort = db.lastShortEntryTime ? new Date(db.lastShortEntryTime).toLocaleString() : "-";
-      
-      let msgText = `📊 *Status Bot Trading*\n
+
+      let msgText = `📊 *Ringkasan Status Bot Trading*\n
 *Pair Bot:* ${db.pair}
 *Harga Saat Ini:* ${formatPrice(price)}
-*Saldo USDT:* ${usdt?.toFixed(2) || "N/A"} USDT
+*Total Saldo USDT:* ${usdt?.toFixed(2) || "N/A"} USDT
 *Leverage:* ${db.leverage}x (${db.marginMode})
-*USDT per Trade:* ${db.usdtPerTrade}
+*Modal per Order:* ${db.usdtPerTrade} USDT
 *Sinyal Terakhir:*
-  - LONG: ${lastLong}
-  - SHORT: ${lastShort}`;
-  
+  - Beli (LONG): ${lastLong}
+  - Jual (SHORT): ${lastShort}`;
+
       if (db.activePosition) {
         msgText += `\n\n*Posisi yang Dimonitor Bot:*
   - Tipe: ${db.activePosition.side.toUpperCase()}
-  - Entry: ${formatPrice(db.activePosition.entryPrice)}
+  - Harga Entry: ${formatPrice(db.activePosition.entryPrice)}
   - TP: ${db.activePosition.tp ? formatPrice(db.activePosition.tp) : 'N/A'}
   - SL: ${db.activePosition.sl ? formatPrice(db.activePosition.sl) : 'N/A'}`;
       } else {
         msgText += `\n\n*Posisi yang Dimonitor Bot:*
-  - ❌ Tidak ada posisi yang dimonitor bot.`;
+  - ❌ Bot sedang tidak memantau posisi trading apa pun.`;
       }
-      
+
       msgText += `\n\n${posText}`;
 
       await msg.reply(msgText);
       console.log("📤 WhatsApp: Laporan status dikirim.");
     } catch (err) {
-      console.error("❌ WhatsApp: Gagal ambil status.", err.message);
-      await msg.reply("⚠️ Error saat mengambil status bot.");
+      console.error("❌ Gagal mengambil data status bot.", err.message);
+      await msg.reply("⚠️ Terjadi kesalahan saat mengambil status bot.");
     }
   }
 });
@@ -304,7 +304,7 @@ const placeOrder = async (side, tp, sl) => {
   console.log("🔍 Order: Memeriksa apakah ada posisi aktif...");
   if (db.activePosition) {
     console.log("⚠️ Order: Masih ada posisi terbuka yang dimonitor oleh bot, order dibatalkan.");
-    await sendMsg(`⚠️ ${db.pair}: Masih ada posisi terbuka yang dimonitor bot. Order ${side} dibatalkan.`);
+    await sendMsg(`⚠️ ${db.pair}: Bot sedang memantau posisi yang sudah terbuka. Order ${side} dibatalkan.`);
     return;
   }
 
@@ -314,7 +314,7 @@ const placeOrder = async (side, tp, sl) => {
     const amt = parseFloat(position?.positionAmt || "0");
     if (isFinite(amt) && Math.abs(amt) > 0) {
       console.log("⚠️ Order: Terdapat posisi aktif di akun (detected). Order dibatalkan.");
-      await sendMsg(`⚠️ ${db.pair}: Terdeteksi posisi aktif di akun. Order ${side} dibatalkan.`);
+      await sendMsg(`⚠️ ${db.pair}: Terdeteksi adanya posisi trading aktif di akun Anda. Order ${side} dibatalkan.`);
       return;
     }
   } catch (e) {
@@ -338,11 +338,11 @@ const placeOrder = async (side, tp, sl) => {
   } catch (e) {
     console.warn("⚠️ Order: Gagal mengatur leverage/margin mode.", e.message);
   }
-  
+
   try {
     const order = await exchange.createOrder(db.pair, "market", side, qty);
     console.log("✅ Order: Entry market order berhasil dibuat.");
-    
+
     // Simpan detail posisi di database
     db.activePosition = {
         side: side,
@@ -353,14 +353,14 @@ const placeOrder = async (side, tp, sl) => {
     };
     saveDB();
 
-    await sendMsg(`✅ *Order Terkirim!*
+    await sendMsg(`✅ *Order Trading Terkirim!*
 *Pair:* ${db.pair}
-*Tipe:* ${side.toUpperCase()}
+*Jenis:* ${side.toUpperCase()}
 *Entry:* ${formatPrice(price)}
 *TP:* ${formatPrice(tp)}
 *SL:* ${formatPrice(sl)}
 *Leverage:* ${db.leverage}x
-*Catatan:* TP & SL akan dimonitor oleh bot.`);
+*Catatan:* Target Profit (TP) dan Stop Loss (SL) akan dimonitor oleh bot secara otomatis.`);
 
     logSignal(side === "buy" ? "LONG" : "SHORT", price, tp, sl, "ORDER_PLACED_MONITOR_BY_BOT");
 
@@ -368,7 +368,7 @@ const placeOrder = async (side, tp, sl) => {
     console.error("❌ Order: Gagal membuat order.", e.message);
     await sendMsg(`❌ *Gagal Membuat Order!*
 *Pair:* ${db.pair}
-*Tipe:* ${side.toUpperCase()}
+*Jenis:* ${side.toUpperCase()}
 *Pesan Error:* ${e.message}`);
   }
 };
@@ -387,20 +387,20 @@ const closePosition = async (reason, entryPrice = "N/A") => {
       // buat reduceOnly order untuk menutup
       await exchange.createOrder(db.pair, "market", side, amount, undefined, { reduceOnly: true });
       console.log(`✅ Posisi: Order tutup posisi berhasil dibuat (side=${side}, amt=${amount}).`);
-      
+
       const exitPrice = await getPrice();
       await sendMsg(`📉 *Posisi Ditutup!*
 *Pair:* ${db.pair}
-*Sebab:* ${reason}
+*Alasan:* ${reason}
 *Harga Entry:* ${formatPrice(entryPrice)}
-*Harga Exit:* ${formatPrice(exitPrice)}`);
+*Harga Keluar:* ${formatPrice(exitPrice)}`);
     }
 
   } catch (err) {
     console.error("❌ Posisi: Gagal menutup posisi.", err.message);
     await sendMsg(`❌ *Gagal Menutup Posisi!*
 *Pair:* ${db.pair}
-*Sebab:* ${reason}
+*Alasan:* ${reason}
 *Pesan Error:* ${err.message}`);
   } finally {
     // Reset status di database (pastikan bot tidak langsung open new order tanpa verifikasi posisi live)
@@ -414,7 +414,7 @@ const analyzeSignal = async () => {
   console.log("🧠 Analisis: Melakukan analisis teknikal...");
   const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
   if (!ohlcv || ohlcv.length < 200) {
-    console.warn("⚠️ Analisis: Data OHLCV tidak cukup, menunggu...");
+    console.warn("⚠️ Sinyal tidak valid. Bot menunggu sinyal baru...");
     return {};
   }
   const close = ohlcv.map((c) => c[4]);
@@ -491,11 +491,11 @@ const checkPositionStatus = async () => {
     const prevSafe = isFinite(prevPosAmt) ? prevPosAmt : 0;
     if (prevSafe !== 0 && amtSafe === 0) {
       const side = prevSafe > 0 ? "LONG" : "SHORT";
-      await sendMsg(`📉 *Posisi ${side} Ditutup!*
+      await sendMsg(`📉 *Posisi ${side} Ditutup Secara Manual!*
 *Pair:* ${db.pair}
-*Harga Exit:* (lihat di Binance)`);
+*Harga Keluar:* (Silakan cek di aplikasi Binance)`);
       console.log(`📉 Posisi ${side} di ${db.pair} sudah ditutup.`);
-      
+
       // Reset status di database jika posisi ditutup manual
       db.activePosition = null;
       saveDB();
@@ -532,7 +532,7 @@ const checkPositionStatus = async () => {
 setInterval(async () => {
   try {
     await checkPositionStatus();
-    
+
     console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
     console.log("🔍 Status Posisi Aktif di DB: ", db.activePosition);
 
@@ -541,29 +541,29 @@ setInterval(async () => {
       const now = Date.now();
       const sig = await analyzeSignal();
       if (!sig.price) {
-        console.log("⚠️ Analisis: Sinyal tidak valid, menunggu...");
+        console.log("⚠️ Sinyal tidak valid. Bot menunggu sinyal baru...");
         return;
       }
 
       const readyLong = !db.lastLongEntryTime || mins(now - db.lastLongEntryTime) >= COOLDOWN_MINUTES;
       const readyShort = !db.lastShortEntryTime || mins(now - db.lastShortEntryTime) >= COOLDOWN_MINUTES;
-      
+
       if (sig.canLong && readyLong) {
-        console.log("🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order.");
+        console.log("🚀 Sinyal trading LONG terdeteksi. Bot akan segera membuka order.");
         db.lastLongEntryTime = now;
         saveDB();
         await placeOrder("buy", sig.targetLong, sig.stopLossLong);
       }
 
       if (sig.canShort && readyShort) {
-        console.log("📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order.");
+        console.log("📉 Sinyal trading SHORT terdeteksi. Bot akan segera membuka order.");
         db.lastShortEntryTime = now;
         saveDB();
         await placeOrder("sell", sig.targetShort, sig.stopLossShort);
       }
-      
+
       if (!sig.canLong && !sig.canShort) {
-          console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
+          console.log("💤 Tidak ada sinyal trading valid saat ini. Bot menunggu...");
       }
     } else {
       console.log("➡️ Loop Utama: Posisi aktif terdeteksi. Melewatkan analisis sinyal.");
