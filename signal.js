@@ -307,7 +307,7 @@ const analyzeSignal = async () => {
   const canLong = scoreLong >= 3 && isFinite(price) && isFinite(ma200) && price > ma200 ;
   const canShort = scoreShort >= 3 && isFinite(price) && isFinite(ma200) && price < ma200;
 
-  return { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing, scoreLong, scoreShort };
+  return { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, scoreLong, scoreShort };
 };
 
 // -----------------------------------------------------------------------------
