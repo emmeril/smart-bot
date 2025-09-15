@@ -271,8 +271,6 @@ const analyzeSignal = async () => {
 
   const price = close.at(-1);
   const prevCandle = ohlcv.at(-2);
-  const prevPrevCandle = ohlcv.at(-3);
-
   const candleBody = Math.abs(prevCandle[4] - prevCandle[1]);
   const candleRange = prevCandle[2] - prevCandle[3];
   const isStrongCandle = candleBody / candleRange >= 0.4;
