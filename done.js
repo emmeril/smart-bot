@@ -13,7 +13,7 @@ const dbPath = "./db.json";
 const logPath = "./log.csv";
 const serverPort = 7890;
 
-const COOLDOWN_MINUTES = 15;
+// const COOLDOWN_MINUTES = 15;
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
@@ -531,6 +531,9 @@ const checkPositionStatus = async () => {
 // -------------------- MAIN LOOP --------------------
 setInterval(async () => {
   try {
+    const now = new Date();
+    const currentMinute = now.getMinutes();
+    const isScheduledTime = currentMinute % 15 === 0;
     await checkPositionStatus();
     
     console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
@@ -545,17 +548,17 @@ setInterval(async () => {
         return;
       }
 
-      const readyLong = !db.lastLongEntryTime || mins(now - db.lastLongEntryTime) >= COOLDOWN_MINUTES;
-      const readyShort = !db.lastShortEntryTime || mins(now - db.lastShortEntryTime) >= COOLDOWN_MINUTES;
+      // const readyLong = !db.lastLongEntryTime || mins(now - db.lastLongEntryTime) >= COOLDOWN_MINUTES;
+      // const readyShort = !db.lastShortEntryTime || mins(now - db.lastShortEntryTime) >= COOLDOWN_MINUTES;
       
-      if (sig.canLong && readyLong) {
+      if (sig.canLong && isScheduledTime) {
         console.log("🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order.");
         db.lastLongEntryTime = now;
         saveDB();
         await placeOrder("buy", sig.targetLong, sig.stopLossLong);
       }
 
-      if (sig.canShort && readyShort) {
+      if (sig.canShort && isScheduledTime) {
         console.log("📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order.");
         db.lastShortEntryTime = now;
         saveDB();
