@@ -279,25 +279,14 @@ const analyzeSignal = async () => {
   const candleUp = prevCandle[4] > prevCandle[1];
   const candleDown = prevCandle[4] < prevCandle[1];
 
-  const isBullishEngulfing =
-    prevPrevCandle[1] > prevPrevCandle[4] &&
-    prevCandle[1] < prevCandle[4] &&
-    prevCandle[1] < prevPrevCandle[4] &&
-    prevCandle[4] > prevPrevCandle[1];
-
-  const isBearishEngulfing =
-    prevPrevCandle[1] < prevPrevCandle[4] &&
-    prevCandle[1] > prevCandle[4] &&
-    prevCandle[1] > prevPrevCandle[4] &&
-    prevCandle[4] < prevCandle[1];
-
+ 
   let scoreLong = 0;
   if (isFinite(rsi) && rsi < 35) scoreLong++;
   if (isFinite(macd?.histogram) && macd?.histogram > 0) scoreLong++;
   if (isFinite(ema20) && isFinite(ema50) && ema20 > ema50) scoreLong++;
   if (isFinite(adx?.adx) && adx?.adx > 20) scoreLong++;
   if (isStrongCandle && candleUp) scoreLong++;
-  if (isBullishEngulfing) scoreLong += 2;
+ 
 
   let scoreShort = 0;
   if (isFinite(rsi) && rsi > 65) scoreShort++;
@@ -305,18 +294,18 @@ const analyzeSignal = async () => {
   if (isFinite(ema20) && isFinite(ema50) && ema20 < ema50) scoreShort++;
   if (isFinite(adx?.adx) && adx?.adx > 20) scoreShort++;
   if (isStrongCandle && candleDown) scoreShort++;
-  if (isBearishEngulfing) scoreShort += 2;
+ 
 
-  const high10 = Math.max(...high.slice(-10));
-  const low10 = Math.min(...low.slice(-10));
+  const high10 = Math.max(...high.slice(-50));
+  const low10 = Math.min(...low.slice(-50));
 
   const targetLong = high10;
-  const stopLossLong = Math.min(...low.slice(-5));
+  const stopLossLong = Math.min(...low.slice(-50));
   const targetShort = low10;
-  const stopLossShort = Math.max(...high.slice(-5));
+  const stopLossShort = Math.max(...high.slice(-50));
 
-  const canLong = scoreLong >= 3 && isFinite(price) && isFinite(ma200) && price > ma200 && isBullishEngulfing;
-  const canShort = scoreShort >= 3 && isFinite(price) && isFinite(ma200) && price < ma200 && isBearishEngulfing;
+  const canLong = scoreLong >= 3 && isFinite(price) && isFinite(ma200) && price > ma200 ;
+  const canShort = scoreShort >= 3 && isFinite(price) && isFinite(ma200) && price < ma200;
 
   return { canLong, canShort, targetLong, stopLossLong, targetShort, stopLossShort, price, ma200, isBullishEngulfing, isBearishEngulfing, scoreLong, scoreShort };
 };
