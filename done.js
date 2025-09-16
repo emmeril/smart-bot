@@ -605,7 +605,7 @@ const checkPositionStatus = async () => {
 
     // Monitoring internal untuk TP/SL dari data di database
     if (db.activePosition && amtSafe !== 0) {
-      const { tp, sl, side, entryPrice } = db.activePosition;
+      const { tp, sl, side, entryPrice, offset } = db.activePosition;
       const currentPrice = await getPrice();
       if (!currentPrice) return;
 
