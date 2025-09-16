@@ -23,14 +23,14 @@ if (!fs.existsSync(logPath)) {
 
 const db = fs.existsSync(dbPath)
   ? JSON.parse(fs.readFileSync(dbPath))
-  : { 
-      pair: "XRP/USDT:USDT", 
-      lastLongEntryTime: 0, 
+  : {
+      pair: "XRP/USDT:USDT",
+      lastLongEntryTime: 0,
       lastShortEntryTime: 0,
       leverage: 10,
       marginMode: "ISOLATED",
       activePosition: null,
-      usdtPerTrade: 5.1 
+      usdtPerTrade: 5.1,
     };
 
 let prevPosAmt = 0;
@@ -66,11 +66,17 @@ const client = new Client({
   puppeteer: {
     executablePath: process.env.PUPPETEER_PATH || "/usr/bin/chromium",
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+    ],
   },
 });
 
-app.listen(serverPort, () => console.log(`🟢 Server: QR server aktif di http://localhost:${serverPort}/qr`));
+app.listen(serverPort, () =>
+  console.log(`🟢 Server: QR server aktif di http://localhost:${serverPort}/qr`)
+);
 
 client.on("qr", (qr) => {
   currentQR = qr;
@@ -93,11 +99,13 @@ client.on("message", async (msg) => {
   if (!msg.from.includes(process.env.ADMIN_PHONE)) return;
   const txt = msg.body.toLowerCase();
   const [cmd, ...args] = txt.split(" ");
-  
+
   if (cmd === "!pair") {
     const newPair = args[0]?.toUpperCase();
     if (!newPair) {
-      return msg.reply("⚠️ Format salah. Gunakan: *!pair [SIMBOL]*, contoh: *!pair BTC/USDT:USDT*");
+      return msg.reply(
+        "⚠️ Format salah. Gunakan: *!pair [SIMBOL]*, contoh: *!pair BTC/USDT:USDT*"
+      );
     }
     db.pair = newPair;
     db.lastLongEntryTime = 0;
@@ -113,12 +121,16 @@ client.on("message", async (msg) => {
     const validModes = ["ISOLATED", "CROSSED"];
 
     if (!newLeverage || newLeverage < 1 || newLeverage > 125) {
-      return msg.reply("⚠️ Format salah. Gunakan: *!leverage [1-125] [isolated/crossed]*");
+      return msg.reply(
+        "⚠️ Format salah. Gunakan: *!leverage [1-125] [isolated/crossed]*"
+      );
     }
     if (newMarginMode && !validModes.includes(newMarginMode)) {
-      return msg.reply(`⚠️ Margin mode tidak valid. Pilihan: *${validModes.join(" atau ")}*.`);
+      return msg.reply(
+        `⚠️ Margin mode tidak valid. Pilihan: *${validModes.join(" atau ")}*.`
+      );
     }
-    
+
     db.leverage = newLeverage;
     if (newMarginMode) db.marginMode = newMarginMode;
     fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
@@ -126,26 +138,36 @@ client.on("message", async (msg) => {
     let replyMsg = `✅ Pengaturan berhasil diperbarui:\n\n*Leverage:* ${db.leverage}x`;
     if (newMarginMode) replyMsg += `\n*Margin Mode:* ${db.marginMode}`;
 
-    console.log(`🔄 Perintah: Leverage/margin mode diganti ke ${db.leverage}x (${db.marginMode}).`);
+    console.log(
+      `🔄 Perintah: Leverage/margin mode diganti ke ${db.leverage}x (${db.marginMode}).`
+    );
     msg.reply(replyMsg);
   }
 
   if (cmd === "!order") {
     const newAmount = parseFloat(args[0]);
     if (isNaN(newAmount) || newAmount <= 0) {
-      return msg.reply("⚠️ Format salah. Gunakan: *!order [JUMLAH]*, contoh: *!order 10.5*");
+      return msg.reply(
+        "⚠️ Format salah. Gunakan: *!order [JUMLAH]*, contoh: *!order 10.5*"
+      );
     }
     db.usdtPerTrade = newAmount;
     fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
-    console.log(`🔄 Perintah: Jumlah USDT per trade diubah ke ${db.usdtPerTrade}.`);
-    msg.reply(`✅ Jumlah USDT per trade berhasil diubah menjadi *${db.usdtPerTrade} USDT*.`);
+    console.log(
+      `🔄 Perintah: Jumlah USDT per trade diubah ke ${db.usdtPerTrade}.`
+    );
+    msg.reply(
+      `✅ Jumlah USDT per trade berhasil diubah menjadi *${db.usdtPerTrade} USDT*.`
+    );
   }
-  
+
   if (cmd === "!reset") {
     db.activePosition = null;
     fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
     console.log(`🔄 Perintah: Status posisi bot direset.`);
-    msg.reply("✅ Status posisi bot telah direset. Bot akan mulai mencari sinyal baru.");
+    msg.reply(
+      "✅ Status posisi bot telah direset. Bot akan mulai mencari sinyal baru."
+    );
   }
 
   if (cmd === "!status") {
@@ -153,23 +175,29 @@ client.on("message", async (msg) => {
       const price = await getPrice();
       const bal = await exchange.fetchBalance();
       const usdt = bal.total.USDT;
-      const positions = bal.info?.positions?.filter(p => parseFloat(p.positionAmt) !== 0) || [];
+      const positions =
+        bal.info?.positions?.filter((p) => parseFloat(p.positionAmt) !== 0) ||
+        [];
 
       let posText = `*Posisi Terbuka di Binance:*`;
       if (positions.length === 0) {
         posText += `\n❌ Tidak ada posisi terbuka di akun Anda.`;
       } else {
-        positions.forEach(pos => {
+        positions.forEach((pos) => {
           const side = parseFloat(pos.positionAmt) > 0 ? "LONG" : "SHORT";
           posText += `\n\n  *Pair:* ${pos.symbol}
   - Tipe: ${side}
   - PnL (Unrealized): ${parseFloat(pos.unrealizedProfit).toFixed(2)} USDT`;
         });
       }
-      
-      const lastLong = db.lastLongEntryTime ? new Date(db.lastLongEntryTime).toLocaleString() : "-";
-      const lastShort = db.lastShortEntryTime ? new Date(db.lastShortEntryTime).toLocaleString() : "-";
-      
+
+      const lastLong = db.lastLongEntryTime
+        ? new Date(db.lastLongEntryTime).toLocaleString()
+        : "-";
+      const lastShort = db.lastShortEntryTime
+        ? new Date(db.lastShortEntryTime).toLocaleString()
+        : "-";
+
       let msgText = `📊 *Status Bot Trading*\n
 *Pair Bot:* ${db.pair}
 *Harga Saat Ini:* ${formatPrice(price)}
@@ -179,18 +207,18 @@ client.on("message", async (msg) => {
 *Sinyal Terakhir:*
   - LONG: ${lastLong}
   - SHORT: ${lastShort}`;
-  
+
       if (db.activePosition) {
         msgText += `\n\n*Posisi yang Dimonitor Bot:*
   - Tipe: ${db.activePosition.side.toUpperCase()}
   - Entry: ${formatPrice(db.activePosition.entryPrice)}
-  - TP: ${db.activePosition.tp ? formatPrice(db.activePosition.tp) : 'N/A'}
-  - SL: ${db.activePosition.sl ? formatPrice(db.activePosition.sl) : 'N/A'}`;
+  - TP: ${db.activePosition.tp ? formatPrice(db.activePosition.tp) : "N/A"}
+  - SL: ${db.activePosition.sl ? formatPrice(db.activePosition.sl) : "N/A"}`;
       } else {
         msgText += `\n\n*Posisi yang Dimonitor Bot:*
   - ❌ Tidak ada posisi yang dimonitor bot.`;
       }
-      
+
       msgText += `\n\n${posText}`;
 
       await msg.reply(msgText);
@@ -218,7 +246,9 @@ const mins = (ms) => ms / 1000 / 60;
 const sendMsg = async (text) => {
   try {
     const chats = await client.getChats();
-    const chat = chats.find((c) => !c.isGroup && c.id.user.includes(process.env.ADMIN_PHONE));
+    const chat = chats.find(
+      (c) => !c.isGroup && c.id.user.includes(process.env.ADMIN_PHONE)
+    );
     if (chat) {
       await chat.sendMessage(text);
       console.log("📤 WhatsApp: Pesan terkirim.", text.split("\n")[0] + "...");
@@ -253,12 +283,16 @@ const calcQty = (price) => {
   let qty = db.usdtPerTrade / price;
   const prec = exchange.markets[db.pair]?.precision?.amount ?? 3;
   qty = parseFloat(qty.toFixed(prec));
-  console.log(`📐 Kalkulasi: Kuantitas dihitung: ${qty} (${db.usdtPerTrade} USDT).`);
+  console.log(
+    `📐 Kalkulasi: Kuantitas dihitung: ${qty} (${db.usdtPerTrade} USDT).`
+  );
   return qty;
 };
 
 const logSignal = (type, entry, tp, sl, status) => {
-  const line = `${new Date().toISOString()},${db.pair},${type},${entry},${tp},${sl},${status}\n`;
+  const line = `${new Date().toISOString()},${
+    db.pair
+  },${type},${entry},${tp},${sl},${status}\n`;
   fs.appendFileSync(logPath, line);
   console.log("📝 Log: Sinyal dicatat di log.csv");
 };
@@ -282,15 +316,30 @@ const getPositionFromBalance = async () => {
     const marketId = getMarketId();
     const positions = bal.info?.positions || [];
     // Some exchanges have symbol or contractCode; try multiple keys
-    const pos = positions.find(p => {
-      return [p.symbol, p.contractCode, p.comm, p.info, p.asset].some(k => false); // noop
+    const pos = positions.find((p) => {
+      return [p.symbol, p.contractCode, p.comm, p.info, p.asset].some(
+        (k) => false
+      ); // noop
     });
     // Instead do safe find:
-    let found = positions.find(p => p.symbol === marketId || p.contractCode === marketId || (p.symbol && p.symbol.includes(marketId)) );
+    let found = positions.find(
+      (p) =>
+        p.symbol === marketId ||
+        p.contractCode === marketId ||
+        (p.symbol && p.symbol.includes(marketId))
+    );
     if (!found) {
       // try matching by removing non-alphanum
-      const norm = (s) => (s || "").toString().replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-      found = positions.find(p => norm(p.symbol) === norm(marketId) || norm(p.contractCode) === norm(marketId));
+      const norm = (s) =>
+        (s || "")
+          .toString()
+          .replace(/[^a-zA-Z0-9]/g, "")
+          .toUpperCase();
+      found = positions.find(
+        (p) =>
+          norm(p.symbol) === norm(marketId) ||
+          norm(p.contractCode) === norm(marketId)
+      );
     }
     return { balance: bal, position: found };
   } catch (err) {
@@ -303,8 +352,12 @@ const getPositionFromBalance = async () => {
 const placeOrder = async (side, tp, sl) => {
   console.log("🔍 Order: Memeriksa apakah ada posisi aktif...");
   if (db.activePosition) {
-    console.log("⚠️ Order: Masih ada posisi terbuka yang dimonitor oleh bot, order dibatalkan.");
-    await sendMsg(`⚠️ ${db.pair}: Masih ada posisi terbuka yang dimonitor bot. Order ${side} dibatalkan.`);
+    console.log(
+      "⚠️ Order: Masih ada posisi terbuka yang dimonitor oleh bot, order dibatalkan."
+    );
+    await sendMsg(
+      `⚠️ ${db.pair}: Masih ada posisi terbuka yang dimonitor bot. Order ${side} dibatalkan.`
+    );
     return;
   }
 
@@ -313,8 +366,12 @@ const placeOrder = async (side, tp, sl) => {
     const { position } = await getPositionFromBalance();
     const amt = parseFloat(position?.positionAmt || "0");
     if (isFinite(amt) && Math.abs(amt) > 0) {
-      console.log("⚠️ Order: Terdapat posisi aktif di akun (detected). Order dibatalkan.");
-      await sendMsg(`⚠️ ${db.pair}: Terdeteksi posisi aktif di akun. Order ${side} dibatalkan.`);
+      console.log(
+        "⚠️ Order: Terdapat posisi aktif di akun (detected). Order dibatalkan."
+      );
+      await sendMsg(
+        `⚠️ ${db.pair}: Terdeteksi posisi aktif di akun. Order ${side} dibatalkan.`
+      );
       return;
     }
   } catch (e) {
@@ -322,7 +379,8 @@ const placeOrder = async (side, tp, sl) => {
   }
 
   const price = await getPrice();
-  if (!price) return console.log("❌ Order: Gagal mendapatkan harga, order dibatalkan.");
+  if (!price)
+    return console.log("❌ Order: Gagal mendapatkan harga, order dibatalkan.");
   const qty = calcQty(price);
 
   console.log(`➡️ Order: ENTRY ${side.toUpperCase()}
@@ -338,18 +396,19 @@ const placeOrder = async (side, tp, sl) => {
   } catch (e) {
     console.warn("⚠️ Order: Gagal mengatur leverage/margin mode.", e.message);
   }
-  
+
   try {
     const order = await exchange.createOrder(db.pair, "market", side, qty);
     console.log("✅ Order: Entry market order berhasil dibuat.");
-    
+
     // Simpan detail posisi di database
     db.activePosition = {
-        side: side,
-        entryPrice: price,
-        tp: tp,
-        sl: sl,
-        orderId: order.id,
+      side: side,
+      entryPrice: price,
+      tp: tp,
+      sl: sl,
+      offset: side === "buy" ? sig.longOffset : sig.shortOffset,
+      orderId: order.id,
     };
     saveDB();
 
@@ -362,8 +421,13 @@ const placeOrder = async (side, tp, sl) => {
 *Leverage:* ${db.leverage}x
 *Catatan:* TP & SL akan dimonitor oleh bot.`);
 
-    logSignal(side === "buy" ? "LONG" : "SHORT", price, tp, sl, "ORDER_PLACED_MONITOR_BY_BOT");
-
+    logSignal(
+      side === "buy" ? "LONG" : "SHORT",
+      price,
+      tp,
+      sl,
+      "ORDER_PLACED_MONITOR_BY_BOT"
+    );
   } catch (e) {
     console.error("❌ Order: Gagal membuat order.", e.message);
     await sendMsg(`❌ *Gagal Membuat Order!*
@@ -385,9 +449,13 @@ const closePosition = async (reason, entryPrice = "N/A") => {
       const side = qty > 0 ? "sell" : "buy";
       const amount = Math.abs(qty);
       // buat reduceOnly order untuk menutup
-      await exchange.createOrder(db.pair, "market", side, amount, undefined, { reduceOnly: true });
-      console.log(`✅ Posisi: Order tutup posisi berhasil dibuat (side=${side}, amt=${amount}).`);
-      
+      await exchange.createOrder(db.pair, "market", side, amount, undefined, {
+        reduceOnly: true,
+      });
+      console.log(
+        `✅ Posisi: Order tutup posisi berhasil dibuat (side=${side}, amt=${amount}).`
+      );
+
       const exitPrice = await getPrice();
       await sendMsg(`📉 *Posisi Ditutup!*
 *Pair:* ${db.pair}
@@ -395,7 +463,6 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 *Harga Entry:* ${formatPrice(entryPrice)}
 *Harga Exit:* ${formatPrice(exitPrice)}`);
     }
-
   } catch (err) {
     console.error("❌ Posisi: Gagal menutup posisi.", err.message);
     await sendMsg(`❌ *Gagal Menutup Posisi!*
@@ -407,7 +474,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
     db.activePosition = null;
     saveDB();
   }
-}
+};
 
 // -------------------- ANALYSIS --------------------
 const analyzeSignal = async () => {
@@ -425,13 +492,22 @@ const analyzeSignal = async () => {
   const ema20 = EMA.calculate({ values: close.slice(-50), period: 20 }).pop();
   const ema50 = EMA.calculate({ values: close.slice(-50), period: 50 }).pop();
   const ma200 = EMA.calculate({ values: close, period: 200 }).pop();
-  const macd = MACD.calculate({ values: close.slice(-50), fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }).pop();
-  const adx = ADX.calculate({ close: close.slice(-50), high: high.slice(-50), low: low.slice(-50), period: 14 }).pop();
+  const macd = MACD.calculate({
+    values: close.slice(-50),
+    fastPeriod: 12,
+    slowPeriod: 26,
+    signalPeriod: 9,
+  }).pop();
+  const adx = ADX.calculate({
+    close: close.slice(-50),
+    high: high.slice(-50),
+    low: low.slice(-50),
+    period: 14,
+  }).pop();
 
   const price = close.at(-1);
   const prev = ohlcv.at(-2);
   const prev2 = ohlcv.at(-3);
-
 
   const isAboveMA200 = price > ma200;
   const isBelowMA200 = price < ma200;
@@ -453,6 +529,10 @@ const analyzeSignal = async () => {
   const targetShort = Math.min(...low.slice(-50));
   const stopLossShort = Math.max(...high.slice(-50));
 
+  // Hitung offset dari jarak antara TP dan SL
+  const longOffset = targetLong - stopLossLong;
+  const shortOffset = stopLossShort - targetShort;
+
   const canLong = scoreLong >= 3 && isAboveMA200;
   const canShort = scoreShort >= 3 && isBelowMA200;
 
@@ -461,11 +541,31 @@ const analyzeSignal = async () => {
   console.log(`  - Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
   console.log(`  - Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
   console.log(`  --- Detail Indikator ---`);
-  console.log(`  - RSI: ${rsi?.toFixed(2)} (${rsi < 35 ? '✅' : '❌'} Long | ${rsi > 65 ? '✅' : '❌'} Short)`);
-  console.log(`  - MACD Hist: ${macd?.histogram?.toFixed(4)} (${macd?.histogram > 0 ? '✅' : '❌'} Long | ${macd?.histogram < 0 ? '✅' : '❌'} Short)`);
-  console.log(`  - EMA20 vs EMA50: ${ema20?.toFixed(4)} vs ${ema50?.toFixed(4)} (${ema20 > ema50 ? '✅' : '❌'} Long | ${ema20 < ema50 ? '✅' : '❌'} Short)`);
-  console.log(`  - MA200: ${ma200?.toFixed(4)} (Harga ${isAboveMA200 ? '✅ di atas' : '❌ di bawah'} | ${isBelowMA200 ? '✅ di bawah' : '❌ di atas'})`);
-  console.log(`  - ADX: ${adx?.adx?.toFixed(2)} (${adx?.adx > 20 ? '✅' : '❌'} Tren Kuat)`);
+  console.log(
+    `  - RSI: ${rsi?.toFixed(2)} (${rsi < 35 ? "✅" : "❌"} Long | ${
+      rsi > 65 ? "✅" : "❌"
+    } Short)`
+  );
+  console.log(
+    `  - MACD Hist: ${macd?.histogram?.toFixed(4)} (${
+      macd?.histogram > 0 ? "✅" : "❌"
+    } Long | ${macd?.histogram < 0 ? "✅" : "❌"} Short)`
+  );
+  console.log(
+    `  - EMA20 vs EMA50: ${ema20?.toFixed(4)} vs ${ema50?.toFixed(4)} (${
+      ema20 > ema50 ? "✅" : "❌"
+    } Long | ${ema20 < ema50 ? "✅" : "❌"} Short)`
+  );
+  console.log(
+    `  - MA200: ${ma200?.toFixed(4)} (Harga ${
+      isAboveMA200 ? "✅ di atas" : "❌ di bawah"
+    } | ${isBelowMA200 ? "✅ di bawah" : "❌ di atas"})`
+  );
+  console.log(
+    `  - ADX: ${adx?.adx?.toFixed(2)} (${
+      adx?.adx > 20 ? "✅" : "❌"
+    } Tren Kuat)`
+  );
   console.log(`  - Total Score: Long=${scoreLong} | Short=${scoreShort}`);
   console.log(`  ---`);
 
@@ -476,6 +576,8 @@ const analyzeSignal = async () => {
     stopLossLong,
     targetShort,
     stopLossShort,
+    longOffset,
+    shortOffset,
     price,
   };
 };
@@ -495,7 +597,7 @@ const checkPositionStatus = async () => {
 *Pair:* ${db.pair}
 *Harga Exit:* (lihat di Binance)`);
       console.log(`📉 Posisi ${side} di ${db.pair} sudah ditutup.`);
-      
+
       // Reset status di database jika posisi ditutup manual
       db.activePosition = null;
       saveDB();
@@ -506,6 +608,31 @@ const checkPositionStatus = async () => {
       const { tp, sl, side, entryPrice } = db.activePosition;
       const currentPrice = await getPrice();
       if (!currentPrice) return;
+
+      // --- LOGIKA TRAILING STOP LOSS DENGAN OFFSET DINAMIS ---
+      if (side === "buy") {
+        const newSL = currentPrice - offset;
+        if (newSL > sl) {
+          db.activePosition.sl = newSL;
+          saveDB();
+          await sendMsg(
+            `📈 Trailing SL diperbarui untuk posisi LONG!\n*New SL:* ${formatPrice(
+              newSL
+            )}`
+          );
+        }
+      } else if (side === "sell") {
+        const newSL = currentPrice + offset;
+        if (newSL < sl) {
+          db.activePosition.sl = newSL;
+          saveDB();
+          await sendMsg(
+            `📉 Trailing SL diperbarui untuk posisi SHORT!\n*New SL:* ${formatPrice(
+              newSL
+            )}`
+          );
+        }
+      }
 
       if (side === "buy") {
         if (currentPrice >= tp) {
@@ -536,11 +663,11 @@ setInterval(async () => {
     const isScheduledTime = currentMinute % 15 === 0;
 
     // PENTING: Selalu cek status posisi di Binance
-        const { position } = await getPositionFromBalance();
-        const amt = parseFloat(position?.positionAmt || "0");
-        const hasActiveBinancePosition = isFinite(amt) && Math.abs(amt) > 0;
+    const { position } = await getPositionFromBalance();
+    const amt = parseFloat(position?.positionAmt || "0");
+    const hasActiveBinancePosition = isFinite(amt) && Math.abs(amt) > 0;
     await checkPositionStatus();
-    
+
     console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
     console.log("🔍 Status Posisi Aktif di DB: ", db.activePosition);
 
@@ -555,28 +682,33 @@ setInterval(async () => {
 
       // const readyLong = !db.lastLongEntryTime || mins(now - db.lastLongEntryTime) >= COOLDOWN_MINUTES;
       // const readyShort = !db.lastShortEntryTime || mins(now - db.lastShortEntryTime) >= COOLDOWN_MINUTES;
-      
+
       if (sig.canLong && isScheduledTime) {
-        console.log("🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order.");
+        console.log(
+          "🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order."
+        );
         db.lastLongEntryTime = now;
         saveDB();
         await placeOrder("buy", sig.targetLong, sig.stopLossLong);
       }
 
       if (sig.canShort && isScheduledTime) {
-        console.log("📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order.");
+        console.log(
+          "📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order."
+        );
         db.lastShortEntryTime = now;
         saveDB();
         await placeOrder("sell", sig.targetShort, sig.stopLossShort);
       }
-      
+
       if (!sig.canLong && !sig.canShort) {
-          console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
+        console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
       }
     } else {
-      console.log("➡️ Loop Utama: Posisi aktif terdeteksi. Melewatkan analisis sinyal.");
+      console.log(
+        "➡️ Loop Utama: Posisi aktif terdeteksi. Melewatkan analisis sinyal."
+      );
     }
-
   } catch (e) {
     console.error("⚠️ Loop: Terjadi kesalahan di loop utama.", e.message);
     console.error(e.stack);
