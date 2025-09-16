@@ -349,7 +349,7 @@ const getPositionFromBalance = async () => {
 };
 
 // -------------------- ORDER --------------------
-const placeOrder = async (side, tp, sl) => {
+const placeOrder = async (side, tp, sl, offset) => {
   console.log("🔍 Order: Memeriksa apakah ada posisi aktif...");
   if (db.activePosition) {
     console.log(
@@ -407,7 +407,7 @@ const placeOrder = async (side, tp, sl) => {
       entryPrice: price,
       tp: tp,
       sl: sl,
-      offset: side === "buy" ? sig.longOffset : sig.shortOffset,
+      offset: offset,
       orderId: order.id,
     };
     saveDB();
@@ -689,7 +689,12 @@ setInterval(async () => {
         );
         db.lastLongEntryTime = now;
         saveDB();
-        await placeOrder("buy", sig.targetLong, sig.stopLossLong);
+        await placeOrder(
+          "buy",
+          sig.targetLong,
+          sig.stopLossLong,
+          sig.longOffset
+        );
       }
 
       if (sig.canShort && isScheduledTime) {
@@ -698,7 +703,12 @@ setInterval(async () => {
         );
         db.lastShortEntryTime = now;
         saveDB();
-        await placeOrder("sell", sig.targetShort, sig.stopLossShort);
+        await placeOrder(
+          "sell",
+          sig.targetShort,
+          sig.stopLossShort,
+          sig.shortOffset
+        );
       }
 
       if (!sig.canLong && !sig.canShort) {
