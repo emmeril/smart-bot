@@ -534,13 +534,18 @@ setInterval(async () => {
     const now = new Date();
     const currentMinute = now.getMinutes();
     const isScheduledTime = currentMinute % 15 === 0;
+
+    // PENTING: Selalu cek status posisi di Binance
+        const { position } = await getPositionFromBalance();
+        const amt = parseFloat(position?.positionAmt || "0");
+        const hasActiveBinancePosition = isFinite(amt) && Math.abs(amt) > 0;
     await checkPositionStatus();
     
     console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
     console.log("🔍 Status Posisi Aktif di DB: ", db.activePosition);
 
     // Hanya cari sinyal baru jika tidak ada posisi yang dimonitor
-    if (db.activePosition === null) {
+    if (db.activePosition === null && !hasActiveBinancePosition) {
       const now = Date.now();
       const sig = await analyzeSignal();
       if (!sig.price) {
