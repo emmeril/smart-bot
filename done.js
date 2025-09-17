@@ -538,10 +538,10 @@ const analyzeSignal = async () => {
   if (ema20 < ema50) scoreShort++;
   if (adx?.adx > 20) scoreShort++;
 
-  const targetLong = Math.max(...high.slice(-50));
-  const stopLossLong = Math.min(...low.slice(-50));
-  const targetShort = Math.min(...low.slice(-50));
-  const stopLossShort = Math.max(...high.slice(-50));
+  const targetLong = Math.max(...high.slice(-16));
+  const stopLossLong = Math.min(...low.slice(-16));
+  const targetShort = Math.min(...low.slice(-16));
+  const stopLossShort = Math.max(...high.slice(-16));
 
   // Hitung offset dari jarak antara TP dan SL
   const longOffset = targetLong - stopLossLong;
