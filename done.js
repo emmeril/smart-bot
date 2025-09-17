@@ -170,6 +170,37 @@ client.on("message", async (msg) => {
     );
   }
 
+    if (cmd === "!pnl") {
+    try {
+      const { position } = await getPositionFromBalance();
+      if (!position || parseFloat(position.positionAmt) === 0) {
+        return msg.reply("❌ Tidak ada posisi terbuka di Binance untuk dihitung PnL-nya.");
+      }
+
+      const pnl = parseFloat(position.unrealizedProfit);
+      const entryPrice = parseFloat(position.entryPrice);
+      const currentPrice = await getPrice();
+      const positionAmt = parseFloat(position.positionAmt);
+      const side = positionAmt > 0 ? "LONG" : "SHORT";
+
+      let pnlMsg = `📊 *Laporan PnL Saat Ini*\n\n`;
+      pnlMsg += `*Pair:* ${db.pair}\n`;
+      pnlMsg += `*Tipe Posisi:* ${side}\n`;
+      pnlMsg += `*Harga Entry:* ${formatPrice(entryPrice)}\n`;
+      pnlMsg += `*Harga Saat Ini:* ${formatPrice(currentPrice)}\n`;
+      pnlMsg += `*PnL (Unrealized):* ${pnl.toFixed(2)} USDT (${
+        pnl >= 0 ? "✅" : "❌"
+      })`;
+
+      await msg.reply(pnlMsg);
+      console.log("📤 WhatsApp: Laporan PnL dikirim.");
+    } catch (err) {
+      console.error("❌ WhatsApp: Gagal ambil PnL.", err.message);
+      await msg.reply("⚠️ Error saat mengambil PnL.");
+    }
+    }
+  
+
   if (cmd === "!status") {
     try {
       const price = await getPrice();
