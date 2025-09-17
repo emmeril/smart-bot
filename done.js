@@ -349,7 +349,7 @@ const getPositionFromBalance = async () => {
 };
 
 // -------------------- ORDER --------------------
-const placeOrder = async (side, tp, sl, offset) => {
+const placeOrder = async (side, tp, sl, offset, targetEntryPrice) => {
   console.log("🔍 Order: Memeriksa apakah ada posisi aktif...");
   if (db.activePosition) {
     console.log(
@@ -381,6 +381,20 @@ const placeOrder = async (side, tp, sl, offset) => {
   const price = await getPrice();
   if (!price)
     return console.log("❌ Order: Gagal mendapatkan harga, order dibatalkan.");
+
+  // --- LOGIKA BARU: Tentukan apakah kondisi entry terpenuhi ---
+  let isEntryConditionMet = false;
+  if (side === 'buy' && price < targetEntryPrice) {
+    isEntryConditionMet = true;
+  } else if (side === 'sell' && price > targetEntryPrice) {
+    isEntryConditionMet = true;
+  }
+
+  if (!isEntryConditionMet) {
+    console.log(`⚠️ Order: Kondisi entry tidak terpenuhi untuk ${side}. Harga saat ini ${formatPrice(price)} tidak berada di sisi yang diinginkan dari target entry ${formatPrice(targetEntryPrice)}. Order dibatalkan.`);
+    return;
+  }
+
   const qty = calcQty(price);
 
   console.log(`➡️ Order: ENTRY ${side.toUpperCase()}
@@ -533,6 +547,10 @@ const analyzeSignal = async () => {
   const longOffset = targetLong - stopLossLong;
   const shortOffset = stopLossShort - targetShort;
 
+  // Hitung mid-point (harga tengah) antara TP dan SL
+  const midPriceLong = (targetLong + stopLossLong) / 2;
+  const midPriceShort = (targetShort + stopLossShort) / 2;
+
   const canLong = scoreLong >= 3 && isAboveMA200;
   const canShort = scoreShort >= 3 && isBelowMA200;
 
@@ -566,6 +584,8 @@ const analyzeSignal = async () => {
       adx?.adx > 20 ? "✅" : "❌"
     } Tren Kuat)`
   );
+  console.log(`  - Mid Price Long: ${formatPrice(midPriceLong)}`);
+  console.log(`  - Mid Price Short: ${formatPrice(midPriceShort)}`);
   console.log(`  - Total Score: Long=${scoreLong} | Short=${scoreShort}`);
   console.log(`  ---`);
 
@@ -578,6 +598,8 @@ const analyzeSignal = async () => {
     stopLossShort,
     longOffset,
     shortOffset,
+    midPriceLong,
+    midPriceShort,
     price,
   };
 };
@@ -693,7 +715,8 @@ setInterval(async () => {
           "buy",
           sig.targetLong,
           sig.stopLossLong,
-          sig.longOffset
+          sig.longOffset,
+          sig.midPriceLong
         );
       }
 
@@ -707,7 +730,8 @@ setInterval(async () => {
           "sell",
           sig.targetShort,
           sig.stopLossShort,
-          sig.shortOffset
+          sig.shortOffset,
+          sig.midPriceShort
         );
       }
 
