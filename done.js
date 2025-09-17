@@ -384,9 +384,9 @@ const placeOrder = async (side, tp, sl, offset, targetEntryPrice) => {
 
   // --- LOGIKA BARU: Tentukan apakah kondisi entry terpenuhi ---
   let isEntryConditionMet = false;
-  if (side === 'buy' && price < targetEntryPrice) {
+  if (side === 'buy' && price <= targetEntryPrice) {
     isEntryConditionMet = true;
-  } else if (side === 'sell' && price > targetEntryPrice) {
+  } else if (side === 'sell' && price >= targetEntryPrice) {
     isEntryConditionMet = true;
   }
 
