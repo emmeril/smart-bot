@@ -178,7 +178,6 @@ client.on("message", async (msg) => {
       }
 
       const pnl = parseFloat(position.unrealizedProfit);
-      const entryPrice = parseFloat(position.entryPrice);
       const currentPrice = await getPrice();
       const positionAmt = parseFloat(position.positionAmt);
       const side = positionAmt > 0 ? "LONG" : "SHORT";
@@ -186,7 +185,6 @@ client.on("message", async (msg) => {
       let pnlMsg = `📊 *Laporan PnL Saat Ini*\n\n`;
       pnlMsg += `*Pair:* ${db.pair}\n`;
       pnlMsg += `*Tipe Posisi:* ${side}\n`;
-      pnlMsg += `*Harga Entry:* ${formatPrice(entryPrice)}\n`;
       pnlMsg += `*Harga Saat Ini:* ${formatPrice(currentPrice)}\n`;
       pnlMsg += `*PnL (Unrealized):* ${pnl.toFixed(2)} USDT (${
         pnl >= 0 ? "✅" : "❌"
@@ -198,7 +196,8 @@ client.on("message", async (msg) => {
       console.error("❌ WhatsApp: Gagal ambil PnL.", err.message);
       await msg.reply("⚠️ Error saat mengambil PnL.");
     }
-    }
+  }
+  
   
 
   if (cmd === "!status") {
