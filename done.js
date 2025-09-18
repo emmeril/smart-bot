@@ -17,7 +17,7 @@ const serverPort = 7890;
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
-  fs.writeFileSync(logPath, "timestamp,pair,type,entry,tp,sl,status\n");
+  fs.writeFileSync(logPath, "timestamp,pair,type,entry,tp,sl,status,pnl\n");
   console.log("📝 Log: File log.csv dibuat.");
 }
 
@@ -172,33 +172,73 @@ client.on("message", async (msg) => {
 
     if (cmd === "!pnl") {
     try {
-      const { position } = await getPositionFromBalance();
-      if (!position || parseFloat(position.positionAmt) === 0) {
-        return msg.reply("❌ Tidak ada posisi terbuka di Binance untuk dihitung PnL-nya.");
+      if (!fs.existsSync(logPath)) {
+        return msg.reply("ℹ️ Log tidak ditemukan (log.csv belum ada).");
+      }
+      const raw = fs.readFileSync(logPath, "utf8");
+      const lines = raw.split(/\r?\n/).filter((l) => l.trim() !== "");
+      // skip header
+      const dataLines = lines.slice(1);
+
+      let tpCount = 0, slCount = 0;
+      let tpSum = 0, slSum = 0;
+      let netSum = 0;
+      let items = [];
+
+      dataLines.forEach((line) => {
+        const parts = line.split(",");
+        if (parts.length < 7) return;
+        const status = parts[6] ? parts[6].trim() : "";
+        // pnl may be at index 7 (if present)
+        const pnlRaw = parts[7] ? parts[7].trim() : "";
+        const pnl = pnlRaw !== "" && !isNaN(Number(pnlRaw)) ? Number(pnlRaw) : null;
+
+        if (/TP_REALIZED/i.test(status) || /TP/i.test(status) && pnl !== null) {
+          tpCount++;
+          if (pnl !== null) tpSum += pnl;
+        }
+        if (/SL_REALIZED/i.test(status) || /SL/i.test(status) && pnl !== null) {
+          slCount++;
+          if (pnl !== null) slSum += pnl;
+        }
+        if (pnl !== null) netSum += pnl;
+
+        // optional: collect last 5 realized events
+        if ((/TP_REALIZED|SL_REALIZED/i).test(status)) {
+          items.push({
+            time: parts[0],
+            pair: parts[1],
+            type: parts[2],
+            entry: parts[3],
+            tp: parts[4],
+            sl: parts[5],
+            status,
+            pnl
+          });
+        }
+      });
+
+      const avgTp = tpCount ? tpSum / tpCount : 0;
+      const avgSl = slCount ? slSum / slCount : 0;
+
+      let reply = `📊 *Rekap PnL*\n\n*TP (realisasi):* ${tpCount} trade — Total: ${tpSum.toFixed(4)} USDT — Rata2: ${avgTp.toFixed(4)} USDT\n*SL (realisasi):* ${slCount} trade — Total: ${slSum.toFixed(4)} USDT — Rata2: ${avgSl.toFixed(4)} USDT\n\n*Net PnL:* ${netSum >= 0 ? "+" : ""}${netSum.toFixed(4)} USDT`;
+
+      // tambahkan 5 record terakhir (jika ada)
+      if (items.length > 0) {
+        const last = items.slice(-5).reverse();
+        reply += `\n\n*5 Realized Terakhir:*\n`;
+        last.forEach((it) => {
+          reply += `\n- ${it.time.split("T")[0]} ${it.status} ${it.type} PnL:${it.pnl !== null ? (it.pnl>=0?"+":"")+it.pnl.toFixed(4)+" USDT" : "N/A"}`;
+        });
       }
 
-      const pnl = parseFloat(position.unrealizedProfit);
-      const currentPrice = await getPrice();
-      const positionAmt = parseFloat(position.positionAmt);
-      const side = positionAmt > 0 ? "LONG" : "SHORT";
-
-      let pnlMsg = `📊 *Laporan PnL Saat Ini*\n\n`;
-      pnlMsg += `*Pair:* ${db.pair}\n`;
-      pnlMsg += `*Tipe Posisi:* ${side}\n`;
-      pnlMsg += `*Harga Saat Ini:* ${formatPrice(currentPrice)}\n`;
-      pnlMsg += `*PnL (Unrealized):* ${pnl.toFixed(2)} USDT (${
-        pnl >= 0 ? "✅" : "❌"
-      })`;
-
-      await msg.reply(pnlMsg);
-      console.log("📤 WhatsApp: Laporan PnL dikirim.");
-    } catch (err) {
-      console.error("❌ WhatsApp: Gagal ambil PnL.", err.message);
-      await msg.reply("⚠️ Error saat mengambil PnL.");
+      await msg.reply(reply);
+    } catch (e) {
+      console.error("❌ Error !pnl:", e.message);
+      await msg.reply("⚠️ Terjadi error saat menghitung PnL.");
     }
   }
-  
-  
+
 
   if (cmd === "!status") {
     try {
@@ -319,10 +359,15 @@ const calcQty = (price) => {
   return qty;
 };
 
-const logSignal = (type, entry, tp, sl, status) => {
+const logSignal = (type, entry, tp, sl, status, pnl = null) => {
+  // pastikan nilai numeric untuk entry/tp/sl jika ada
+  const entryStr = entry !== undefined && entry !== null ? entry : "";
+  const tpStr = tp !== undefined && tp !== null ? tp : "";
+  const slStr = sl !== undefined && sl !== null ? sl : "";
+  const pnlStr = pnl !== null && isFinite(pnl) ? Number(pnl).toFixed(6) : ""; // simpan 6 desimal
   const line = `${new Date().toISOString()},${
     db.pair
-  },${type},${entry},${tp},${sl},${status}\n`;
+  },${type},${entryStr},${tpStr},${slStr},${status},${pnlStr}\n`;
   fs.appendFileSync(logPath, line);
   console.log("📝 Log: Sinyal dicatat di log.csv");
 };
@@ -414,14 +459,20 @@ const placeOrder = async (side, tp, sl, offset, targetEntryPrice) => {
 
   // --- LOGIKA BARU: Tentukan apakah kondisi entry terpenuhi ---
   let isEntryConditionMet = false;
-  if (side === 'buy' && price <= targetEntryPrice) {
+  if (side === "buy" && price <= targetEntryPrice) {
     isEntryConditionMet = true;
-  } else if (side === 'sell' && price >= targetEntryPrice) {
+  } else if (side === "sell" && price >= targetEntryPrice) {
     isEntryConditionMet = true;
   }
 
   if (!isEntryConditionMet) {
-    console.log(`⚠️ Order: Kondisi entry tidak terpenuhi untuk ${side}. Harga saat ini ${formatPrice(price)} tidak berada di sisi yang diinginkan dari target entry ${formatPrice(targetEntryPrice)}. Order dibatalkan.`);
+    console.log(
+      `⚠️ Order: Kondisi entry tidak terpenuhi untuk ${side}. Harga saat ini ${formatPrice(
+        price
+      )} tidak berada di sisi yang diinginkan dari target entry ${formatPrice(
+        targetEntryPrice
+      )}. Order dibatalkan.`
+    );
     return;
   }
 
@@ -501,6 +552,53 @@ const closePosition = async (reason, entryPrice = "N/A") => {
       );
 
       const exitPrice = await getPrice();
+
+      // ---- HITUNG PNL ESTIMASI BERDASARKAN db.usdtPerTrade ----
+      let pnl = null;
+      if (entryPrice !== "N/A" && isFinite(exitPrice) && isFinite(entryPrice)) {
+        try {
+          const entryNum = Number(entryPrice);
+          const exitNum = Number(exitPrice);
+          // qty yang dipakai saat entry di sistem kita: db.usdtPerTrade / entryPrice
+          // PNL long = db.usdtPerTrade * (exit/entry - 1)
+          // PNL short = db.usdtPerTrade * (1 - exit/entry)
+          if (side === "sell") {
+            // kita menutup posisi LONG (karena qty>0 -> close with sell)
+            pnl = db.usdtPerTrade * (exitNum / entryNum - 1);
+          } else {
+            // kita menutup posisi SHORT (qty<0 -> close with buy)
+            pnl = db.usdtPerTrade * (1 - exitNum / entryNum);
+          }
+        } catch (e) {
+          pnl = null;
+        }
+      }
+
+      let message = `📉 *Posisi Ditutup!*\n*Pair:* ${
+        db.pair
+      }\n*Sebab:* ${reason}\n*Harga Entry:* ${formatPrice(
+        entryPrice
+      )}\n*Harga Exit:* ${formatPrice(exitPrice)}`;
+      if (pnl !== null && isFinite(pnl)) {
+        message += `\n*PnL (est):* ${pnl >= 0 ? "+" : ""}${pnl.toFixed(
+          4
+        )} USDT`;
+      }
+      await sendMsg(message);
+
+      // Log hasil realisasi (TP/SL) ke log.csv
+      let statusTag = "CLOSED_MANUAL";
+      if (/TP/i.test(reason)) statusTag = "TP_REALIZED";
+      if (/SL/i.test(reason)) statusTag = "SL_REALIZED";
+      logSignal(
+        qty > 0 ? "LONG" : "SHORT",
+        entryPrice,
+        db.activePosition?.tp ?? "",
+        db.activePosition?.sl ?? "",
+        statusTag,
+        pnl
+      );
+
       await sendMsg(`📉 *Posisi Ditutup!*
 *Pair:* ${db.pair}
 *Sebab:* ${reason}
