@@ -230,13 +230,13 @@ client.on("message", async (msg) => {
       const avgTp = tpCount ? tpSum / tpCount : 0;
       const avgSl = slCount ? slSum / slCount : 0;
 
-      let reply = `📊 *Rekap PnL*\n\n*TP (realisasi):* ${tpCount} trade — Total: ${tpSum.toFixed(
+      let reply = `📊 *Rekap PnL*\n\n*TP (realisasi):* ${tpCount} trade\n*Total: ${tpSum.toFixed(
         4
-      )} USDT — Rata2: ${avgTp.toFixed(
+      )} USDT\n*Rata2: ${avgTp.toFixed(
         4
-      )} USDT\n*SL (realisasi):* ${slCount} trade — Total: ${slSum.toFixed(
+      )} USDT\n*SL (realisasi):* ${slCount} trade\n*Total: ${slSum.toFixed(
         4
-      )} USDT — Rata2: ${avgSl.toFixed(4)} USDT\n\n*Net PnL:* ${
+      )} USDT\n*Rata2: ${avgSl.toFixed(4)} USDT\n\n*Net PnL:* ${
         netSum >= 0 ? "+" : ""
       }${netSum.toFixed(4)} USDT`;
 
