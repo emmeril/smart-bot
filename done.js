@@ -170,7 +170,7 @@ client.on("message", async (msg) => {
     );
   }
 
-    if (cmd === "!pnl") {
+  if (cmd === "!pnl") {
     try {
       if (!fs.existsSync(logPath)) {
         return msg.reply("ℹ️ Log tidak ditemukan (log.csv belum ada).");
@@ -180,8 +180,10 @@ client.on("message", async (msg) => {
       // skip header
       const dataLines = lines.slice(1);
 
-      let tpCount = 0, slCount = 0;
-      let tpSum = 0, slSum = 0;
+      let tpCount = 0,
+        slCount = 0;
+      let tpSum = 0,
+        slSum = 0;
       let netSum = 0;
       let items = [];
 
@@ -191,20 +193,27 @@ client.on("message", async (msg) => {
         const status = parts[6] ? parts[6].trim() : "";
         // pnl may be at index 7 (if present)
         const pnlRaw = parts[7] ? parts[7].trim() : "";
-        const pnl = pnlRaw !== "" && !isNaN(Number(pnlRaw)) ? Number(pnlRaw) : null;
+        const pnl =
+          pnlRaw !== "" && !isNaN(Number(pnlRaw)) ? Number(pnlRaw) : null;
 
-        if (/TP_REALIZED/i.test(status) || /TP/i.test(status) && pnl !== null) {
+        if (
+          (/TP_REALIZED/i.test(status) || /TP/i.test(status)) &&
+          pnl !== null
+        ) {
           tpCount++;
           if (pnl !== null) tpSum += pnl;
         }
-        if (/SL_REALIZED/i.test(status) || /SL/i.test(status) && pnl !== null) {
+        if (
+          (/SL_REALIZED/i.test(status) || /SL/i.test(status)) &&
+          pnl !== null
+        ) {
           slCount++;
           if (pnl !== null) slSum += pnl;
         }
         if (pnl !== null) netSum += pnl;
 
         // optional: collect last 5 realized events
-        if ((/TP_REALIZED|SL_REALIZED/i).test(status)) {
+        if (/TP_REALIZED|SL_REALIZED/i.test(status)) {
           items.push({
             time: parts[0],
             pair: parts[1],
@@ -213,7 +222,7 @@ client.on("message", async (msg) => {
             tp: parts[4],
             sl: parts[5],
             status,
-            pnl
+            pnl,
           });
         }
       });
@@ -221,14 +230,26 @@ client.on("message", async (msg) => {
       const avgTp = tpCount ? tpSum / tpCount : 0;
       const avgSl = slCount ? slSum / slCount : 0;
 
-      let reply = `📊 *Rekap PnL*\n\n*TP (realisasi):* ${tpCount} trade — Total: ${tpSum.toFixed(4)} USDT — Rata2: ${avgTp.toFixed(4)} USDT\n*SL (realisasi):* ${slCount} trade — Total: ${slSum.toFixed(4)} USDT — Rata2: ${avgSl.toFixed(4)} USDT\n\n*Net PnL:* ${netSum >= 0 ? "+" : ""}${netSum.toFixed(4)} USDT`;
+      let reply = `📊 *Rekap PnL*\n\n*TP (realisasi):* ${tpCount} trade — Total: ${tpSum.toFixed(
+        4
+      )} USDT — Rata2: ${avgTp.toFixed(
+        4
+      )} USDT\n*SL (realisasi):* ${slCount} trade — Total: ${slSum.toFixed(
+        4
+      )} USDT — Rata2: ${avgSl.toFixed(4)} USDT\n\n*Net PnL:* ${
+        netSum >= 0 ? "+" : ""
+      }${netSum.toFixed(4)} USDT`;
 
       // tambahkan 5 record terakhir (jika ada)
       if (items.length > 0) {
         const last = items.slice(-5).reverse();
         reply += `\n\n*5 Realized Terakhir:*\n`;
         last.forEach((it) => {
-          reply += `\n- ${it.time.split("T")[0]} ${it.status} ${it.type} PnL:${it.pnl !== null ? (it.pnl>=0?"+":"")+it.pnl.toFixed(4)+" USDT" : "N/A"}`;
+          reply += `\n- ${it.time.split("T")[0]} ${it.status} ${it.type} PnL:${
+            it.pnl !== null
+              ? (it.pnl >= 0 ? "+" : "") + it.pnl.toFixed(4) + " USDT"
+              : "N/A"
+          }`;
         });
       }
 
@@ -238,7 +259,6 @@ client.on("message", async (msg) => {
       await msg.reply("⚠️ Terjadi error saat menghitung PnL.");
     }
   }
-
 
   if (cmd === "!status") {
     try {
@@ -390,12 +410,7 @@ const getPositionFromBalance = async () => {
     const bal = await exchange.fetchBalance();
     const marketId = getMarketId();
     const positions = bal.info?.positions || [];
-    // Some exchanges have symbol or contractCode; try multiple keys
-    const pos = positions.find((p) => {
-      return [p.symbol, p.contractCode, p.comm, p.info, p.asset].some(
-        (k) => false
-      ); // noop
-    });
+
     // Instead do safe find:
     let found = positions.find(
       (p) =>
@@ -559,31 +574,31 @@ const closePosition = async (reason, entryPrice = "N/A") => {
         try {
           const entryNum = Number(entryPrice);
           const exitNum = Number(exitPrice);
-          // qty yang dipakai saat entry di sistem kita: db.usdtPerTrade / entryPrice
-          // PNL long = db.usdtPerTrade * (exit/entry - 1)
-          // PNL short = db.usdtPerTrade * (1 - exit/entry)
-          if (side === "sell") {
-            // kita menutup posisi LONG (karena qty>0 -> close with sell)
-            pnl = db.usdtPerTrade * (exitNum / entryNum - 1);
-          } else {
-            // kita menutup posisi SHORT (qty<0 -> close with buy)
-            pnl = db.usdtPerTrade * (1 - exitNum / entryNum);
+          const qtyAbs = Math.abs(parseFloat(position?.positionAmt || "0"));
+          if (qtyAbs > 0 && isFinite(exitPrice) && isFinite(entryPrice)) {
+            if (side === "sell") {
+              pnl = (exitNum - entryNum) * qtyAbs; // LONG close
+            } else {
+              pnl = (entryNum - exitNum) * qtyAbs; // SHORT close
+            }
           }
         } catch (e) {
           pnl = null;
         }
       }
 
-      let message = `📉 *Posisi Ditutup!*\n*Pair:* ${
-        db.pair
-      }\n*Sebab:* ${reason}\n*Harga Entry:* ${formatPrice(
-        entryPrice
-      )}\n*Harga Exit:* ${formatPrice(exitPrice)}`;
+      let message = `📉 *Posisi Ditutup!*
+*Pair:* ${db.pair}
+*Sebab:* ${reason}
+*Harga Entry:* ${formatPrice(entryPrice)}
+*Harga Exit:* ${formatPrice(exitPrice)}`;
+
       if (pnl !== null && isFinite(pnl)) {
         message += `\n*PnL (est):* ${pnl >= 0 ? "+" : ""}${pnl.toFixed(
           4
         )} USDT`;
       }
+
       await sendMsg(message);
 
       // Log hasil realisasi (TP/SL) ke log.csv
@@ -598,12 +613,6 @@ const closePosition = async (reason, entryPrice = "N/A") => {
         statusTag,
         pnl
       );
-
-      await sendMsg(`📉 *Posisi Ditutup!*
-*Pair:* ${db.pair}
-*Sebab:* ${reason}
-*Harga Entry:* ${formatPrice(entryPrice)}
-*Harga Exit:* ${formatPrice(exitPrice)}`);
     }
   } catch (err) {
     console.error("❌ Posisi: Gagal menutup posisi.", err.message);
