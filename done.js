@@ -271,13 +271,13 @@ client.on("message", async (msg) => {
 
       let posText = `*Posisi Terbuka di Binance:*`;
       if (positions.length === 0) {
-        posText += `❌ Tidak ada posisi terbuka di akun Anda.`;
+        posText += `\n❌ Tidak ada posisi terbuka di akun Anda.`;
       } else {
         positions.forEach((pos) => {
           const side = parseFloat(pos.positionAmt) > 0 ? "LONG" : "SHORT";
           posText += `*Pair:* ${pos.symbol}
-  Tipe: ${side}
-  PnL (Unrealized): ${parseFloat(pos.unrealizedProfit).toFixed(2)} USDT`;
+  \nTipe: ${side}
+  \nPnL (Unrealized): ${parseFloat(pos.unrealizedProfit).toFixed(2)} USDT`;
         });
       }
 
