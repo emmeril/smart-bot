@@ -271,13 +271,13 @@ client.on("message", async (msg) => {
 
       let posText = `*Posisi Terbuka di Binance:*`;
       if (positions.length === 0) {
-        posText += `\n❌ Tidak ada posisi terbuka di akun Anda.`;
+        posText += `❌ Tidak ada posisi terbuka di akun Anda.`;
       } else {
         positions.forEach((pos) => {
           const side = parseFloat(pos.positionAmt) > 0 ? "LONG" : "SHORT";
-          posText += `\n\n  *Pair:* ${pos.symbol}
-  \nTipe: ${side}
-  \nPnL (Unrealized): ${parseFloat(pos.unrealizedProfit).toFixed(2)} USDT`;
+          posText += `*Pair:* ${pos.symbol}
+  Tipe: ${side}
+  PnL (Unrealized): ${parseFloat(pos.unrealizedProfit).toFixed(2)} USDT`;
         });
       }
 
@@ -295,18 +295,18 @@ client.on("message", async (msg) => {
 *Leverage:* ${db.leverage}x (${db.marginMode})
 *USDT per Trade:* ${db.usdtPerTrade}
 *Sinyal Terakhir:*
-\nLONG: ${lastLong}
-\nSHORT: ${lastShort}`;
+LONG: ${lastLong}
+SHORT: ${lastShort}`;
 
       if (db.activePosition) {
         msgText += `\n\n*Posisi yang Dimonitor Bot:*
-  \nTipe: ${db.activePosition.side.toUpperCase()}
-  \nEntry: ${formatPrice(db.activePosition.entryPrice)}
-  \nTP: ${db.activePosition.tp ? formatPrice(db.activePosition.tp) : "N/A"}
-  \nSL: ${db.activePosition.sl ? formatPrice(db.activePosition.sl) : "N/A"}`;
+  *Tipe:* ${db.activePosition.side.toUpperCase()}
+  *Entry:* ${formatPrice(db.activePosition.entryPrice)}
+  *TP:* ${db.activePosition.tp ? formatPrice(db.activePosition.tp) : "N/A"}
+  *SL:* ${db.activePosition.sl ? formatPrice(db.activePosition.sl) : "N/A"}`;
       } else {
         msgText += `\n\n*Posisi yang Dimonitor Bot:*
-  \n❌ Tidak ada posisi yang dimonitor bot.`;
+  ❌ Tidak ada posisi yang dimonitor bot.`;
       }
 
       msgText += `\n\n${posText}`;
