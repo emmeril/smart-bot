@@ -275,7 +275,7 @@ client.on("message", async (msg) => {
       } else {
         positions.forEach((pos) => {
           const side = parseFloat(pos.positionAmt) > 0 ? "LONG" : "SHORT";
-          posText += `*Pair:* ${pos.symbol}
+          posText += `*\nPair:* ${pos.symbol}
   \nTipe: ${side}
   \nPnL (Unrealized): ${parseFloat(pos.unrealizedProfit).toFixed(2)} USDT`;
         });
