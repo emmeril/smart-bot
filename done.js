@@ -392,6 +392,15 @@ const logSignal = (type, entry, tp, sl, status, pnl = null) => {
   console.log("📝 Log: Sinyal dicatat di log.csv");
 };
 
+const calculatePivotPoints = (high, low, close) => {
+  const pp = (high + low + close) / 3;
+  const r1 = 2 * pp - low;
+  const s1 = 2 * pp - high;
+  const r2 = pp + (high - low);
+  const s2 = pp - (high - low);
+  return { pp, r1, s1, r2, s2 };
+};
+
 // ---------- NEW HELPERS: market id & position fetch ----------
 const getMarketId = () => {
   // Prefer ccxt's market id (exchange.markets[db.pair].id) if available
@@ -639,6 +648,15 @@ const analyzeSignal = async () => {
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
 
+   // Ambil data untuk 16 candle terakhir
+  const last16Candles = ohlcv.slice(-17, -1); // Mengambil 16 candle sebelum candle saat ini
+  const avgHigh = last16Candles.reduce((sum, candle) => sum + candle[2], 0) / 16;
+  const avgLow = last16Candles.reduce((sum, candle) => sum + candle[3], 0) / 16;
+  const avgClose = last16Candles.reduce((sum, candle) => sum + candle[4], 0) / 16;
+
+  // Hitung Pivot Points dari rata-rata 16 candle
+  const { pp, r1, s1, r2, s2 } = calculatePivotPoints(avgHigh, avgLow, avgClose);
+
   const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
   const ema20 = EMA.calculate({ values: close.slice(-50), period: 20 }).pop();
   const ema50 = EMA.calculate({ values: close.slice(-50), period: 50 }).pop();
@@ -675,18 +693,29 @@ const analyzeSignal = async () => {
   if (ema20 < ema50) scoreShort++;
   if (adx?.adx > 20) scoreShort++;
 
-  const targetLong = Math.max(...high.slice(-16));
-  const stopLossLong = Math.min(...low.slice(-16));
-  const targetShort = Math.min(...low.slice(-16));
-  const stopLossShort = Math.max(...high.slice(-16));
+  // const targetLong = Math.max(...high.slice(-16));
+  // const stopLossLong = Math.min(...low.slice(-16));
+  // const targetShort = Math.min(...low.slice(-16));
+  // const stopLossShort = Math.max(...high.slice(-16));
 
   // Hitung offset dari jarak antara TP dan SL
-  const longOffset = targetLong - stopLossLong;
-  const shortOffset = stopLossShort - targetShort;
+  // const longOffset = targetLong - stopLossLong;
+  // const shortOffset = stopLossShort - targetShort;
+   // Tentukan TP & SL berdasarkan Pivot Points yang baru dihitung
+  const targetLong = r1; 
+  const stopLossLong = s1; 
+  const targetShort = s1; 
+  const stopLossShort = r1; 
 
   // Hitung mid-point (harga tengah) antara TP dan SL
   const midPriceLong = (targetLong + stopLossLong) / 2;
   const midPriceShort = (targetShort + stopLossShort) / 2;
+  const longOffset = targetLong - stopLossLong;
+  const shortOffset = stopLossShort - targetShort;
+
+  // Hitung mid-point (harga tengah) antara TP dan SL
+  // const midPriceLong = (targetLong + stopLossLong) / 2;
+  // const midPriceShort = (targetShort + stopLossShort) / 2;
 
   const canLong = scoreLong >= 3 && isAboveMA200;
   const canShort = scoreShort >= 3 && isBelowMA200;
