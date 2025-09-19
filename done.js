@@ -648,14 +648,20 @@ const analyzeSignal = async () => {
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
 
-   // Ambil data untuk 16 candle terakhir
+  // Ambil data untuk 16 candle terakhir
   const last16Candles = ohlcv.slice(-17, -1); // Mengambil 16 candle sebelum candle saat ini
-  const avgHigh = last16Candles.reduce((sum, candle) => sum + candle[2], 0) / 16;
+  const avgHigh =
+    last16Candles.reduce((sum, candle) => sum + candle[2], 0) / 16;
   const avgLow = last16Candles.reduce((sum, candle) => sum + candle[3], 0) / 16;
-  const avgClose = last16Candles.reduce((sum, candle) => sum + candle[4], 0) / 16;
+  const avgClose =
+    last16Candles.reduce((sum, candle) => sum + candle[4], 0) / 16;
 
   // Hitung Pivot Points dari rata-rata 16 candle
-  const { pp, r1, s1, r2, s2 } = calculatePivotPoints(avgHigh, avgLow, avgClose);
+  const { pp, r1, s1, r2, s2 } = calculatePivotPoints(
+    avgHigh,
+    avgLow,
+    avgClose
+  );
 
   const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
   const ema20 = EMA.calculate({ values: close.slice(-50), period: 20 }).pop();
@@ -701,11 +707,11 @@ const analyzeSignal = async () => {
   // Hitung offset dari jarak antara TP dan SL
   // const longOffset = targetLong - stopLossLong;
   // const shortOffset = stopLossShort - targetShort;
-   // Tentukan TP & SL berdasarkan Pivot Points yang baru dihitung
-  const targetLong = r1; 
-  const stopLossLong = s1; 
-  const targetShort = s1; 
-  const stopLossShort = r1; 
+  // Tentukan TP & SL berdasarkan Pivot Points yang baru dihitung
+  const targetLong = r1;
+  const stopLossLong = s1;
+  const targetShort = s1;
+  const stopLossShort = r1;
 
   // Hitung mid-point (harga tengah) antara TP dan SL
   const midPriceLong = (targetLong + stopLossLong) / 2;
@@ -752,6 +758,8 @@ const analyzeSignal = async () => {
   );
   console.log(`  - Mid Price Long: ${formatPrice(midPriceLong)}`);
   console.log(`  - Mid Price Short: ${formatPrice(midPriceShort)}`);
+  console.log(`  - Resistance: ${formatPrice(r1)}`);
+  console.log(`  - Support: ${formatPrice(s1)}`);
   console.log(`  - Total Score: Long=${scoreLong} | Short=${scoreShort}`);
   console.log(`  ---`);
 
