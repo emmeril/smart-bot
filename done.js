@@ -483,10 +483,17 @@ const placeOrder = async (side, tp, sl, offset, targetEntryPrice) => {
 
   // --- LOGIKA BARU: Tentukan apakah kondisi entry terpenuhi ---
   let isEntryConditionMet = false;
-  if (side === "buy" && price <= targetEntryPrice) {
-    isEntryConditionMet = true;
-  } else if (side === "sell" && price >= targetEntryPrice) {
-    isEntryConditionMet = true;
+  
+  if (side === "buy") {
+    // Sinyal LONG: Harga saat ini harus lebih rendah dari target TP
+    if (price <= targetEntryPrice && price < tp) {
+      isEntryConditionMet = true;
+    }
+  } else if (side === "sell") {
+    // Sinyal SHORT: Harga saat ini harus lebih tinggi dari target TP
+    if (price >= targetEntryPrice && price > tp) {
+      isEntryConditionMet = true;
+    }
   }
 
   if (!isEntryConditionMet) {
@@ -497,6 +504,10 @@ const placeOrder = async (side, tp, sl, offset, targetEntryPrice) => {
         targetEntryPrice
       )}. Order dibatalkan.`
     );
+    // Tambahan pesan jika harga sudah melewati TP
+    if ((side === "buy" && price >= tp) || (side === "sell" && price <= tp)) {
+      await sendMsg(`⚠️ ${db.pair}: Sinyal ${side.toUpperCase()} valid, tapi harga sudah melewati TP. Order dibatalkan.`);
+    }
     return;
   }
 
