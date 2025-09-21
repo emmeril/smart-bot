@@ -660,12 +660,12 @@ const analyzeSignal = async () => {
   const low = ohlcv.map((c) => c[3]);
 
   // Ambil data untuk 16 candle terakhir
-  const last16Candles = ohlcv.slice(-17, -1); // Mengambil 16 candle sebelum candle saat ini
+  const last16Candles = ohlcv.slice(-95, -1); // Mengambil 16 candle sebelum candle saat ini
   const avgHigh =
-    last16Candles.reduce((sum, candle) => sum + candle[2], 0) / 16;
-  const avgLow = last16Candles.reduce((sum, candle) => sum + candle[3], 0) / 16;
+    last16Candles.reduce((sum, candle) => sum + candle[2], 0) / 96;
+  const avgLow = last16Candles.reduce((sum, candle) => sum + candle[3], 0) / 96;
   const avgClose =
-    last16Candles.reduce((sum, candle) => sum + candle[4], 0) / 16;
+    last16Candles.reduce((sum, candle) => sum + candle[4], 0) / 96;
 
   // Hitung Pivot Points dari rata-rata 16 candle
   const { pp, r1, s1, r2, s2 } = calculatePivotPoints(
