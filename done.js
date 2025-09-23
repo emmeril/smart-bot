@@ -828,7 +828,7 @@ const analyzeSignal = async () => {
   const midPriceShort = (targetShort + stopLossShort) / 2;
 
   console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
-  console.log(`  - Harga: ${formatPrice(price)}`);
+
   console.log(`  - Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
   console.log(`  - Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
   console.log(`  --- Detail Indikator ---`);
@@ -867,11 +867,13 @@ const analyzeSignal = async () => {
   //     adx?.adx > 20 ? "✅ Tren Kuat" : "❌ Tren Lemah"
   //   })`
   // );
-  console.log(`  - Mid Price Long: ${formatPrice(midPriceLong)}`);
-  console.log(`  - Mid Price Short: ${formatPrice(midPriceShort)}`);
+
+  console.log(`  - Harga: ${formatPrice(price)}`);
   console.log(`  - Target Long: ${formatPrice(targetLong)}`);
+  console.log(`  - Mid Price Long: ${formatPrice(midPriceLong)}`);
   console.log(`  - Stop Loss Long: ${formatPrice(stopLossLong)}`);
   console.log(`  - Target Short: ${formatPrice(targetShort)}`);
+  console.log(`  - Mid Price Short: ${formatPrice(midPriceShort)}`);
   console.log(`  - Stop Loss Short: ${formatPrice(stopLossShort)}`);
   console.log(`  ---`);
 
