@@ -751,10 +751,10 @@ const analyzeSignal = async () => {
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
 
-  // Hitung MA
-  const ma7 = EMA.calculate({ values: close.slice(-100), period: 7 }).pop();
-  const ma25 = EMA.calculate({ values: close.slice(-100), period: 25 }).pop();
-  const ma99 = EMA.calculate({ values: close, period: 99 }).pop();
+   // Menghitung SMA pada timeframe 15 menit
+  const ma7 = SMA.calculate({ values: close.slice(-100), period: 7 }).pop();
+  const ma25 = SMA.calculate({ values: close.slice(-100), period: 25 }).pop();
+  const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
 
   // Hitung indikator lain
   const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
@@ -773,18 +773,12 @@ const analyzeSignal = async () => {
 
   const price = close.at(-1);
 
-  // Ambil nilai MA sebelumnya untuk mendeteksi crossover
-  const prevMA7 = EMA.calculate({
-    values: close.slice(-101, -1),
-    period: 7,
-  }).pop();
-  const prevMA25 = EMA.calculate({
-    values: close.slice(-101, -1),
-    period: 25,
-  }).pop();
+  // Ambil nilai SMA sebelumnya untuk mendeteksi crossover
+  const prevMA7 = SMA.calculate({ values: close.slice(-101, -1), period: 7 }).pop();
+  const prevMA25 = SMA.calculate({ values: close.slice(-101, -1), period: 25 }).pop();
 
-  const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
-  const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
+  const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
+  const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
 
   let canLong = false;
   let canShort = false;
