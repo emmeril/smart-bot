@@ -774,8 +774,14 @@ const analyzeSignal = async () => {
   const price = close.at(-1);
 
   // Ambil nilai MA sebelumnya untuk mendeteksi crossover
-  const prevMA7 = EMA.calculate({ values: close.slice(-101, -1), period: 7 }).pop();
-  const prevMA25 = EMA.calculate({ values: close.slice(-101, -1), period: 25 }).pop();
+  const prevMA7 = EMA.calculate({
+    values: close.slice(-101, -1),
+    period: 7,
+  }).pop();
+  const prevMA25 = EMA.calculate({
+    values: close.slice(-101, -1),
+    period: 25,
+  }).pop();
 
   const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
   const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
@@ -789,25 +795,25 @@ const analyzeSignal = async () => {
   // Analisis Sinyal LONG
   if (isCrossedUp && isPriceAboveMA99) {
     // Cek kondisi tambahan untuk LONG
-    const isRsiValid = rsi < 50;
-    const isMacdValid = macd?.histogram > 0;
-    const isAdxStrong = adx?.adx > 20;
-
-    if (isRsiValid && isMacdValid && isAdxStrong) {
-      canLong = true;
-    }
+    // const isRsiValid = rsi < 50;
+    // const isMacdValid = macd?.histogram > 0;
+    // const isAdxStrong = adx?.adx > 20;
+    canLong = true;
+    // if (isRsiValid && isMacdValid && isAdxStrong) {
+    //   canLong = true;
+    // }
   }
 
   // Analisis Sinyal SHORT
   if (isCrossedDown && isPriceBelowMA99) {
     // Cek kondisi tambahan untuk SHORT
-    const isRsiValid = rsi > 50;
-    const isMacdValid = macd?.histogram < 0;
-    const isAdxStrong = adx?.adx > 20;
-
-    if (isRsiValid && isMacdValid && isAdxStrong) {
-      canShort = true;
-    }
+    // const isRsiValid = rsi > 50;
+    // const isMacdValid = macd?.histogram < 0;
+    // const isAdxStrong = adx?.adx > 20;
+    canShort = true;
+    // if (isRsiValid && isMacdValid && isAdxStrong) {
+    //   canShort = true;
+    // }
   }
 
   const targetLong = Math.max(...high.slice(-16));
@@ -826,11 +832,41 @@ const analyzeSignal = async () => {
   console.log(`  - Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
   console.log(`  - Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
   console.log(`  --- Detail Indikator ---`);
-  console.log(`  - Crossover MA: ${isCrossedUp ? "✅ MA7 Crossed Up MA25" : isCrossedDown ? "✅ MA7 Crossed Down MA25" : "❌ Tidak Ada"}`);
-  console.log(`  - Posisi Harga vs MA99: ${isPriceAboveMA99 ? "✅ Harga di atas MA99 (Tren Naik)" : "❌ Harga di bawah MA99 (Tren Turun)"}`);
-  console.log(`  - RSI: ${rsi?.toFixed(2)} (${(canLong && rsi < 50) || (canShort && rsi > 50) ? "✅ Valid" : "❌ Tidak Valid"})`);
-  console.log(`  - MACD Hist: ${macd?.histogram?.toFixed(4)} (${(canLong && macd?.histogram > 0) || (canShort && macd?.histogram < 0) ? "✅ Valid" : "❌ Tidak Valid"})`);
-  console.log(`  - ADX: ${adx?.adx?.toFixed(2)} (${adx?.adx > 20 ? "✅ Tren Kuat" : "❌ Tren Lemah"})`);
+  console.log(
+    `  - Crossover MA: ${
+      isCrossedUp
+        ? "✅ MA7 Crossed Up MA25"
+        : isCrossedDown
+        ? "✅ MA7 Crossed Down MA25"
+        : "❌ Tidak Ada"
+    }`
+  );
+  console.log(
+    `  - Posisi Harga vs MA99: ${
+      isPriceAboveMA99
+        ? "✅ Harga di atas MA99 (Tren Naik)"
+        : "❌ Harga di bawah MA99 (Tren Turun)"
+    }`
+  );
+  // console.log(
+  //   `  - RSI: ${rsi?.toFixed(2)} (${
+  //     (canLong && rsi < 50) || (canShort && rsi > 50)
+  //       ? "✅ Valid"
+  //       : "❌ Tidak Valid"
+  //   })`
+  // );
+  // console.log(
+  //   `  - MACD Hist: ${macd?.histogram?.toFixed(4)} (${
+  //     (canLong && macd?.histogram > 0) || (canShort && macd?.histogram < 0)
+  //       ? "✅ Valid"
+  //       : "❌ Tidak Valid"
+  //   })`
+  // );
+  // console.log(
+  //   `  - ADX: ${adx?.adx?.toFixed(2)} (${
+  //     adx?.adx > 20 ? "✅ Tren Kuat" : "❌ Tren Lemah"
+  //   })`
+  // );
   console.log(`  - Mid Price Long: ${formatPrice(midPriceLong)}`);
   console.log(`  - Mid Price Short: ${formatPrice(midPriceShort)}`);
   console.log(`  - Target Long: ${formatPrice(targetLong)}`);
@@ -989,11 +1025,13 @@ setInterval(async () => {
       if (!sig.canLong && !sig.canShort) {
         console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
       }
-    } 
-    
+    }
+
     // Logika baru untuk memperbarui TP/SL dan offset jika ada posisi aktif
     else if (db.activePosition !== null) {
-      console.log("➡️ Posisi aktif terdeteksi. Memeriksa sinyal untuk pembaruan TP/SL dan offset.");
+      console.log(
+        "➡️ Posisi aktif terdeteksi. Memeriksa sinyal untuk pembaruan TP/SL dan offset."
+      );
       if (sig.price) {
         const currentSide = db.activePosition.side;
         let newSL, newTP, newOffset;
@@ -1009,12 +1047,20 @@ setInterval(async () => {
         }
 
         // Periksa apakah TP, SL, atau offset baru berbeda dari yang ada di database
-        if (newSL !== db.activePosition.sl || newTP !== db.activePosition.tp || newOffset !== db.activePosition.offset) {
-          console.log(`✅ Sinyal: TP/SL/Offset baru terdeteksi! Memperbarui dari DB.`);
+        if (
+          newSL !== db.activePosition.sl ||
+          newTP !== db.activePosition.tp ||
+          newOffset !== db.activePosition.offset
+        ) {
+          console.log(
+            `✅ Sinyal: TP/SL/Offset baru terdeteksi! Memperbarui dari DB.`
+          );
           console.log(`TP lama: ${db.activePosition.tp} -> TP baru: ${newTP}`);
           console.log(`SL lama: ${db.activePosition.sl} -> SL baru: ${newSL}`);
-          console.log(`Offset lama: ${db.activePosition.offset} -> Offset baru: ${newOffset}`);
-          
+          console.log(
+            `Offset lama: ${db.activePosition.offset} -> Offset baru: ${newOffset}`
+          );
+
           db.activePosition.sl = newSL;
           db.activePosition.tp = newTP;
           db.activePosition.offset = newOffset;
@@ -1025,10 +1071,14 @@ setInterval(async () => {
           // Ini biasanya ditangani di fungsi seperti 'checkPositionStatus' atau 'placeOrder'.
           // Pastikan logika trailing stop loss yang sudah ada tidak bertabrakan dengan ini.
         } else {
-          console.log("✔️ Sinyal: Tidak ada perubahan TP/SL/Offset. Tidak ada pembaruan.");
+          console.log(
+            "✔️ Sinyal: Tidak ada perubahan TP/SL/Offset. Tidak ada pembaruan."
+          );
         }
       } else {
-          console.log("⚠️ Analisis: Sinyal tidak valid. Tidak ada pembaruan TP/SL/Offset.");
+        console.log(
+          "⚠️ Analisis: Sinyal tidak valid. Tidak ada pembaruan TP/SL/Offset."
+        );
       }
     }
   } catch (e) {
