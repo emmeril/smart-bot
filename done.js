@@ -966,9 +966,9 @@ const checkPositionStatus = async () => {
 // -------------------- MAIN LOOP --------------------
 setInterval(async () => {
   try {
-    const now = new Date();
-    const currentMinute = now.getMinutes();
-    const isScheduledTime = currentMinute % 15 === 0;
+    // const now = new Date();
+    // const currentMinute = now.getMinutes();
+    // const isScheduledTime = currentMinute % 15 === 0;
 
     // PENTING: Selalu cek status posisi di Binance
     const { position } = await getPositionFromBalance();
@@ -992,7 +992,37 @@ setInterval(async () => {
       // const readyLong = !db.lastLongEntryTime || mins(now - db.lastLongEntryTime) >= COOLDOWN_MINUTES;
       // const readyShort = !db.lastShortEntryTime || mins(now - db.lastShortEntryTime) >= COOLDOWN_MINUTES;
 
-      if (sig.canLong && isScheduledTime) {
+      // if (sig.canLong && isScheduledTime) {
+      //   console.log(
+      //     "🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order."
+      //   );
+      //   db.lastLongEntryTime = now;
+      //   saveDB();
+      //   await placeOrder(
+      //     "buy",
+      //     sig.targetLong,
+      //     sig.stopLossLong,
+      //     sig.longOffset,
+      //     sig.midPriceLong
+      //   );
+      // }
+
+      // if (sig.canShort && isScheduledTime) {
+      //   console.log(
+      //     "📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order."
+      //   );
+      //   db.lastShortEntryTime = now;
+      //   saveDB();
+      //   await placeOrder(
+      //     "sell",
+      //     sig.targetShort,
+      //     sig.stopLossShort,
+      //     sig.shortOffset,
+      //     sig.midPriceShort
+      //   );
+      // }
+
+      if (sig.canLong) {
         console.log(
           "🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order."
         );
@@ -1007,7 +1037,7 @@ setInterval(async () => {
         );
       }
 
-      if (sig.canShort && isScheduledTime) {
+      if (sig.canShort) {
         console.log(
           "📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order."
         );
