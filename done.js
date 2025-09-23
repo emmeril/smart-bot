@@ -833,6 +833,10 @@ const analyzeSignal = async () => {
   console.log(`  - ADX: ${adx?.adx?.toFixed(2)} (${adx?.adx > 20 ? "✅ Tren Kuat" : "❌ Tren Lemah"})`);
   console.log(`  - Mid Price Long: ${formatPrice(midPriceLong)}`);
   console.log(`  - Mid Price Short: ${formatPrice(midPriceShort)}`);
+  console.log(`  - Target Long: ${formatPrice(targetLong)}`);
+  console.log(`  - Stop Loss Long: ${formatPrice(stopLossLong)}`);
+  console.log(`  - Target Short: ${formatPrice(targetShort)}`);
+  console.log(`  - Stop Loss Short: ${formatPrice(stopLossShort)}`);
   console.log(`  ---`);
 
   return {
