@@ -2,7 +2,7 @@
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
-const { RSI, MA, MACD, ADX } = require("technicalindicators");
+const { RSI, SMA, MACD, ADX } = require("technicalindicators");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const express = require("express");
 const QRCode = require("qrcode");
@@ -751,10 +751,10 @@ const analyzeSignal = async () => {
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
 
-  // Menghitung SMA pada timeframe 15 menit
-  const ma7 = MA.calculate({ values: close.slice(-100), period: 7 }).pop();
-  const ma25 = MA.calculate({ values: close.slice(-100), period: 25 }).pop();
-  const ma99 = MA.calculate({ values: close, period: 99 }).pop();
+   // Menghitung SMA pada timeframe 15 menit
+  const ma7 = SMA.calculate({ values: close.slice(-100), period: 7 }).pop();
+  const ma25 = SMA.calculate({ values: close.slice(-100), period: 25 }).pop();
+  const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
 
   // Hitung indikator lain
   const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
@@ -774,18 +774,17 @@ const analyzeSignal = async () => {
   const price = close.at(-1);
 
   // Ambil nilai SMA sebelumnya untuk mendeteksi crossover
-// Ambil nilai MA sebelumnya untuk mendeteksi crossover
-  const prevMA7 = MA.calculate({ values: close.slice(-101, -1), period: 7 }).pop();
-  const prevMA25 = MA.calculate({ values: close.slice(-101, -1), period: 25 }).pop();
+  const prevMA7 = SMA.calculate({ values: close.slice(-101, -1), period: 7 }).pop();
+  const prevMA25 = SMA.calculate({ values: close.slice(-101, -1), period: 25 }).pop();
 
   const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
   const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
 
-  let canLong = false;
-  let canShort = false;
+  let canLong = false;
+  let canShort = false;
 
-  const isPriceAboveMA99 = price > ma99;
-  const isPriceBelowMA99 = price < ma99;
+  const isPriceAboveMA99 = price > ma99;
+  const isPriceBelowMA99 = price < ma99;
 
   // Analisis Sinyal LONG
   if (isCrossedUp && isPriceAboveMA99) {
