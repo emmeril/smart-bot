@@ -741,41 +741,42 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 //   };
 // };
 const analyzeSignal = async () => {
-  console.log("🧠 Analisis: Melakukan analisis teknikal...");
-  const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
-  if (!ohlcv || ohlcv.length < 200) {
-    console.warn("⚠️ Analisis: Data OHLCV tidak cukup, menunggu...");
-    return {};
-  }
-  const close = ohlcv.map((c) => c[4]);
-  const high = ohlcv.map((c) => c[2]);
-  const low = ohlcv.map((c) => c[3]);
+  console.log("🧠 Analisis: Melakukan analisis teknikal...");
+  const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
+  if (!ohlcv || ohlcv.length < 200) {
+    console.warn("⚠️ Analisis: Data OHLCV tidak cukup, menunggu...");
+    return {};
+  }
+  const close = ohlcv.map((c) => c[4]);
+  const high = ohlcv.map((c) => c[2]);
+  const low = ohlcv.map((c) => c[3]);
 
-  // Menghitung SMA pada timeframe 15 menit
-  const ma7 = SMA.calculate({ values: close.slice(-100), period: 7 }).pop();
-  const ma25 = SMA.calculate({ values: close.slice(-100), period: 25 }).pop();
-  const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
-  
-  // Hitung indikator lain
-  const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
-  const macd = MACD.calculate({
-    values: close.slice(-50),
-    fastPeriod: 12,
-    slowPeriod: 26,
-    signalPeriod: 9,
-  }).pop();
-  const adx = ADX.calculate({
-    close: close.slice(-50),
-    high: high.slice(-50),
-    low: low.slice(-50),
-    period: 14,
-  }).pop();
+  // Menghitung SMA pada timeframe 15 menit
+  const ma7 = MA.calculate({ values: close.slice(-100), period: 7 }).pop();
+  const ma25 = MA.calculate({ values: close.slice(-100), period: 25 }).pop();
+  const ma99 = MA.calculate({ values: close, period: 99 }).pop();
 
-  const price = close.at(-1);
+  // Hitung indikator lain
+  const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
+  const macd = MACD.calculate({
+    values: close.slice(-50),
+    fastPeriod: 12,
+    slowPeriod: 26,
+    signalPeriod: 9,
+  }).pop();
+  const adx = ADX.calculate({
+    close: close.slice(-50),
+    high: high.slice(-50),
+    low: low.slice(-50),
+    period: 14,
+  }).pop();
 
-  // Ambil nilai SMA sebelumnya untuk mendeteksi crossover
-  const prevMA7 = SMA.calculate({ values: close.slice(-101, -1), period: 7 }).pop();
-  const prevMA25 = SMA.calculate({ values: close.slice(-101, -1), period: 25 }).pop();
+  const price = close.at(-1);
+
+  // Ambil nilai SMA sebelumnya untuk mendeteksi crossover
+// Ambil nilai MA sebelumnya untuk mendeteksi crossover
+  const prevMA7 = MA.calculate({ values: close.slice(-101, -1), period: 7 }).pop();
+  const prevMA25 = MA.calculate({ values: close.slice(-101, -1), period: 25 }).pop();
 
   const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
   const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
@@ -786,68 +787,104 @@ const analyzeSignal = async () => {
   const isPriceAboveMA99 = price > ma99;
   const isPriceBelowMA99 = price < ma99;
 
-  // Analisis Sinyal LONG
-  if (isCrossedUp && isPriceAboveMA99) {
-    // Cek kondisi tambahan untuk LONG
-    const isRsiValid = rsi < 50;
-    const isMacdValid = macd?.histogram > 0;
-    const isAdxStrong = adx?.adx > 20;
+  // Analisis Sinyal LONG
+  if (isCrossedUp && isPriceAboveMA99) {
+    // Cek kondisi tambahan untuk LONG
+    // const isRsiValid = rsi < 50;
+    // const isMacdValid = macd?.histogram > 0;
+    // const isAdxStrong = adx?.adx > 20;
+    canLong = true;
+    // if (isRsiValid && isMacdValid && isAdxStrong) {
+    //   canLong = true;
+    // }
+  }
 
-    if (isRsiValid && isMacdValid && isAdxStrong) {
-      canLong = true;
-    }
-  }
+  // Analisis Sinyal SHORT
+  if (isCrossedDown && isPriceBelowMA99) {
+    // Cek kondisi tambahan untuk SHORT
+    // const isRsiValid = rsi > 50;
+    // const isMacdValid = macd?.histogram < 0;
+    // const isAdxStrong = adx?.adx > 20;
+    canShort = true;
+    // if (isRsiValid && isMacdValid && isAdxStrong) {
+    //   canShort = true;
+    // }
+  }
 
-  // Analisis Sinyal SHORT
-  if (isCrossedDown && isPriceBelowMA99) {
-    // Cek kondisi tambahan untuk SHORT
-    const isRsiValid = rsi > 50;
-    const isMacdValid = macd?.histogram < 0;
-    const isAdxStrong = adx?.adx > 20;
+  const targetLong = Math.max(...high.slice(-16));
+  const stopLossLong = Math.min(...low.slice(-16));
+  const targetShort = Math.min(...low.slice(-16));
+  const stopLossShort = Math.max(...high.slice(-16));
 
-    if (isRsiValid && isMacdValid && isAdxStrong) {
-      canShort = true;
-    }
-  }
+  const longOffset = targetLong - stopLossLong;
+  const shortOffset = stopLossShort - targetShort;
 
-  const targetLong = Math.max(...high.slice(-16));
-  const stopLossLong = Math.min(...low.slice(-16));
-  const targetShort = Math.min(...low.slice(-16));
-  const stopLossShort = Math.max(...high.slice(-16));
+  const midPriceLong = (targetLong + stopLossLong) / 2;
+  const midPriceShort = (targetShort + stopLossShort) / 2;
 
-  const longOffset = targetLong - stopLossLong;
-  const shortOffset = stopLossShort - targetShort;
+  console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
 
-  const midPriceLong = (targetLong + stopLossLong) / 2;
-  const midPriceShort = (targetShort + stopLossShort) / 2;
+  console.log(`  - Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
+  console.log(`  - Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
+  console.log(`  --- Detail Indikator ---`);
+  console.log(
+    `  - Crossover MA: ${
+      isCrossedUp
+        ? "✅ MA7 Crossed Up MA25"
+        : isCrossedDown
+        ? "✅ MA7 Crossed Down MA25"
+        : "❌ Tidak Ada"
+    }`
+  );
+  console.log(
+    `  - Posisi Harga vs MA99: ${
+      isPriceAboveMA99
+        ? "✅ Harga di atas MA99 (Tren Naik)"
+        : "❌ Harga di bawah MA99 (Tren Turun)"
+    }`
+  );
+  // console.log(
+  //   `  - RSI: ${rsi?.toFixed(2)} (${
+  //     (canLong && rsi < 50) || (canShort && rsi > 50)
+  //       ? "✅ Valid"
+  //       : "❌ Tidak Valid"
+  //   })`
+  // );
+  // console.log(
+  //   `  - MACD Hist: ${macd?.histogram?.toFixed(4)} (${
+  //     (canLong && macd?.histogram > 0) || (canShort && macd?.histogram < 0)
+  //       ? "✅ Valid"
+  //       : "❌ Tidak Valid"
+  //   })`
+  // );
+  // console.log(
+  //   `  - ADX: ${adx?.adx?.toFixed(2)} (${
+  //     adx?.adx > 20 ? "✅ Tren Kuat" : "❌ Tren Lemah"
+  //   })`
+  // );
 
-  console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
-  console.log(`  - Harga: ${formatPrice(price)}`);
-  console.log(`  - Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
-  console.log(`  - Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
-  console.log(`  --- Detail Indikator ---`);
-  console.log(`  - Crossover SMA: ${isCrossedUp ? "✅ SMA7 Crossed Up SMA25" : isCrossedDown ? "✅ SMA7 Crossed Down SMA25" : "❌ Tidak Ada"}`);
-  console.log(`  - Posisi Harga vs SMA99: ${isPriceAboveMA99 ? "✅ Harga di atas SMA99 (Tren Naik)" : "❌ Harga di bawah SMA99 (Tren Turun)"}`);
-  console.log(`  - RSI: ${rsi?.toFixed(2)} (${(canLong && rsi < 50) || (canShort && rsi > 50) ? "✅ Valid" : "❌ Tidak Valid"})`);
-  console.log(`  - MACD Hist: ${macd?.histogram?.toFixed(4)} (${(canLong && macd?.histogram > 0) || (canShort && macd?.histogram < 0) ? "✅ Valid" : "❌ Tidak Valid"})`);
-  console.log(`  - ADX: ${adx?.adx?.toFixed(2)} (${adx?.adx > 20 ? "✅ Tren Kuat" : "❌ Tren Lemah"})`);
-  console.log(`  - Mid Price Long: ${formatPrice(midPriceLong)}`);
-  console.log(`  - Mid Price Short: ${formatPrice(midPriceShort)}`);
-  console.log(`  ---`);
+  console.log(`  - Harga: ${formatPrice(price)}`);
+  console.log(`  - Target Long: ${formatPrice(targetLong)}`);
+  console.log(`  - Mid Price Long: ${formatPrice(midPriceLong)}`);
+  console.log(`  - Stop Loss Long: ${formatPrice(stopLossLong)}`);
+  console.log(`  - Target Short: ${formatPrice(targetShort)}`);
+  console.log(`  - Mid Price Short: ${formatPrice(midPriceShort)}`);
+  console.log(`  - Stop Loss Short: ${formatPrice(stopLossShort)}`);
+  console.log(`  ---`);
 
-  return {
-    canLong,
-    canShort,
-    targetLong,
-    stopLossLong,
-    targetShort,
-    stopLossShort,
-    longOffset,
-    shortOffset,
-    midPriceLong,
-    midPriceShort,
-    price,
-  };
+  return {
+    canLong,
+    canShort,
+    targetLong,
+    stopLossLong,
+    targetShort,
+    stopLossShort,
+    longOffset,
+    shortOffset,
+    midPriceLong,
+    midPriceShort,
+    price,
+  };
 };
 
 // -------------------- CEK POSISI (TP/SL trigger) --------------------
