@@ -757,19 +757,19 @@ const analyzeSignal = async () => {
   const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
 
   // Hitung indikator lain
-  const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
-  const macd = MACD.calculate({
-    values: close.slice(-50),
-    fastPeriod: 12,
-    slowPeriod: 26,
-    signalPeriod: 9,
-  }).pop();
-  const adx = ADX.calculate({
-    close: close.slice(-50),
-    high: high.slice(-50),
-    low: low.slice(-50),
-    period: 14,
-  }).pop();
+  // const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
+  // const macd = MACD.calculate({
+  //   values: close.slice(-50),
+  //   fastPeriod: 12,
+  //   slowPeriod: 26,
+  //   signalPeriod: 9,
+  // }).pop();
+  // const adx = ADX.calculate({
+  //   close: close.slice(-50),
+  //   high: high.slice(-50),
+  //   low: low.slice(-50),
+  //   period: 14,
+  // }).pop();
 
   const price = close.at(-1);
 
