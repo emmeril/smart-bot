@@ -2,7 +2,7 @@
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
-const { RSI, EMA, MACD, ADX } = require("technicalindicators");
+const { RSI, MA, MACD, ADX } = require("technicalindicators");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const express = require("express");
 const QRCode = require("qrcode");
