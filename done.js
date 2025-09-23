@@ -628,6 +628,118 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 };
 
 // -------------------- ANALYSIS --------------------
+// const analyzeSignal = async () => {
+//   console.log("🧠 Analisis: Melakukan analisis teknikal...");
+//   const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
+//   if (!ohlcv || ohlcv.length < 200) {
+//     console.warn("⚠️ Analisis: Data OHLCV tidak cukup, menunggu...");
+//     return {};
+//   }
+//   const close = ohlcv.map((c) => c[4]);
+//   const high = ohlcv.map((c) => c[2]);
+//   const low = ohlcv.map((c) => c[3]);
+
+//   const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
+//   const ema20 = EMA.calculate({ values: close.slice(-50), period: 20 }).pop();
+//   const ema50 = EMA.calculate({ values: close.slice(-50), period: 50 }).pop();
+//   const ma200 = EMA.calculate({ values: close, period: 200 }).pop();
+//   const macd = MACD.calculate({
+//     values: close.slice(-50),
+//     fastPeriod: 12,
+//     slowPeriod: 26,
+//     signalPeriod: 9,
+//   }).pop();
+//   const adx = ADX.calculate({
+//     close: close.slice(-50),
+//     high: high.slice(-50),
+//     low: low.slice(-50),
+//     period: 14,
+//   }).pop();
+
+//   const price = close.at(-1);
+//   const prev = ohlcv.at(-2);
+//   const prev2 = ohlcv.at(-3);
+
+//   const isAboveMA200 = price > ma200;
+//   const isBelowMA200 = price < ma200;
+
+//   let scoreLong = 0;
+//   if (rsi < 35) scoreLong++;
+//   if (macd?.histogram > 0) scoreLong++;
+//   if (ema20 > ema50) scoreLong++;
+//   if (adx?.adx > 20) scoreLong++;
+
+//   let scoreShort = 0;
+//   if (rsi > 65) scoreShort++;
+//   if (macd?.histogram < 0) scoreShort++;
+//   if (ema20 < ema50) scoreShort++;
+//   if (adx?.adx > 20) scoreShort++;
+
+//   const targetLong = Math.max(...high.slice(-16));
+//   const stopLossLong = Math.min(...low.slice(-16));
+//   const targetShort = Math.min(...low.slice(-16));
+//   const stopLossShort = Math.max(...high.slice(-16));
+
+//   // Hitung offset dari jarak antara TP dan SL
+//   const longOffset = targetLong - stopLossLong;
+//   const shortOffset = stopLossShort - targetShort;
+
+//   // Hitung mid-point (harga tengah) antara TP dan SL
+//   const midPriceLong = (targetLong + stopLossLong) / 2;
+//   const midPriceShort = (targetShort + stopLossShort) / 2;
+
+//   const canLong = scoreLong >= 3 && isAboveMA200;
+//   const canShort = scoreShort >= 3 && isBelowMA200;
+
+//   console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
+//   console.log(`  - Harga: ${formatPrice(price)}`);
+//   console.log(`  - Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
+//   console.log(`  - Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
+//   console.log(`  --- Detail Indikator ---`);
+//   console.log(
+//     `  - RSI: ${rsi?.toFixed(2)} (${rsi < 35 ? "✅" : "❌"} Long | ${
+//       rsi > 65 ? "✅" : "❌"
+//     } Short)`
+//   );
+//   console.log(
+//     `  - MACD Hist: ${macd?.histogram?.toFixed(4)} (${
+//       macd?.histogram > 0 ? "✅" : "❌"
+//     } Long | ${macd?.histogram < 0 ? "✅" : "❌"} Short)`
+//   );
+//   console.log(
+//     `  - EMA20 vs EMA50: ${ema20?.toFixed(4)} vs ${ema50?.toFixed(4)} (${
+//       ema20 > ema50 ? "✅" : "❌"
+//     } Long | ${ema20 < ema50 ? "✅" : "❌"} Short)`
+//   );
+//   console.log(
+//     `  - MA200: ${ma200?.toFixed(4)} (Harga ${
+//       isAboveMA200 ? "✅ di atas" : "❌ di bawah"
+//     } | ${isBelowMA200 ? "✅ di bawah" : "❌ di atas"})`
+//   );
+//   console.log(
+//     `  - ADX: ${adx?.adx?.toFixed(2)} (${
+//       adx?.adx > 20 ? "✅" : "❌"
+//     } Tren Kuat)`
+//   );
+//   console.log(`  - Mid Price Long: ${formatPrice(midPriceLong)}`);
+//   console.log(`  - Mid Price Short: ${formatPrice(midPriceShort)}`);
+//   console.log(`  - Total Score: Long=${scoreLong} | Short=${scoreShort}`);
+//   console.log(`  ---`);
+
+//   return {
+//     canLong,
+//     canShort,
+//     targetLong,
+//     stopLossLong,
+//     targetShort,
+//     stopLossShort,
+//     longOffset,
+//     shortOffset,
+//     midPriceLong,
+//     midPriceShort,
+//     price,
+//   };
+// };
 const analyzeSignal = async () => {
   console.log("🧠 Analisis: Melakukan analisis teknikal...");
   const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
@@ -639,10 +751,13 @@ const analyzeSignal = async () => {
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
 
+  // Hitung MA
+  const ma7 = EMA.calculate({ values: close.slice(-100), period: 7 }).pop();
+  const ma25 = EMA.calculate({ values: close.slice(-100), period: 25 }).pop();
+  const ma99 = EMA.calculate({ values: close, period: 99 }).pop();
+
+  // Hitung indikator lain
   const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
-  const ema20 = EMA.calculate({ values: close.slice(-50), period: 20 }).pop();
-  const ema50 = EMA.calculate({ values: close.slice(-50), period: 50 }).pop();
-  const ma200 = EMA.calculate({ values: close, period: 200 }).pop();
   const macd = MACD.calculate({
     values: close.slice(-50),
     fastPeriod: 12,
@@ -657,74 +772,69 @@ const analyzeSignal = async () => {
   }).pop();
 
   const price = close.at(-1);
-  const prev = ohlcv.at(-2);
-  const prev2 = ohlcv.at(-3);
 
-  const isAboveMA200 = price > ma200;
-  const isBelowMA200 = price < ma200;
+  // Ambil nilai MA sebelumnya untuk mendeteksi crossover
+  const prevMA7 = EMA.calculate({ values: close.slice(-101, -1), period: 7 }).pop();
+  const prevMA25 = EMA.calculate({ values: close.slice(-101, -1), period: 25 }).pop();
 
-  let scoreLong = 0;
-  if (rsi < 35) scoreLong++;
-  if (macd?.histogram > 0) scoreLong++;
-  if (ema20 > ema50) scoreLong++;
-  if (adx?.adx > 20) scoreLong++;
+  const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
+  const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
 
-  let scoreShort = 0;
-  if (rsi > 65) scoreShort++;
-  if (macd?.histogram < 0) scoreShort++;
-  if (ema20 < ema50) scoreShort++;
-  if (adx?.adx > 20) scoreShort++;
+  let canLong = false;
+  let canShort = false;
+
+  // Analisis Sinyal LONG
+  if (isCrossedUp) {
+    // Cek kondisi tambahan untuk LONG
+    const isMA25AboveMA99 = ma25 > ma99;
+    const isRsiValid = rsi < 50;
+    const isMacdValid = macd?.histogram > 0;
+    const isAdxStrong = adx?.adx > 20;
+
+    // Jika semua kondisi terpenuhi, sinyal LONG valid
+    if (isMA25AboveMA99 && isRsiValid && isMacdValid && isAdxStrong) {
+      canLong = true;
+    }
+  }
+
+  // Analisis Sinyal SHORT
+  if (isCrossedDown) {
+    // Cek kondisi tambahan untuk SHORT
+    const isMA25BelowMA99 = ma25 < ma99;
+    const isRsiValid = rsi > 50;
+    const isMacdValid = macd?.histogram < 0;
+    const isAdxStrong = adx?.adx > 20;
+
+    // Jika semua kondisi terpenuhi, sinyal SHORT valid
+    if (isMA25BelowMA99 && isRsiValid && isMacdValid && isAdxStrong) {
+      canShort = true;
+    }
+  }
 
   const targetLong = Math.max(...high.slice(-16));
   const stopLossLong = Math.min(...low.slice(-16));
   const targetShort = Math.min(...low.slice(-16));
   const stopLossShort = Math.max(...high.slice(-16));
 
-  // Hitung offset dari jarak antara TP dan SL
   const longOffset = targetLong - stopLossLong;
   const shortOffset = stopLossShort - targetShort;
 
-  // Hitung mid-point (harga tengah) antara TP dan SL
   const midPriceLong = (targetLong + stopLossLong) / 2;
   const midPriceShort = (targetShort + stopLossShort) / 2;
 
-  const canLong = scoreLong >= 3 && isAboveMA200;
-  const canShort = scoreShort >= 3 && isBelowMA200;
-
   console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
-  console.log(`  - Harga: ${formatPrice(price)}`);
-  console.log(`  - Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
-  console.log(`  - Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
-  console.log(`  --- Detail Indikator ---`);
-  console.log(
-    `  - RSI: ${rsi?.toFixed(2)} (${rsi < 35 ? "✅" : "❌"} Long | ${
-      rsi > 65 ? "✅" : "❌"
-    } Short)`
-  );
-  console.log(
-    `  - MACD Hist: ${macd?.histogram?.toFixed(4)} (${
-      macd?.histogram > 0 ? "✅" : "❌"
-    } Long | ${macd?.histogram < 0 ? "✅" : "❌"} Short)`
-  );
-  console.log(
-    `  - EMA20 vs EMA50: ${ema20?.toFixed(4)} vs ${ema50?.toFixed(4)} (${
-      ema20 > ema50 ? "✅" : "❌"
-    } Long | ${ema20 < ema50 ? "✅" : "❌"} Short)`
-  );
-  console.log(
-    `  - MA200: ${ma200?.toFixed(4)} (Harga ${
-      isAboveMA200 ? "✅ di atas" : "❌ di bawah"
-    } | ${isBelowMA200 ? "✅ di bawah" : "❌ di atas"})`
-  );
-  console.log(
-    `  - ADX: ${adx?.adx?.toFixed(2)} (${
-      adx?.adx > 20 ? "✅" : "❌"
-    } Tren Kuat)`
-  );
-  console.log(`  - Mid Price Long: ${formatPrice(midPriceLong)}`);
-  console.log(`  - Mid Price Short: ${formatPrice(midPriceShort)}`);
-  console.log(`  - Total Score: Long=${scoreLong} | Short=${scoreShort}`);
-  console.log(`  ---`);
+  console.log(`  - Harga: ${formatPrice(price)}`);
+  console.log(`  - Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
+  console.log(`  - Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
+  console.log(`  --- Detail Indikator ---`);
+  console.log(`  - Crossover MA: ${isCrossedUp ? "✅ MA7 Crossed Up MA25" : isCrossedDown ? "✅ MA7 Crossed Down MA25" : "❌ Tidak Ada"}`);
+  console.log(`  - Posisi MA25 vs MA99: ${ma25 > ma99 ? "✅ MA25 di atas MA99" : "❌ MA25 di bawah MA99"}`);
+  console.log(`  - RSI: ${rsi?.toFixed(2)}`);
+  console.log(`  - MACD Hist: ${macd?.histogram?.toFixed(4)}`);
+  console.log(`  - ADX: ${adx?.adx?.toFixed(2)}`);
+  console.log(`  - Mid Price Long: ${formatPrice(midPriceLong)}`);
+  console.log(`  - Mid Price Short: ${formatPrice(midPriceShort)}`);
+  console.log(`  ---`);
 
   return {
     canLong,
