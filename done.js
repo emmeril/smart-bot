@@ -962,7 +962,7 @@ const checkPositionStatus = async () => {
 // -------------------- MAIN LOOP --------------------
 setInterval(async () => {
   try {
-    // const now = new Date();
+    const now = new Date();
     // const currentMinute = now.getMinutes();
     // const isScheduledTime = currentMinute % 15 === 0;
 
