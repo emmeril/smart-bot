@@ -961,154 +961,118 @@ const checkPositionStatus = async () => {
 
 // -------------------- MAIN LOOP --------------------
 setInterval(async () => {
-  try {
-    const now = new Date();
-    // const currentMinute = now.getMinutes();
-    // const isScheduledTime = currentMinute % 15 === 0;
+  try {
+    const now = new Date();
+    const { position } = await getPositionFromBalance();
+    const amt = parseFloat(position?.positionAmt || "0");
+    const hasActiveBinancePosition = isFinite(amt) && Math.abs(amt) > 0;
+    await checkPositionStatus();
 
-    // PENTING: Selalu cek status posisi di Binance
-    const { position } = await getPositionFromBalance();
-    const amt = parseFloat(position?.positionAmt || "0");
-    const hasActiveBinancePosition = isFinite(amt) && Math.abs(amt) > 0;
-    await checkPositionStatus();
+    console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
+    console.log("🔍 Status Posisi Aktif di DB: ", db.activePosition);
 
-    console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
-    console.log("🔍 Status Posisi Aktif di DB: ", db.activePosition);
+    const sig = await analyzeSignal();
 
-    // Jalankan analisis sinyal setiap saat
-    const sig = await analyzeSignal();
+    if (!sig.price) {
+        console.log("⚠️ Analisis: Sinyal tidak valid, menunggu...");
+        return;
+    }
 
-    // Logika untuk membuka posisi baru hanya jika tidak ada posisi yang dimonitor
-    if (db.activePosition === null && !hasActiveBinancePosition) {
-      if (!sig.price) {
-        console.log("⚠️ Analisis: Sinyal tidak valid, menunggu...");
-        return;
-      }
+    const hasBotPosition = db.activePosition !== null;
+    let shouldExitCurrentPosition = false;
 
-      // const readyLong = !db.lastLongEntryTime || mins(now - db.lastLongEntryTime) >= COOLDOWN_MINUTES;
-      // const readyShort = !db.lastShortEntryTime || mins(now - db.lastShortEntryTime) >= COOLDOWN_MINUTES;
+    // --- LOGIKA BARU UNTUK SWING POSISI ---
+    if (hasBotPosition) {
+        const currentSide = db.activePosition.side;
+        if (currentSide === "buy" && sig.canShort) {
+            console.log("⚠️ Sinyal: Sinyal SHORT valid, menutup posisi LONG yang aktif.");
+            shouldExitCurrentPosition = true;
+        } else if (currentSide === "sell" && sig.canLong) {
+            console.log("⚠️ Sinyal: Sinyal LONG valid, menutup posisi SHORT yang aktif.");
+            shouldExitCurrentPosition = true;
+        }
+    }
 
-      // if (sig.canLong && isScheduledTime) {
-      //   console.log(
-      //     "🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order."
-      //   );
-      //   db.lastLongEntryTime = now;
-      //   saveDB();
-      //   await placeOrder(
-      //     "buy",
-      //     sig.targetLong,
-      //     sig.stopLossLong,
-      //     sig.longOffset,
-      //     sig.midPriceLong
-      //   );
-      // }
+    // Eksekusi penutupan posisi jika ada sinyal valid untuk swing
+    if (shouldExitCurrentPosition) {
+        await closePosition("Sinyal berbalik arah", db.activePosition.entryPrice);
+        
+        // JEDA SEBENTAR untuk memastikan posisi sebelumnya benar-benar tertutup
+        await new Promise(resolve => setTimeout(resolve, 5000)); 
+    }
 
-      // if (sig.canShort && isScheduledTime) {
-      //   console.log(
-      //     "📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order."
-      //   );
-      //   db.lastShortEntryTime = now;
-      //   saveDB();
-      //   await placeOrder(
-      //     "sell",
-      //     sig.targetShort,
-      //     sig.stopLossShort,
-      //     sig.shortOffset,
-      //     sig.midPriceShort
-      //   );
-      // }
+    // Logika untuk membuka posisi baru hanya jika tidak ada posisi aktif
+    // Periksa kembali status setelah kemungkinan close position
+    const { position: updatedPosition } = await getPositionFromBalance();
+    const updatedAmt = parseFloat(updatedPosition?.positionAmt || "0");
+    const hasActiveBinancePositionAfterClose = isFinite(updatedAmt) && Math.abs(updatedAmt) > 0;
 
-      if (sig.canLong) {
-        console.log(
-          "🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order."
-        );
-        db.lastLongEntryTime = now;
-        saveDB();
-        await placeOrder(
-          "buy",
-          sig.targetLong,
-          sig.stopLossLong,
-          sig.longOffset,
-          sig.midPriceLong
-        );
-      }
+    if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
+        if (sig.canLong) {
+            console.log("🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order.");
+            db.lastLongEntryTime = now;
+            saveDB();
+            await placeOrder(
+                "buy",
+                sig.targetLong,
+                sig.stopLossLong,
+                sig.longOffset,
+                sig.midPriceLong
+            );
+        } else if (sig.canShort) {
+            console.log("📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order.");
+            db.lastShortEntryTime = now;
+            saveDB();
+            await placeOrder(
+                "sell",
+                sig.targetShort,
+                sig.stopLossShort,
+                sig.shortOffset,
+                sig.midPriceShort
+            );
+        } else {
+            console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
+        }
+    }
 
-      if (sig.canShort) {
-        console.log(
-          "📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order."
-        );
-        db.lastShortEntryTime = now;
-        saveDB();
-        await placeOrder(
-          "sell",
-          sig.targetShort,
-          sig.stopLossShort,
-          sig.shortOffset,
-          sig.midPriceShort
-        );
-      }
+    // Logika untuk memperbarui TP/SL dan offset jika ada posisi aktif
+    else if (db.activePosition !== null) {
+      console.log(
+        "➡️ Posisi aktif terdeteksi. Memeriksa sinyal untuk pembaruan TP/SL dan offset."
+      );
+      if (sig.price) {
+        const currentSide = db.activePosition.side;
+        let newSL, newTP, newOffset;
 
-      if (!sig.canLong && !sig.canShort) {
-        console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
-      }
-    }
+        if (currentSide === "buy") {
+          newSL = sig.stopLossLong;
+          newTP = sig.targetLong;
+          newOffset = sig.longOffset;
+        } else if (currentSide === "sell") {
+          newSL = sig.stopLossShort;
+          newTP = sig.targetShort;
+          newOffset = sig.shortOffset;
+        }
 
-    // Logika baru untuk memperbarui TP/SL dan offset jika ada posisi aktif
-    else if (db.activePosition !== null) {
-      console.log(
-        "➡️ Posisi aktif terdeteksi. Memeriksa sinyal untuk pembaruan TP/SL dan offset."
-      );
-      if (sig.price) {
-        const currentSide = db.activePosition.side;
-        let newSL, newTP, newOffset;
-
-        if (currentSide === "buy") {
-          newSL = sig.stopLossLong;
-          newTP = sig.targetLong;
-          newOffset = sig.longOffset;
-        } else if (currentSide === "sell") {
-          newSL = sig.stopLossShort;
-          newTP = sig.targetShort;
-          newOffset = sig.shortOffset;
-        }
-
-        // Periksa apakah TP, SL, atau offset baru berbeda dari yang ada di database
-        if (
-          newSL !== db.activePosition.sl ||
-          newTP !== db.activePosition.tp ||
-          newOffset !== db.activePosition.offset
-        ) {
-          console.log(
-            `✅ Sinyal: TP/SL/Offset baru terdeteksi! Memperbarui dari DB.`
-          );
-          console.log(`TP lama: ${db.activePosition.tp} -> TP baru: ${newTP}`);
-          console.log(`SL lama: ${db.activePosition.sl} -> SL baru: ${newSL}`);
-          console.log(
-            `Offset lama: ${db.activePosition.offset} -> Offset baru: ${newOffset}`
-          );
-
-          db.activePosition.sl = newSL;
-          db.activePosition.tp = newTP;
-          db.activePosition.offset = newOffset;
-          saveDB();
-
-          // PENTING: Untuk memastikan perubahan ini diterapkan di Binance, Anda harus
-          // membatalkan order TP/SL yang lama dan membuat order baru di Binance.
-          // Ini biasanya ditangani di fungsi seperti 'checkPositionStatus' atau 'placeOrder'.
-          // Pastikan logika trailing stop loss yang sudah ada tidak bertabrakan dengan ini.
-        } else {
-          console.log(
-            "✔️ Sinyal: Tidak ada perubahan TP/SL/Offset. Tidak ada pembaruan."
-          );
-        }
-      } else {
-        console.log(
-          "⚠️ Analisis: Sinyal tidak valid. Tidak ada pembaruan TP/SL/Offset."
-        );
-      }
-    }
-  } catch (e) {
-    console.error("⚠️ Loop: Terjadi kesalahan di loop utama.", e.message);
-    console.error(e.stack);
-  }
+        if (
+          newSL !== db.activePosition.sl ||
+          newTP !== db.activePosition.tp ||
+          newOffset !== db.activePosition.offset
+        ) {
+          console.log(`✅ Sinyal: TP/SL/Offset baru terdeteksi! Memperbarui dari DB.`);
+          db.activePosition.sl = newSL;
+          db.activePosition.tp = newTP;
+          db.activePosition.offset = newOffset;
+          saveDB();
+        } else {
+          console.log("✔️ Sinyal: Tidak ada perubahan TP/SL/Offset. Tidak ada pembaruan.");
+        }
+      } else {
+        console.log("⚠️ Analisis: Sinyal tidak valid. Tidak ada pembaruan TP/SL/Offset.");
+      }
+    }
+  } catch (e) {
+    console.error("⚠️ Loop: Terjadi kesalahan di loop utama.", e.message);
+    console.error(e.stack);
+  }
 }, 10000);
