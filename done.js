@@ -742,7 +742,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 // };
 const analyzeSignal = async () => {
   console.log("🧠 Analisis: Melakukan analisis teknikal...");
-  const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
+  const ohlcv = await exchange.fetchOHLCV(db.pair, "5m", undefined, 200);
   if (!ohlcv || ohlcv.length < 200) {
     console.warn("⚠️ Analisis: Data OHLCV tidak cukup, menunggu...");
     return {};
@@ -751,7 +751,7 @@ const analyzeSignal = async () => {
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
 
-   // Menghitung SMA pada timeframe 15 menit
+   // Menghitung SMA 
   const ma7 = SMA.calculate({ values: close.slice(-100), period: 7 }).pop();
   const ma25 = SMA.calculate({ values: close.slice(-100), period: 25 }).pop();
   const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
@@ -810,10 +810,10 @@ const analyzeSignal = async () => {
     // }
   }
 
-  const targetLong = Math.max(...high.slice(-16));
-  const stopLossLong = Math.min(...low.slice(-16));
-  const targetShort = Math.min(...low.slice(-16));
-  const stopLossShort = Math.max(...high.slice(-16));
+  const targetLong = Math.max(...high.slice(-48));
+  const stopLossLong = Math.min(...low.slice(-48));
+  const targetShort = Math.min(...low.slice(-48));
+  const stopLossShort = Math.max(...high.slice(-48));
 
   const longOffset = targetLong - stopLossLong;
   const shortOffset = stopLossShort - targetShort;
