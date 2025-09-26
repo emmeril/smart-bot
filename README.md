@@ -27,8 +27,8 @@ Menggunakan strategi **MA Crossover (7 vs 25) dengan filter MA99**, trailing sto
 
 ### 1. Clone Repo
 ```bash
-git clone https://github.com/username/crypto-trading-bot.git
-cd crypto-trading-bot
+git clone https://github.com/emmeril/smart-bot.git
+cd smart-bot
 ```
 
 ### 2. Install Dependencies
