@@ -439,7 +439,8 @@ const getPositionFromBalance = async () => {
 };
 
 // -------------------- ORDER --------------------
-const placeOrder = async (side, tp, sl, offset, targetEntryPrice) => {
+// const placeOrder = async (side, tp, sl, offset, targetEntryPrice) => {
+  const placeOrder = async (side, tp, sl, offset) => {
   console.log("🔍 Order: Memeriksa apakah ada posisi aktif...");
   if (db.activePosition) {
     console.log(
@@ -473,23 +474,23 @@ const placeOrder = async (side, tp, sl, offset, targetEntryPrice) => {
     return console.log("❌ Order: Gagal mendapatkan harga, order dibatalkan.");
 
   // --- LOGIKA BARU: Tentukan apakah kondisi entry terpenuhi ---
-  let isEntryConditionMet = false;
-  if (side === "buy" && price <= targetEntryPrice) {
-    isEntryConditionMet = true;
-  } else if (side === "sell" && price >= targetEntryPrice) {
-    isEntryConditionMet = true;
-  }
+  // let isEntryConditionMet = false;
+  // if (side === "buy" && price <= targetEntryPrice) {
+  //   isEntryConditionMet = true;
+  // } else if (side === "sell" && price >= targetEntryPrice) {
+  //   isEntryConditionMet = true;
+  // }
 
-  if (!isEntryConditionMet) {
-    console.log(
-      `⚠️ Order: Kondisi entry tidak terpenuhi untuk ${side}. Harga saat ini ${formatPrice(
-        price
-      )} tidak berada di sisi yang diinginkan dari target entry ${formatPrice(
-        targetEntryPrice
-      )}. Order dibatalkan.`
-    );
-    return;
-  }
+  // if (!isEntryConditionMet) {
+  //   console.log(
+  //     `⚠️ Order: Kondisi entry tidak terpenuhi untuk ${side}. Harga saat ini ${formatPrice(
+  //       price
+  //     )} tidak berada di sisi yang diinginkan dari target entry ${formatPrice(
+  //       targetEntryPrice
+  //     )}. Order dibatalkan.`
+  //   );
+  //   return;
+  // }
 
   const qty = calcQty(price);
 
@@ -742,7 +743,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 // };
 const analyzeSignal = async () => {
   console.log("🧠 Analisis: Melakukan analisis teknikal...");
-  const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
+  const ohlcv = await exchange.fetchOHLCV(db.pair, "5m", undefined, 200);
   if (!ohlcv || ohlcv.length < 200) {
     console.warn("⚠️ Analisis: Data OHLCV tidak cukup, menunggu...");
     return {};
@@ -824,8 +825,8 @@ const analyzeSignal = async () => {
   const longOffset = targetLong - stopLossLong;
   const shortOffset = stopLossShort - targetShort;
 
-  const midPriceLong = (targetLong + stopLossLong) / 2;
-  const midPriceShort = (targetShort + stopLossShort) / 2;
+  // const midPriceLong = (targetLong + stopLossLong) / 2;
+  // const midPriceShort = (targetShort + stopLossShort) / 2;
 
   // Awal output yang rapi
 console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
@@ -848,14 +849,14 @@ console.log(`-----------------------------------`);
 // Strategi Long
 console.log(`📈 Strategi Long:`);
 console.log(`   - Target: ${formatPrice(targetLong)}`);
-console.log(`   - Mid Price: ${formatPrice(midPriceLong)}`);
+// console.log(`   - Mid Price: ${formatPrice(midPriceLong)}`);
 console.log(`   - Stop Loss: ${formatPrice(stopLossLong)}`);
 console.log(`-----------------------------------`);
 
 // Strategi Short
 console.log(`📉 Strategi Short:`);
 console.log(`   - Target: ${formatPrice(targetShort)}`);
-console.log(`   - Mid Price: ${formatPrice(midPriceShort)}`);
+// console.log(`   - Mid Price: ${formatPrice(midPriceShort)}`);
 console.log(`   - Stop Loss: ${formatPrice(stopLossShort)}`);
 console.log(`-----------------------------------`);
 
@@ -868,8 +869,8 @@ console.log(`-----------------------------------`);
     stopLossShort,
     longOffset,
     shortOffset,
-    midPriceLong,
-    midPriceShort,
+    // midPriceLong,
+    // midPriceShort,
     price,
   };
 };
@@ -1005,8 +1006,8 @@ setInterval(async () => {
           "buy",
           sig.targetLong,
           sig.stopLossLong,
-          sig.longOffset,
-          sig.midPriceLong
+          sig.longOffset
+          // sig.midPriceLong
         );
       } else if (sig.canShort) {
         console.log(
@@ -1018,8 +1019,8 @@ setInterval(async () => {
           "sell",
           sig.targetShort,
           sig.stopLossShort,
-          sig.shortOffset,
-          sig.midPriceShort
+          sig.shortOffset
+          // sig.midPriceShort
         );
       } else {
         console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
