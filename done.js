@@ -817,10 +817,10 @@ const analyzeSignal = async () => {
     // }
   }
 
-  const targetLong = Math.max(...high.slice(-16));
-  const stopLossLong = Math.min(...low.slice(-16));
-  const targetShort = Math.min(...low.slice(-16));
-  const stopLossShort = Math.max(...high.slice(-16));
+  const targetLong = Math.max(...high.slice(-48));
+  const stopLossLong = Math.min(...low.slice(-48));
+  const targetShort = Math.min(...low.slice(-48));
+  const stopLossShort = Math.max(...high.slice(-48));
 
   const longOffset = targetLong - stopLossLong;
   const shortOffset = stopLossShort - targetShort;
