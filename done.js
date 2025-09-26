@@ -2,8 +2,16 @@
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
-const { RSI, SMA, MACD, ADX } = require("technicalindicators");
-const { Client, LocalAuth } = require("whatsapp-web.js");
+const {
+  RSI,
+  SMA,
+  MACD,
+  ADX
+} = require("technicalindicators");
+const {
+  Client,
+  LocalAuth
+} = require("whatsapp-web.js");
 const express = require("express");
 const QRCode = require("qrcode");
 
@@ -21,17 +29,17 @@ if (!fs.existsSync(logPath)) {
   console.log("📝 Log: File log.csv dibuat.");
 }
 
-const db = fs.existsSync(dbPath)
-  ? JSON.parse(fs.readFileSync(dbPath))
-  : {
-      pair: "XRP/USDT:USDT",
-      lastLongEntryTime: 0,
-      lastShortEntryTime: 0,
-      leverage: 10,
-      marginMode: "ISOLATED",
-      activePosition: null,
-      usdtPerTrade: 5.1,
-    };
+const db = fs.existsSync(dbPath) ?
+  JSON.parse(fs.readFileSync(dbPath)) :
+  {
+    pair: "XRP/USDT:USDT",
+    lastLongEntryTime: 0,
+    lastShortEntryTime: 0,
+    leverage: 10,
+    marginMode: "ISOLATED",
+    activePosition: null,
+    usdtPerTrade: 5.1,
+  };
 
 let prevPosAmt = 0;
 
@@ -45,7 +53,9 @@ console.log(`   - USDT per Trade: ${db.usdtPerTrade}`);
 const exchange = new ccxt.binance({
   apiKey: process.env.API_KEY,
   secret: process.env.API_SECRET,
-  options: { defaultType: "future" },
+  options: {
+    defaultType: "future"
+  },
 });
 
 (async () => {
@@ -266,8 +276,7 @@ client.on("message", async (msg) => {
       const bal = await exchange.fetchBalance();
       const usdt = bal.total.USDT;
       const positions =
-        bal.info?.positions?.filter((p) => parseFloat(p.positionAmt) !== 0) ||
-        [];
+        bal.info?.positions?.filter((p) => parseFloat(p.positionAmt) !== 0) || [];
 
       let posText = `*Posisi Terbuka di Binance:*`;
       if (positions.length === 0) {
@@ -281,12 +290,12 @@ client.on("message", async (msg) => {
         });
       }
 
-      const lastLong = db.lastLongEntryTime
-        ? new Date(db.lastLongEntryTime).toLocaleString()
-        : "-";
-      const lastShort = db.lastShortEntryTime
-        ? new Date(db.lastShortEntryTime).toLocaleString()
-        : "-";
+      const lastLong = db.lastLongEntryTime ?
+        new Date(db.lastLongEntryTime).toLocaleString() :
+        "-";
+      const lastShort = db.lastShortEntryTime ?
+        new Date(db.lastShortEntryTime).toLocaleString() :
+        "-";
 
       let msgText = `📊 *Status Bot Trading*\n
 *Pair Bot:* ${db.pair}
@@ -414,33 +423,39 @@ const getPositionFromBalance = async () => {
     // Instead do safe find:
     let found = positions.find(
       (p) =>
-        p.symbol === marketId ||
-        p.contractCode === marketId ||
-        (p.symbol && p.symbol.includes(marketId))
+      p.symbol === marketId ||
+      p.contractCode === marketId ||
+      (p.symbol && p.symbol.includes(marketId))
     );
     if (!found) {
       // try matching by removing non-alphanum
       const norm = (s) =>
         (s || "")
-          .toString()
-          .replace(/[^a-zA-Z0-9]/g, "")
-          .toUpperCase();
+        .toString()
+        .replace(/[^a-zA-Z0-9]/g, "")
+        .toUpperCase();
       found = positions.find(
         (p) =>
-          norm(p.symbol) === norm(marketId) ||
-          norm(p.contractCode) === norm(marketId)
+        norm(p.symbol) === norm(marketId) ||
+        norm(p.contractCode) === norm(marketId)
       );
     }
-    return { balance: bal, position: found };
+    return {
+      balance: bal,
+      position: found
+    };
   } catch (err) {
     console.error("❌ Helper: Gagal ambil posisi dari balance.", err.message);
-    return { balance: null, position: null };
+    return {
+      balance: null,
+      position: null
+    };
   }
 };
 
 // -------------------- ORDER --------------------
 // const placeOrder = async (side, tp, sl, offset, targetEntryPrice) => {
-  const placeOrder = async (side, tp, sl, offset) => {
+const placeOrder = async (side, tp, sl, offset) => {
   console.log("🔍 Order: Memeriksa apakah ada posisi aktif...");
   if (db.activePosition) {
     console.log(
@@ -454,7 +469,9 @@ const getPositionFromBalance = async () => {
 
   // Extra: pastikan tidak ada posisi yang aktif di account
   try {
-    const { position } = await getPositionFromBalance();
+    const {
+      position
+    } = await getPositionFromBalance();
     const amt = parseFloat(position?.positionAmt || "0");
     if (isFinite(amt) && Math.abs(amt) > 0) {
       console.log(
@@ -551,7 +568,9 @@ const getPositionFromBalance = async () => {
 const closePosition = async (reason, entryPrice = "N/A") => {
   console.log(`🚨 Posisi: Menutup posisi karena ${reason}.`);
   try {
-    const { position } = await getPositionFromBalance();
+    const {
+      position
+    } = await getPositionFromBalance();
     const qty = parseFloat(position?.positionAmt || "0");
 
     if (!isFinite(qty) || Math.abs(qty) === 0) {
@@ -753,9 +772,18 @@ const analyzeSignal = async () => {
   const low = ohlcv.map((c) => c[3]);
 
   // Menghitung SMA
-  const ma7 = SMA.calculate({ values: close.slice(-100), period: 7 }).pop();
-  const ma25 = SMA.calculate({ values: close.slice(-100), period: 25 }).pop();
-  const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
+  const ma7 = SMA.calculate({
+    values: close.slice(-100),
+    period: 7
+  }).pop();
+  const ma25 = SMA.calculate({
+    values: close.slice(-100),
+    period: 25
+  }).pop();
+  const ma99 = SMA.calculate({
+    values: close,
+    period: 99
+  }).pop();
 
   // Hitung indikator lain
   // const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
@@ -829,36 +857,36 @@ const analyzeSignal = async () => {
   // const midPriceShort = (targetShort + stopLossShort) / 2;
 
   // Awal output yang rapi
-console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
-console.log(`-----------------------------------`);
+  console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
+  console.log(`-----------------------------------`);
 
-// Sinyal Utama
-console.log(`📈 Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
-console.log(`📉 Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
-console.log(`-----------------------------------`);
+  // Sinyal Utama
+  console.log(`📈 Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
+  console.log(`📉 Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
+  console.log(`-----------------------------------`);
 
-// Detail Indikator
-console.log(`📝 Detail Indikator:`);
-console.log(`   - Crossover MA: ${isCrossedUp ? "📈 MA7 Crossed Up MA25" : isCrossedDown ? "📉 MA7 Crossed Down MA25" : "↔️ Tidak Ada"}`);
-console.log(`   - Posisi Harga vs MA99: ${isPriceAboveMA99 ? "📈 Harga di atas MA99 (Tren Naik)" : "📉 Harga di bawah MA99 (Tren Turun)"}`);
+  // Detail Indikator
+  console.log(`📝 Detail Indikator:`);
+  console.log(`   - Crossover MA: ${isCrossedUp ? "📈 MA7 Crossed Up MA25" : isCrossedDown ? "📉 MA7 Crossed Down MA25" : "↔️ Tidak Ada"}`);
+  console.log(`   - Posisi Harga vs MA99: ${isPriceAboveMA99 ? "📈 Harga di atas MA99 (Tren Naik)" : "📉 Harga di bawah MA99 (Tren Turun)"}`);
 
-// Informasi Harga
-console.log(`💰 Harga Saat Ini: ${formatPrice(price)}`);
-console.log(`-----------------------------------`);
+  // Informasi Harga
+  console.log(`💰 Harga Saat Ini: ${formatPrice(price)}`);
+  console.log(`-----------------------------------`);
 
-// Strategi Long
-console.log(`📈 Strategi Long:`);
-console.log(`   - Target: ${formatPrice(targetLong)}`);
-// console.log(`   - Mid Price: ${formatPrice(midPriceLong)}`);
-console.log(`   - Stop Loss: ${formatPrice(stopLossLong)}`);
-console.log(`-----------------------------------`);
+  // Strategi Long
+  console.log(`📈 Strategi Long:`);
+  console.log(`   - Target: ${formatPrice(targetLong)}`);
+  // console.log(`   - Mid Price: ${formatPrice(midPriceLong)}`);
+  console.log(`   - Stop Loss: ${formatPrice(stopLossLong)}`);
+  console.log(`-----------------------------------`);
 
-// Strategi Short
-console.log(`📉 Strategi Short:`);
-console.log(`   - Target: ${formatPrice(targetShort)}`);
-// console.log(`   - Mid Price: ${formatPrice(midPriceShort)}`);
-console.log(`   - Stop Loss: ${formatPrice(stopLossShort)}`);
-console.log(`-----------------------------------`);
+  // Strategi Short
+  console.log(`📉 Strategi Short:`);
+  console.log(`   - Target: ${formatPrice(targetShort)}`);
+  // console.log(`   - Mid Price: ${formatPrice(midPriceShort)}`);
+  console.log(`   - Stop Loss: ${formatPrice(stopLossShort)}`);
+  console.log(`-----------------------------------`);
 
   return {
     canLong,
@@ -869,6 +897,8 @@ console.log(`-----------------------------------`);
     stopLossShort,
     longOffset,
     shortOffset,
+    isCrossedUp,
+    isCrossedDown,
     // midPriceLong,
     // midPriceShort,
     price,
@@ -878,7 +908,9 @@ console.log(`-----------------------------------`);
 // -------------------- CEK POSISI (TP/SL trigger) --------------------
 const checkPositionStatus = async () => {
   try {
-    const { position } = await getPositionFromBalance();
+    const {
+      position
+    } = await getPositionFromBalance();
     const amt = parseFloat(position?.positionAmt || "0");
     const amtSafe = isFinite(amt) ? amt : 0;
 
@@ -898,7 +930,13 @@ const checkPositionStatus = async () => {
 
     // Monitoring internal untuk TP/SL dari data di database
     if (db.activePosition && amtSafe !== 0) {
-      const { tp, sl, side, entryPrice, offset } = db.activePosition;
+      const {
+        tp,
+        sl,
+        side,
+        entryPrice,
+        offset
+      } = db.activePosition;
       const currentPrice = await getPrice();
       if (!currentPrice) return;
 
@@ -952,7 +990,9 @@ const checkPositionStatus = async () => {
 setInterval(async () => {
   try {
     const now = new Date();
-    const { position } = await getPositionFromBalance();
+    const {
+      position
+    } = await getPositionFromBalance();
     const amt = parseFloat(position?.positionAmt || "0");
     const hasActiveBinancePosition = isFinite(amt) && Math.abs(amt) > 0;
     await checkPositionStatus();
@@ -968,10 +1008,20 @@ setInterval(async () => {
     }
 
     const hasBotPosition = db.activePosition !== null;
-    let shouldExitCurrentPosition = false; // --- LOGIKA BARU UNTUK SWING POSISI ---
-
+    let shouldExitCurrentPosition = false;
+    let shouldTakeProfit = false;
+    // --- LOGIKA BARU UNTUK SWING POSISI & TP menggunakan Crossover yang berlawanan---
     if (hasBotPosition) {
       const currentSide = db.activePosition.side;
+
+      if (currentSide === "buy" && sig.isCrossedDown) {
+        console.log("🚨 TP Trigger: LONG ditutup karena MA7 crossed down MA25.");
+        shouldTakeProfit = true;
+      } else if (currentSide === "sell" && sig.isCrossedUp) {
+        console.log("🚨 TP Trigger: SHORT ditutup karena MA7 crossed up MA25.");
+        shouldTakeProfit = true;
+      }
+
       if (currentSide === "buy" && sig.canShort) {
         console.log(
           "⚠️ Sinyal: Sinyal SHORT valid, menutup posisi LONG yang aktif."
@@ -983,14 +1033,24 @@ setInterval(async () => {
         );
         shouldExitCurrentPosition = true;
       }
-    } // Eksekusi penutupan posisi jika ada sinyal valid untuk swing
-
+    }
+    // Eksekusi penutupan posisi jika ada sinyal valid untuk swing TP menggunakan Crossover yang berlawanan
+    if (shouldTakeProfit) {
+      await closePosition(
+        "TP Crossover Tercapai",
+        db.activePosition.entryPrice
+      ); // Jeda sebentar sebelum melanjutkan
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      return; // Hentikan loop saat ini, biarkan loop berikutnya open posisi baru jika sinyal valid
+    }
+    // Eksekusi penutupan posisi jika ada sinyal valid untuk swing
     if (shouldExitCurrentPosition) {
       await closePosition("Sinyal berbalik arah", db.activePosition.entryPrice); // JEDA SEBENTAR untuk memastikan posisi sebelumnya benar-benar tertutup
       await new Promise((resolve) => setTimeout(resolve, 5000));
     } // Logika untuk membuka posisi baru hanya jika tidak ada posisi aktif // Periksa kembali status setelah kemungkinan close position
-
-    const { position: updatedPosition } = await getPositionFromBalance();
+    const {
+      position: updatedPosition
+    } = await getPositionFromBalance();
     const updatedAmt = parseFloat(updatedPosition?.positionAmt || "0");
     const hasActiveBinancePositionAfterClose =
       isFinite(updatedAmt) && Math.abs(updatedAmt) > 0;
