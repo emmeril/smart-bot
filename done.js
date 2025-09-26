@@ -751,10 +751,10 @@ const analyzeSignal = async () => {
   const high = ohlcv.map((c) => c[2]);
   const low = ohlcv.map((c) => c[3]);
 
-   // Menghitung SMA 
-  const ma7 = SMA.calculate({ values: close.slice(-100), period: 7 }).pop();
-  const ma25 = SMA.calculate({ values: close.slice(-100), period: 25 }).pop();
-  const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
+  // Menghitung SMA
+  const ma7 = SMA.calculate({ values: close.slice(-100), period: 7 }).pop();
+  const ma25 = SMA.calculate({ values: close.slice(-100), period: 25 }).pop();
+  const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
 
   // Hitung indikator lain
   // const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
@@ -774,11 +774,17 @@ const analyzeSignal = async () => {
   const price = close.at(-1);
 
   // Ambil nilai SMA sebelumnya untuk mendeteksi crossover
-  const prevMA7 = SMA.calculate({ values: close.slice(-101, -1), period: 7 }).pop();
-  const prevMA25 = SMA.calculate({ values: close.slice(-101, -1), period: 25 }).pop();
+  const prevMA7 = SMA.calculate({
+    values: close.slice(-101, -1),
+    period: 7,
+  }).pop();
+  const prevMA25 = SMA.calculate({
+    values: close.slice(-101, -1),
+    period: 25,
+  }).pop();
 
-  const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
-  const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
+  const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
+  const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
 
   let canLong = false;
   let canShort = false;
@@ -821,57 +827,37 @@ const analyzeSignal = async () => {
   const midPriceLong = (targetLong + stopLossLong) / 2;
   const midPriceShort = (targetShort + stopLossShort) / 2;
 
-  console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
+  // Awal output yang rapi
+console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
+console.log(`-----------------------------------`);
 
-  console.log(`  - Sinyal Long: ${canLong ? "⬆️ VALID" : "❌ TIDAK VALID"}`);
-  console.log(`  - Sinyal Short: ${canShort ? "⬇️ VALID" : "❌ TIDAK VALID"}`);
-  console.log(`  --- Detail Indikator ---`);
-  console.log(
-    `  - Crossover MA: ${
-      isCrossedUp
-        ? "⬆️ MA7 Crossed Up MA25"
-        : isCrossedDown
-        ? "⬇️ MA7 Crossed Down MA25"
-        : "❌ Tidak Ada"
-    }`
-  );
-  console.log(
-    `  - Posisi Harga vs MA99: ${
-      isPriceAboveMA99
-        ? "⬆️ Harga di atas MA99 (Tren Naik)"
-        : "⬇️ Harga di bawah MA99 (Tren Turun)"
-    }`
-  );
-  // console.log(
-  //   `  - RSI: ${rsi?.toFixed(2)} (${
-  //     (canLong && rsi < 50) || (canShort && rsi > 50)
-  //       ? "✅ Valid"
-  //       : "❌ Tidak Valid"
-  //   })`
-  // );
-  // console.log(
-  //   `  - MACD Hist: ${macd?.histogram?.toFixed(4)} (${
-  //     (canLong && macd?.histogram > 0) || (canShort && macd?.histogram < 0)
-  //       ? "✅ Valid"
-  //       : "❌ Tidak Valid"
-  //   })`
-  // );
-  // console.log(
-  //   `  - ADX: ${adx?.adx?.toFixed(2)} (${
-  //     adx?.adx > 20 ? "✅ Tren Kuat" : "❌ Tren Lemah"
-  //   })`
-  // );
+// Sinyal Utama
+console.log(`📈 Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
+console.log(`📉 Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
+console.log(`-----------------------------------`);
 
-  console.log(`  💰 Harga: ${formatPrice(price)}`);
-  console.log(`  ---------`);
-  console.log(`  ⬆️ Target Long: ${formatPrice(targetLong)}`);
-  console.log(`  ↔️ Mid Price Long: ${formatPrice(midPriceLong)}`);
-  console.log(`  ❌ Stop Loss Long: ${formatPrice(stopLossLong)}`);
-  console.log(`  ---------`);
-  console.log(`  ⬇️ Target Short: ${formatPrice(targetShort)}`);
-  console.log(`  ↔️ Mid Price Short: ${formatPrice(midPriceShort)}`);
-  console.log(`  ❌ Stop Loss Short: ${formatPrice(stopLossShort)}`);
-  console.log(`  ---------`);
+// Detail Indikator
+console.log(`📝 Detail Indikator:`);
+console.log(`   - Crossover MA: ${isCrossedUp ? "⬆️ MA7 Crossed Up MA25" : isCrossedDown ? "⬇️ MA7 Crossed Down MA25" : "↔️ Tidak Ada"}`);
+console.log(`   - Posisi Harga vs MA99: ${isPriceAboveMA99 ? "⬆️ Harga di atas MA99 (Tren Naik)" : "⬇️ Harga di bawah MA99 (Tren Turun)"}`);
+
+// Informasi Harga
+console.log(`💰 Harga Saat Ini: ${formatPrice(price)}`);
+console.log(`-----------------------------------`);
+
+// Strategi Long
+console.log(`🚀 Strategi Long:`);
+console.log(`   - Target: ${formatPrice(targetLong)}`);
+console.log(`   - Mid Price: ${formatPrice(midPriceLong)}`);
+console.log(`   - Stop Loss: ${formatPrice(stopLossLong)}`);
+console.log(`-----------------------------------`);
+
+// Strategi Short
+console.log(`🔻 Strategi Short:`);
+console.log(`   - Target: ${formatPrice(targetShort)}`);
+console.log(`   - Mid Price: ${formatPrice(midPriceShort)}`);
+console.log(`   - Stop Loss: ${formatPrice(stopLossShort)}`);
+console.log(`-----------------------------------`);
 
   return {
     canLong,
@@ -963,118 +949,125 @@ const checkPositionStatus = async () => {
 
 // -------------------- MAIN LOOP --------------------
 setInterval(async () => {
-  try {
-    const now = new Date();
-    const { position } = await getPositionFromBalance();
-    const amt = parseFloat(position?.positionAmt || "0");
-    const hasActiveBinancePosition = isFinite(amt) && Math.abs(amt) > 0;
-    await checkPositionStatus();
+  try {
+    const now = new Date();
+    const { position } = await getPositionFromBalance();
+    const amt = parseFloat(position?.positionAmt || "0");
+    const hasActiveBinancePosition = isFinite(amt) && Math.abs(amt) > 0;
+    await checkPositionStatus();
 
-    console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
-    console.log("🔍 Status Posisi Aktif di DB: ", db.activePosition);
+    console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
+    console.log("🔍 Status Posisi Aktif di DB: ", db.activePosition);
 
-    const sig = await analyzeSignal();
+    const sig = await analyzeSignal();
 
-    if (!sig.price) {
-        console.log("⚠️ Analisis: Sinyal tidak valid, menunggu...");
-        return;
-    }
+    if (!sig.price) {
+      console.log("⚠️ Analisis: Sinyal tidak valid, menunggu...");
+      return;
+    }
 
-    const hasBotPosition = db.activePosition !== null;
-    let shouldExitCurrentPosition = false;
+    const hasBotPosition = db.activePosition !== null;
+    let shouldExitCurrentPosition = false; // --- LOGIKA BARU UNTUK SWING POSISI ---
 
-    // --- LOGIKA BARU UNTUK SWING POSISI ---
-    if (hasBotPosition) {
-        const currentSide = db.activePosition.side;
-        if (currentSide === "buy" && sig.canShort) {
-            console.log("⚠️ Sinyal: Sinyal SHORT valid, menutup posisi LONG yang aktif.");
-            shouldExitCurrentPosition = true;
-        } else if (currentSide === "sell" && sig.canLong) {
-            console.log("⚠️ Sinyal: Sinyal LONG valid, menutup posisi SHORT yang aktif.");
-            shouldExitCurrentPosition = true;
-        }
-    }
+    if (hasBotPosition) {
+      const currentSide = db.activePosition.side;
+      if (currentSide === "buy" && sig.canShort) {
+        console.log(
+          "⚠️ Sinyal: Sinyal SHORT valid, menutup posisi LONG yang aktif."
+        );
+        shouldExitCurrentPosition = true;
+      } else if (currentSide === "sell" && sig.canLong) {
+        console.log(
+          "⚠️ Sinyal: Sinyal LONG valid, menutup posisi SHORT yang aktif."
+        );
+        shouldExitCurrentPosition = true;
+      }
+    } // Eksekusi penutupan posisi jika ada sinyal valid untuk swing
 
-    // Eksekusi penutupan posisi jika ada sinyal valid untuk swing
-    if (shouldExitCurrentPosition) {
-        await closePosition("Sinyal berbalik arah", db.activePosition.entryPrice);
-        
-        // JEDA SEBENTAR untuk memastikan posisi sebelumnya benar-benar tertutup
-        await new Promise(resolve => setTimeout(resolve, 5000)); 
-    }
+    if (shouldExitCurrentPosition) {
+      await closePosition("Sinyal berbalik arah", db.activePosition.entryPrice); // JEDA SEBENTAR untuk memastikan posisi sebelumnya benar-benar tertutup
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    } // Logika untuk membuka posisi baru hanya jika tidak ada posisi aktif // Periksa kembali status setelah kemungkinan close position
 
-    // Logika untuk membuka posisi baru hanya jika tidak ada posisi aktif
-    // Periksa kembali status setelah kemungkinan close position
-    const { position: updatedPosition } = await getPositionFromBalance();
-    const updatedAmt = parseFloat(updatedPosition?.positionAmt || "0");
-    const hasActiveBinancePositionAfterClose = isFinite(updatedAmt) && Math.abs(updatedAmt) > 0;
+    const { position: updatedPosition } = await getPositionFromBalance();
+    const updatedAmt = parseFloat(updatedPosition?.positionAmt || "0");
+    const hasActiveBinancePositionAfterClose =
+      isFinite(updatedAmt) && Math.abs(updatedAmt) > 0;
 
-    if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
-        if (sig.canLong) {
-            console.log("🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order.");
-            db.lastLongEntryTime = now;
-            saveDB();
-            await placeOrder(
-                "buy",
-                sig.targetLong,
-                sig.stopLossLong,
-                sig.longOffset,
-                sig.midPriceLong
-            );
-        } else if (sig.canShort) {
-            console.log("📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order.");
-            db.lastShortEntryTime = now;
-            saveDB();
-            await placeOrder(
-                "sell",
-                sig.targetShort,
-                sig.stopLossShort,
-                sig.shortOffset,
-                sig.midPriceShort
-            );
-        } else {
-            console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
-        }
-    }
+    if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
+      if (sig.canLong) {
+        console.log(
+          "🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order."
+        );
+        db.lastLongEntryTime = now;
+        saveDB();
+        await placeOrder(
+          "buy",
+          sig.targetLong,
+          sig.stopLossLong,
+          sig.longOffset,
+          sig.midPriceLong
+        );
+      } else if (sig.canShort) {
+        console.log(
+          "📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order."
+        );
+        db.lastShortEntryTime = now;
+        saveDB();
+        await placeOrder(
+          "sell",
+          sig.targetShort,
+          sig.stopLossShort,
+          sig.shortOffset,
+          sig.midPriceShort
+        );
+      } else {
+        console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
+      }
+    } // Logika untuk memperbarui TP/SL dan offset jika ada posisi aktif
+    else if (db.activePosition !== null) {
+      console.log(
+        "➡️ Posisi aktif terdeteksi. Memeriksa sinyal untuk pembaruan TP/SL dan offset."
+      );
+      if (sig.price) {
+        const currentSide = db.activePosition.side;
+        let newSL, newTP, newOffset;
 
-    // Logika untuk memperbarui TP/SL dan offset jika ada posisi aktif
-    else if (db.activePosition !== null) {
-      console.log(
-        "➡️ Posisi aktif terdeteksi. Memeriksa sinyal untuk pembaruan TP/SL dan offset."
-      );
-      if (sig.price) {
-        const currentSide = db.activePosition.side;
-        let newSL, newTP, newOffset;
+        if (currentSide === "buy") {
+          newSL = sig.stopLossLong;
+          newTP = sig.targetLong;
+          newOffset = sig.longOffset;
+        } else if (currentSide === "sell") {
+          newSL = sig.stopLossShort;
+          newTP = sig.targetShort;
+          newOffset = sig.shortOffset;
+        }
 
-        if (currentSide === "buy") {
-          newSL = sig.stopLossLong;
-          newTP = sig.targetLong;
-          newOffset = sig.longOffset;
-        } else if (currentSide === "sell") {
-          newSL = sig.stopLossShort;
-          newTP = sig.targetShort;
-          newOffset = sig.shortOffset;
-        }
-
-        if (
-          newSL !== db.activePosition.sl ||
-          newTP !== db.activePosition.tp ||
-          newOffset !== db.activePosition.offset
-        ) {
-          console.log(`✅ Sinyal: TP/SL/Offset baru terdeteksi! Memperbarui dari DB.`);
-          db.activePosition.sl = newSL;
-          db.activePosition.tp = newTP;
-          db.activePosition.offset = newOffset;
-          saveDB();
-        } else {
-          console.log("✔️ Sinyal: Tidak ada perubahan TP/SL/Offset. Tidak ada pembaruan.");
-        }
-      } else {
-        console.log("⚠️ Analisis: Sinyal tidak valid. Tidak ada pembaruan TP/SL/Offset.");
-      }
-    }
-  } catch (e) {
-    console.error("⚠️ Loop: Terjadi kesalahan di loop utama.", e.message);
-    console.error(e.stack);
-  }
+        if (
+          newSL !== db.activePosition.sl ||
+          newTP !== db.activePosition.tp ||
+          newOffset !== db.activePosition.offset
+        ) {
+          console.log(
+            `✅ Sinyal: TP/SL/Offset baru terdeteksi! Memperbarui dari DB.`
+          );
+          db.activePosition.sl = newSL;
+          db.activePosition.tp = newTP;
+          db.activePosition.offset = newOffset;
+          saveDB();
+        } else {
+          console.log(
+            "✔️ Sinyal: Tidak ada perubahan TP/SL/Offset. Tidak ada pembaruan."
+          );
+        }
+      } else {
+        console.log(
+          "⚠️ Analisis: Sinyal tidak valid. Tidak ada pembaruan TP/SL/Offset."
+        );
+      }
+    }
+  } catch (e) {
+    console.error("⚠️ Loop: Terjadi kesalahan di loop utama.", e.message);
+    console.error(e.stack);
+  }
 }, 10000);
