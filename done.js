@@ -838,8 +838,8 @@ console.log(`-----------------------------------`);
 
 // Detail Indikator
 console.log(`📝 Detail Indikator:`);
-console.log(`   - Crossover MA: ${isCrossedUp ? "⬆️ MA7 Crossed Up MA25" : isCrossedDown ? "⬇️ MA7 Crossed Down MA25" : "↔️ Tidak Ada"}`);
-console.log(`   - Posisi Harga vs MA99: ${isPriceAboveMA99 ? "⬆️ Harga di atas MA99 (Tren Naik)" : "⬇️ Harga di bawah MA99 (Tren Turun)"}`);
+console.log(`   - Crossover MA: ${isCrossedUp ? "⬆️\u00A0MA7 Crossed Up MA25" : isCrossedDown ? "⬇️\u00A0MA7 Crossed Down MA25" : "↔️\u00A0Tidak Ada"}`);
+console.log(`   - Posisi Harga vs MA99: ${isPriceAboveMA99 ? "⬆️\u00A0Harga di atas MA99 (Tren Naik)" : "⬇️\u00A0Harga di bawah MA99 (Tren Turun)"}`);
 
 // Informasi Harga
 console.log(`💰 Harga Saat Ini: ${formatPrice(price)}`);
