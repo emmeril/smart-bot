@@ -823,23 +823,23 @@ const analyzeSignal = async () => {
 
   console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
 
-  console.log(`  - Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
-  console.log(`  - Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
+  console.log(`  - Sinyal Long: ${canLong ? "⬆️ VALID" : "❌ TIDAK VALID"}`);
+  console.log(`  - Sinyal Short: ${canShort ? "⬇️ VALID" : "❌ TIDAK VALID"}`);
   console.log(`  --- Detail Indikator ---`);
   console.log(
     `  - Crossover MA: ${
       isCrossedUp
-        ? "✅ MA7 Crossed Up MA25"
+        ? "⬆️ MA7 Crossed Up MA25"
         : isCrossedDown
-        ? "✅ MA7 Crossed Down MA25"
+        ? "⬇️ MA7 Crossed Down MA25"
         : "❌ Tidak Ada"
     }`
   );
   console.log(
     `  - Posisi Harga vs MA99: ${
       isPriceAboveMA99
-        ? "✅ Harga di atas MA99 (Tren Naik)"
-        : "❌ Harga di bawah MA99 (Tren Turun)"
+        ? "⬆️ Harga di atas MA99 (Tren Naik)"
+        : "⬇️ Harga di bawah MA99 (Tren Turun)"
     }`
   );
   // console.log(
@@ -862,14 +862,16 @@ const analyzeSignal = async () => {
   //   })`
   // );
 
-  console.log(`  - Harga: ${formatPrice(price)}`);
-  console.log(`  - Target Long: ${formatPrice(targetLong)}`);
-  console.log(`  - Mid Price Long: ${formatPrice(midPriceLong)}`);
-  console.log(`  - Stop Loss Long: ${formatPrice(stopLossLong)}`);
-  console.log(`  - Target Short: ${formatPrice(targetShort)}`);
-  console.log(`  - Mid Price Short: ${formatPrice(midPriceShort)}`);
-  console.log(`  - Stop Loss Short: ${formatPrice(stopLossShort)}`);
-  console.log(`  ---`);
+  console.log(`  💰 Harga: ${formatPrice(price)}`);
+  console.log(`  ---------`);
+  console.log(`  ⬆️ Target Long: ${formatPrice(targetLong)}`);
+  console.log(`  ↔️ Mid Price Long: ${formatPrice(midPriceLong)}`);
+  console.log(`  ❌ Stop Loss Long: ${formatPrice(stopLossLong)}`);
+  console.log(`  ---------`);
+  console.log(`  ⬇️ Target Short: ${formatPrice(targetShort)}`);
+  console.log(`  ↔️ Mid Price Short: ${formatPrice(midPriceShort)}`);
+  console.log(`  ❌ Stop Loss Short: ${formatPrice(stopLossShort)}`);
+  console.log(`  ---------`);
 
   return {
     canLong,
