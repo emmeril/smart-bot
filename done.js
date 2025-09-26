@@ -838,22 +838,22 @@ console.log(`-----------------------------------`);
 
 // Detail Indikator
 console.log(`📝 Detail Indikator:`);
-console.log(`   - Crossover MA: ${isCrossedUp ? "⬆️ MA7 Crossed Up MA25" : isCrossedDown ? "⬇️ MA7 Crossed Down MA25" : "↔️ Tidak Ada"}`);
-console.log(`   - Posisi Harga vs MA99: ${isPriceAboveMA99 ? "⬆️ Harga di atas MA99 (Tren Naik)" : "⬇️ Harga di bawah MA99 (Tren Turun)"}`);
+console.log(`   - Crossover MA: ${isCrossedUp ? "📈 MA7 Crossed Up MA25" : isCrossedDown ? "📉 MA7 Crossed Down MA25" : "↔️ Tidak Ada"}`);
+console.log(`   - Posisi Harga vs MA99: ${isPriceAboveMA99 ? "📈 Harga di atas MA99 (Tren Naik)" : "📉 Harga di bawah MA99 (Tren Turun)"}`);
 
 // Informasi Harga
 console.log(`💰 Harga Saat Ini: ${formatPrice(price)}`);
 console.log(`-----------------------------------`);
 
 // Strategi Long
-console.log(`🚀 Strategi Long:`);
+console.log(`📈 Strategi Long:`);
 console.log(`   - Target: ${formatPrice(targetLong)}`);
 console.log(`   - Mid Price: ${formatPrice(midPriceLong)}`);
 console.log(`   - Stop Loss: ${formatPrice(stopLossLong)}`);
 console.log(`-----------------------------------`);
 
 // Strategi Short
-console.log(`🔻 Strategi Short:`);
+console.log(`📉 Strategi Short:`);
 console.log(`   - Target: ${formatPrice(targetShort)}`);
 console.log(`   - Mid Price: ${formatPrice(midPriceShort)}`);
 console.log(`   - Stop Loss: ${formatPrice(stopLossShort)}`);
