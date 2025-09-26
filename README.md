@@ -1,82 +1,88 @@
-<!DOCTYPE html>
-<body>
-  <h1>🤖 Smart Bot Trading - Binance Futures</h1>
-  <p><strong>Smart.js</strong> adalah bot trading <strong>Binance Futures</strong> yang bekerja otomatis berbasis kombinasi <em>technical indicators</em>, trailing stop, dan pengendalian risiko.</p>
+# 📈 Crypto Trading Bot (Binance Futures + WhatsApp Control)
 
-  <h2>✨ Fitur Unggulan</h2>
-  <ul>
-    <li>📈 <strong>Auto Trading Long & Short</strong> secara bersamaan (Hedge Mode)</li>
-    <li>🧠 <strong>AI-based Entry Rules</strong>: RSI, MACD, EMA20/50, ADX, Candlestick</li>
-    <li>🎯 <strong>Trailing Stop Take Profit</strong> aktif saat profit &gt; 3%</li>
-    <li>🛡️ <strong>Auto Stop Loss</strong> jika rugi 2%</li>
-    <li>⏱️ <strong>Auto Cut Timeout</strong> jika posisi terlalu lama (default: 45–1440 menit)</li>
-    <li>📊 <strong>Backtest Mode</strong> selama 30 hari dengan hasil log & PnL</li>
-    <li>📤 <strong>Log Transaksi</strong> otomatis ke <code>log.csv</code></li>
-    <li>📱 <strong>Notifikasi WhatsApp</strong> (via <code>whatsapp-web.js</code>)</li>
-    <li>🧾 <strong>Control via WhatsApp</strong> seperti <code>!status</code>, <code>!leverage</code>, <code>!pair</code>, <code>!pnl</code></li>
-    <li>⚙️ <strong>Mode Konservatif & Agresif</strong> untuk sinyal entry</li>
-    <li>📆 <strong>Auto Pause Trading Saat Weekend</strong> (Sabtu & Minggu)</li>
-  </ul>
+Bot trading otomatis untuk **Binance Futures** dengan integrasi **WhatsApp Web** sebagai panel kontrol.  
+Menggunakan strategi **MA Crossover (7 vs 25) dengan filter MA99**, trailing stop otomatis, serta pencatatan PnL ke log.
 
-  <h2>🚀 Cara Jalankan</h2>
-  <pre><code>npm install
-node smart.js            # mode live trading
-node smart.js --backtest # mode backtest 30 hari
-</code></pre>
+---
 
-  <h2>📟 WhatsApp Command List</h2>
-  <ul>
-    <li><code>!status</code> – Melihat status bot, posisi, floating PnL</li>
-    <li><code>!pair DOGE/USDT:USDT</code> – Ganti pair</li>
-    <li><code>!leverage 10 isolated</code> – Atur leverage & margin mode</li>
-    <li><code>!balance 30</code> – Gunakan 30% dari saldo untuk entry</li>
-    <li><code>!pnl</code> – Ringkasan profit & loss total</li>
-    <li><code>!mode agresif</code> / <code>!mode konservatif</code> – Ganti strategi entry</li>
-    <li><code>!maxhold 60</code> – Ubah batas waktu posisi terbuka (dalam menit)</li>
-  </ul>
+## 🚀 Fitur Utama
+- ✅ **Integrasi Binance Futures** via [ccxt](https://github.com/ccxt/ccxt)  
+- ✅ **Kontrol Bot via WhatsApp** (ubah pair, leverage, order size, reset, status, rekap PnL)  
+- ✅ **Manajemen Posisi**
+  - Entry hanya jika tidak ada posisi aktif (bot/akun)
+  - Close otomatis jika TP/SL tercapai
+  - Trailing Stop Loss dengan offset dinamis
+  - Swing posisi (close posisi lama jika sinyal berbalik)  
+- ✅ **Strategi Analisis**
+  - Sinyal LONG: MA7 cross up MA25 + harga di atas MA99
+  - Sinyal SHORT: MA7 cross down MA25 + harga di bawah MA99
+  - TP/SL dari high/low 16 candle terakhir (TF 15m)
+- ✅ **Logging**
+  - Semua order tercatat di `log.csv`
+  - Rekap PnL bisa ditarik lewat WhatsApp (`!pnl`)
 
-  <h2>📁 Struktur File</h2>
-  <ul>
-    <li><code>smart.js</code> – Bot utama</li>
-    <li><code>db.json</code> – Penyimpanan status dan pengaturan</li>
-    <li><code>log.csv</code> – Log transaksi lengkap (entry/exit, PnL)</li>
-  </ul>
+---
 
-  <h2>🧠 Strategi Entry</h2>
-  <p>Bot hanya akan entry jika semua indikator teknikal berikut terpenuhi:</p>
-  <ul>
-    <li>RSI <code>&lt; 35</code> untuk Long, <code>&gt; 65</code> untuk Short</li>
-    <li>MACD Histogram mendukung arah</li>
-    <li>EMA20 > EMA50 (Long) atau EMA20 &lt; EMA50 (Short)</li>
-    <li>ADX &gt; 20</li>
-    <li>Konfirmasi candle kuat (Bullish/Bearish)</li>
-    <li><strong>(Opsional)</strong> Engulfing Pattern</li>
-  </ul>
+## ⚙️ Instalasi
 
-  <h2>🛡️ Manajemen Risiko</h2>
-  <ul>
-    <li>Stop loss otomatis jika harga turun lebih dari 2%</li>
-    <li>Trailing TP aktif saat profit ≥ 3%</li>
-    <li>Auto-close jika posisi terbuka terlalu lama (default 45–1440 menit)</li>
-    <li>Loss limit per arah: max 3x berturut-turut</li>
-    <li>Cooldown per arah setelah entry</li>
-  </ul>
+### 1. Clone Repo
+```bash
+git clone https://github.com/username/crypto-trading-bot.git
+cd crypto-trading-bot
+```
 
-  <h2>📈 Backtest 30 Hari</h2>
-  <p>Gunakan <code>--backtest</code> untuk simulasi performa 30 hari terakhir dan lihat hasilnya di <code>log.csv</code>. Terdapat info lengkap: Winrate, Net PnL, dan jumlah posisi.</p>
+### 2. Install Dependencies
+```bash
+npm install
+```
 
-  <h2>🛠️ Teknologi</h2>
-  <ul>
-    <li><strong>ccxt</strong> – Binance API wrapper</li>
-    <li><strong>technicalindicators</strong> – Indikator teknikal</li>
-    <li><strong>whatsapp-web.js</strong> – WhatsApp bot</li>
-    <li><strong>Node.js</strong> – Core runtime</li>
-  </ul>
+### 3. Konfigurasi Environment
+Buat file `.env`:
+```env
+API_KEY=your_binance_api_key
+API_SECRET=your_binance_api_secret
+ADMIN_PHONE=628xxxxxx   # Nomor WhatsApp admin
+PUPPETEER_PATH=/usr/bin/chromium  # Sesuaikan path Chromium
+```
 
-  <h2>📌 Disclaimer</h2>
-  <p>Bot ini bersifat eksperimental. Gunakan di akun <strong>demo</strong> atau modal kecil. Tidak ada jaminan profit. Selalu pahami risiko trading futures.</p>
+### 4. Jalankan Bot
+```bash
+node done.js
+```
 
-  <hr/>
-  <p style="font-size: 0.9em; color: #777">Made with ❤️ by Hafri & ChatGPT</p>
-</body>
-</html>
+---
+
+## 📱 Perintah WhatsApp
+Kirim pesan dari nomor admin ke WhatsApp bot:
+
+- `!pair BTC/USDT:USDT` → Ganti pair trading  
+- `!leverage 20 isolated` → Set leverage & margin mode  
+- `!order 10` → Set jumlah USDT per trade  
+- `!reset` → Reset status posisi bot  
+- `!pnl` → Lihat rekap profit/loss  
+- `!status` → Cek saldo, posisi aktif, TP/SL, dan status bot  
+
+---
+
+## 📊 Log & Database
+- **db.json** → Menyimpan state bot (pair, leverage, posisi aktif, dll)  
+- **log.csv** → Menyimpan riwayat order, TP/SL, PnL
+
+Format `log.csv`:
+```csv
+timestamp,pair,type,entry,tp,sl,status,pnl
+2025-09-26T08:20:10.123Z,XRP/USDT:USDT,LONG,0.521,0.540,0.510,TP_REALIZED,0.920000
+```
+
+---
+
+## 🧠 Catatan
+- PnL yang ditampilkan adalah **estimasi** (belum memperhitungkan fee Binance).  
+- Strategi bawaan masih sederhana (MA crossover), sebaiknya dipadukan dengan filter RSI/MACD/ADX.  
+- Loop utama jalan tiap **10 detik** → bisa diubah sesuai kebutuhan.  
+- Pastikan server punya Chromium/Chrome agar WhatsApp Web bisa jalan.  
+
+---
+
+## 📜 Lisensi
+MIT License  
