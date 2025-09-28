@@ -817,11 +817,45 @@ const analyzeSignal = async () => {
     // }
   }
 
-  const targetLong = Math.max(...high.slice(-16));
-  const stopLossLong = Math.min(...low.slice(-16));
-  const targetShort = Math.min(...low.slice(-16));
-  const stopLossShort = Math.max(...high.slice(-16));
+  //const targetLong = Math.max(...high.slice(-16));
+  //const stopLossLong = Math.min(...low.slice(-16));
+  //const targetShort = Math.min(...low.slice(-16));
+  //const stopLossShort = Math.max(...high.slice(-16));
 
+  // ---------------- SUPPORT & RESISTANCE (16 candle terakhir = 4 jam) ----------------
+  function findSwingLevels(highArr, lowArr, lookback = 16) {
+    let swingHighs = [];
+    let swingLows = [];
+
+    for (let i = 2; i < lookback - 2; i++) {
+      if (highArr[i] > highArr[i - 1] && highArr[i] > highArr[i - 2] &&
+          highArr[i] > highArr[i + 1] && highArr[i] > highArr[i + 2]) {
+        swingHighs.push(highArr[i]);
+      }
+      if (lowArr[i] < lowArr[i - 1] && lowArr[i] < lowArr[i - 2] &&
+          lowArr[i] < lowArr[i + 1] && lowArr[i] < lowArr[i + 2]) {
+        swingLows.push(lowArr[i]);
+      }
+    }
+
+    const resistance = swingHighs.length
+      ? Math.max(...swingHighs)
+      : Math.max(...highArr.slice(-lookback));
+    const support = swingLows.length
+      ? Math.min(...swingLows)
+      : Math.min(...lowArr.slice(-lookback));
+
+    return { support, resistance };
+  }
+
+  const { support, resistance } = findSwingLevels(high.slice(-16), low.slice(-16));
+
+  // TP & SL berbasis support/resistance
+  const targetLong = resistance;
+  const stopLossLong = support;
+  const targetShort = support;
+  const stopLossShort = resistance;
+  
   const longOffset = targetLong - stopLossLong;
   const shortOffset = stopLossShort - targetShort;
 
