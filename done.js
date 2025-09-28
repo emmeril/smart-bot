@@ -860,19 +860,38 @@ const analyzeSignal = async () => {
   const shortOffset = stopLossShort - targetShort;
 
 // =================== BREAKOUT LOGIC ===================
-  if (price > resistance) {
-    if (!db.activePosition) {
-      targetLong = price + longOffset;  // hitung sekali saat entry
-      stopLossLong = support;
-    }
-  }
+if (price > resistance) {
+    // Ambil resistance baru dari timeframe 8 jam (480m)
+    const ohlcv8h = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
+    const high8h = ohlcv8h.map(c => c[2]);
+    const low8h = ohlcv8h.map(c => c[3]);
 
-  if (price < support) {
-    if (!db.activePosition) {
-      targetShort = price - shortOffset; // hitung sekali saat entry
-      stopLossShort = resistance;
-    }
-  }
+    const { support: support8h, resistance: resistance8h } = findSwingLevels(
+      high8h.slice(-32), // 30 candle terakhir di TF 8 jam ≈ 10 hari
+      low8h.slice(-32),
+      32
+    );
+
+    targetLong = resistance8h;   // TP pakai resistance TF 8 jam
+    stopLossLong = support;      // SL tetap support TF 4 jam
+}
+
+if (price < support) {
+    // Ambil support baru dari timeframe 8 jam (480m)
+    const ohlcv8h = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
+    const high8h = ohlcv8h.map(c => c[2]);
+    const low8h = ohlcv8h.map(c => c[3]);
+
+    const { support: support8h, resistance: resistance8h } = findSwingLevels(
+      high8h.slice(-32),
+      low8h.slice(-32),
+      32
+    );
+
+    targetShort = support8h;       // TP pakai support TF 8 jam
+    stopLossShort = resistance;    // SL tetap resistance TF 4 jam
+  
+}
 
 
   // const midPriceLong = (targetLong + stopLossLong) / 2;
