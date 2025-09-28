@@ -859,16 +859,19 @@ const analyzeSignal = async () => {
   const longOffset = targetLong - stopLossLong;
   const shortOffset = stopLossShort - targetShort;
 
-  // Breakout ke atas
+// =================== BREAKOUT LOGIC ===================
   if (price > resistance) {
-    targetLong = price + longOffset;  // pakai real offset
-    stopLossLong = support;
+    if (!db.activePosition) {
+      targetLong = price + longOffset;  // hitung sekali saat entry
+      stopLossLong = support;
+    }
   }
 
-  // Breakdown ke bawah
   if (price < support) {
-    targetShort = price - shortOffset; // pakai real offset
-    stopLossShort = resistance;
+    if (!db.activePosition) {
+      targetShort = price - shortOffset; // hitung sekali saat entry
+      stopLossShort = resistance;
+    }
   }
 
 
