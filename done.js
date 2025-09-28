@@ -862,34 +862,34 @@ const analyzeSignal = async () => {
 // =================== BREAKOUT LOGIC ===================
 if (price > resistance) {
     // Ambil resistance baru dari timeframe 8 jam (480m)
-    const ohlcv8h = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
-    const high8h = ohlcv8h.map(c => c[2]);
-    const low8h = ohlcv8h.map(c => c[3]);
+    const ohlcvBreakout = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
+    const highBreakout = ohlcvBreakout.map(c => c[2]);
+    const lowBreakout = ohlcvBreakout.map(c => c[3]);
 
-    const { support: support8h, resistance: resistance8h } = findSwingLevels(
-      high8h.slice(-32), // 30 candle terakhir di TF 8 jam ≈ 10 hari
-      low8h.slice(-32),
-      32
+    const { support: supportBreakout, resistance: resistanceBreakout } = findSwingLevels(
+      highBreakout.slice(-48), // 30 candle terakhir di TF 8 jam ≈ 10 hari
+      lowBreakout.slice(-48),
+      48
     );
 
-    targetLong = resistance8h;   // TP pakai resistance TF 8 jam
-    stopLossLong = support;      // SL tetap support TF 4 jam
+    targetLong = resistanceBreakout;   // TP pakai resistance TF 8 jam
+    stopLossLong = supportBreakout;      // SL tetap support TF 4 jam
 }
 
 if (price < support) {
     // Ambil support baru dari timeframe 8 jam (480m)
-    const ohlcv8h = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
-    const high8h = ohlcv8h.map(c => c[2]);
-    const low8h = ohlcv8h.map(c => c[3]);
+    const ohlcvBreakout = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
+    const highBreakout = ohlcvBreakout.map(c => c[2]);
+    const lowBreakout = ohlcvBreakout.map(c => c[3]);
 
-    const { support: support8h, resistance: resistance8h } = findSwingLevels(
-      high8h.slice(-32),
-      low8h.slice(-32),
-      32
+    const { support: supportBreakout, resistance: resistanceBreakout } = findSwingLevels(
+      highBreakout.slice(-48), // 30 candle terakhir di TF 8 jam ≈ 10 hari
+      lowBreakout.slice(-48),
+      48
     );
 
-    targetShort = support8h;       // TP pakai support TF 8 jam
-    stopLossShort = resistance;    // SL tetap resistance TF 4 jam
+    targetShort = supportBreakout;       // TP pakai support TF 8 jam
+    stopLossShort = resistanceBreakout;    // SL tetap resistance TF 4 jam
   
 }
 
