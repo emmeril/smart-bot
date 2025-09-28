@@ -821,8 +821,7 @@ const analyzeSignal = async () => {
   //const stopLossLong = Math.min(...low.slice(-16));
   //const targetShort = Math.min(...low.slice(-16));
   //const stopLossShort = Math.max(...high.slice(-16));
-
-  // ---------------- SUPPORT & RESISTANCE (16 candle terakhir = 4 jam) ----------------
+ // =================== SUPPORT & RESISTANCE ===================
   function findSwingLevels(highArr, lowArr, lookback = 16) {
     let swingHighs = [];
     let swingLows = [];
@@ -850,14 +849,28 @@ const analyzeSignal = async () => {
 
   const { support, resistance } = findSwingLevels(high.slice(-16), low.slice(-16));
 
-  // TP & SL berbasis support/resistance
-  const targetLong = resistance;
-  const stopLossLong = support;
-  const targetShort = support;
-  const stopLossShort = resistance;
-  
+  // =================== TP & SL LOGIC ===================
+  let targetLong = resistance;
+  let stopLossLong = support;
+  let targetShort = support;
+  let stopLossShort = resistance;
+
+  // Hitung offset
   const longOffset = targetLong - stopLossLong;
   const shortOffset = stopLossShort - targetShort;
+
+  // Breakout ke atas
+  if (price > resistance) {
+    targetLong = price + longOffset;  // pakai real offset
+    stopLossLong = support;
+  }
+
+  // Breakdown ke bawah
+  if (price < support) {
+    targetShort = price - shortOffset; // pakai real offset
+    stopLossShort = resistance;
+  }
+
 
   // const midPriceLong = (targetLong + stopLossLong) / 2;
   // const midPriceShort = (targetShort + stopLossShort) / 2;
