@@ -823,7 +823,7 @@ const analyzeSignal = async () => {
   //const stopLossShort = Math.max(...high.slice(-16));
 
   // ---------------- SUPPORT & RESISTANCE (16 candle terakhir = 4 jam) ----------------
-  function findSwingLevels(highArr, lowArr, lookback = 16) {
+  function findSwingLevels(highArr, lowArr, lookback = 32) {
     let swingHighs = [];
     let swingLows = [];
 
@@ -848,7 +848,7 @@ const analyzeSignal = async () => {
     return { support, resistance };
   }
 
-  const { support, resistance } = findSwingLevels(high.slice(-16), low.slice(-16));
+  const { support, resistance } = findSwingLevels(high.slice(-32), low.slice(-32));
 
   // TP & SL berbasis support/resistance
   const targetLong = resistance;
