@@ -849,8 +849,9 @@ const analyzeSignal = async () => {
   //const stopLossLong = Math.min(...low.slice(-16));
   //const targetShort = Math.min(...low.slice(-16));
   //const stopLossShort = Math.max(...high.slice(-16));
+
   // =================== SUPPORT & RESISTANCE ===================
-  function findSwingLevels(highArr, lowArr, lookback = 96) {
+  function findSwingLevels(highArr, lowArr, lookback) {
     let swingHighs = [];
     let swingLows = [];
 
@@ -881,7 +882,7 @@ const analyzeSignal = async () => {
   const {
     support,
     resistance
-  } = findSwingLevels(high.slice(-96), low.slice(-96));
+  } = findSwingLevels(high.slice(-96), low.slice(-96), 96);
 
   // =================== TP & SL LOGIC ===================
   const targetLong = resistance;
