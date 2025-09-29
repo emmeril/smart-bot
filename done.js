@@ -884,10 +884,10 @@ const analyzeSignal = async () => {
   } = findSwingLevels(high.slice(-96), low.slice(-96));
 
   // =================== TP & SL LOGIC ===================
-  let targetLong = resistance;
-  let stopLossLong = support;
-  let targetShort = support;
-  let stopLossShort = resistance;
+  const targetLong = resistance;
+  const stopLossLong = support;
+  const targetShort = support;
+  const stopLossShort = resistance;
 
   // Hitung offset
   const longOffset = targetLong - stopLossLong;
