@@ -2,8 +2,16 @@
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
-const { RSI, SMA, MACD, ADX } = require("technicalindicators");
-const { Client, LocalAuth } = require("whatsapp-web.js");
+const {
+  RSI,
+  SMA,
+  MACD,
+  ADX
+} = require("technicalindicators");
+const {
+  Client,
+  LocalAuth
+} = require("whatsapp-web.js");
 const express = require("express");
 const QRCode = require("qrcode");
 
@@ -21,17 +29,17 @@ if (!fs.existsSync(logPath)) {
   console.log("📝 Log: File log.csv dibuat.");
 }
 
-const db = fs.existsSync(dbPath)
-  ? JSON.parse(fs.readFileSync(dbPath))
-  : {
-      pair: "XRP/USDT:USDT",
-      lastLongEntryTime: 0,
-      lastShortEntryTime: 0,
-      leverage: 10,
-      marginMode: "ISOLATED",
-      activePosition: null,
-      usdtPerTrade: 5.1,
-    };
+const db = fs.existsSync(dbPath) ?
+  JSON.parse(fs.readFileSync(dbPath)) :
+  {
+    pair: "XRP/USDT:USDT",
+    lastLongEntryTime: 0,
+    lastShortEntryTime: 0,
+    leverage: 10,
+    marginMode: "ISOLATED",
+    activePosition: null,
+    usdtPerTrade: 5.1,
+  };
 
 let prevPosAmt = 0;
 
@@ -45,7 +53,9 @@ console.log(`   - USDT per Trade: ${db.usdtPerTrade}`);
 const exchange = new ccxt.binance({
   apiKey: process.env.API_KEY,
   secret: process.env.API_SECRET,
-  options: { defaultType: "future" },
+  options: {
+    defaultType: "future"
+  },
 });
 
 (async () => {
@@ -266,8 +276,7 @@ client.on("message", async (msg) => {
       const bal = await exchange.fetchBalance();
       const usdt = bal.total.USDT;
       const positions =
-        bal.info?.positions?.filter((p) => parseFloat(p.positionAmt) !== 0) ||
-        [];
+        bal.info?.positions?.filter((p) => parseFloat(p.positionAmt) !== 0) || [];
 
       let posText = `*Posisi Terbuka di Binance:*`;
       if (positions.length === 0) {
@@ -281,12 +290,12 @@ client.on("message", async (msg) => {
         });
       }
 
-      const lastLong = db.lastLongEntryTime
-        ? new Date(db.lastLongEntryTime).toLocaleString()
-        : "-";
-      const lastShort = db.lastShortEntryTime
-        ? new Date(db.lastShortEntryTime).toLocaleString()
-        : "-";
+      const lastLong = db.lastLongEntryTime ?
+        new Date(db.lastLongEntryTime).toLocaleString() :
+        "-";
+      const lastShort = db.lastShortEntryTime ?
+        new Date(db.lastShortEntryTime).toLocaleString() :
+        "-";
 
       let msgText = `📊 *Status Bot Trading*\n
 *Pair Bot:* ${db.pair}
@@ -414,33 +423,39 @@ const getPositionFromBalance = async () => {
     // Instead do safe find:
     let found = positions.find(
       (p) =>
-        p.symbol === marketId ||
-        p.contractCode === marketId ||
-        (p.symbol && p.symbol.includes(marketId))
+      p.symbol === marketId ||
+      p.contractCode === marketId ||
+      (p.symbol && p.symbol.includes(marketId))
     );
     if (!found) {
       // try matching by removing non-alphanum
       const norm = (s) =>
         (s || "")
-          .toString()
-          .replace(/[^a-zA-Z0-9]/g, "")
-          .toUpperCase();
+        .toString()
+        .replace(/[^a-zA-Z0-9]/g, "")
+        .toUpperCase();
       found = positions.find(
         (p) =>
-          norm(p.symbol) === norm(marketId) ||
-          norm(p.contractCode) === norm(marketId)
+        norm(p.symbol) === norm(marketId) ||
+        norm(p.contractCode) === norm(marketId)
       );
     }
-    return { balance: bal, position: found };
+    return {
+      balance: bal,
+      position: found
+    };
   } catch (err) {
     console.error("❌ Helper: Gagal ambil posisi dari balance.", err.message);
-    return { balance: null, position: null };
+    return {
+      balance: null,
+      position: null
+    };
   }
 };
 
 // -------------------- ORDER --------------------
 // const placeOrder = async (side, tp, sl, offset, targetEntryPrice) => {
-  const placeOrder = async (side, tp, sl, offset) => {
+const placeOrder = async (side, tp, sl, offset) => {
   console.log("🔍 Order: Memeriksa apakah ada posisi aktif...");
   if (db.activePosition) {
     console.log(
@@ -454,7 +469,9 @@ const getPositionFromBalance = async () => {
 
   // Extra: pastikan tidak ada posisi yang aktif di account
   try {
-    const { position } = await getPositionFromBalance();
+    const {
+      position
+    } = await getPositionFromBalance();
     const amt = parseFloat(position?.positionAmt || "0");
     if (isFinite(amt) && Math.abs(amt) > 0) {
       console.log(
@@ -551,7 +568,9 @@ const getPositionFromBalance = async () => {
 const closePosition = async (reason, entryPrice = "N/A") => {
   console.log(`🚨 Posisi: Menutup posisi karena ${reason}.`);
   try {
-    const { position } = await getPositionFromBalance();
+    const {
+      position
+    } = await getPositionFromBalance();
     const qty = parseFloat(position?.positionAmt || "0");
 
     if (!isFinite(qty) || Math.abs(qty) === 0) {
@@ -753,9 +772,18 @@ const analyzeSignal = async () => {
   const low = ohlcv.map((c) => c[3]);
 
   // Menghitung SMA
-  const ma7 = SMA.calculate({ values: close.slice(-100), period: 7 }).pop();
-  const ma25 = SMA.calculate({ values: close.slice(-100), period: 25 }).pop();
-  const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
+  const ma7 = SMA.calculate({
+    values: close.slice(-100),
+    period: 7
+  }).pop();
+  const ma25 = SMA.calculate({
+    values: close.slice(-100),
+    period: 25
+  }).pop();
+  const ma99 = SMA.calculate({
+    values: close,
+    period: 99
+  }).pop();
 
   // Hitung indikator lain
   // const rsi = RSI.calculate({ values: close.slice(-50), period: 14 }).pop();
@@ -821,33 +849,39 @@ const analyzeSignal = async () => {
   //const stopLossLong = Math.min(...low.slice(-16));
   //const targetShort = Math.min(...low.slice(-16));
   //const stopLossShort = Math.max(...high.slice(-16));
- // =================== SUPPORT & RESISTANCE ===================
+  // =================== SUPPORT & RESISTANCE ===================
   function findSwingLevels(highArr, lowArr, lookback = 16) {
     let swingHighs = [];
     let swingLows = [];
 
     for (let i = 2; i < lookback - 2; i++) {
       if (highArr[i] > highArr[i - 1] && highArr[i] > highArr[i - 2] &&
-          highArr[i] > highArr[i + 1] && highArr[i] > highArr[i + 2]) {
+        highArr[i] > highArr[i + 1] && highArr[i] > highArr[i + 2]) {
         swingHighs.push(highArr[i]);
       }
       if (lowArr[i] < lowArr[i - 1] && lowArr[i] < lowArr[i - 2] &&
-          lowArr[i] < lowArr[i + 1] && lowArr[i] < lowArr[i + 2]) {
+        lowArr[i] < lowArr[i + 1] && lowArr[i] < lowArr[i + 2]) {
         swingLows.push(lowArr[i]);
       }
     }
 
-    const resistance = swingHighs.length
-      ? Math.max(...swingHighs)
-      : Math.max(...highArr.slice(-lookback));
-    const support = swingLows.length
-      ? Math.min(...swingLows)
-      : Math.min(...lowArr.slice(-lookback));
+    const resistance = swingHighs.length ?
+      Math.max(...swingHighs) :
+      Math.max(...highArr.slice(-lookback));
+    const support = swingLows.length ?
+      Math.min(...swingLows) :
+      Math.min(...lowArr.slice(-lookback));
 
-    return { support, resistance };
+    return {
+      support,
+      resistance
+    };
   }
 
-  const { support, resistance } = findSwingLevels(high.slice(-16), low.slice(-16));
+  const {
+    support,
+    resistance
+  } = findSwingLevels(high.slice(-16), low.slice(-16));
 
   // =================== TP & SL LOGIC ===================
   let targetLong = resistance;
@@ -859,75 +893,78 @@ const analyzeSignal = async () => {
   const longOffset = targetLong - stopLossLong;
   const shortOffset = stopLossShort - targetShort;
 
-// =================== BREAKOUT LOGIC ===================
-if (price > resistance) {
-    // Ambil resistance baru dari timeframe 8 jam (480m)
+  // =================== BREAKOUT LOGIC ===================
+  if (price > resistance) {
     const ohlcvBreakout = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
     const highBreakout = ohlcvBreakout.map(c => c[2]);
     const lowBreakout = ohlcvBreakout.map(c => c[3]);
 
-    const { support: supportBreakout, resistance: resistanceBreakout } = findSwingLevels(
-      highBreakout.slice(-48), // 30 candle terakhir di TF 8 jam ≈ 10 hari
-      lowBreakout.slice(-48),
-      48
+    const {
+      support: supportBreakout,
+      resistance: resistanceBreakout
+    } = findSwingLevels(
+      highBreakout.slice(-96),
+      lowBreakout.slice(-96),
+      96
     );
 
-    targetLong = resistanceBreakout;   // TP pakai resistance TF 8 jam
-    stopLossLong = supportBreakout;      // SL tetap support TF 4 jam
-}
+    targetLong = resistanceBreakout;
+    stopLossLong = supportBreakout;
+  }
 
-if (price < support) {
-    // Ambil support baru dari timeframe 8 jam (480m)
+  if (price < support) {
     const ohlcvBreakout = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
     const highBreakout = ohlcvBreakout.map(c => c[2]);
     const lowBreakout = ohlcvBreakout.map(c => c[3]);
 
-    const { support: supportBreakout, resistance: resistanceBreakout } = findSwingLevels(
-      highBreakout.slice(-48), // 30 candle terakhir di TF 8 jam ≈ 10 hari
-      lowBreakout.slice(-48),
-      48
+    const {
+      support: supportBreakout,
+      resistance: resistanceBreakout
+    } = findSwingLevels(
+      highBreakout.slice(-96),
+      lowBreakout.slice(-96),
+      96
     );
 
-    targetShort = supportBreakout;       // TP pakai support TF 8 jam
-    stopLossShort = resistanceBreakout;    // SL tetap resistance TF 4 jam
-  
-}
+    targetShort = supportBreakout;
+    stopLossShort = resistanceBreakout;
+  }
 
 
   // const midPriceLong = (targetLong + stopLossLong) / 2;
   // const midPriceShort = (targetShort + stopLossShort) / 2;
 
   // Awal output yang rapi
-console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
-console.log(`-----------------------------------`);
+  console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
+  console.log(`-----------------------------------`);
 
-// Sinyal Utama
-console.log(`📈 Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
-console.log(`📉 Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
-console.log(`-----------------------------------`);
+  // Sinyal Utama
+  console.log(`📈 Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}`);
+  console.log(`📉 Sinyal Short: ${canShort ? "✅ VALID" : "❌ TIDAK VALID"}`);
+  console.log(`-----------------------------------`);
 
-// Detail Indikator
-console.log(`📝 Detail Indikator:`);
-console.log(`   - Crossover MA: ${isCrossedUp ? "📈 MA7 Crossed Up MA25" : isCrossedDown ? "📉 MA7 Crossed Down MA25" : "↔️ Tidak Ada"}`);
-console.log(`   - Posisi Harga vs MA99: ${isPriceAboveMA99 ? "📈 Harga di atas MA99 (Tren Naik)" : "📉 Harga di bawah MA99 (Tren Turun)"}`);
+  // Detail Indikator
+  console.log(`📝 Detail Indikator:`);
+  console.log(`   - Crossover MA: ${isCrossedUp ? "📈 MA7 Crossed Up MA25" : isCrossedDown ? "📉 MA7 Crossed Down MA25" : "↔️ Tidak Ada"}`);
+  console.log(`   - Posisi Harga vs MA99: ${isPriceAboveMA99 ? "📈 Harga di atas MA99 (Tren Naik)" : "📉 Harga di bawah MA99 (Tren Turun)"}`);
 
-// Informasi Harga
-console.log(`💰 Harga Saat Ini: ${formatPrice(price)}`);
-console.log(`-----------------------------------`);
+  // Informasi Harga
+  console.log(`💰 Harga Saat Ini: ${formatPrice(price)}`);
+  console.log(`-----------------------------------`);
 
-// Strategi Long
-console.log(`📈 Strategi Long:`);
-console.log(`   - Target: ${formatPrice(targetLong)}`);
-// console.log(`   - Mid Price: ${formatPrice(midPriceLong)}`);
-console.log(`   - Stop Loss: ${formatPrice(stopLossLong)}`);
-console.log(`-----------------------------------`);
+  // Strategi Long
+  console.log(`📈 Strategi Long:`);
+  console.log(`   - Target: ${formatPrice(targetLong)}`);
+  // console.log(`   - Mid Price: ${formatPrice(midPriceLong)}`);
+  console.log(`   - Stop Loss: ${formatPrice(stopLossLong)}`);
+  console.log(`-----------------------------------`);
 
-// Strategi Short
-console.log(`📉 Strategi Short:`);
-console.log(`   - Target: ${formatPrice(targetShort)}`);
-// console.log(`   - Mid Price: ${formatPrice(midPriceShort)}`);
-console.log(`   - Stop Loss: ${formatPrice(stopLossShort)}`);
-console.log(`-----------------------------------`);
+  // Strategi Short
+  console.log(`📉 Strategi Short:`);
+  console.log(`   - Target: ${formatPrice(targetShort)}`);
+  // console.log(`   - Mid Price: ${formatPrice(midPriceShort)}`);
+  console.log(`   - Stop Loss: ${formatPrice(stopLossShort)}`);
+  console.log(`-----------------------------------`);
 
   return {
     canLong,
@@ -947,7 +984,9 @@ console.log(`-----------------------------------`);
 // -------------------- CEK POSISI (TP/SL trigger) --------------------
 const checkPositionStatus = async () => {
   try {
-    const { position } = await getPositionFromBalance();
+    const {
+      position
+    } = await getPositionFromBalance();
     const amt = parseFloat(position?.positionAmt || "0");
     const amtSafe = isFinite(amt) ? amt : 0;
 
@@ -967,7 +1006,13 @@ const checkPositionStatus = async () => {
 
     // Monitoring internal untuk TP/SL dari data di database
     if (db.activePosition && amtSafe !== 0) {
-      const { tp, sl, side, entryPrice, offset } = db.activePosition;
+      const {
+        tp,
+        sl,
+        side,
+        entryPrice,
+        offset
+      } = db.activePosition;
       const currentPrice = await getPrice();
       if (!currentPrice) return;
 
@@ -1021,7 +1066,9 @@ const checkPositionStatus = async () => {
 setInterval(async () => {
   try {
     const now = new Date();
-    const { position } = await getPositionFromBalance();
+    const {
+      position
+    } = await getPositionFromBalance();
     const amt = parseFloat(position?.positionAmt || "0");
     const hasActiveBinancePosition = isFinite(amt) && Math.abs(amt) > 0;
     await checkPositionStatus();
@@ -1059,7 +1106,9 @@ setInterval(async () => {
       await new Promise((resolve) => setTimeout(resolve, 5000));
     } // Logika untuk membuka posisi baru hanya jika tidak ada posisi aktif // Periksa kembali status setelah kemungkinan close position
 
-    const { position: updatedPosition } = await getPositionFromBalance();
+    const {
+      position: updatedPosition
+    } = await getPositionFromBalance();
     const updatedAmt = parseFloat(updatedPosition?.positionAmt || "0");
     const hasActiveBinancePositionAfterClose =
       isFinite(updatedAmt) && Math.abs(updatedAmt) > 0;
