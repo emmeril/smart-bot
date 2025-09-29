@@ -849,10 +849,6 @@ const checkPositionStatus = async () => {
 setInterval(async () => {
     try {
         const now = new Date();
-        const {
-            position
-        } = await getPositionFromBalance();
-        const amt = parseFloat(position?.positionAmt || "0");
         await checkPositionStatus();
 
         console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
