@@ -866,7 +866,7 @@ setInterval(async () => {
         }
 
         const hasBotPosition = db.activePosition !== null;
-        let shouldExitCurrentPosition = false; 
+        let shouldExitCurrentPosition = false;
         // --- LOGIKA BARU UNTUK SWING POSISI ---
         if (hasBotPosition) {
             const currentSide = db.activePosition.side;
@@ -881,13 +881,13 @@ setInterval(async () => {
                 );
                 shouldExitCurrentPosition = true;
             }
-        } 
+        }
         // Eksekusi penutupan posisi jika ada sinyal valid untuk swing
         if (shouldExitCurrentPosition) {
-            await closePosition("Sinyal berbalik arah", db.activePosition.entryPrice); 
+            await closePosition("Sinyal berbalik arah", db.activePosition.entryPrice);
             // JEDA SEBENTAR untuk memastikan posisi sebelumnya benar-benar tertutup
             await new Promise((resolve) => setTimeout(resolve, 5000));
-        } 
+        }
         // Logika untuk membuka posisi baru hanya jika tidak ada posisi aktif // Periksa kembali status setelah kemungkinan close position
         const {
             position: updatedPosition
@@ -900,8 +900,8 @@ setInterval(async () => {
 
             // ================== LOGIKA SKIP ORDER (BREAKOUT) ==================
 
-            let isLongBreakout = sig.canLong && sig.price > sig.targetLong; 
-            let isShortBreakout = sig.canShort && sig.price < sig.targetShort; 
+            let isLongBreakout = sig.canLong && sig.price > sig.targetLong;
+            let isShortBreakout = sig.canShort && sig.price < sig.targetShort;
 
             if (isLongBreakout) {
                 console.log(
@@ -941,7 +941,7 @@ setInterval(async () => {
             } else {
                 console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
             }
-        } 
+        }
         // Logika untuk memperbarui TP/SL dan offset jika ada posisi aktif
         else if (db.activePosition !== null) {
             console.log(
