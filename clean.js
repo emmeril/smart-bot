@@ -886,11 +886,11 @@ setInterval(async () => {
         }
         // Logika untuk membuka posisi baru hanya jika tidak ada posisi aktif // Periksa kembali status setelah kemungkinan close position
         const {
-            position: updatedPosition
+            position
         } = await getPositionFromBalance();
-        const updatedAmt = parseFloat(updatedPosition?.positionAmt || "0");
+        const amt = parseFloat(position?.positionAmt || "0");
         const hasActiveBinancePositionAfterClose =
-            isFinite(updatedAmt) && Math.abs(updatedAmt) > 0;
+            isFinite(amt) && Math.abs(amt) > 0;
 
         if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
 
