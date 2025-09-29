@@ -897,7 +897,24 @@ setInterval(async () => {
             isFinite(updatedAmt) && Math.abs(updatedAmt) > 0;
 
         if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
-            if (sig.canLong) {
+
+            // ================== LOGIKA SKIP ORDER (BREAKOUT) ==================
+
+            let isLongBreakout = sig.canLong && sig.price > sig.targetLong; 
+            let isShortBreakout = sig.canShort && sig.price < sig.targetShort; 
+
+            if (isLongBreakout) {
+                console.log(
+                    `🚫 SKIP ORDER: Sinyal LONG valid, namun harga (${formatPrice(sig.price)}) sudah melewati Target/Resistance (${formatPrice(sig.targetLong)}).`
+                );
+            }
+            if (isShortBreakout) {
+                console.log(
+                    `🚫 SKIP ORDER: Sinyal SHORT valid, namun harga (${formatPrice(sig.price)}) sudah melewati Target/Support (${formatPrice(sig.targetShort)}).`
+                );
+            }
+
+            if (sig.canLong && !isLongBreakout) {
                 console.log(
                     "🚀 Sinyal: Sinyal LONG valid dan bot siap, membuat order."
                 );
@@ -909,7 +926,7 @@ setInterval(async () => {
                     sig.stopLossLong,
                     sig.longOffset
                 );
-            } else if (sig.canShort) {
+            } else if (sig.canShort && !isShortBreakout) {
                 console.log(
                     "📉 Sinyal: Sinyal SHORT valid dan bot siap, membuat order."
                 );
