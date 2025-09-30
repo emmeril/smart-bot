@@ -846,7 +846,6 @@ const checkPositionStatus = async () => {
 };
 
 // -------------------- MAIN LOOP --------------------
-// -------------------- MAIN LOOP --------------------
 setInterval(async () => {
     try {
         const now = new Date();
@@ -976,88 +975,6 @@ setInterval(async () => {
                 console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
             }
         }
-        // Logika untuk memperbarui TP/SL dan offset jika ada posisi aktif
-        // else if (db.activePosition !== null) {
-        //     console.log(
-        //         "➡️ Posisi aktif terdeteksi. Memeriksa sinyal untuk pembaruan TP/SL dan offset."
-        //     );
-        //     if (sig.price) {
-        //         const currentSide = db.activePosition.side;
-        //         let newSL, newTP, newOffset;
-
-        //         // --- LOGIKA UPDATE POSISI AKTIF (SAMA SEPERTI LOGIKA ENTRY DI ATAS) ---
-        //         if (currentSide === "buy") {
-        //             const isLongBreakout = sig.price > sig.targetLong;
-        //             if (isLongBreakout) {
-        //                 const midPriceDiff = sig.targetLong - sig.stopLossLong;
-        //                 newTP = sig.targetLong + midPriceDiff;
-        //                 newSL = sig.targetLong;
-        //                 newOffset = newTP - newSL;
-        //             } else {
-        //                 newTP = sig.targetLong;
-        //                 newSL = sig.stopLossLong;
-        //                 newOffset = sig.longOffset;
-        //             }
-        //         } else if (currentSide === "sell") {
-        //             const isShortBreakout = sig.price < sig.targetShort;
-        //             if (isShortBreakout) {
-        //                 const midPriceDiff = sig.stopLossShort - sig.targetShort;
-        //                 newTP = sig.targetShort - midPriceDiff;
-        //                 newSL = sig.targetShort;
-        //                 newOffset = newSL - newTP;
-        //             } else {
-        //                 newTP = sig.targetShort;
-        //                 newSL = sig.stopLossShort;
-        //                 newOffset = sig.shortOffset;
-        //             }
-        //         }
-        //         // --- AKHIR LOGIKA UPDATE POSISI AKTIF ---
-
-
-        //         // Cek apakah ada perubahan yang signifikan dari hasil analisis baru
-        //         if (
-        //             newSL !== db.activePosition.sl ||
-        //             newTP !== db.activePosition.tp ||
-        //             newOffset !== db.activePosition.offset
-        //         ) {
-        //             // Logika Trailing SL: hanya update SL jika lebih menguntungkan (lebih tinggi untuk long, lebih rendah untuk short)
-        //             let shouldUpdate = false;
-
-        //             if (currentSide === "buy" && newSL > db.activePosition.sl) {
-        //                 // Trailing SL: SL baru lebih tinggi
-        //                 shouldUpdate = true;
-        //             } else if (currentSide === "sell" && newSL < db.activePosition.sl) {
-        //                 // Trailing SL: SL baru lebih rendah
-        //                 shouldUpdate = true;
-        //             } else if (newTP !== db.activePosition.tp) {
-        //                 // Update TP jika berubah (misal dari Swing ke Breakout)
-        //                  shouldUpdate = true;
-        //             }
-
-        //             if (shouldUpdate) {
-        //                  console.log(
-        //                     `✅ Sinyal: TP/SL/Offset baru terdeteksi! Memperbarui dari DB.`
-        //                 );
-        //                 db.activePosition.sl = newSL;
-        //                 db.activePosition.tp = newTP;
-        //                 db.activePosition.offset = newOffset;
-        //                 saveDB();
-        //             } else {
-        //                 console.log(
-        //                     "✔️ Sinyal: TP/SL/Offset baru tidak lebih baik atau sama. Tidak ada pembaruan."
-        //                 );
-        //             }
-        //         } else {
-        //             console.log(
-        //                 "✔️ Sinyal: Tidak ada perubahan TP/SL/Offset. Tidak ada pembaruan."
-        //             );
-        //         }
-        //     } else {
-        //         console.log(
-        //             "⚠️ Analisis: Sinyal tidak valid. Tidak ada pembaruan TP/SL/Offset."
-        //         );
-        //     }
-        // }
     } catch (e) {
         console.error("⚠️ Loop: Terjadi kesalahan di loop utama.", e.message);
         console.error(e.stack);
