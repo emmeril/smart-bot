@@ -447,7 +447,7 @@ const getPositionFromBalance = async () => {
 };
 
 // -------------------- ORDER --------------------
-const placeOrder = async (side, tp, sl, offset) => {
+const placeOrder = async (side, tp, sl) => {
     console.log("🔍 Order: Memeriksa apakah ada posisi aktif...");
     if (db.activePosition) {
         console.log(
@@ -508,7 +508,6 @@ const placeOrder = async (side, tp, sl, offset) => {
             entryPrice: price,
             tp: tp,
             sl: sl,
-            offset: offset,
             orderId: order.id,
         };
         saveDB();
@@ -717,9 +716,7 @@ const analyzeSignal = async () => {
     const targetShort = support;
     const stopLossShort = resistance;
 
-    // Hitung offset
-    const longOffset = targetLong - stopLossLong;
-    const shortOffset = stopLossShort - targetShort;
+    // Menghapus penghitungan offset
 
     // Awal output yang rapi
     console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
@@ -758,8 +755,6 @@ const analyzeSignal = async () => {
         stopLossLong,
         targetShort,
         stopLossShort,
-        longOffset,
-        shortOffset,
         price,
     };
 };
@@ -794,12 +789,13 @@ const checkPositionStatus = async () => {
                 sl,
                 side,
                 entryPrice,
-                offset
-            } = db.activePosition;
+            } = db.activePosition; // Menghapus offset
             const currentPrice = await getPrice();
             if (!currentPrice) return;
 
-            // --- LOGIKA TRAILING STOP LOSS DENGAN OFFSET DINAMIS ---
+            // --- MENGHAPUS LOGIKA TRAILING STOP LOSS DENGAN OFFSET DINAMIS ---
+            // Kode Trailing SL sebelumnya:
+            /*
             if (side === "buy") {
                 const newSL = currentPrice - offset;
                 if (newSL > sl) {
@@ -823,6 +819,8 @@ const checkPositionStatus = async () => {
                     );
                 }
             }
+            */
+            // --- AKHIR PENGHAPUSAN TRAILING SL ---
 
             if (side === "buy") {
                 if (currentPrice >= tp) {
@@ -897,7 +895,7 @@ setInterval(async () => {
             // ================== LOGIKA ORDER (TERMASUK BREAKOUT) ==================
 
             // Gunakan variabel sementara untuk TP/SL yang mungkin diubah
-            let entryTP, entrySL, entryOffset;
+            let entryTP, entrySL;
 
             if (sig.canLong) {
                 // Sinyal LONG
@@ -910,7 +908,6 @@ setInterval(async () => {
 
                     entryTP = sig.targetLong + midPriceDiff; // Resistance + Diff
                     entrySL = sig.targetLong - midPriceDiff; // Resistance - Diff
-                    entryOffset = entryTP - entrySL;
 
                     console.log(
                         `🚀 Sinyal LONG: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
@@ -919,7 +916,6 @@ setInterval(async () => {
                     // Swing/Normal LONG
                     entryTP = sig.targetLong;
                     entrySL = sig.stopLossLong;
-                    entryOffset = sig.longOffset;
 
                     console.log(
                         `🚀 Sinyal LONG: SWING. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
@@ -932,8 +928,7 @@ setInterval(async () => {
                     "buy",
                     entryTP,
                     entrySL,
-                    entryOffset
-                );
+                ); // Menghapus entryOffset
 
             } else if (sig.canShort) {
                 // Sinyal SHORT
@@ -946,7 +941,6 @@ setInterval(async () => {
 
                     entryTP = sig.targetShort - midPriceDiff; // Support - Diff
                     entrySL = sig.targetShort + midPriceDiff; // Support + Diff
-                    entryOffset = entrySL - entryTP;
 
                     console.log(
                         `📉 Sinyal SHORT: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
@@ -955,7 +949,6 @@ setInterval(async () => {
                     // Swing/Normal SHORT
                     entryTP = sig.targetShort;
                     entrySL = sig.stopLossShort;
-                    entryOffset = sig.shortOffset;
 
                     console.log(
                         `📉 Sinyal SHORT: SWING. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
@@ -968,21 +961,20 @@ setInterval(async () => {
                     "sell",
                     entryTP,
                     entrySL,
-                    entryOffset
-                );
+                ); // Menghapus entryOffset
 
             } else {
                 console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
             }         
         }
-        // Logika untuk memperbarui TP/SL dan offset jika ada posisi aktif
+        // Logika untuk memperbarui TP/SL
         else if (db.activePosition !== null) {
             console.log(
-                "➡️ Posisi aktif terdeteksi. Memeriksa sinyal untuk pembaruan TP/SL dan offset."
+                "➡️ Posisi aktif terdeteksi. Memeriksa sinyal untuk pembaruan TP/SL."
             );
             if (sig.price) {
                 const currentSide = db.activePosition.side;
-                let newSL, newTP, newOffset;
+                let newSL, newTP;
 
                 // --- LOGIKA UPDATE POSISI AKTIF (SAMA SEPERTI LOGIKA ENTRY DI ATAS) ---
                 if (currentSide === "buy") {
@@ -991,11 +983,9 @@ setInterval(async () => {
                         const midPriceDiff = sig.targetLong - sig.stopLossLong;
                         newTP = sig.targetLong + midPriceDiff;
                         newSL = sig.targetLong - midPriceDiff;
-                        newOffset = newTP - newSL;
                     } else {
                         newTP = sig.targetLong;
                         newSL = sig.stopLossLong;
-                        newOffset = sig.longOffset;
                     }
                 } else if (currentSide === "sell") {
                     const isShortBreakout = sig.price < sig.targetShort;
@@ -1003,11 +993,9 @@ setInterval(async () => {
                         const midPriceDiff = sig.stopLossShort - sig.targetShort;
                         newTP = sig.targetShort - midPriceDiff;
                         newSL = sig.targetShort + midPriceDiff;
-                        newOffset = newSL - newTP;
                     } else {
                         newTP = sig.targetShort;
                         newSL = sig.stopLossShort;
-                        newOffset = sig.shortOffset;
                     }
                 }
                 // --- AKHIR LOGIKA UPDATE POSISI AKTIF ---
@@ -1016,44 +1004,46 @@ setInterval(async () => {
                 // Cek apakah ada perubahan yang signifikan dari hasil analisis baru
                 if (
                     newSL !== db.activePosition.sl ||
-                    newTP !== db.activePosition.tp ||
-                    newOffset !== db.activePosition.offset
+                    newTP !== db.activePosition.tp 
                 ) {
-                    // Logika Trailing SL: hanya update SL jika lebih menguntungkan (lebih tinggi untuk long, lebih rendah untuk short)
+                    // Logika Trailing SL yang dihapus, kini hanya pengecekan perubahan murni.
+                    // Jika ada perubahan TP/SL, kita hanya mengupdate yang *lebih menguntungkan*
+                    // atau yang berubah karena pergerakan Breakout/Swing.
                     let shouldUpdate = false;
 
-                    if (currentSide === "buy" && newSL > db.activePosition.sl) {
-                        // Trailing SL: SL baru lebih tinggi
-                        shouldUpdate = true;
-                    } else if (currentSide === "sell" && newSL < db.activePosition.sl) {
-                        // Trailing SL: SL baru lebih rendah
-                        shouldUpdate = true;
-                    } else if (newTP !== db.activePosition.tp) {
-                        // Update TP jika berubah (misal dari Swing ke Breakout)
-                         shouldUpdate = true;
-                    }
+                    if (currentSide === "buy") {
+                        // Update jika TP naik (lebih baik) atau SL naik (Trailing SL sederhana: harga telah naik)
+                        if (newTP > db.activePosition.tp || newSL > db.activePosition.sl) {
+                            shouldUpdate = true;
+                        }
+                    } else if (currentSide === "sell") {
+                        // Update jika TP turun (lebih baik) atau SL turun (Trailing SL sederhana: harga telah turun)
+                        if (newTP < db.activePosition.tp || newSL < db.activePosition.sl) {
+                            shouldUpdate = true;
+                        }
+                    } 
 
                     if (shouldUpdate) {
                          console.log(
-                            `✅ Sinyal: TP/SL/Offset baru terdeteksi! Memperbarui dari DB.`
+                            `✅ Sinyal: TP/SL baru terdeteksi! Memperbarui dari DB.`
                         );
                         db.activePosition.sl = newSL;
                         db.activePosition.tp = newTP;
-                        db.activePosition.offset = newOffset;
+                        // Hapus pembaruan offset
                         saveDB();
                     } else {
                         console.log(
-                            "✔️ Sinyal: TP/SL/Offset baru tidak lebih baik atau sama. Tidak ada pembaruan."
+                            "✔️ Sinyal: TP/SL baru tidak lebih baik atau sama. Tidak ada pembaruan."
                         );
                     }
                 } else {
                     console.log(
-                        "✔️ Sinyal: Tidak ada perubahan TP/SL/Offset. Tidak ada pembaruan."
+                        "✔️ Sinyal: Tidak ada perubahan TP/SL. Tidak ada pembaruan."
                     );
                 }
             } else {
                 console.log(
-                    "⚠️ Analisis: Sinyal tidak valid. Tidak ada pembaruan TP/SL/Offset."
+                    "⚠️ Analisis: Sinyal tidak valid. Tidak ada pembaruan TP/SL."
                 );
             }
         }
