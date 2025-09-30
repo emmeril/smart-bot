@@ -709,7 +709,7 @@ const analyzeSignal = async () => {
     const {
         support,
         resistance
-    } = findSwingLevels(high.slice(-16), low.slice(-16), 16);
+    } = findSwingLevels(high.slice(-96), low.slice(-96), 96);
 
     // =================== TP & SL LOGIC ===================
     const targetLong = resistance;
