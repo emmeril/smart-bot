@@ -50,7 +50,6 @@ const exchange = new ccxt.binance({
     options: {
         defaultType: "future"
     },
-    urls: { api: { public: "https://fapi.binance.me/fapi/v1", private: "https://fapi.binance.me/fapi/v1" } }
 });
 
 (async () => {
