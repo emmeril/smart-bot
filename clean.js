@@ -904,13 +904,13 @@ setInterval(async () => {
                 const isLongBreakout = sig.price > sig.targetLong;
 
                 if (isLongBreakout) {
-                    const midPriceDiff = sig.targetLong - sig.stopLossLong; 
+                    const midPriceDiff = sig.targetLong - sig.stopLossLong;
 
                     // Mendapatkan setengah dari selisih harga
-                    const halfMidPriceDiff = midPriceDiff / 2;   
+                    const halfMidPriceDiff = Math.round(midPriceDiff / 2);
 
-                    entryTP = sig.targetLong + halfMidPriceDiff; 
-                    entrySL = sig.targetLong - halfMidPriceDiff; 
+                    entryTP = sig.targetLong + halfMidPriceDiff;
+                    entrySL = sig.targetLong - halfMidPriceDiff;
 
                     console.log(
                         `🚀 Sinyal LONG: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
@@ -943,7 +943,7 @@ setInterval(async () => {
                     const midPriceDiff = sig.stopLossShort - sig.targetShort;
 
                     // Mendapatkan setengah dari selisih harga
-                    const halfMidPriceDiff = midPriceDiff / 2;
+                    const halfMidPriceDiff = Math.round(midPriceDiff / 2);
 
                     entryTP = sig.targetShort - halfMidPriceDiff; // Support - Diff
                     entrySL = sig.targetShort + halfMidPriceDiff; // Support + Diff
@@ -987,7 +987,7 @@ setInterval(async () => {
                     const isLongBreakout = sig.price > sig.targetLong;
                     if (isLongBreakout) {
                         const midPriceDiff = sig.targetLong - sig.stopLossLong;
-                        const halfMidPriceDiff = midPriceDiff / 2;
+                        const halfMidPriceDiff = Math.round(midPriceDiff / 2);
                         newTP = sig.targetLong + halfMidPriceDiff;
                         newSL = sig.targetLong - halfMidPriceDiff;
                     } else {
@@ -998,7 +998,7 @@ setInterval(async () => {
                     const isShortBreakout = sig.price < sig.targetShort;
                     if (isShortBreakout) {
                         const midPriceDiff = sig.stopLossShort - sig.targetShort;
-                        const halfMidPriceDiff = midPriceDiff / 2;
+                        const halfMidPriceDiff = Math.round(midPriceDiff / 2);
                         newTP = sig.targetShort - halfMidPriceDiff;
                         newSL = sig.targetShort + halfMidPriceDiff;
                     } else {
