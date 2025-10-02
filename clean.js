@@ -982,97 +982,97 @@ setInterval(async () => {
             }
         }
         // Logika untuk memperbarui TP/SL
-        else if (db.activePosition !== null) {
-            console.log(
-                "➡️ Posisi aktif terdeteksi. Memeriksa sinyal untuk pembaruan TP/SL."
-            );
-            if (sig.price) {
-                const currentSide = db.activePosition.side;
-                let newSL, newTP;
+        // else if (db.activePosition !== null) {
+        //     console.log(
+        //         "➡️ Posisi aktif terdeteksi. Memeriksa sinyal untuk pembaruan TP/SL."
+        //     );
+        //     if (sig.price) {
+        //         const currentSide = db.activePosition.side;
+        //         let newSL, newTP;
 
-                // --- LOGIKA UPDATE POSISI AKTIF (SAMA SEPERTI LOGIKA ENTRY DI ATAS) ---
-                if (currentSide === "buy") {
-                    const isLongBreakout = sig.price > sig.targetLong;
-                    if (isLongBreakout) {
-                        const midPriceDiff = sig.targetLong - sig.stopLossLong;
-                        // 1. Hitung setengah dari selisih
-                        const rawHalfDiff = midPriceDiff / 2;
+        //         // --- LOGIKA UPDATE POSISI AKTIF (SAMA SEPERTI LOGIKA ENTRY DI ATAS) ---
+        //         if (currentSide === "buy") {
+        //             const isLongBreakout = sig.price > sig.targetLong;
+        //             if (isLongBreakout) {
+        //                 const midPriceDiff = sig.targetLong - sig.stopLossLong;
+        //                 // 1. Hitung setengah dari selisih
+        //                 const rawHalfDiff = midPriceDiff / 2;
 
-                        // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
-                        // Gunakan Math.abs() untuk mendapatkan jarak positif
-                        const halfMidPriceDiff = formatPrice(rawHalfDiff);
-                        newTP = sig.targetLong + halfMidPriceDiff;
-                        newSL = sig.targetLong - halfMidPriceDiff;
-                    } else {
-                        newTP = sig.targetLong;
-                        newSL = sig.stopLossLong;
-                    }
-                } else if (currentSide === "sell") {
-                    const isShortBreakout = sig.price < sig.targetShort;
-                    if (isShortBreakout) {
-                        const midPriceDiff = sig.stopLossShort - sig.targetShort;
-                        // 1. Hitung setengah dari selisih
-                        const rawHalfDiff = midPriceDiff / 2;
+        //                 // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
+        //                 // Gunakan Math.abs() untuk mendapatkan jarak positif
+        //                 const halfMidPriceDiff = formatPrice(rawHalfDiff);
+        //                 newTP = sig.targetLong + halfMidPriceDiff;
+        //                 newSL = sig.targetLong - halfMidPriceDiff;
+        //             } else {
+        //                 newTP = sig.targetLong;
+        //                 newSL = sig.stopLossLong;
+        //             }
+        //         } else if (currentSide === "sell") {
+        //             const isShortBreakout = sig.price < sig.targetShort;
+        //             if (isShortBreakout) {
+        //                 const midPriceDiff = sig.stopLossShort - sig.targetShort;
+        //                 // 1. Hitung setengah dari selisih
+        //                 const rawHalfDiff = midPriceDiff / 2;
 
-                        // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
-                        // Gunakan Math.abs() untuk mendapatkan jarak positif
-                        const halfMidPriceDiff = formatPrice(rawHalfDiff);
-                        newTP = sig.targetShort - halfMidPriceDiff;
-                        newSL = sig.targetShort + halfMidPriceDiff;
-                    } else {
-                        newTP = sig.targetShort;
-                        newSL = sig.stopLossShort;
-                    }
-                }
-                // --- AKHIR LOGIKA UPDATE POSISI AKTIF ---
+        //                 // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
+        //                 // Gunakan Math.abs() untuk mendapatkan jarak positif
+        //                 const halfMidPriceDiff = formatPrice(rawHalfDiff);
+        //                 newTP = sig.targetShort - halfMidPriceDiff;
+        //                 newSL = sig.targetShort + halfMidPriceDiff;
+        //             } else {
+        //                 newTP = sig.targetShort;
+        //                 newSL = sig.stopLossShort;
+        //             }
+        //         }
+        //         // --- AKHIR LOGIKA UPDATE POSISI AKTIF ---
 
 
-                // Cek apakah ada perubahan yang signifikan dari hasil analisis baru
-                if (
-                    newSL !== db.activePosition.sl ||
-                    newTP !== db.activePosition.tp
-                ) {
-                    // Logika Trailing SL yang dihapus, kini hanya pengecekan perubahan murni.
-                    // Jika ada perubahan TP/SL, kita hanya mengupdate yang *lebih menguntungkan*
-                    // atau yang berubah karena pergerakan Breakout/Swing.
-                    let shouldUpdate = false;
+        //         // Cek apakah ada perubahan yang signifikan dari hasil analisis baru
+        //         if (
+        //             newSL !== db.activePosition.sl ||
+        //             newTP !== db.activePosition.tp
+        //         ) {
+        //             // Logika Trailing SL yang dihapus, kini hanya pengecekan perubahan murni.
+        //             // Jika ada perubahan TP/SL, kita hanya mengupdate yang *lebih menguntungkan*
+        //             // atau yang berubah karena pergerakan Breakout/Swing.
+        //             let shouldUpdate = false;
 
-                    if (currentSide === "buy") {
-                        // Update jika TP naik (lebih baik) atau SL naik (Trailing SL sederhana: harga telah naik)
-                        if (newTP > db.activePosition.tp || newSL > db.activePosition.sl) {
-                            shouldUpdate = true;
-                        }
-                    } else if (currentSide === "sell") {
-                        // Update jika TP turun (lebih baik) atau SL turun (Trailing SL sederhana: harga telah turun)
-                        if (newTP < db.activePosition.tp || newSL < db.activePosition.sl) {
-                            shouldUpdate = true;
-                        }
-                    }
+        //             if (currentSide === "buy") {
+        //                 // Update jika TP naik (lebih baik) atau SL naik (Trailing SL sederhana: harga telah naik)
+        //                 if (newTP > db.activePosition.tp || newSL > db.activePosition.sl) {
+        //                     shouldUpdate = true;
+        //                 }
+        //             } else if (currentSide === "sell") {
+        //                 // Update jika TP turun (lebih baik) atau SL turun (Trailing SL sederhana: harga telah turun)
+        //                 if (newTP < db.activePosition.tp || newSL < db.activePosition.sl) {
+        //                     shouldUpdate = true;
+        //                 }
+        //             }
 
-                    if (shouldUpdate) {
-                        console.log(
-                            `✅ Sinyal: TP/SL baru terdeteksi! Memperbarui dari DB.`
-                        );
-                        db.activePosition.sl = newSL;
-                        db.activePosition.tp = newTP;
-                        // Hapus pembaruan offset
-                        saveDB();
-                    } else {
-                        console.log(
-                            "✔️ Sinyal: TP/SL baru tidak lebih baik atau sama. Tidak ada pembaruan."
-                        );
-                    }
-                } else {
-                    console.log(
-                        "✔️ Sinyal: Tidak ada perubahan TP/SL. Tidak ada pembaruan."
-                    );
-                }
-            } else {
-                console.log(
-                    "⚠️ Analisis: Sinyal tidak valid. Tidak ada pembaruan TP/SL."
-                );
-            }
-        }
+        //             if (shouldUpdate) {
+        //                 console.log(
+        //                     `✅ Sinyal: TP/SL baru terdeteksi! Memperbarui dari DB.`
+        //                 );
+        //                 db.activePosition.sl = newSL;
+        //                 db.activePosition.tp = newTP;
+        //                 // Hapus pembaruan offset
+        //                 saveDB();
+        //             } else {
+        //                 console.log(
+        //                     "✔️ Sinyal: TP/SL baru tidak lebih baik atau sama. Tidak ada pembaruan."
+        //                 );
+        //             }
+        //         } else {
+        //             console.log(
+        //                 "✔️ Sinyal: Tidak ada perubahan TP/SL. Tidak ada pembaruan."
+        //             );
+        //         }
+        //     } else {
+        //         console.log(
+        //             "⚠️ Analisis: Sinyal tidak valid. Tidak ada pembaruan TP/SL."
+        //         );
+        //     }
+        // }
     } catch (e) {
         console.error("⚠️ Loop: Terjadi kesalahan di loop utama.", e.message);
         console.error(e.stack);
