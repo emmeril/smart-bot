@@ -904,10 +904,13 @@ setInterval(async () => {
                 const isLongBreakout = sig.price > sig.targetLong;
 
                 if (isLongBreakout) {
-                    const midPriceDiff = sig.targetLong - sig.stopLossLong; // Resistance - Support
+                    const midPriceDiff = sig.targetLong - sig.stopLossLong; 
 
-                    entryTP = sig.targetLong + midPriceDiff; // Resistance + Diff
-                    entrySL = sig.targetLong - midPriceDiff; // Resistance - Diff
+                    // Mendapatkan setengah dari selisih harga
+                    const halfMidPriceDiff = midPriceDiff / 2;   
+
+                    entryTP = sig.targetLong + halfMidPriceDiff; 
+                    entrySL = sig.targetLong - halfMidPriceDiff; 
 
                     console.log(
                         `🚀 Sinyal LONG: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
@@ -937,10 +940,13 @@ setInterval(async () => {
                 const isShortBreakout = sig.price < sig.targetShort;
 
                 if (isShortBreakout) {
-                    const midPriceDiff = sig.stopLossShort - sig.targetShort; // Resistance - Support
+                    const midPriceDiff = sig.stopLossShort - sig.targetShort;
 
-                    entryTP = sig.targetShort - midPriceDiff; // Support - Diff
-                    entrySL = sig.targetShort + midPriceDiff; // Support + Diff
+                    // Mendapatkan setengah dari selisih harga
+                    const halfMidPriceDiff = midPriceDiff / 2;
+
+                    entryTP = sig.targetShort - halfMidPriceDiff; // Support - Diff
+                    entrySL = sig.targetShort + halfMidPriceDiff; // Support + Diff
 
                     console.log(
                         `📉 Sinyal SHORT: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
@@ -965,7 +971,7 @@ setInterval(async () => {
 
             } else {
                 console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
-            }         
+            }
         }
         // Logika untuk memperbarui TP/SL
         else if (db.activePosition !== null) {
@@ -981,8 +987,9 @@ setInterval(async () => {
                     const isLongBreakout = sig.price > sig.targetLong;
                     if (isLongBreakout) {
                         const midPriceDiff = sig.targetLong - sig.stopLossLong;
-                        newTP = sig.targetLong + midPriceDiff;
-                        newSL = sig.targetLong - midPriceDiff;
+                        const halfMidPriceDiff = midPriceDiff / 2;
+                        newTP = sig.targetLong + halfMidPriceDiff;
+                        newSL = sig.targetLong - halfMidPriceDiff;
                     } else {
                         newTP = sig.targetLong;
                         newSL = sig.stopLossLong;
@@ -991,8 +998,9 @@ setInterval(async () => {
                     const isShortBreakout = sig.price < sig.targetShort;
                     if (isShortBreakout) {
                         const midPriceDiff = sig.stopLossShort - sig.targetShort;
-                        newTP = sig.targetShort - midPriceDiff;
-                        newSL = sig.targetShort + midPriceDiff;
+                        const halfMidPriceDiff = midPriceDiff / 2;
+                        newTP = sig.targetShort - halfMidPriceDiff;
+                        newSL = sig.targetShort + halfMidPriceDiff;
                     } else {
                         newTP = sig.targetShort;
                         newSL = sig.stopLossShort;
@@ -1004,7 +1012,7 @@ setInterval(async () => {
                 // Cek apakah ada perubahan yang signifikan dari hasil analisis baru
                 if (
                     newSL !== db.activePosition.sl ||
-                    newTP !== db.activePosition.tp 
+                    newTP !== db.activePosition.tp
                 ) {
                     // Logika Trailing SL yang dihapus, kini hanya pengecekan perubahan murni.
                     // Jika ada perubahan TP/SL, kita hanya mengupdate yang *lebih menguntungkan*
@@ -1021,10 +1029,10 @@ setInterval(async () => {
                         if (newTP < db.activePosition.tp || newSL < db.activePosition.sl) {
                             shouldUpdate = true;
                         }
-                    } 
+                    }
 
                     if (shouldUpdate) {
-                         console.log(
+                        console.log(
                             `✅ Sinyal: TP/SL baru terdeteksi! Memperbarui dari DB.`
                         );
                         db.activePosition.sl = newSL;
