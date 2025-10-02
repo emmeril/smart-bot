@@ -911,7 +911,7 @@ setInterval(async () => {
 
                     // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
                     // Gunakan Math.abs() untuk mendapatkan jarak positif
-                    const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(5));
+                    const halfMidPriceDiff = formatPrice(rawHalfDiff);
 
                     entryTP = sig.targetLong + halfMidPriceDiff;
                     entrySL = sig.targetLong - halfMidPriceDiff;
@@ -951,7 +951,7 @@ setInterval(async () => {
 
                     // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
                     // Gunakan Math.abs() untuk mendapatkan jarak positif
-                    const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(5));
+                    const halfMidPriceDiff = formatPrice(rawHalfDiff);
 
                     entryTP = sig.targetShort - halfMidPriceDiff; // Support - Diff
                     entrySL = sig.targetShort + halfMidPriceDiff; // Support + Diff
@@ -1000,7 +1000,7 @@ setInterval(async () => {
 
                         // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
                         // Gunakan Math.abs() untuk mendapatkan jarak positif
-                        const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(5));
+                        const halfMidPriceDiff = formatPrice(rawHalfDiff);
                         newTP = sig.targetLong + halfMidPriceDiff;
                         newSL = sig.targetLong - halfMidPriceDiff;
                     } else {
@@ -1016,7 +1016,7 @@ setInterval(async () => {
 
                         // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
                         // Gunakan Math.abs() untuk mendapatkan jarak positif
-                        const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(5));
+                        const halfMidPriceDiff = formatPrice(rawHalfDiff);
                         newTP = sig.targetShort - halfMidPriceDiff;
                         newSL = sig.targetShort + halfMidPriceDiff;
                     } else {
