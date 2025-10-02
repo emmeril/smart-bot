@@ -906,8 +906,12 @@ setInterval(async () => {
                 if (isLongBreakout) {
                     const midPriceDiff = sig.targetLong - sig.stopLossLong;
 
-                    // Mendapatkan setengah dari selisih harga
-                    const halfMidPriceDiff = Math.round(midPriceDiff / 2);
+                    // 1. Hitung setengah dari selisih
+                    const rawHalfDiff = midPriceDiff / 2;
+
+                    // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
+                    // Gunakan Math.abs() untuk mendapatkan jarak positif
+                    const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(5));
 
                     entryTP = sig.targetLong + halfMidPriceDiff;
                     entrySL = sig.targetLong - halfMidPriceDiff;
@@ -942,8 +946,12 @@ setInterval(async () => {
                 if (isShortBreakout) {
                     const midPriceDiff = sig.stopLossShort - sig.targetShort;
 
-                    // Mendapatkan setengah dari selisih harga
-                    const halfMidPriceDiff = Math.round(midPriceDiff / 2);
+                    // 1. Hitung setengah dari selisih
+                    const rawHalfDiff = midPriceDiff / 2;
+
+                    // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
+                    // Gunakan Math.abs() untuk mendapatkan jarak positif
+                    const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(5));
 
                     entryTP = sig.targetShort - halfMidPriceDiff; // Support - Diff
                     entrySL = sig.targetShort + halfMidPriceDiff; // Support + Diff
@@ -987,7 +995,12 @@ setInterval(async () => {
                     const isLongBreakout = sig.price > sig.targetLong;
                     if (isLongBreakout) {
                         const midPriceDiff = sig.targetLong - sig.stopLossLong;
-                        const halfMidPriceDiff = Math.round(midPriceDiff / 2);
+                        // 1. Hitung setengah dari selisih
+                        const rawHalfDiff = midPriceDiff / 2;
+
+                        // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
+                        // Gunakan Math.abs() untuk mendapatkan jarak positif
+                        const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(5));
                         newTP = sig.targetLong + halfMidPriceDiff;
                         newSL = sig.targetLong - halfMidPriceDiff;
                     } else {
@@ -998,7 +1011,12 @@ setInterval(async () => {
                     const isShortBreakout = sig.price < sig.targetShort;
                     if (isShortBreakout) {
                         const midPriceDiff = sig.stopLossShort - sig.targetShort;
-                        const halfMidPriceDiff = Math.round(midPriceDiff / 2);
+                        // 1. Hitung setengah dari selisih
+                        const rawHalfDiff = midPriceDiff / 2;
+
+                        // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
+                        // Gunakan Math.abs() untuk mendapatkan jarak positif
+                        const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(5));
                         newTP = sig.targetShort - halfMidPriceDiff;
                         newSL = sig.targetShort + halfMidPriceDiff;
                     } else {
