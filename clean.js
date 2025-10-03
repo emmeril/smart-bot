@@ -622,7 +622,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 // -------------------- ANALYSIS --------------------
 const analyzeSignal = async () => {
     console.log("🧠 Analisis: Melakukan analisis teknikal...");
-    const ohlcv = await exchange.fetchOHLCV(db.pair, "5m", undefined, 200);
+    const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 200);
     if (!ohlcv || ohlcv.length < 200) {
         console.warn("⚠️ Analisis: Data OHLCV tidak cukup, menunggu...");
         return {};
@@ -708,7 +708,7 @@ const analyzeSignal = async () => {
     const {
         support,
         resistance
-    } = findSwingLevels(high.slice(-144), low.slice(-144), 144);
+    } = findSwingLevels(high.slice(-96), low.slice(-96), 96);
 
     // =================== TP & SL LOGIC ===================
     const targetLong = resistance;
