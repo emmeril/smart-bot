@@ -904,17 +904,21 @@ setInterval(async () => {
                 const isLongBreakout = sig.price > sig.targetLong;
 
                 if (isLongBreakout) {
-                    const midPriceDiff = sig.targetLong - sig.stopLossLong;
+                    // LOGIKA BREAKOUT LONG
+// ...
+const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5; // Dapatkan presisi harga
+const midPriceDiff = sig.targetLong - sig.stopLossLong;
+// 1. Hitung setengah dari selisih
+const rawHalfDiff = midPriceDiff / 2;
 
-                    // 1. Hitung setengah dari selisih
-                    const rawHalfDiff = midPriceDiff / 2;
+// 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
+// Menggunakan parseFloat(toFixed()) untuk membulatkan lalu menjadikannya angka
+const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(priceDecimals));
 
-                    // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
-                    // Gunakan Math.abs() untuk mendapatkan jarak positif
-                    const halfMidPriceDiff = formatPrice(rawHalfDiff);
+entryTP = sig.targetLong + halfMidPriceDiff;
+entrySL = sig.targetLong - halfMidPriceDiff;
+// ...
 
-                    entryTP = sig.targetLong + halfMidPriceDiff;
-                    entrySL = sig.targetLong - halfMidPriceDiff;
 
                     console.log(
                         `🚀 Sinyal LONG: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
@@ -944,17 +948,20 @@ setInterval(async () => {
                 const isShortBreakout = sig.price < sig.targetShort;
 
                 if (isShortBreakout) {
-                    const midPriceDiff = sig.stopLossShort - sig.targetShort;
+                    // LOGIKA BREAKOUT SHORT
+// ...
+const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5; // Dapatkan presisi harga
+const midPriceDiff = sig.stopLossShort - sig.targetShort;
+// 1. Hitung setengah dari selisih
+const rawHalfDiff = midPriceDiff / 2;
 
-                    // 1. Hitung setengah dari selisih
-                    const rawHalfDiff = midPriceDiff / 2;
+// 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
+// Menggunakan parseFloat(toFixed()) untuk membulatkan lalu menjadikannya angka
+const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(priceDecimals));
 
-                    // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
-                    // Gunakan Math.abs() untuk mendapatkan jarak positif
-                    const halfMidPriceDiff = formatPrice(rawHalfDiff);
-
-                    entryTP = sig.targetShort - halfMidPriceDiff; // Support - Diff
-                    entrySL = sig.targetShort + halfMidPriceDiff; // Support + Diff
+entryTP = sig.targetShort - halfMidPriceDiff; // Support - Diff
+entrySL = sig.targetShort + halfMidPriceDiff; // Support + Diff
+// ...
 
                     console.log(
                         `📉 Sinyal SHORT: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
