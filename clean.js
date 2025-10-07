@@ -768,6 +768,37 @@ const checkPositionStatus = async () => {
         const amt = parseFloat(position?.positionAmt || "0");
         const amtSafe = isFinite(amt) ? amt : 0;
 
+                // --- TAMBAHAN: Logika Resinkronisasi dari Binance ke DB ---
+        if (db.activePosition === null && amtSafe !== 0) {
+            const currentSide = amtSafe > 0 ? "buy" : "sell";
+            const entryPrice = parseFloat(position.entryPrice);
+
+            console.log(
+                `🚨 Resync: Posisi ${currentSide.toUpperCase()} terdeteksi di Binance. Memuat kembali ke DB.`
+            );
+            
+            // Perlu mendapatkan perkiraan TP/SL baru (bisa menggunakan S/R saat ini)
+            // Untuk sementara, kita set SL/TP ke N/A atau menggunakan S/R terakhir
+            const sig = await analyzeSignal(); 
+            let defaultTP = currentSide === 'buy' ? sig.targetLong : sig.targetShort;
+            let defaultSL = currentSide === 'buy' ? sig.stopLossLong : sig.stopLossShort;
+
+            db.activePosition = {
+                side: currentSide,
+                entryPrice: entryPrice,
+                // Gunakan TP/SL dari analisis saat ini sebagai default/fallback
+                tp: defaultTP || null, 
+                sl: defaultSL || null, 
+                orderId: "RESYNC", // Tandai bahwa ini adalah posisi hasil resync
+            };
+            saveDB();
+            await sendMsg(`⚠️ *Resync Posisi!*
+*Pair:* ${db.pair}
+*Tipe:* ${currentSide.toUpperCase()}
+*Entry:* ${formatPrice(entryPrice)}
+*Catatan:* TP/SL diestimasi ulang berdasarkan S/R saat ini.`);
+        }
+
         // Deteksi penutupan posisi manual atau oleh Binance
         const prevSafe = isFinite(prevPosAmt) ? prevPosAmt : 0;
         if (prevSafe !== 0 && amtSafe === 0) {
@@ -789,39 +820,10 @@ const checkPositionStatus = async () => {
                 sl,
                 side,
                 entryPrice,
-            } = db.activePosition; // Menghapus offset
+            } = db.activePosition; 
             const currentPrice = await getPrice();
             if (!currentPrice) return;
-
-            // --- MENGHAPUS LOGIKA TRAILING STOP LOSS DENGAN OFFSET DINAMIS ---
-            // Kode Trailing SL sebelumnya:
-            /*
-            if (side === "buy") {
-                const newSL = currentPrice - offset;
-                if (newSL > sl) {
-                    db.activePosition.sl = newSL;
-                    saveDB();
-                    await sendMsg(
-                        `📈 Trailing SL diperbarui untuk posisi LONG!\n*New SL:* ${formatPrice(
-              newSL
-            )}`
-                    );
-                }
-            } else if (side === "sell") {
-                const newSL = currentPrice + offset;
-                if (newSL < sl) {
-                    db.activePosition.sl = newSL;
-                    saveDB();
-                    await sendMsg(
-                        `📉 Trailing SL diperbarui untuk posisi SHORT!\n*New SL:* ${formatPrice(
-              newSL
-            )}`
-                    );
-                }
-            }
-            */
-            // --- AKHIR PENGHAPUSAN TRAILING SL ---
-
+     
             if (side === "buy") {
                 if (currentPrice >= tp) {
                     await closePosition("TP tercapai", entryPrice);
