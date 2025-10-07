@@ -543,7 +543,7 @@ setInterval(async () => {
         if (shouldExitCurrentPosition) {
             await closePosition("Sinyal berbalik arah", db.activePosition.entryPrice);
             // JEDA SEBENTAR untuk memastikan posisi sebelumnya benar-benar tertutup
-            await new Promise((resolve) => setTimeout(resolve, 5000));
+            await new Promise((resolve) => setTimeout(resolve, 15000));
         }
         // Logika untuk membuka posisi baru hanya jika tidak ada posisi aktif // Periksa kembali status setelah kemungkinan close position
         const {
@@ -658,4 +658,4 @@ setInterval(async () => {
         console.error("⚠️ Loop: Terjadi kesalahan di loop utama.", e.message);
         console.error(e.stack);
     }
-}, 15000);
+}, 30000);
