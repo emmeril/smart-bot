@@ -5,18 +5,15 @@ const ccxt = require("ccxt");
 const {
     SMA
 } = require("technicalindicators");
-const {
-    Client,
-    LocalAuth
-} = require("whatsapp-web.js");
-const express = require("express");
-const QRCode = require("qrcode");
+// Hapus import yang tidak digunakan: const { Client, LocalAuth } = require("whatsapp-web.js");
+// Hapus import yang tidak digunakan: const express = require("express");
+// Hapus import yang tidak digunakan: const QRCode = require("qrcode");
 
 // -------------------- CONFIG --------------------
-const app = express();
+// Hapus: const app = express();
 const dbPath = "./db.json";
 const logPath = "./log.csv";
-const serverPort = 7890;
+// Hapus: const serverPort = 7890;
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
@@ -35,7 +32,7 @@ const db = fs.existsSync(dbPath) ?
         usdtPerTrade: 5.1,
     };
 
-let prevPosAmt = 0;
+let prevPosAmt = 0; // Digunakan untuk mendeteksi penutupan posisi manual
 
 console.log(`⚙️ Konfigurasi Bot:`);
 console.log(`   - Pair Aktif: ${db.pair}`);
@@ -61,7 +58,7 @@ const exchange = new ccxt.binance({
     }
 })();
 
-// -------------------- WHATSAPP --------------------
+// -------------------- WHATSAPP (Dihapus karena kode tidak ada) --------------------
 
 
 // -------------------- UTIL --------------------
@@ -170,7 +167,7 @@ const placeOrder = async (side, tp, sl) => {
         console.log(
             "⚠️ Order: Masih ada posisi terbuka yang dimonitor oleh bot, order dibatalkan."
         );
-        
+
         return;
     }
 
@@ -184,7 +181,7 @@ const placeOrder = async (side, tp, sl) => {
             console.log(
                 "⚠️ Order: Terdapat posisi aktif di akun (detected). Order dibatalkan."
             );
-            
+
             return;
         }
     } catch (e) {
@@ -225,7 +222,7 @@ const placeOrder = async (side, tp, sl) => {
         };
         saveDB();
 
-        
+
         logSignal(
             side === "buy" ? "LONG" : "SHORT",
             price,
@@ -235,7 +232,7 @@ const placeOrder = async (side, tp, sl) => {
         );
     } catch (e) {
         console.error("❌ Order: Gagal membuat order.", e.message);
-        
+
     }
 };
 
@@ -264,31 +261,25 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 
             // ---- HITUNG PNL ESTIMASI BERDASARKAN db.usdtPerTrade ----
             let pnl = null;
+            let message = ""; // Variabel message tidak lagi digunakan untuk whatsapp, namun logic PnL dipertahankan
             if (entryPrice !== "N/A" && isFinite(exitPrice) && isFinite(entryPrice)) {
                 try {
                     const entryNum = Number(entryPrice);
                     const exitNum = Number(exitPrice);
                     const qtyAbs = Math.abs(parseFloat(position?.positionAmt || "0"));
-                    if (qtyAbs > 0 && isFinite(exitPrice) && isFinite(entryPrice)) {
-                        if (side === "sell") {
-                            pnl = (exitNum - entryNum) * qtyAbs; // LONG close
-                        } else {
-                            pnl = (entryNum - exitNum) * qtyAbs; // SHORT close
+                    if (qtyAbs > 0 && isFinite(exitPrice) && isFinite(entryNum)) {
+                        // Perbaikan: Pastikan menggunakan entryNum bukan entryPrice di kalkulasi
+                        if (side === "buy") { // Side 'buy' menutup LONG (Entry 'buy', Close 'sell')
+                            pnl = (exitNum - entryNum) * qtyAbs;
+                        } else { // Side 'sell' menutup SHORT (Entry 'sell', Close 'buy')
+                            pnl = (entryNum - exitNum) * qtyAbs;
                         }
                     }
                 } catch (e) {
                     pnl = null;
                 }
             }
-
-            
-
-            if (pnl !== null && isFinite(pnl)) {
-                message += `\n*PnL (est):* ${pnl >= 0 ? "+" : ""}${pnl.toFixed(
-          4
-        )} USDT`;
-            }
-
+            // Hapus: if (pnl !== null && isFinite(pnl)) { message += ... }
 
             // Log hasil realisasi (TP/SL) ke log.csv
             let statusTag = "CLOSED_MANUAL";
@@ -305,7 +296,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
         }
     } catch (err) {
         console.error("❌ Posisi: Gagal menutup posisi.", err.message);
-        
+
     } finally {
         // Reset status di database (pastikan bot tidak langsung open new order tanpa verifikasi posisi live)
         db.activePosition = null;
@@ -410,7 +401,7 @@ const analyzeSignal = async () => {
     const targetShort = support;
     const stopLossShort = resistance;
 
-    // Menghapus penghitungan offset
+    // Menghapus penghitungan offset yang tidak lagi ada
 
     // Awal output yang rapi
     console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
@@ -466,7 +457,7 @@ const checkPositionStatus = async () => {
         const prevSafe = isFinite(prevPosAmt) ? prevPosAmt : 0;
         if (prevSafe !== 0 && amtSafe === 0) {
             const side = prevSafe > 0 ? "LONG" : "SHORT";
-            
+
             console.log(`📉 Posisi ${side} di ${db.pair} sudah ditutup.`);
 
             // Reset status di database jika posisi ditutup manual
@@ -481,17 +472,17 @@ const checkPositionStatus = async () => {
                 sl,
                 side,
                 entryPrice,
-            } = db.activePosition; // Menghapus offset
+            } = db.activePosition;
             const currentPrice = await getPrice();
             if (!currentPrice) return;
 
-            if (side === "buy") {
+            if (side === "buy") { // Posisi LONG
                 if (currentPrice >= tp) {
                     await closePosition("TP tercapai", entryPrice);
                 } else if (currentPrice <= sl) {
                     await closePosition("SL tercapai", entryPrice);
                 }
-            } else if (side === "sell") {
+            } else if (side === "sell") { // Posisi SHORT
                 if (currentPrice <= tp) {
                     await closePosition("TP tercapai", entryPrice);
                 } else if (currentPrice >= sl) {
@@ -568,19 +559,20 @@ setInterval(async () => {
 
                 if (isLongBreakout) {
                     // LOGIKA BREAKOUT LONG
-                    // ...
-                    const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5; // Dapatkan presisi harga
+                    // Hitung selisih harga antara Resistance (targetLong) dan Support (stopLossLong)
                     const midPriceDiff = sig.targetLong - sig.stopLossLong;
-                    // 1. Hitung setengah dari selisih
+                    const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5; // Dapatkan presisi harga
+
+                    // 1. Hitung setengah dari selisih (Absolut)
                     const rawHalfDiff = midPriceDiff / 2;
 
-                    // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
-                    // Menggunakan parseFloat(toFixed()) untuk membulatkan lalu menjadikannya angka
+                    // 2. Bulatkan ke jumlah desimal yang diinginkan
                     const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(priceDecimals));
 
+                    // TP: Resistance + Half Diff
                     entryTP = sig.targetLong + halfMidPriceDiff;
+                    // SL: Resistance - Half Diff
                     entrySL = sig.targetLong - halfMidPriceDiff;
-                    // ...
 
 
                     console.log(
@@ -602,7 +594,7 @@ setInterval(async () => {
                     "buy",
                     entryTP,
                     entrySL,
-                ); // Menghapus entryOffset
+                );
 
             } else if (sig.canShort) {
                 // Sinyal SHORT
@@ -612,19 +604,20 @@ setInterval(async () => {
 
                 if (isShortBreakout) {
                     // LOGIKA BREAKOUT SHORT
-                    // ...
-                    const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5; // Dapatkan presisi harga
+                    // Hitung selisih harga antara StopLossShort (Resistance) dan TargetShort (Support)
                     const midPriceDiff = sig.stopLossShort - sig.targetShort;
-                    // 1. Hitung setengah dari selisih
+                    const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5; // Dapatkan presisi harga
+
+                    // 1. Hitung setengah dari selisih (Absolut)
                     const rawHalfDiff = midPriceDiff / 2;
 
-                    // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
-                    // Menggunakan parseFloat(toFixed()) untuk membulatkan lalu menjadikannya angka
+                    // 2. Bulatkan ke jumlah desimal yang diinginkan
                     const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(priceDecimals));
 
-                    entryTP = sig.targetShort - halfMidPriceDiff; // Support - Diff
-                    entrySL = sig.targetShort + halfMidPriceDiff; // Support + Diff
-                    // ...
+                    // TP: Support - Half Diff
+                    entryTP = sig.targetShort - halfMidPriceDiff;
+                    // SL: Support + Half Diff
+                    entrySL = sig.targetShort + halfMidPriceDiff;
 
                     console.log(
                         `📉 Sinyal SHORT: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
@@ -645,13 +638,12 @@ setInterval(async () => {
                     "sell",
                     entryTP,
                     entrySL,
-                ); // Menghapus entryOffset
+                );
 
             } else {
                 console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
             }
         }
-        
 
 
     } catch (e) {
