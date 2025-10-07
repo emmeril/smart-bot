@@ -382,7 +382,6 @@ const calcQty = (price) => {
 };
 
 const logSignal = (type, entry, tp, sl, status, pnl = null) => {
-    // pastikan nilai numeric untuk entry/tp/sl jika ada
     const entryStr = entry !== undefined && entry !== null ? entry : "";
     const tpStr = tp !== undefined && tp !== null ? tp : "";
     const slStr = sl !== undefined && sl !== null ? sl : "";
@@ -396,14 +395,12 @@ const logSignal = (type, entry, tp, sl, status, pnl = null) => {
 
 // ---------- NEW HELPERS: market id & position fetch ----------
 const getMarketId = () => {
-    // Prefer ccxt's market id (exchange.markets[db.pair].id) if available
     try {
         const market = exchange.markets[db.pair];
         if (market && market.id) return market.id; // e.g. "XRPUSDT"
     } catch (e) {
         // ignore
     }
-    // fallback: remove separators
     return db.pair.replace("/", "").replace(":", "");
 };
 
@@ -413,7 +410,6 @@ const getPositionFromBalance = async () => {
         const marketId = getMarketId();
         const positions = bal.info?.positions || [];
 
-        // Instead do safe find:
         let found = positions.find(
             (p) =>
             p.symbol === marketId ||
@@ -421,7 +417,6 @@ const getPositionFromBalance = async () => {
             (p.symbol && p.symbol.includes(marketId))
         );
         if (!found) {
-            // try matching by removing non-alphanum
             const norm = (s) =>
                 (s || "")
                 .toString()
@@ -459,7 +454,6 @@ const placeOrder = async (side, tp, sl) => {
         return;
     }
 
-    // Extra: pastikan tidak ada posisi yang aktif di account
     try {
         const {
             position
@@ -613,7 +607,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 *Sebab:* ${reason}
 *Pesan Error:* ${err.message}`);
     } finally {
-        // Reset status di database (pastikan bot tidak langsung open new order tanpa verifikasi posisi live)
+        // Reset status di database
         db.activePosition = null;
         saveDB();
     }
@@ -716,8 +710,6 @@ const analyzeSignal = async () => {
     const targetShort = support;
     const stopLossShort = resistance;
 
-    // Menghapus penghitungan offset
-
     // Awal output yang rapi
     console.log(`\n📊 *Hasil Analisis ${db.pair}*`);
     console.log(`-----------------------------------`);
@@ -768,7 +760,7 @@ const checkPositionStatus = async () => {
         const amt = parseFloat(position?.positionAmt || "0");
         const amtSafe = isFinite(amt) ? amt : 0;
 
-                // --- TAMBAHAN: Logika Resinkronisasi dari Binance ke DB ---
+        // --- TAMBAHAN: Logika Resinkronisasi dari Binance ke DB ---
         if (db.activePosition === null && amtSafe !== 0) {
             const currentSide = amtSafe > 0 ? "buy" : "sell";
             const entryPrice = parseFloat(position.entryPrice);
@@ -820,10 +812,10 @@ const checkPositionStatus = async () => {
                 sl,
                 side,
                 entryPrice,
-            } = db.activePosition; 
+            } = db.activePosition;
             const currentPrice = await getPrice();
             if (!currentPrice) return;
-     
+
             if (side === "buy") {
                 if (currentPrice >= tp) {
                     await closePosition("TP tercapai", entryPrice);
@@ -863,7 +855,7 @@ setInterval(async () => {
 
         const hasBotPosition = db.activePosition !== null;
         let shouldExitCurrentPosition = false;
-        // --- LOGIKA BARU UNTUK SWING POSISI ---
+        // --- LOGIKA UNTUK SWING POSISI ---
         if (hasBotPosition) {
             const currentSide = db.activePosition.side;
             if (currentSide === "buy" && sig.canShort) {
@@ -881,10 +873,10 @@ setInterval(async () => {
         // Eksekusi penutupan posisi jika ada sinyal valid untuk swing
         if (shouldExitCurrentPosition) {
             await closePosition("Sinyal berbalik arah", db.activePosition.entryPrice);
-            // JEDA SEBENTAR untuk memastikan posisi sebelumnya benar-benar tertutup
+            // JEDA SEBENTAR
             await new Promise((resolve) => setTimeout(resolve, 5000));
         }
-        // Logika untuk membuka posisi baru hanya jika tidak ada posisi aktif // Periksa kembali status setelah kemungkinan close position
+        // Logika untuk membuka posisi baru hanya jika tidak ada posisi aktif
         const {
             position
         } = await getPositionFromBalance();
@@ -907,20 +899,13 @@ setInterval(async () => {
 
                 if (isLongBreakout) {
                     // LOGIKA BREAKOUT LONG
-                    // ...
-                    const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5; // Dapatkan presisi harga
+                    const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5;
                     const midPriceDiff = sig.targetLong - sig.stopLossLong;
-                    // 1. Hitung setengah dari selisih
                     const rawHalfDiff = midPriceDiff / 2;
-
-                    // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
-                    // Menggunakan parseFloat(toFixed()) untuk membulatkan lalu menjadikannya angka
                     const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(priceDecimals));
 
                     entryTP = sig.targetLong + halfMidPriceDiff;
                     entrySL = sig.targetLong - halfMidPriceDiff;
-                    // ...
-
 
                     console.log(
                         `🚀 Sinyal LONG: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
@@ -940,8 +925,8 @@ setInterval(async () => {
                 await placeOrder(
                     "buy",
                     entryTP,
-                    entrySL,
-                ); // Menghapus entryOffset
+                    entrySL
+                );
 
             } else if (sig.canShort) {
                 // Sinyal SHORT
@@ -951,19 +936,13 @@ setInterval(async () => {
 
                 if (isShortBreakout) {
                     // LOGIKA BREAKOUT SHORT
-                    // ...
-                    const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5; // Dapatkan presisi harga
+                    const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5;
                     const midPriceDiff = sig.stopLossShort - sig.targetShort;
-                    // 1. Hitung setengah dari selisih
                     const rawHalfDiff = midPriceDiff / 2;
-
-                    // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
-                    // Menggunakan parseFloat(toFixed()) untuk membulatkan lalu menjadikannya angka
                     const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(priceDecimals));
 
-                    entryTP = sig.targetShort - halfMidPriceDiff; // Support - Diff
-                    entrySL = sig.targetShort + halfMidPriceDiff; // Support + Diff
-                    // ...
+                    entryTP = sig.targetShort - halfMidPriceDiff;
+                    entrySL = sig.targetShort + halfMidPriceDiff;
 
                     console.log(
                         `📉 Sinyal SHORT: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
@@ -983,105 +962,13 @@ setInterval(async () => {
                 await placeOrder(
                     "sell",
                     entryTP,
-                    entrySL,
-                ); // Menghapus entryOffset
+                    entrySL
+                );
 
             } else {
                 console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
             }
         }
-        // Logika untuk memperbarui TP/SL
-        // else if (db.activePosition !== null) {
-        //     console.log(
-        //         "➡️ Posisi aktif terdeteksi. Memeriksa sinyal untuk pembaruan TP/SL."
-        //     );
-        //     if (sig.price) {
-        //         const currentSide = db.activePosition.side;
-        //         let newSL, newTP;
-
-        //         // --- LOGIKA UPDATE POSISI AKTIF (SAMA SEPERTI LOGIKA ENTRY DI ATAS) ---
-        //         if (currentSide === "buy") {
-        //             const isLongBreakout = sig.price > sig.targetLong;
-        //             if (isLongBreakout) {
-        //                 const midPriceDiff = sig.targetLong - sig.stopLossLong;
-        //                 // 1. Hitung setengah dari selisih
-        //                 const rawHalfDiff = midPriceDiff / 2;
-
-        //                 // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
-        //                 // Gunakan Math.abs() untuk mendapatkan jarak positif
-        //                 const halfMidPriceDiff = formatPrice(rawHalfDiff);
-        //                 newTP = sig.targetLong + halfMidPriceDiff;
-        //                 newSL = sig.targetLong - halfMidPriceDiff;
-        //             } else {
-        //                 newTP = sig.targetLong;
-        //                 newSL = sig.stopLossLong;
-        //             }
-        //         } else if (currentSide === "sell") {
-        //             const isShortBreakout = sig.price < sig.targetShort;
-        //             if (isShortBreakout) {
-        //                 const midPriceDiff = sig.stopLossShort - sig.targetShort;
-        //                 // 1. Hitung setengah dari selisih
-        //                 const rawHalfDiff = midPriceDiff / 2;
-
-        //                 // 2. Bulatkan ke jumlah desimal yang diinginkan (Misal: 5 desimal)
-        //                 // Gunakan Math.abs() untuk mendapatkan jarak positif
-        //                 const halfMidPriceDiff = formatPrice(rawHalfDiff);
-        //                 newTP = sig.targetShort - halfMidPriceDiff;
-        //                 newSL = sig.targetShort + halfMidPriceDiff;
-        //             } else {
-        //                 newTP = sig.targetShort;
-        //                 newSL = sig.stopLossShort;
-        //             }
-        //         }
-        //         // --- AKHIR LOGIKA UPDATE POSISI AKTIF ---
-
-
-        //         // Cek apakah ada perubahan yang signifikan dari hasil analisis baru
-        //         if (
-        //             newSL !== db.activePosition.sl ||
-        //             newTP !== db.activePosition.tp
-        //         ) {
-        //             // Logika Trailing SL yang dihapus, kini hanya pengecekan perubahan murni.
-        //             // Jika ada perubahan TP/SL, kita hanya mengupdate yang *lebih menguntungkan*
-        //             // atau yang berubah karena pergerakan Breakout/Swing.
-        //             let shouldUpdate = false;
-
-        //             if (currentSide === "buy") {
-        //                 // Update jika TP naik (lebih baik) atau SL naik (Trailing SL sederhana: harga telah naik)
-        //                 if (newTP > db.activePosition.tp || newSL > db.activePosition.sl) {
-        //                     shouldUpdate = true;
-        //                 }
-        //             } else if (currentSide === "sell") {
-        //                 // Update jika TP turun (lebih baik) atau SL turun (Trailing SL sederhana: harga telah turun)
-        //                 if (newTP < db.activePosition.tp || newSL < db.activePosition.sl) {
-        //                     shouldUpdate = true;
-        //                 }
-        //             }
-
-        //             if (shouldUpdate) {
-        //                 console.log(
-        //                     `✅ Sinyal: TP/SL baru terdeteksi! Memperbarui dari DB.`
-        //                 );
-        //                 db.activePosition.sl = newSL;
-        //                 db.activePosition.tp = newTP;
-        //                 // Hapus pembaruan offset
-        //                 saveDB();
-        //             } else {
-        //                 console.log(
-        //                     "✔️ Sinyal: TP/SL baru tidak lebih baik atau sama. Tidak ada pembaruan."
-        //                 );
-        //             }
-        //         } else {
-        //             console.log(
-        //                 "✔️ Sinyal: Tidak ada perubahan TP/SL. Tidak ada pembaruan."
-        //             );
-        //         }
-        //     } else {
-        //         console.log(
-        //             "⚠️ Analisis: Sinyal tidak valid. Tidak ada pembaruan TP/SL."
-        //         );
-        //     }
-        // }
     } catch (e) {
         console.error("⚠️ Loop: Terjadi kesalahan di loop utama.", e.message);
         console.error(e.stack);
