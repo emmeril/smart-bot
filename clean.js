@@ -760,8 +760,8 @@ const checkPositionStatus = async () => {
         const amt = parseFloat(position?.positionAmt || "0");
         const amtSafe = isFinite(amt) ? amt : 0;
 
-        // --- TAMBAHAN: Logika Resinkronisasi dari Binance ke DB ---
-        if (db.activePosition === null && amtSafe !== 0) {
+       // --- TAMBAHAN: Logika Resinkronisasi dari Binance ke DB ---
+        if (db.activePosition === null && amtSafe !== 0 && position?.entryPrice) {
             const currentSide = amtSafe > 0 ? "buy" : "sell";
             const entryPrice = parseFloat(position.entryPrice);
 
@@ -769,11 +769,33 @@ const checkPositionStatus = async () => {
                 `🚨 Resync: Posisi ${currentSide.toUpperCase()} terdeteksi di Binance. Memuat kembali ke DB.`
             );
             
-            // Perlu mendapatkan perkiraan TP/SL baru (bisa menggunakan S/R saat ini)
-            // Untuk sementara, kita set SL/TP ke N/A atau menggunakan S/R terakhir
+            // Dapatkan TP/SL dari analisis saat ini sebagai nilai default/fallback
             const sig = await analyzeSignal(); 
             let defaultTP = currentSide === 'buy' ? sig.targetLong : sig.targetShort;
             let defaultSL = currentSide === 'buy' ? sig.stopLossLong : sig.stopLossShort;
+            
+            // Jika resync terjadi selama breakout, gunakan TP/SL breakout
+            const isLongBreakout = currentSide === 'buy' && sig.price > sig.targetLong;
+            const isShortBreakout = currentSide === 'sell' && sig.price < sig.targetShort;
+
+            if (isLongBreakout || isShortBreakout) {
+                const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5;
+                let midPriceDiff;
+                
+                if (currentSide === 'buy') {
+                    midPriceDiff = sig.targetLong - sig.stopLossLong;
+                    const rawHalfDiff = midPriceDiff / 2;
+                    const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(priceDecimals));
+                    defaultTP = sig.targetLong + halfMidPriceDiff;
+                    defaultSL = sig.targetLong - halfMidPriceDiff;
+                } else { // sell
+                    midPriceDiff = sig.stopLossShort - sig.targetShort;
+                    const rawHalfDiff = midPriceDiff / 2;
+                    const halfMidPriceDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(priceDecimals));
+                    defaultTP = sig.targetShort - halfMidPriceDiff;
+                    defaultSL = sig.targetShort + halfMidPriceDiff;
+                }
+            }
 
             db.activePosition = {
                 side: currentSide,
@@ -788,7 +810,7 @@ const checkPositionStatus = async () => {
 *Pair:* ${db.pair}
 *Tipe:* ${currentSide.toUpperCase()}
 *Entry:* ${formatPrice(entryPrice)}
-*Catatan:* TP/SL diestimasi ulang berdasarkan S/R saat ini.`);
+*Catatan:* TP/SL diestimasi ulang berdasarkan S/R atau Breakout saat ini. Bot melanjutkan monitoring.`);
         }
 
         // Deteksi penutupan posisi manual atau oleh Binance
