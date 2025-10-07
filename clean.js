@@ -170,9 +170,7 @@ const placeOrder = async (side, tp, sl) => {
         console.log(
             "⚠️ Order: Masih ada posisi terbuka yang dimonitor oleh bot, order dibatalkan."
         );
-        await sendMsg(
-            `⚠️ ${db.pair}: Masih ada posisi terbuka yang dimonitor bot. Order ${side} dibatalkan.`
-        );
+        
         return;
     }
 
@@ -186,9 +184,7 @@ const placeOrder = async (side, tp, sl) => {
             console.log(
                 "⚠️ Order: Terdapat posisi aktif di akun (detected). Order dibatalkan."
             );
-            await sendMsg(
-                `⚠️ ${db.pair}: Terdeteksi posisi aktif di akun. Order ${side} dibatalkan.`
-            );
+            
             return;
         }
     } catch (e) {
@@ -229,15 +225,7 @@ const placeOrder = async (side, tp, sl) => {
         };
         saveDB();
 
-        await sendMsg(`✅ *Order Terkirim!*
-*Pair:* ${db.pair}
-*Tipe:* ${side.toUpperCase()}
-*Entry:* ${formatPrice(price)}
-*TP:* ${formatPrice(tp)}
-*SL:* ${formatPrice(sl)}
-*Leverage:* ${db.leverage}x
-*Catatan:* TP & SL akan dimonitor oleh bot.`);
-
+        
         logSignal(
             side === "buy" ? "LONG" : "SHORT",
             price,
@@ -296,11 +284,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
                 }
             }
 
-            let message = `📉 *Posisi Ditutup!*
-*Pair:* ${db.pair}
-*Sebab:* ${reason}
-*Harga Entry:* ${formatPrice(entryPrice)}
-*Harga Exit:* ${formatPrice(exitPrice)}`;
+            
 
             if (pnl !== null && isFinite(pnl)) {
                 message += `\n*PnL (est):* ${pnl >= 0 ? "+" : ""}${pnl.toFixed(
@@ -308,7 +292,6 @@ const closePosition = async (reason, entryPrice = "N/A") => {
         )} USDT`;
             }
 
-            await sendMsg(message);
 
             // Log hasil realisasi (TP/SL) ke log.csv
             let statusTag = "CLOSED_MANUAL";
@@ -325,10 +308,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
         }
     } catch (err) {
         console.error("❌ Posisi: Gagal menutup posisi.", err.message);
-        await sendMsg(`❌ *Gagal Menutup Posisi!*
-*Pair:* ${db.pair}
-*Sebab:* ${reason}
-*Pesan Error:* ${err.message}`);
+        
     } finally {
         // Reset status di database (pastikan bot tidak langsung open new order tanpa verifikasi posisi live)
         db.activePosition = null;
