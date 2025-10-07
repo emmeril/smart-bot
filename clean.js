@@ -235,10 +235,7 @@ const placeOrder = async (side, tp, sl) => {
         );
     } catch (e) {
         console.error("❌ Order: Gagal membuat order.", e.message);
-        await sendMsg(`❌ *Gagal Membuat Order!*
-*Pair:* ${db.pair}
-*Tipe:* ${side.toUpperCase()}
-*Pesan Error:* ${e.message}`);
+        
     }
 };
 
