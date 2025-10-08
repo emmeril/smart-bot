@@ -254,30 +254,58 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 
             const exitPrice = await getPrice();
 
-            // ---- HITUNG PNL ESTIMASI BERDASARKAN db.usdtPerTrade ----
-            let pnl = null;           
-            if (entryPrice !== "N/A" && isFinite(exitPrice) && isFinite(entryPrice)) {
+            // ---- HITUNG PNL ESTIMASI BERDASARKAN STATUS PENUTUPAN ----
+            let pnl = null;
+            let statusTag = "CLOSED_MANUAL";
+
+            // Tentukan status tag
+            const isTP = /TP/i.test(reason);
+            const isSL = /SL/i.test(reason);
+
+            if (isTP) statusTag = "TP_REALIZED";
+            else if (isSL) statusTag = "SL_REALIZED";
+            
+            // Logika perhitungan PNL yang diperbarui
+            if (entryPrice !== "N/A" && db.activePosition) {
+                const {
+                    tp, // Nilai TP (Stop Loss untuk Short)
+                    sl, // Nilai SL (Target Profit untuk Short)
+                    side: entrySide
+                } = db.activePosition;
+
                 try {
                     const entryNum = Number(entryPrice);
-                    const exitNum = Number(exitPrice);
-                    const qtyAbs = Math.abs(parseFloat(position?.positionAmt || "0"));
-                    if (qtyAbs > 0 && isFinite(exitPrice) && isFinite(entryNum)) {
-                        // Perbaikan: Pastikan menggunakan entryNum bukan entryPrice di kalkulasi
-                        if (side === "buy") { // Side 'buy' menutup LONG (Entry 'buy', Close 'sell')
+                    // Gunakan kuantitas yang dieksekusi di Binance, jika 0 gunakan kuantitas estimasi dari db.usdtPerTrade / entryPrice
+                    const qtyAbs = Math.abs(parseFloat(position?.positionAmt || "0")) || (db.usdtPerTrade / entryNum); 
+                    
+                    if (isTP) {
+                        // Jika status TP: Hitung P&L menggunakan harga TP yang dipicu. PNL HARUS POSITIF.
+                        const targetPrice = entrySide === "buy" ? tp : sl; // LONG: TP, SHORT: SL adalah harga profit
+                        const pnlGross = entrySide === "buy" ? (targetPrice - entryNum) : (entryNum - targetPrice); 
+                        pnl = Math.abs(pnlGross * qtyAbs);
+                        
+                    } else if (isSL) {
+                        // Jika status SL: Hitung P&L menggunakan harga SL yang dipicu. PNL HARUS NEGATIF.
+                        const stopPrice = entrySide === "buy" ? sl : tp; // LONG: SL, SHORT: TP adalah harga loss
+                        const pnlGross = entrySide === "buy" ? (stopPrice - entryNum) : (entryNum - stopPrice);
+                        pnl = -Math.abs(pnlGross * qtyAbs);
+                        
+                    } else if (isFinite(exitPrice) && qtyAbs > 0) {
+                        // Penutupan Manual / Sinyal Berbalik: Gunakan PNL aktual
+                        const exitNum = Number(exitPrice);
+                        if (entrySide === "buy") { // Menutup LONG
                             pnl = (exitNum - entryNum) * qtyAbs;
-                        } else { // Side 'sell' menutup SHORT (Entry 'sell', Close 'buy')
+                        } else { // Menutup SHORT
                             pnl = (entryNum - exitNum) * qtyAbs;
                         }
                     }
                 } catch (e) {
                     pnl = null;
+                    console.warn("⚠️ PNL: Gagal hitung PNL berdasarkan status.", e.message);
                 }
             }
             
             // Log hasil realisasi (TP/SL) ke log.csv
-            let statusTag = "CLOSED_MANUAL";
-            if (/TP/i.test(reason)) statusTag = "TP_REALIZED";
-            if (/SL/i.test(reason)) statusTag = "SL_REALIZED";
             logSignal(
                 qty > 0 ? "LONG" : "SHORT",
                 entryPrice,
