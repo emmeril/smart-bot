@@ -5,9 +5,6 @@ const ccxt = require("ccxt");
 const {
     SMA
 } = require("technicalindicators");
-// Hapus import yang tidak digunakan: const { Client, LocalAuth } = require("whatsapp-web.js");
-// Hapus import yang tidak digunakan: const express = require("express");
-// Hapus import yang tidak digunakan: const QRCode = require("qrcode");
 
 // -------------------- CONFIG --------------------
 // Hapus: const app = express();
@@ -57,8 +54,6 @@ const exchange = new ccxt.binance({
         console.error("❌ Exchange: Gagal memuat markets.", err.message);
     }
 })();
-
-// -------------------- WHATSAPP (Dihapus karena kode tidak ada) --------------------
 
 
 // -------------------- UTIL --------------------
@@ -260,8 +255,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
             const exitPrice = await getPrice();
 
             // ---- HITUNG PNL ESTIMASI BERDASARKAN db.usdtPerTrade ----
-            let pnl = null;
-            let message = ""; // Variabel message tidak lagi digunakan untuk whatsapp, namun logic PnL dipertahankan
+            let pnl = null;           
             if (entryPrice !== "N/A" && isFinite(exitPrice) && isFinite(entryPrice)) {
                 try {
                     const entryNum = Number(entryPrice);
@@ -279,8 +273,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
                     pnl = null;
                 }
             }
-            // Hapus: if (pnl !== null && isFinite(pnl)) { message += ... }
-
+            
             // Log hasil realisasi (TP/SL) ke log.csv
             let statusTag = "CLOSED_MANUAL";
             if (/TP/i.test(reason)) statusTag = "TP_REALIZED";
