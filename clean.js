@@ -369,16 +369,22 @@ const analyzeSignal = async () => {
     let canLong = false;
     let canShort = false;
 
-    const isPriceAboveMA99 = price > ma99;
-    const isPriceBelowMA99 = price < ma99;
+    // const isPriceAboveMA99 = price > ma99;
+    // const isPriceBelowMA99 = price < ma99;
+
+    const isMA7AboveMA99 = ma7 > ma99;
+    const isMA7BelowMA99 = ma7 < ma99;
+
+    const isMA25AboveMA99 = ma25 > ma99;
+    const isMA25BelowMA99 = ma25 < ma99;
 
     // Analisis Sinyal LONG
-    if (isCrossedUp && isPriceAboveMA99) {
+    if (isCrossedUp && isMA7AboveMA99 && isMA25AboveMA99) {
         canLong = true;
     }
 
     // Analisis Sinyal SHORT
-    if (isCrossedDown && isPriceBelowMA99) {
+    if (isCrossedDown && isMA7BelowMA99 && isMA25BelowMA99) {
         canShort = true;
     }
 
@@ -436,7 +442,8 @@ const analyzeSignal = async () => {
     // Detail Indikator
     console.log(`📝 Detail Indikator:`);
     console.log(`   - Crossover MA: ${isCrossedUp ? "📈 MA7 Crossed Up MA25" : isCrossedDown ? "📉 MA7 Crossed Down MA25" : "↔️ Tidak Ada"}`);
-    console.log(`   - Posisi Harga vs MA99: ${isPriceAboveMA99 ? "📈 Harga di atas MA99 (Tren Naik)" : "📉 Harga di bawah MA99 (Tren Turun)"}`);
+    console.log(`   - Posisi MA7 vs MA99: ${isMA7AboveMA99 ? "📈 Harga di atas MA99 (Tren Naik)" : "📉 Harga di bawah MA99 (Tren Turun)"}`);
+    console.log(`   - Posisi MA25 vs MA99: ${isMA25AboveMA99 ? "📈 Harga di atas MA99 (Tren Naik)" : "📉 Harga di bawah MA99 (Tren Turun)"}`);
 
     // Informasi Harga
     console.log(`💰 Harga Saat Ini: ${formatPrice(price)}`);
