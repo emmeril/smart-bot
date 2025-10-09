@@ -571,7 +571,7 @@ setInterval(async () => {
         const amt = parseFloat(position?.positionAmt || "0");
         const hasActiveBinancePositionAfterClose =
             isFinite(amt) && Math.abs(amt) > 0;
-
+// ... di dalam setInterval loop
 if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
 
     // ================== LOGIKA ORDER (TERMASUK BREAKOUT) ==================
@@ -666,6 +666,9 @@ if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
         console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
     }
 }
+// ...
+
+
 
     } catch (e) {
         console.error("⚠️ Loop: Terjadi kesalahan di loop utama.", e.message);
