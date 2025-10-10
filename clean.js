@@ -50,7 +50,14 @@ const exchange = new ccxt.binance({
 })();
 
 // -------------------- UTIL FUNCTIONS --------------------
-const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+const saveDB = () => {
+    if (db.activePosition) {
+        db.activePosition.entryPrice = formatPrice(db.activePosition.entryPrice);
+        db.activePosition.tp = formatPrice(db.activePosition.tp);
+        db.activePosition.sl = formatPrice(db.activePosition.sl);
+    }
+    fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+};
 
 const formatPrice = (price, pair = db.pair) => {
     if (!price || !isFinite(price)) return "N/A";
