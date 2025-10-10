@@ -271,6 +271,7 @@ const analyzeSignal = async () => {
     const high = ohlcv.map(c => c[2]);
     const low = ohlcv.map(c => c[3]);
 
+    // -------------------- MOVING AVERAGES --------------------
     const ma7 = SMA.calculate({ values: close.slice(-100), period: 7 }).pop();
     const ma25 = SMA.calculate({ values: close.slice(-100), period: 25 }).pop();
     const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
@@ -299,38 +300,127 @@ const analyzeSignal = async () => {
         canShort = true;
     }
 
-    const findSwingLevels = (highArr, lowArr, lookback) => {
-        let swingHighs = [];
-        let swingLows = [];
-
-        for (let i = 2; i < lookback - 2; i++) {
-            if (highArr[i] > highArr[i - 1] && highArr[i] > highArr[i - 2] &&
-                highArr[i] > highArr[i + 1] && highArr[i] > highArr[i + 2]) {
-                swingHighs.push(highArr[i]);
+    // -------------------- IMPROVED SUPPORT/RESISTANCE --------------------
+    const findAdvancedSwingLevels = (highArr, lowArr, lookback = 10, minStrength = 2) => {
+        const swingHighs = [];
+        const swingLows = [];
+        
+        for (let i = lookback; i < highArr.length - lookback; i++) {
+            let isSwingHigh = true;
+            let isSwingLow = true;
+            let strengthHigh = 0;
+            let strengthLow = 0;
+            
+            // Check left and right untuk swing high
+            for (let j = 1; j <= lookback; j++) {
+                if (highArr[i - j] > highArr[i]) isSwingHigh = false;
+                if (highArr[i + j] > highArr[i]) isSwingHigh = false;
+                
+                if (lowArr[i - j] < lowArr[i]) isSwingLow = false;
+                if (lowArr[i + j] < lowArr[i]) isSwingLow = false;
+                
+                // Hitung strength (berapa banyak candle di sekitarnya yang lebih rendah/tinggi)
+                if (highArr[i - j] < highArr[i] && highArr[i + j] < highArr[i]) strengthHigh++;
+                if (lowArr[i - j] > lowArr[i] && lowArr[i + j] > lowArr[i]) strengthLow++;
             }
-            if (lowArr[i] < lowArr[i - 1] && lowArr[i] < lowArr[i - 2] &&
-                lowArr[i] < lowArr[i + 1] && lowArr[i] < lowArr[i + 2]) {
-                swingLows.push(lowArr[i]);
+            
+            if (isSwingHigh && strengthHigh >= minStrength) {
+                swingHighs.push({
+                    price: highArr[i],
+                    strength: strengthHigh,
+                    index: i
+                });
+            }
+            
+            if (isSwingLow && strengthLow >= minStrength) {
+                swingLows.push({
+                    price: lowArr[i],
+                    strength: strengthLow,
+                    index: i
+                });
             }
         }
-
-        const resistance = swingHighs.length ? 
-            Math.max(...swingHighs) : 
-            Math.max(...highArr.slice(-lookback));
-        const support = swingLows.length ? 
-            Math.min(...swingLows) : 
-            Math.min(...lowArr.slice(-lookback));
-
-        return { support, resistance };
+        
+        // Group level yang berdekatan (dalam 0.2%)
+        const groupLevels = (levels, threshold = 0.002) => {
+            const groups = [];
+            
+            levels.sort((a, b) => a.price - b.price).forEach(level => {
+                const existingGroup = groups.find(g => 
+                    Math.abs(g.price - level.price) / g.price < threshold
+                );
+                
+                if (existingGroup) {
+                    existingGroup.members.push(level);
+                    existingGroup.price = (existingGroup.price + level.price) / 2; // average price
+                    existingGroup.strength += level.strength;
+                } else {
+                    groups.push({
+                        price: level.price,
+                        strength: level.strength,
+                        members: [level]
+                    });
+                }
+            });
+            
+            return groups.sort((a, b) => b.strength - a.strength);
+        };
+        
+        return {
+            resistance: groupLevels(swingHighs).slice(0, 3), // 3 resistance terkuat
+            support: groupLevels(swingLows).slice(0, 3)      // 3 support terkuat
+        };
     };
 
-    const { support, resistance } = findSwingLevels(high.slice(-96), low.slice(-96), 96);
+    // -------------------- ATR CALCULATION --------------------
+    const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
+        const tr = [];
+        for (let i = 1; i < highArr.length; i++) {
+            const tr1 = highArr[i] - lowArr[i];
+            const tr2 = Math.abs(highArr[i] - closeArr[i - 1]);
+            const tr3 = Math.abs(lowArr[i] - closeArr[i - 1]);
+            tr.push(Math.max(tr1, tr2, tr3));
+        }
+        
+        const atr = [];
+        for (let i = period - 1; i < tr.length; i++) {
+            const slice = tr.slice(i - period + 1, i + 1);
+            atr.push(slice.reduce((a, b) => a + b) / period);
+        }
+        
+        return atr;
+    };
+
+    // -------------------- IMPROVED S/R DETECTION --------------------
+    const advancedLevels = findAdvancedSwingLevels(high, low, 8, 3);
+    const currentATR = calculateATR(high, low, close, 14).pop() || 0;
+    
+    // Filter level yang terlalu dekat dengan harga current (min 0.5 ATR)
+    const minDistance = currentATR * 0.5;
+    
+    const validResistance = advancedLevels.resistance
+        .filter(level => level.price > price + minDistance)
+        .sort((a, b) => a.price - b.price); // Urutkan dari terdekat
+    
+    const validSupport = advancedLevels.support
+        .filter(level => level.price < price - minDistance)
+        .sort((a, b) => b.price - a.price); // Urutkan dari terdekat
+
+    // Pilih level terdekat yang valid, atau fallback ke method lama
+    const resistance = validResistance.length > 0 ? 
+        validResistance[0].price : 
+        Math.max(...high.slice(-96));
+    
+    const support = validSupport.length > 0 ? 
+        validSupport[0].price : 
+        Math.min(...low.slice(-96));
 
     const targetLong = resistance;
     const stopLossLong = support;
     const targetShort = support;
     const stopLossShort = resistance;
 
+    // -------------------- ENHANCED LOGGING --------------------
     console.log(`\n📊 Hasil Analisis ${db.pair}
 -----------------------------------
 📈 Sinyal Long: ${canLong ? "✅ VALID" : "❌ TIDAK VALID"}
@@ -342,13 +432,22 @@ const analyzeSignal = async () => {
 - Posisi MA25 vs MA99: ${isMA25AboveMA99 ? "📈 Di atas MA99" : "📉 Di bawah MA99"}
 💰 Harga Saat Ini: ${formatPrice(price)}
 -----------------------------------
+🎯 Advanced Support/Resistance:
+- ATR Current: ${formatPrice(currentATR)}
+- Resistance Levels: ${validResistance.map(l => formatPrice(l.price) + `(strength:${l.strength})`).join(', ')}
+- Support Levels: ${validSupport.map(l => formatPrice(l.price) + `(strength:${l.strength})`).join(', ')}
+- Selected Resistance: ${formatPrice(resistance)}
+- Selected Support: ${formatPrice(support)}
+-----------------------------------
 📈 Strategi Long:
 - Target: ${formatPrice(targetLong)}
 - Stop Loss: ${formatPrice(stopLossLong)}
+- Risk/Reward: ${((targetLong - price) / (price - stopLossLong)).toFixed(2)}
 -----------------------------------
 📉 Strategi Short:
 - Target: ${formatPrice(targetShort)}
 - Stop Loss: ${formatPrice(stopLossShort)}
+- Risk/Reward: ${((price - targetShort) / (stopLossShort - price)).toFixed(2)}
 -----------------------------------`);
 
     return {
