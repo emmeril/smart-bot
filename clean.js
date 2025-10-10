@@ -7,6 +7,7 @@ const { SMA } = require("technicalindicators");
 // -------------------- CONFIG --------------------
 const dbPath = "./db.json";
 const logPath = "./log.csv";
+let isProcessing = false;
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
@@ -534,6 +535,12 @@ const checkPositionStatus = async () => {
 
 // -------------------- MAIN LOOP --------------------
 setInterval(async () => {
+    if (isProcessing) {
+        console.log("⏳ Skip: Masih processing sebelumnya...");
+        return;
+    }
+    
+    isProcessing = true;
     try {
         const now = new Date();
         await checkPositionStatus();
@@ -598,5 +605,7 @@ setInterval(async () => {
     } catch (err) {
         console.error("⚠️ Loop: Terjadi kesalahan di loop utama.", err.message);
         console.error(err.stack);
+    } finally {
+        isProcessing = false;
     }
 }, 30000);
