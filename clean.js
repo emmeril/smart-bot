@@ -546,6 +546,7 @@ const checkPositionStatus = async () => {
 };
 
 // -------------------- MAIN LOOP --------------------
+// -------------------- MAIN LOOP --------------------
 setInterval(async () => {
     try {
         const now = new Date();
@@ -599,6 +600,8 @@ setInterval(async () => {
             // Gunakan variabel sementara untuk TP/SL yang mungkin diubah
             let entryTP, entrySL;
             const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5; // Dapatkan presisi harga
+            // Batas range minimum, misalnya 0.05% dari harga saat ini.
+            const minRangeThreshold = sig.price * 0.0005; // 0.0005 = 0.05%
 
             if (sig.canLong) {
                 // Sinyal LONG
@@ -609,20 +612,30 @@ setInterval(async () => {
                 if (isLongBreakout) {
                     // LOGIKA BREAKOUT LONG
                     // Jarak/Range penuh antara Resistance (TargetLong) dan Support (StopLossLong)
-                    const rangeDiff = sig.targetLong - sig.stopLossLong;
+                    const rawRangeDiff = Math.abs(sig.targetLong - sig.stopLossLong);
+                    
+                    if (rawRangeDiff < minRangeThreshold) {
+                         // Fallback jika range terlalu kecil/nol
+                         entryTP = sig.targetLong * (1 + 0.001); // TP: +0.1% dari Resistance
+                         entrySL = sig.targetLong * (1 - 0.001); // SL: -0.1% dari Resistance
+                        
+                         console.log(
+                            `⚠️ Sinyal LONG: BREAKOUT Range terlalu kecil/nol. Menggunakan Fallback. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
+                        );
+                    } else {
+                        // Hitung setengah dari range. Bulatkan.
+                        const rawHalfDiff = rawRangeDiff / 2;
+                        const halfRangeDiff = parseFloat(rawHalfDiff.toFixed(priceDecimals));
 
-                    // Hitung setengah dari range. Ambil nilai absolut dan bulatkan.
-                    const rawHalfDiff = rangeDiff / 2;
-                    const halfRangeDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(priceDecimals));
+                        // TP: Resistance + Half Range
+                        entryTP = sig.targetLong + halfRangeDiff;
+                        // SL: Resistance - Half Range (SL ditempatkan di bawah Resistance)
+                        entrySL = sig.targetLong - halfRangeDiff;
 
-                    // TP: Resistance + Half Range
-                    entryTP = sig.targetLong + halfRangeDiff;
-                    // SL: Resistance - Half Range (SL ditempatkan di bawah Resistance)
-                    entrySL = sig.targetLong - halfRangeDiff;
-
-                    console.log(
-                        `🚀 Sinyal LONG: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
-                    );
+                        console.log(
+                            `🚀 Sinyal LONG: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
+                        );
+                    }
                 } else {
                     // Swing/Normal LONG
                     entryTP = sig.targetLong; // Resistance
@@ -650,20 +663,30 @@ setInterval(async () => {
                 if (isShortBreakout) {
                     // LOGIKA BREAKOUT SHORT
                     // Jarak/Range penuh antara Resistance (StopLossShort) dan Support (TargetShort)
-                    const rangeDiff = sig.stopLossShort - sig.targetShort;
+                    const rawRangeDiff = Math.abs(sig.stopLossShort - sig.targetShort);
 
-                    // Hitung setengah dari range. Ambil nilai absolut dan bulatkan.
-                    const rawHalfDiff = rangeDiff / 2;
-                    const halfRangeDiff = parseFloat(Math.abs(rawHalfDiff).toFixed(priceDecimals));
+                    if (rawRangeDiff < minRangeThreshold) {
+                         // Fallback jika range terlalu kecil/nol
+                         entryTP = sig.targetShort * (1 - 0.001); // TP: -0.1% dari Support
+                         entrySL = sig.targetShort * (1 + 0.001); // SL: +0.1% dari Support
 
-                    // TP: Support - Half Range (TP diproyeksikan di bawah Support)
-                    entryTP = sig.targetShort - halfRangeDiff;
-                    // SL: Support + Half Range (SL ditempatkan di atas Support)
-                    entrySL = sig.targetShort + halfRangeDiff;
+                         console.log(
+                            `⚠️ Sinyal SHORT: BREAKOUT Range terlalu kecil/nol. Menggunakan Fallback. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
+                        );
+                    } else {
+                        // Hitung setengah dari range. Bulatkan.
+                        const rawHalfDiff = rawRangeDiff / 2;
+                        const halfRangeDiff = parseFloat(rawHalfDiff.toFixed(priceDecimals));
 
-                    console.log(
-                        `📉 Sinyal SHORT: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
-                    );
+                        // TP: Support - Half Range (TP diproyeksikan di bawah Support)
+                        entryTP = sig.targetShort - halfRangeDiff;
+                        // SL: Support + Half Range (SL ditempatkan di atas Support)
+                        entrySL = sig.targetShort + halfRangeDiff;
+
+                        console.log(
+                            `📉 Sinyal SHORT: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
+                        );
+                    }
                 } else {
                     // Swing/Normal SHORT
                     entryTP = sig.targetShort; // Support
