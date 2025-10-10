@@ -1,6 +1,6 @@
 const fs = require("fs");
 const readline = require("readline");
-const ccxt = require("ccxt");  // ✅ IMPORT CCXT
+const ccxt = require("ccxt");
 
 const dbPath = "./db.json";
 
@@ -74,12 +74,13 @@ const checkBalance = async () => {
         
         console.log(`💵 Total Wallet Balance: ${totalWalletBalance.toFixed(2)} USDT`);
         console.log(`🆓 Available Balance: ${availableBalance.toFixed(2)} USDT`);
+        console.log(`🔒 Used Balance: ${(totalWalletBalance - availableBalance).toFixed(2)} USDT`);
         
         // Position info
         const positions = balance.info?.positions || [];
         const activePositions = positions.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
         
-        console.log(`📈 Active Positions: ${activePositions.length}`);
+        console.log(`\n📈 Active Positions: ${activePositions.length}`);
         
         if (activePositions.length > 0) {
             console.log("\n🔍 DETAIL POSISI:");
@@ -88,23 +89,33 @@ const checkBalance = async () => {
                 const amount = parseFloat(pos.positionAmt);
                 const entryPrice = parseFloat(pos.entryPrice);
                 const unrealizedPnl = parseFloat(pos.unrealizedProfit);
+                const leverage = parseFloat(pos.leverage) || 1;
+                const side = amount > 0 ? "LONG" : "SHORT";
                 
-                console.log(`- ${symbol}: ${amount} (Entry: ${entryPrice}) | PnL: ${unrealizedPnl.toFixed(4)} USDT`);
+                console.log(`- ${symbol} [${side}]:`);
+                console.log(`  Amount: ${Math.abs(amount)} | Entry: ${entryPrice}`);
+                console.log(`  PnL: ${unrealizedPnl.toFixed(4)} USDT | Leverage: ${leverage}x`);
+                console.log(`  Margin: ${(Math.abs(amount) * entryPrice / leverage).toFixed(2)} USDT`);
             });
+        } else {
+            console.log("✅ Tidak ada posisi aktif");
         }
         
         // Account info
         const accountInfo = balance.info || {};
         console.log(`\n⚙️  ACCOUNT INFO:`);
-        console.log(`- Margin Mode: ${accountInfo.marginType || 'N/A'}`);
-        console.log(`- Leverage: ${accountInfo.leverage || 'N/A'}x`);
+        console.log(`- Total Asset: ${accountInfo.totalWalletBalance || 'N/A'} USDT`);
+        console.log(`- Available Balance: ${accountInfo.availableBalance || 'N/A'} USDT`);
+        console.log(`- Max Withdraw: ${accountInfo.maxWithdrawAmount || 'N/A'} USDT`);
         
         return balance;
         
     } catch (error) {
         console.log("❌ Gagal fetch balance:", error.message);
-        if (error.message.includes('API-key')) {
+        if (error.message.includes('API-key') || error.message.includes('signature')) {
             console.log("💡 Cek API Key & Secret di file .env");
+        } else if (error.message.includes('network')) {
+            console.log("💡 Cek koneksi internet");
         }
         return null;
     }
@@ -112,7 +123,6 @@ const checkBalance = async () => {
 
 // ✅ VALIDATION FUNCTIONS 
 const validators = {
-    // ... (validators yang sama seperti sebelumnya)
     pair: (input) => {
         if (!input) return "❌ Pair tidak boleh kosong!";
         if (!input.includes("/") || !input.includes("USDT")) {
@@ -210,12 +220,12 @@ const configManager = async () => {
         console.log(`3. USDT per Trade: ${db.usdtPerTrade}`);
         console.log(`4. Margin Mode: ${db.marginMode}`);
         
-        // Menu options - TAMBAH CEK BALANCE
+        // Menu options
         console.log("\n📝 PILIH OPSI:");
         console.log("1. Ganti Trading Pair");
         console.log("2. Atur Leverage & USDT");
         console.log("3. Atur Margin Mode");
-        console.log("4. 🔍 Cek Balance Binance");  // ✅ NEW
+        console.log("4. 💰 Cek Balance Binance");
         console.log("5. Lihat Status Trading");
         console.log("6. Reset Bot (Emergency)");
         console.log("0. Keluar");
@@ -233,7 +243,7 @@ const configManager = async () => {
             case "3":
                 await changeMarginMode(db);
                 break;
-            case "4":  // ✅ NEW - CEK BALANCE
+            case "4":
                 await checkBalance();
                 break;
             case "5":
@@ -258,7 +268,145 @@ const configManager = async () => {
     rl.close();
 };
 
-// ... (fungsi-fungsi lainnya tetap sama: changePair, changeLeverageAndUsdt, changeMarginMode, showTradingStatus, resetBot)
+// Fungsi ganti pair
+const changePair = async (db) => {
+    console.log("\n🎯 GANTI TRADING PAIR");
+    console.log("Contoh: DOGE/USDT:USDT, XRP/USDT:USDT, BTC/USDT:USDT");
+    
+    const newPair = await safeInput("Masukkan pair baru: ", validators.pair);
+    if (!newPair) return;
+    
+    const confirmed = await safeConfirm(`Yakin ganti pair dari ${db.pair} ke ${newPair}?`);
+    if (confirmed) {
+        db.pair = newPair;
+        if (writeDB(db)) {
+            console.log("✅ Pair berhasil diupdate!");
+            console.log("💡 Restart bot untuk apply perubahan pair!");
+        }
+    } else {
+        console.log("❌ Update dibatalkan.");
+    }
+};
+
+// Fungsi ganti leverage & USDT per trade
+const changeLeverageAndUsdt = async (db) => {
+    console.log("\n🎯 ATUR LEVERAGE & USDT PER TRADE");
+    console.log(`Saat ini: Leverage ${db.leverage}x, USDT: ${db.usdtPerTrade}`);
+    
+    const newLeverage = await safeInput("Masukkan leverage (1-125): ", validators.leverage);
+    if (!newLeverage) return;
+    
+    const newUsdt = await safeInput("Masukkan USDT per trade: ", validators.usdtPerTrade);
+    if (!newUsdt) return;
+    
+    const confirmed = await safeConfirm(`Yakin ganti leverage dari ${db.leverage}x ke ${newLeverage}x dan USDT dari ${db.usdtPerTrade} ke ${newUsdt}?`);
+    if (confirmed) {
+        db.leverage = parseInt(newLeverage);
+        db.usdtPerTrade = parseFloat(newUsdt);
+        if (writeDB(db)) {
+            console.log("✅ Leverage & USDT per trade berhasil diupdate!");
+        }
+    } else {
+        console.log("❌ Update dibatalkan.");
+    }
+};
+
+// Fungsi ganti margin mode
+const changeMarginMode = async (db) => {
+    console.log("\n🎯 ATUR MARGIN MODE");
+    console.log(`Saat ini: ${db.marginMode}`);
+    console.log("\n📚 Penjelasan Margin Mode:");
+    console.log("- ISOLATED: Margin terpisah per posisi (LEBIH AMAN)");
+    console.log("- CROSSED: Margin dipakai bersama semua posisi");
+    console.log("\n💡 Recommended: ISOLATED untuk risk management lebih baik");
+    
+    const newMode = await safeInput("Masukkan margin mode (ISOLATED/CROSSED): ", validators.marginMode);
+    if (!newMode) return;
+    
+    const confirmed = await safeConfirm(`Yakin ganti margin mode dari ${db.marginMode} ke ${newMode.toUpperCase()}?`);
+    if (confirmed) {
+        db.marginMode = newMode.toUpperCase();
+        if (writeDB(db)) {
+            console.log("✅ Margin mode berhasil diupdate!");
+        }
+    } else {
+        console.log("❌ Update dibatalkan.");
+    }
+};
+
+// Fungsi lihat status trading
+const showTradingStatus = (db) => {
+    console.log("\n📊 STATUS TRADING:");
+    console.log("-".repeat(50));
+    
+    // Status posisi aktif
+    if (db.activePosition) {
+        console.log("🔴 POSISI AKTIF:");
+        console.log(`- Side: ${db.activePosition.side.toUpperCase()}`);
+        console.log(`- Entry: ${db.activePosition.entryPrice}`);
+        console.log(`- TP: ${db.activePosition.tp}`);
+        console.log(`- SL: ${db.activePosition.sl}`);
+        console.log(`- Order ID: ${db.activePosition.orderId}`);
+        
+        // Hitung PnL unrealized
+        const currentTime = new Date().toISOString();
+        const entryTime = db.activePosition.entryTime || currentTime;
+        console.log(`- Entry Time: ${entryTime}`);
+    } else {
+        console.log("🟢 TIDAK ADA POSISI AKTIF");
+    }
+    
+    // Statistics
+    console.log("\n📈 STATISTICS:");
+    console.log(`- Long: ${db.winCountLong || 0}W / ${db.lossCountLong || 0}L`);
+    console.log(`- Short: ${db.winCountShort || 0}W / ${db.lossCountShort || 0}L`);
+    console.log(`- Total Profit: ${db.totalProfit || 0} USDT`);
+    console.log(`- Total Loss: ${db.totalLoss || 0} USDT`);
+    
+    const netProfit = (db.totalProfit || 0) + (db.totalLoss || 0);
+    const winRateLong = db.winCountLong + db.lossCountLong > 0 ? 
+        (db.winCountLong / (db.winCountLong + db.lossCountLong) * 100).toFixed(1) : 0;
+    const winRateShort = db.winCountShort + db.lossCountShort > 0 ? 
+        (db.winCountShort / (db.winCountShort + db.lossCountShort) * 100).toFixed(1) : 0;
+        
+    console.log(`- Net Profit: ${netProfit.toFixed(6)} USDT`);
+    console.log(`- Win Rate Long: ${winRateLong}%`);
+    console.log(`- Win Rate Short: ${winRateShort}%`);
+    
+    console.log("\n⚙️ SETTING AKTIF:");
+    console.log(`- Pair: ${db.pair}`);
+    console.log(`- Leverage: ${db.leverage}x`);
+    console.log(`- USDT/Trade: ${db.usdtPerTrade}`);
+    console.log(`- Margin Mode: ${db.marginMode}`);
+    
+    if (db.lastLongEntryTime && db.lastLongEntryTime !== 0) {
+        console.log(`- Last Long Entry: ${new Date(db.lastLongEntryTime).toLocaleString()}`);
+    }
+    if (db.lastShortEntryTime && db.lastShortEntryTime !== 0) {
+        console.log(`- Last Short Entry: ${new Date(db.lastShortEntryTime).toLocaleString()}`);
+    }
+};
+
+// Fungsi reset bot emergency
+const resetBot = async (db) => {
+    console.log("\n🚨 RESET BOT - EMERGENCY ONLY!");
+    console.log("Tindakan ini untuk:");
+    console.log("- Hapus posisi aktif dari memory bot");
+    console.log("- Reset jika bot error/stuck");
+    console.log("⚠️  Tidak menutup posisi di exchange!");
+    
+    const confirmed = await safeConfirm("Yakin ingin reset bot?");
+    if (confirmed) {
+        db.activePosition = null;
+        db.prevPosAmt = 0;
+        if (writeDB(db)) {
+            console.log("✅ Bot berhasil direset!");
+            console.log("🔄 Restart bot untuk memulai fresh.");
+        }
+    } else {
+        console.log("❌ Reset dibatalkan.");
+    }
+};
 
 // Handle CTRL+C gracefully
 rl.on('SIGINT', () => {
