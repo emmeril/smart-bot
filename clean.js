@@ -564,7 +564,7 @@ setInterval(async () => {
 
         const hasBotPosition = db.activePosition !== null;
         let shouldExitCurrentPosition = false;
-        // --- LOGIKA BARU UNTUK SWING POSISI ---
+        // --- LOGIKA UNTUK SWING POSISI (CROSS-SIGNAL) ---
         if (hasBotPosition) {
             const currentSide = db.activePosition.side;
             if (currentSide === "buy" && sig.canShort) {
@@ -585,7 +585,7 @@ setInterval(async () => {
             // JEDA SEBENTAR untuk memastikan posisi sebelumnya benar-benar tertutup
             await new Promise((resolve) => setTimeout(resolve, 15000));
         }
-        // Logika untuk membuka posisi baru hanya jika tidak ada posisi aktif // Periksa kembali status setelah kemungkinan close position
+        // Logika untuk membuka posisi baru hanya jika tidak ada posisi aktif
         const {
             position
         } = await getPositionFromBalance();
@@ -595,115 +595,60 @@ setInterval(async () => {
 
         if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
 
-            // ================== LOGIKA ORDER (TERMASUK BREAKOUT) ==================
+            // ================== LOGIKA ORDER (HANYA SWING) ==================
 
-            // Gunakan variabel sementara untuk TP/SL yang mungkin diubah
             let entryTP, entrySL;
-            const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5; // Dapatkan presisi harga
-            // Batas range minimum, misalnya 0.05% dari harga saat ini.
-            const minRangeThreshold = sig.price * 0.0005; // 0.0005 = 0.05%
+            // const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5; // Dapatkan presisi harga (Dihapus karena tidak digunakan dalam Swing)
 
+            // 1. Cek Sinyal LONG
             if (sig.canLong) {
-                // Sinyal LONG
-
                 // Cek Breakout LONG: Harga di atas Resistance (targetLong awal)
-                const isLongBreakout = sig.price > sig.targetLong; // TargetLong adalah Resistance
+                const isLongBreakout = sig.price > sig.targetLong; 
 
-                if (isLongBreakout) {
-                    // LOGIKA BREAKOUT LONG
-                    // Jarak/Range penuh antara Resistance (TargetLong) dan Support (StopLossLong)
-                    const rawRangeDiff = Math.abs(sig.targetLong - sig.stopLossLong);
-                    
-                    if (rawRangeDiff < minRangeThreshold) {
-                         // Fallback jika range terlalu kecil/nol
-                         entryTP = sig.targetLong * (1 + 0.001); // TP: +0.1% dari Resistance
-                         entrySL = sig.targetLong * (1 - 0.001); // SL: -0.1% dari Resistance
-                        
-                         console.log(
-                            `⚠️ Sinyal LONG: BREAKOUT Range terlalu kecil/nol. Menggunakan Fallback. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
-                        );
-                    } else {
-                        // Hitung setengah dari range. Bulatkan.
-                        const rawHalfDiff = rawRangeDiff / 2;
-                        const halfRangeDiff = parseFloat(rawHalfDiff.toFixed(priceDecimals));
-
-                        // TP: Resistance + Half Range
-                        entryTP = sig.targetLong + halfRangeDiff;
-                        // SL: Resistance - Half Range (SL ditempatkan di bawah Resistance)
-                        entrySL = sig.targetLong - halfRangeDiff;
-
-                        console.log(
-                            `🚀 Sinyal LONG: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
-                        );
-                    }
-                } else {
-                    // Swing/Normal LONG
+                if (!isLongBreakout) {
+                    // Hanya Open jika BUKAN Breakout (Swing/Normal)
                     entryTP = sig.targetLong; // Resistance
                     entrySL = sig.stopLossLong; // Support
 
                     console.log(
                         `🚀 Sinyal LONG: SWING. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
                     );
+
+                    db.lastLongEntryTime = now;
+                    saveDB();
+                    await placeOrder(
+                        "buy",
+                        entryTP,
+                        entrySL,
+                    );
+                } else {
+                    console.log(`⏸️ Sinyal LONG: BREAKOUT terdeteksi (${formatPrice(sig.price)} > ${formatPrice(sig.targetLong)}). SKIP posisi.`);
                 }
 
-                db.lastLongEntryTime = now;
-                saveDB();
-                await placeOrder(
-                    "buy",
-                    entryTP,
-                    entrySL,
-                );
-
+            // 2. Cek Sinyal SHORT
             } else if (sig.canShort) {
-                // Sinyal SHORT
-
                 // Cek Breakout SHORT: Harga di bawah Support (targetShort awal)
                 const isShortBreakout = sig.price < sig.targetShort; // TargetShort adalah Support
 
-                if (isShortBreakout) {
-                    // LOGIKA BREAKOUT SHORT
-                    // Jarak/Range penuh antara Resistance (StopLossShort) dan Support (TargetShort)
-                    const rawRangeDiff = Math.abs(sig.stopLossShort - sig.targetShort);
-
-                    if (rawRangeDiff < minRangeThreshold) {
-                         // Fallback jika range terlalu kecil/nol
-                         entryTP = sig.targetShort * (1 - 0.001); // TP: -0.1% dari Support
-                         entrySL = sig.targetShort * (1 + 0.001); // SL: +0.1% dari Support
-
-                         console.log(
-                            `⚠️ Sinyal SHORT: BREAKOUT Range terlalu kecil/nol. Menggunakan Fallback. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
-                        );
-                    } else {
-                        // Hitung setengah dari range. Bulatkan.
-                        const rawHalfDiff = rawRangeDiff / 2;
-                        const halfRangeDiff = parseFloat(rawHalfDiff.toFixed(priceDecimals));
-
-                        // TP: Support - Half Range (TP diproyeksikan di bawah Support)
-                        entryTP = sig.targetShort - halfRangeDiff;
-                        // SL: Support + Half Range (SL ditempatkan di atas Support)
-                        entrySL = sig.targetShort + halfRangeDiff;
-
-                        console.log(
-                            `📉 Sinyal SHORT: BREAKOUT terdeteksi. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
-                        );
-                    }
-                } else {
-                    // Swing/Normal SHORT
+                if (!isShortBreakout) {
+                    // Hanya Open jika BUKAN Breakout (Swing/Normal)
                     entryTP = sig.targetShort; // Support
                     entrySL = sig.stopLossShort; // Resistance
 
                     console.log(
                         `📉 Sinyal SHORT: SWING. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
                     );
-                }
 
-                db.lastShortEntryTime = now;
-                saveDB();
-                await placeOrder(
-                    "sell",
-                    entryTP,
-                    entrySL,
-                );
+                    db.lastShortEntryTime = now;
+                    saveDB();
+                    await placeOrder(
+                        "sell",
+                        entryTP,
+                        entrySL,
+                    );
+                } else {
+                    console.log(`⏸️ Sinyal SHORT: BREAKOUT terdeteksi (${formatPrice(sig.price)} < ${formatPrice(sig.targetShort)}). SKIP posisi.`);
+                }
 
             } else {
                 console.log("💤 Sinyal: Tidak ada sinyal valid. Menunggu...");
