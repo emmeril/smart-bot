@@ -61,11 +61,40 @@ const saveDB = () => {
 
 const formatPrice = (price, pair = db.pair) => {
     if (!price || !isFinite(price)) return "N/A";
-    const market = exchange.markets[pair];
-    let decimals = market?.precision?.price ?? 5;
-    if (decimals <= 0) decimals = 5;
-    if (price < 1 && decimals < 5) decimals = 5;
-    return price.toFixed(decimals);
+    
+    try {
+        const market = exchange.markets[pair];
+        if (!market) {
+            console.warn(`⚠️ Format: Market ${pair} tidak ditemukan, fallback ke 5 decimals`);
+            return parseFloat(price.toFixed(5));
+        }
+        
+        // Ambil precision dari Binance
+        let decimals = market.precision?.price;
+        
+        // Jika precision tidak ada, tentukan berdasarkan price range
+        if (decimals === undefined || decimals === null) {
+            if (price < 0.0001) decimals = 8;
+            else if (price < 0.001) decimals = 7;
+            else if (price < 0.01) decimals = 6;
+            else if (price < 0.1) decimals = 5;
+            else if (price < 1) decimals = 4;
+            else if (price < 10) decimals = 3;
+            else if (price < 100) decimals = 2;
+            else if (price < 1000) decimals = 1;
+            else decimals = 0;
+        }
+        
+        // Pastikan decimals valid
+        decimals = Math.max(0, Math.min(8, parseInt(decimals) || 5));
+        
+        const formatted = parseFloat(price.toFixed(decimals));
+        return formatted;
+        
+    } catch (err) {
+        console.warn(`⚠️ Format: Error format price ${price}, fallback:`, err.message);
+        return parseFloat(price.toFixed(5)); // Fallback safe
+    }
 };
 
 const getPrice = async () => {
