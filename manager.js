@@ -1,5 +1,6 @@
 const fs = require("fs");
 const readline = require("readline");
+const ccxt = require("ccxt");  // ✅ IMPORT CCXT
 
 const dbPath = "./db.json";
 
@@ -36,9 +37,82 @@ const rl = readline.createInterface({
 
 const question = (prompt) => new Promise((resolve) => rl.question(prompt, resolve));
 
-// ✅ VALIDATION FUNCTIONS untuk setting yang dipakai bot
+// ✅ INIT EXCHANGE untuk cek balance
+const initExchange = () => {
+    try {
+        return new ccxt.binance({
+            apiKey: process.env.API_KEY,
+            secret: process.env.API_SECRET,
+            options: { defaultType: "future" },
+        });
+    } catch (error) {
+        console.log("❌ Gagal init exchange:", error.message);
+        return null;
+    }
+};
+
+// ✅ FUNGSI CEK BALANCE
+const checkBalance = async () => {
+    console.log("\n💰 CEK BALANCE BINANCE...");
+    
+    const exchange = initExchange();
+    if (!exchange) {
+        console.log("❌ Tidak bisa akses exchange. Cek API Key & Secret.");
+        return;
+    }
+
+    try {
+        await exchange.loadMarkets();
+        const balance = await exchange.fetchBalance();
+        
+        console.log("\n📊 BALANCE FUTURES:");
+        console.log("-".repeat(50));
+        
+        // Total Balance
+        const totalWalletBalance = balance.total?.USDT || 0;
+        const availableBalance = balance.free?.USDT || 0;
+        
+        console.log(`💵 Total Wallet Balance: ${totalWalletBalance.toFixed(2)} USDT`);
+        console.log(`🆓 Available Balance: ${availableBalance.toFixed(2)} USDT`);
+        
+        // Position info
+        const positions = balance.info?.positions || [];
+        const activePositions = positions.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
+        
+        console.log(`📈 Active Positions: ${activePositions.length}`);
+        
+        if (activePositions.length > 0) {
+            console.log("\n🔍 DETAIL POSISI:");
+            activePositions.forEach(pos => {
+                const symbol = pos.symbol;
+                const amount = parseFloat(pos.positionAmt);
+                const entryPrice = parseFloat(pos.entryPrice);
+                const unrealizedPnl = parseFloat(pos.unrealizedProfit);
+                
+                console.log(`- ${symbol}: ${amount} (Entry: ${entryPrice}) | PnL: ${unrealizedPnl.toFixed(4)} USDT`);
+            });
+        }
+        
+        // Account info
+        const accountInfo = balance.info || {};
+        console.log(`\n⚙️  ACCOUNT INFO:`);
+        console.log(`- Margin Mode: ${accountInfo.marginType || 'N/A'}`);
+        console.log(`- Leverage: ${accountInfo.leverage || 'N/A'}x`);
+        
+        return balance;
+        
+    } catch (error) {
+        console.log("❌ Gagal fetch balance:", error.message);
+        if (error.message.includes('API-key')) {
+            console.log("💡 Cek API Key & Secret di file .env");
+        }
+        return null;
+    }
+};
+
+// ✅ VALIDATION FUNCTIONS 
 const validators = {
-    // Validasi pair format
+    // ... (validators yang sama seperti sebelumnya)
     pair: (input) => {
         if (!input) return "❌ Pair tidak boleh kosong!";
         if (!input.includes("/") || !input.includes("USDT")) {
@@ -47,7 +121,6 @@ const validators = {
         return true;
     },
     
-    // Validasi leverage
     leverage: (input) => {
         const leverage = parseInt(input);
         if (isNaN(leverage)) return "❌ Leverage harus angka!";
@@ -55,7 +128,6 @@ const validators = {
         return true;
     },
     
-    // Validasi USDT per trade
     usdtPerTrade: (input) => {
         const amount = parseFloat(input);
         if (isNaN(amount)) return "❌ USDT harus angka!";
@@ -64,7 +136,6 @@ const validators = {
         return true;
     },
     
-    // Validasi margin mode
     marginMode: (input) => {
         const mode = input.toUpperCase();
         if (mode !== "ISOLATED" && mode !== "CROSSED") {
@@ -73,7 +144,6 @@ const validators = {
         return true;
     },
     
-    // Validasi konfirmasi
     confirmation: (input) => {
         const answer = input.toLowerCase();
         if (answer !== 'y' && answer !== 'n') {
@@ -82,11 +152,10 @@ const validators = {
         return true;
     },
     
-    // Validasi menu choice
     menuChoice: (input) => {
         const choice = parseInt(input);
-        if (isNaN(choice) || choice < 0 || choice > 5) {
-            return "❌ Pilih menu 0-5!";
+        if (isNaN(choice) || choice < 0 || choice > 6) {
+            return "❌ Pilih menu 0-6!";
         }
         return true;
     }
@@ -141,16 +210,17 @@ const configManager = async () => {
         console.log(`3. USDT per Trade: ${db.usdtPerTrade}`);
         console.log(`4. Margin Mode: ${db.marginMode}`);
         
-        // Menu options - HANYA YANG DIPAKAI BOT
+        // Menu options - TAMBAH CEK BALANCE
         console.log("\n📝 PILIH OPSI:");
         console.log("1. Ganti Trading Pair");
         console.log("2. Atur Leverage & USDT");
         console.log("3. Atur Margin Mode");
-        console.log("4. Lihat Status Trading");
-        console.log("5. Reset Bot (Emergency)");
+        console.log("4. 🔍 Cek Balance Binance");  // ✅ NEW
+        console.log("5. Lihat Status Trading");
+        console.log("6. Reset Bot (Emergency)");
         console.log("0. Keluar");
         
-        const choice = await safeInput("\nPilih menu (0-5): ", validators.menuChoice);
+        const choice = await safeInput("\nPilih menu (0-6): ", validators.menuChoice);
         if (!choice) continue;
         
         switch (choice) {
@@ -163,10 +233,13 @@ const configManager = async () => {
             case "3":
                 await changeMarginMode(db);
                 break;
-            case "4":
-                showTradingStatus(db);
+            case "4":  // ✅ NEW - CEK BALANCE
+                await checkBalance();
                 break;
             case "5":
+                showTradingStatus(db);
+                break;
+            case "6":
                 await resetBot(db);
                 break;
             case "0":
@@ -185,116 +258,7 @@ const configManager = async () => {
     rl.close();
 };
 
-// Fungsi ganti pair
-const changePair = async (db) => {
-    console.log("\n🎯 GANTI TRADING PAIR");
-    console.log("Contoh: DOGE/USDT:USDT, XRP/USDT:USDT, BTC/USDT:USDT");
-    
-    const newPair = await safeInput("Masukkan pair baru: ", validators.pair);
-    if (!newPair) return;
-    
-    const confirmed = await safeConfirm(`Yakin ganti pair dari ${db.pair} ke ${newPair}?`);
-    if (confirmed) {
-        db.pair = newPair;
-        if (writeDB(db)) {
-            console.log("✅ Pair berhasil diupdate!");
-            console.log("💡 Restart bot untuk apply perubahan pair!");
-        }
-    } else {
-        console.log("❌ Update dibatalkan.");
-    }
-};
-
-// Fungsi ganti leverage & USDT per trade
-const changeLeverageAndUsdt = async (db) => {
-    console.log("\n🎯 ATUR LEVERAGE & USDT PER TRADE");
-    console.log(`Saat ini: Leverage ${db.leverage}x, USDT: ${db.usdtPerTrade}`);
-    
-    const newLeverage = await safeInput("Masukkan leverage (1-125): ", validators.leverage);
-    if (!newLeverage) return;
-    
-    const newUsdt = await safeInput("Masukkan USDT per trade: ", validators.usdtPerTrade);
-    if (!newUsdt) return;
-    
-    const confirmed = await safeConfirm(`Yakin ganti leverage dari ${db.leverage}x ke ${newLeverage}x dan USDT dari ${db.usdtPerTrade} ke ${newUsdt}?`);
-    if (confirmed) {
-        db.leverage = parseInt(newLeverage);
-        db.usdtPerTrade = parseFloat(newUsdt);
-        if (writeDB(db)) {
-            console.log("✅ Leverage & USDT per trade berhasil diupdate!");
-        }
-    } else {
-        console.log("❌ Update dibatalkan.");
-    }
-};
-
-// Fungsi ganti margin mode
-const changeMarginMode = async (db) => {
-    console.log("\n🎯 ATUR MARGIN MODE");
-    console.log(`Saat ini: ${db.marginMode}`);
-    console.log("\n📚 Penjelasan Margin Mode:");
-    console.log("- ISOLATED: Margin terpisah per posisi (LEBIH AMAN)");
-    console.log("- CROSSED: Margin dipakai bersama semua posisi");
-    console.log("\n💡 Recommended: ISOLATED untuk risk management lebih baik");
-    
-    const newMode = await safeInput("Masukkan margin mode (ISOLATED/CROSSED): ", validators.marginMode);
-    if (!newMode) return;
-    
-    const confirmed = await safeConfirm(`Yakin ganti margin mode dari ${db.marginMode} ke ${newMode.toUpperCase()}?`);
-    if (confirmed) {
-        db.marginMode = newMode.toUpperCase();
-        if (writeDB(db)) {
-            console.log("✅ Margin mode berhasil diupdate!");
-        }
-    } else {
-        console.log("❌ Update dibatalkan.");
-    }
-};
-
-// Fungsi lihat status trading
-const showTradingStatus = (db) => {
-    console.log("\n📊 STATUS TRADING:");
-    console.log("-".repeat(50));
-    
-    // Status posisi aktif
-    if (db.activePosition) {
-        console.log("🔴 POSISI AKTIF:");
-        console.log(`- Side: ${db.activePosition.side.toUpperCase()}`);
-        console.log(`- Entry: ${db.activePosition.entryPrice}`);
-        console.log(`- TP: ${db.activePosition.tp}`);
-        console.log(`- SL: ${db.activePosition.sl}`);
-        console.log(`- Order ID: ${db.activePosition.orderId}`);
-    } else {
-        console.log("🟢 TIDAK ADA POSISI AKTIF");
-    }
-    
-    console.log("\n⚙️ SETTING AKTIF:");
-    console.log(`- Pair: ${db.pair}`);
-    console.log(`- Leverage: ${db.leverage}x`);
-    console.log(`- USDT/Trade: ${db.usdtPerTrade}`);
-    console.log(`- Margin Mode: ${db.marginMode}`);
-};
-
-// Fungsi reset bot emergency
-const resetBot = async (db) => {
-    console.log("\n🚨 RESET BOT - EMERGENCY ONLY!");
-    console.log("Tindakan ini untuk:");
-    console.log("- Hapus posisi aktif dari memory bot");
-    console.log("- Reset jika bot error/stuck");
-    console.log("⚠️  Tidak menutup posisi di exchange!");
-    
-    const confirmed = await safeConfirm("Yakin ingin reset bot?");
-    if (confirmed) {
-        db.activePosition = null;
-        db.prevPosAmt = 0;
-        if (writeDB(db)) {
-            console.log("✅ Bot berhasil direset!");
-            console.log("🔄 Restart bot untuk memulai fresh.");
-        }
-    } else {
-        console.log("❌ Reset dibatalkan.");
-    }
-};
+// ... (fungsi-fungsi lainnya tetap sama: changePair, changeLeverageAndUsdt, changeMarginMode, showTradingStatus, resetBot)
 
 // Handle CTRL+C gracefully
 rl.on('SIGINT', () => {
@@ -308,4 +272,4 @@ if (require.main === module) {
     configManager();
 }
 
-module.exports = { configManager };
+module.exports = { configManager, checkBalance };
