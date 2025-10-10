@@ -1,3 +1,4 @@
+require("dotenv").config();
 const fs = require("fs");
 const readline = require("readline");
 const ccxt = require("ccxt");
