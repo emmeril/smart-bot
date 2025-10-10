@@ -268,16 +268,6 @@ const showTradingStatus = (db) => {
         console.log("🟢 TIDAK ADA POSISI AKTIF");
     }
     
-    // Statistics
-    console.log("\n📈 STATISTICS:");
-    console.log(`- Long: ${db.winCountLong || 0}W / ${db.lossCountLong || 0}L`);
-    console.log(`- Short: ${db.winCountShort || 0}W / ${db.lossCountShort || 0}L`);
-    console.log(`- Total Profit: ${db.totalProfit || 0} USDT`);
-    console.log(`- Total Loss: ${db.totalLoss || 0} USDT`);
-    
-    const netProfit = (db.totalProfit || 0) + (db.totalLoss || 0);
-    console.log(`- Net Profit: ${netProfit.toFixed(6)} USDT`);
-    
     console.log("\n⚙️ SETTING AKTIF:");
     console.log(`- Pair: ${db.pair}`);
     console.log(`- Leverage: ${db.leverage}x`);
