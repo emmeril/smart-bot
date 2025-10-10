@@ -276,18 +276,18 @@ const closePosition = async (reason, entryPrice = "N/A") => {
                 try {
                     const entryNum = Number(entryPrice);
                     // Gunakan kuantitas yang baru saja ditutup (amount)
-                    const closedQty = amount; 
+                    const closedQty = amount;
 
                     if (closedQty > 0) { // Pastikan kuantitas aktif terdeteksi
-                        
+
                         let exitNum;
                         let pnlGross;
 
                         if (isTP) {
                             // Harga keluar adalah harga TP yang tersimpan di DB
                             // LONG: tp, SHORT: sl (karena sl adalah stop loss untuk SHORT, tapi di logic Anda SL short diplot sbg TP)
-                            exitNum = entrySide === "buy" ? tp : sl; 
-                            
+                            exitNum = entrySide === "buy" ? tp : sl;
+
                         } else if (isSL) {
                             // Harga keluar adalah harga SL yang tersimpan di DB
                             // LONG: sl, SHORT: tp (karena tp adalah target profit untuk SHORT, tapi di logic Anda TP short diplot sbg SL)
@@ -296,7 +296,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
                         } else if (isFinite(exitPrice)) {
                             // Harga keluar saat penutupan manual/sinyal berbalik
                             exitNum = Number(exitPrice);
-                            
+
                         } else {
                             // Tidak ada harga keluar yang jelas
                             pnl = null;
@@ -306,19 +306,19 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 
                         // Rumus PNL Gross: (Exit - Entry) * Qty untuk LONG, (Entry - Exit) * Qty untuk SHORT
                         if (entrySide === "buy") { // LONG
-                            pnlGross = (exitNum - entryNum); 
+                            pnlGross = (exitNum - entryNum);
                         } else { // SHORT
                             pnlGross = (entryNum - exitNum);
                         }
 
                         pnl = pnlGross * closedQty;
-                        
+
                     } else {
                         // Jika kuantitas live 0, PNL tidak dapat dihitung akurat dari balance
-                        pnl = null; 
+                        pnl = null;
                         console.warn("⚠️ PNL: Kuantitas posisi live adalah 0, PNL tidak dihitung.");
                     }
-                    
+
                 } catch (e) {
                     pnl = null;
                     console.warn("⚠️ PNL: Gagal hitung PNL berdasarkan status.", e.message);
@@ -546,7 +546,6 @@ const checkPositionStatus = async () => {
 };
 
 // -------------------- MAIN LOOP --------------------
-// -------------------- MAIN LOOP --------------------
 setInterval(async () => {
     try {
         const now = new Date();
@@ -595,20 +594,17 @@ setInterval(async () => {
 
         if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
 
-            // ================== LOGIKA ORDER (HANYA SWING) ==================
-
             let entryTP, entrySL;
-            // const priceDecimals = exchange.markets[db.pair]?.precision?.price ?? 5; // Dapatkan presisi harga (Dihapus karena tidak digunakan dalam Swing)
 
             // 1. Cek Sinyal LONG
             if (sig.canLong) {
                 // Cek Breakout LONG: Harga di atas Resistance (targetLong awal)
-                const isLongBreakout = sig.price > sig.targetLong; 
+                const isLongBreakout = sig.price > sig.targetLong;
 
                 if (!isLongBreakout) {
-                    // Hanya Open jika BUKAN Breakout (Swing/Normal)
-                    entryTP = sig.targetLong; // Resistance
-                    entrySL = sig.stopLossLong; // Support
+
+                    entryTP = sig.targetLong;
+                    entrySL = sig.stopLossLong;
 
                     console.log(
                         `🚀 Sinyal LONG: SWING. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
@@ -625,15 +621,15 @@ setInterval(async () => {
                     console.log(`⏸️ Sinyal LONG: BREAKOUT terdeteksi (${formatPrice(sig.price)} > ${formatPrice(sig.targetLong)}). SKIP posisi.`);
                 }
 
-            // 2. Cek Sinyal SHORT
+                // 2. Cek Sinyal SHORT
             } else if (sig.canShort) {
                 // Cek Breakout SHORT: Harga di bawah Support (targetShort awal)
-                const isShortBreakout = sig.price < sig.targetShort; // TargetShort adalah Support
+                const isShortBreakout = sig.price < sig.targetShort;
 
                 if (!isShortBreakout) {
-                    // Hanya Open jika BUKAN Breakout (Swing/Normal)
-                    entryTP = sig.targetShort; // Support
-                    entrySL = sig.stopLossShort; // Resistance
+
+                    entryTP = sig.targetShort;
+                    entrySL = sig.stopLossShort;
 
                     console.log(
                         `📉 Sinyal SHORT: SWING. TP: ${formatPrice(entryTP)}, SL: ${formatPrice(entrySL)}.`
