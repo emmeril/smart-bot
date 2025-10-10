@@ -42,10 +42,10 @@ const question = (prompt) => new Promise((resolve) => rl.question(prompt, resolv
 const initExchange = () => {
     try {
         return new ccxt.binance({
-            apiKey: process.env.API_KEY,
-            secret: process.env.API_SECRET,
-            options: { defaultType: "future" },
-        });
+    apiKey: process.env.API_KEY,
+    secret: process.env.API_SECRET,
+    options: { defaultType: "future" },
+});
     } catch (error) {
         console.log("❌ Gagal init exchange:", error.message);
         return null;
