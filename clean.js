@@ -548,6 +548,16 @@ const updateTPSLForOpenPosition = async (signal) => {
             newTP = signal.targetLong;    // Resistance terbaru
             newSL = signal.stopLossLong;  // Support terbaru
             
+            // ✅ FIX: Jangan update TP jika harga SUDAH DEKAT dengan current TP (80% profit tercapai)
+            const profitToCurrentTP = (currentTP - entryPrice) / entryPrice * 100;
+            const profitToNewTP = (newTP - entryPrice) / entryPrice * 100;
+            
+            // Jika sudah profit 80% ke current TP, jangan ganti TP
+            if (profitToCurrentTP >= 0.8 && newTP > currentTP) {
+                console.log(`🎯 Update TP/SL: Sudah profit ${profitToCurrentTP.toFixed(2)}%, pertahankan TP lama.`);
+                newTP = currentTP;
+            }
+            
             // Validasi: TP harus > entry price, SL harus < entry price
             if (newTP <= entryPrice || newSL >= entryPrice) {
                 console.log("⚠️ Update TP/SL: Level TP/SL tidak valid untuk LONG, skip update.");
@@ -565,6 +575,16 @@ const updateTPSLForOpenPosition = async (signal) => {
             newTP = signal.targetShort;   // Support terbaru
             newSL = signal.stopLossShort; // Resistance terbaru
             
+            // ✅ FIX: Jangan update TP jika harga SUDAH DEKAT dengan current TP (80% profit tercapai)
+            const profitToCurrentTP = (entryPrice - currentTP) / entryPrice * 100;
+            const profitToNewTP = (entryPrice - newTP) / entryPrice * 100;
+            
+            // Jika sudah profit 80% ke current TP, jangan ganti TP
+            if (profitToCurrentTP >= 0.8 && newTP < currentTP) {
+                console.log(`🎯 Update TP/SL: Sudah profit ${profitToCurrentTP.toFixed(2)}%, pertahankan TP lama.`);
+                newTP = currentTP;
+            }
+            
             // Validasi: TP harus < entry price, SL harus > entry price
             if (newTP >= entryPrice || newSL <= entryPrice) {
                 console.log("⚠️ Update TP/SL: Level TP/SL tidak valid untuk SHORT, skip update.");
@@ -580,11 +600,29 @@ const updateTPSLForOpenPosition = async (signal) => {
             return;
         }
 
-        // Cek apakah ada perubahan yang signifikan (minimal 0.1% perubahan)
+        // ✅ FIX: Batasi maksimal TP update (jangan terlalu jauh dari entry)
+        const maxProfitPercent = 2.0; // Maksimal 2% profit dari entry
+        let currentPrice = signal.price;
+        
+        if (side === "buy") {
+            const maxTP = entryPrice * (1 + maxProfitPercent / 100);
+            if (newTP > maxTP) {
+                console.log(`📏 Update TP/SL: TP baru terlalu jauh, batasi ke ${formatPrice(maxTP)}`);
+                newTP = maxTP;
+            }
+        } else if (side === "sell") {
+            const maxTP = entryPrice * (1 - maxProfitPercent / 100);
+            if (newTP < maxTP) {
+                console.log(`📏 Update TP/SL: TP baru terlalu jauh, batasi ke ${formatPrice(maxTP)}`);
+                newTP = maxTP;
+            }
+        }
+
+        // Cek apakah ada perubahan yang signifikan (minimal 0.2% perubahan)
         const tpChangePercent = Math.abs((newTP - currentTP) / currentTP * 100);
         const slChangePercent = Math.abs((newSL - currentSL) / currentSL * 100);
         
-        const minChangeThreshold = 0.1; // Minimal 0.1% perubahan
+        const minChangeThreshold = 0.2; // Naikkan threshold jadi 0.2%
         
         if (tpChangePercent < minChangeThreshold && slChangePercent < minChangeThreshold) {
             console.log("ℹ️ Update TP/SL: Perubahan tidak signifikan, skip update.");
@@ -597,8 +635,18 @@ const updateTPSLForOpenPosition = async (signal) => {
         saveDB();
 
         console.log(`✅ TP/SL Updated untuk posisi ${side.toUpperCase()}:`);
+        console.log(`   Entry: ${formatPrice(entryPrice)}`);
         console.log(`   TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)} (${tpChangePercent.toFixed(2)}%)`);
         console.log(`   SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)} (${slChangePercent.toFixed(2)}%)`);
+        
+        // Hitung profit potential
+        if (side === "buy") {
+            const profitPercent = ((newTP - entryPrice) / entryPrice * 100).toFixed(2);
+            console.log(`   Profit Potential: +${profitPercent}%`);
+        } else {
+            const profitPercent = ((entryPrice - newTP) / entryPrice * 100).toFixed(2);
+            console.log(`   Profit Potential: +${profitPercent}%`);
+        }
         
         // Log perubahan
         logSignal(
