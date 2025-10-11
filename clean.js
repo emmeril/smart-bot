@@ -614,9 +614,91 @@ const updateTPSLForOpenPosition = async (signal) => {
     }
 };
 
+// -------------------- POSITION RECOVERY --------------------
+const recoverPositionState = async () => {
+    try {
+        console.log("🔄 Recovery: Memeriksa sinkronisasi posisi...");
+        
+        const { position } = await getPositionFromBalance();
+        const amt = parseFloat(position?.positionAmt || "0");
+        const amtSafe = isFinite(amt) ? amt : 0;
+        
+        // SCENARIO 1: Ada posisi di Binance tapi DB null
+        if (Math.abs(amtSafe) > 0 && !db.activePosition) {
+            console.log("⚠️ Recovery: Ditemukan posisi aktif di Binance yang tidak tercatat di DB!");
+            
+            const currentPrice = await getPrice();
+            if (!currentPrice) return;
+            
+            // Reconstruct position info
+            const side = amtSafe > 0 ? "buy" : "sell";
+            const entryPrice = parseFloat(position?.entryPrice || currentPrice);
+            const leverage = position?.leverage || db.leverage;
+            
+            // Calculate TP/SL based on strategy
+            const signal = await analyzeSignal();
+            let tp, sl;
+            
+            if (side === "buy") {
+                tp = signal.targetLong || (entryPrice * 1.02);
+                sl = signal.stopLossLong || (entryPrice * 0.98);
+            } else {
+                tp = signal.targetShort || (entryPrice * 0.98);
+                sl = signal.stopLossShort || (entryPrice * 1.02);
+            }
+            
+            // Rebuild activePosition in DB
+            db.activePosition = {
+                side: side,
+                entryPrice: entryPrice,
+                tp: tp,
+                sl: sl,
+                orderId: "RECOVERED_" + Date.now(),
+                recovered: true
+            };
+            
+            saveDB();
+            
+            console.log(`✅ Recovery: Posisi direcover - ${side.toUpperCase()} 
+                        Entry: ${formatPrice(entryPrice)}, 
+                        TP: ${formatPrice(tp)}, 
+                        SL: ${formatPrice(sl)}`);
+            
+            logSignal(
+                side === "buy" ? "LONG" : "SHORT",
+                entryPrice,
+                tp,
+                sl,
+                "POSITION_RECOVERED"
+            );
+        }
+        
+        // SCENARIO 2: DB ada posisi tapi Binance sudah closed
+        if (db.activePosition && Math.abs(amtSafe) === 0) {
+            console.log("⚠️ Recovery: Posisi di DB tidak ditemukan di Binance, cleaning...");
+            
+            logSignal(
+                db.activePosition.side === "buy" ? "LONG" : "SHORT",
+                db.activePosition.entryPrice,
+                db.activePosition.tp,
+                db.activePosition.sl,
+                "CLOSED_EXTERNALLY"
+            );
+            
+            db.activePosition = null;
+            saveDB();
+            console.log("✅ Recovery: DB cleaned");
+        }
+        
+    } catch (err) {
+        console.error("❌ Recovery: Gagal recover posisi", err.message);
+    }
+};
+
+
 // -------------------- MAIN LOOP --------------------
 setInterval(async () => {
-    // ✅ AUTO RELOAD CONFIG - 6 BARIS INI SAJA!
+    // ✅ AUTO RELOAD CONFIG
     try {
         const freshDb = JSON.parse(fs.readFileSync(dbPath));
         db.pair = freshDb.pair;
@@ -635,6 +717,9 @@ setInterval(async () => {
     isProcessing = true;
     try {
         const now = new Date();
+        
+        // ✅ POSITION RECOVERY - TAMBAHKAN INI SEBELUM CHECK POSITION
+        await recoverPositionState();
         await checkPositionStatus();
 
         console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
