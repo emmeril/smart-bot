@@ -535,6 +535,17 @@ const checkPositionStatus = async () => {
 
 // -------------------- MAIN LOOP --------------------
 setInterval(async () => {
+    // ✅ AUTO RELOAD CONFIG - 6 BARIS INI SAJA!
+    try {
+        const freshDb = JSON.parse(fs.readFileSync(dbPath));
+        db.pair = freshDb.pair;
+        db.leverage = freshDb.leverage; 
+        db.marginMode = freshDb.marginMode;
+        db.usdtPerTrade = freshDb.usdtPerTrade;
+    } catch (error) {
+        // Biarkan pakai config lama kalau error
+    }
+
     if (isProcessing) {
         console.log("⏳ Skip: Masih processing sebelumnya...");
         return;
@@ -547,6 +558,11 @@ setInterval(async () => {
 
         console.log("🔍 Loop Utama: Memeriksa sinyal baru...");
         console.log("🔍 Status Posisi Aktif di DB: ", db.activePosition);
+        console.log("⚙️ Config Aktif:", { 
+            pair: db.pair, 
+            leverage: db.leverage,
+            usdtPerTrade: db.usdtPerTrade 
+        });
 
         const signal = await analyzeSignal();
         if (!signal.price) {
