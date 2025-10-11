@@ -1,4 +1,4 @@
-// bot.js (Optimized Version)
+// bot.js (Fixed Version)
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
@@ -14,7 +14,8 @@ const CONFIG = {
     maxProfitPercent: 2.0,
     minChangeThreshold: 0.2,
     maxRetryAttempts: 3,
-    retryDelay: 5000
+    retryDelay: 5000,
+    maxSRDeviation: 0.10 // Maximum 10% deviation for S/R levels
 };
 
 let isProcessing = false;
@@ -27,7 +28,7 @@ if (!fs.existsSync(CONFIG.logPath)) {
 
 const db = fs.existsSync(CONFIG.dbPath) ? 
     JSON.parse(fs.readFileSync(CONFIG.dbPath)) : {
-        pair: "XRP/USDT:USDT",
+        pair: "DOGE/USDT:USDT",
         lastLongEntryTime: 0,
         lastShortEntryTime: 0,
         leverage: 10,
@@ -161,9 +162,224 @@ const getPositionFromBalance = async () => {
     }, "Fetch position");
 };
 
+// -------------------- ENHANCED TECHNICAL ANALYSIS --------------------
+const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
+    if (highArr.length < period + 1) return 0;
+    
+    const tr = [];
+    for (let i = 1; i < highArr.length; i++) {
+        const tr1 = highArr[i] - lowArr[i];
+        const tr2 = Math.abs(highArr[i] - closeArr[i - 1]);
+        const tr3 = Math.abs(lowArr[i] - closeArr[i - 1]);
+        tr.push(Math.max(tr1, tr2, tr3));
+    }
+    
+    const atr = [];
+    for (let i = period - 1; i < tr.length; i++) {
+        const slice = tr.slice(i - period + 1, i + 1);
+        atr.push(slice.reduce((a, b) => a + b) / period);
+    }
+    
+    return atr.length > 0 ? atr[atr.length - 1] : 0;
+};
+
+const findRealisticSwingLevels = (highArr, lowArr, currentPrice, lookback = 8) => {
+    const swingHighs = [];
+    const swingLows = [];
+    
+    // Find swing highs and lows
+    for (let i = lookback; i < highArr.length - lookback; i++) {
+        let isSwingHigh = true;
+        let isSwingLow = true;
+        
+        for (let j = 1; j <= lookback; j++) {
+            if (highArr[i - j] > highArr[i]) isSwingHigh = false;
+            if (highArr[i + j] > highArr[i]) isSwingHigh = false;
+            
+            if (lowArr[i - j] < lowArr[i]) isSwingLow = false;
+            if (lowArr[i + j] < lowArr[i]) isSwingLow = false;
+        }
+        
+        if (isSwingHigh) {
+            swingHighs.push({
+                price: highArr[i],
+                distance: Math.abs(highArr[i] - currentPrice) / currentPrice
+            });
+        }
+        
+        if (isSwingLow) {
+            swingLows.push({
+                price: lowArr[i],
+                distance: Math.abs(lowArr[i] - currentPrice) / currentPrice
+            });
+        }
+    }
+    
+    // Find nearest realistic levels with maximum deviation
+    const nearestResistance = swingHighs
+        .filter(level => level.price > currentPrice && level.distance <= CONFIG.maxSRDeviation)
+        .sort((a, b) => a.price - b.price)[0]; // Get lowest resistance above price
+    
+    const nearestSupport = swingLows
+        .filter(level => level.price < currentPrice && level.distance <= CONFIG.maxSRDeviation)
+        .sort((a, b) => b.price - a.price)[0]; // Get highest support below price
+    
+    // Fallback: if no realistic levels found, use ATR-based levels
+    const atr = calculateATR(highArr, lowArr, Array(highArr.length).fill(currentPrice), 14) || (currentPrice * 0.02);
+    
+    return {
+        resistance: nearestResistance?.price || (currentPrice + (atr * 2)),
+        support: nearestSupport?.price || (currentPrice - (atr * 2))
+    };
+};
+
+const analyzeSignal = async () => {
+    console.log("🧠 Technical analysis started...");
+    
+    try {
+        // Fetch OHLCV data with better timeframe for volatile pairs
+        const ohlcv = await withRetry(
+            () => exchange.fetchOHLCV(db.pair, "15m", undefined, 100),
+            "Fetch OHLCV"
+        );
+        
+        // Validate data quality
+        if (!ohlcv || ohlcv.length < 50) {
+            console.warn("⚠️ Insufficient OHLCV data");
+            return {};
+        }
+
+        // Check data freshness
+        const lastCandleTime = ohlcv[ohlcv.length - 1][0];
+        const currentTime = Date.now();
+        const timeDiff = currentTime - lastCandleTime;
+        
+        if (timeDiff > 20 * 60 * 1000) { // 20 minutes
+            console.warn("⚠️ OHLCV data might be stale");
+        }
+
+        const close = ohlcv.map(c => c[4]);
+        const high = ohlcv.map(c => c[2]);
+        const low = ohlcv.map(c => c[3]);
+        const price = close[close.length - 1];
+
+        // Enhanced Moving Average Analysis with better periods for crypto
+        const maPeriods = { fast: 7, medium: 15, slow: 50 };
+        const maFast = SMA.calculate({ values: close, period: maPeriods.fast }).pop();
+        const maMedium = SMA.calculate({ values: close, period: maPeriods.medium }).pop();
+        const maSlow = SMA.calculate({ values: close, period: maPeriods.slow }).pop();
+
+        // Previous values for crossover detection
+        const prevMAFast = SMA.calculate({ 
+            values: close.slice(0, -1), 
+            period: maPeriods.fast 
+        }).pop();
+        const prevMAMedium = SMA.calculate({ 
+            values: close.slice(0, -1), 
+            period: maPeriods.medium 
+        }).pop();
+
+        // Validate MA differences are significant
+        const minMADiff = price * 0.001; // Minimal 0.1% difference
+        const hasValidMADiff = Math.abs(maFast - maMedium) > minMADiff;
+        
+        // Enhanced signal logic with trend confirmation
+        const isFastAboveMedium = maFast > maMedium;
+        const isMediumAboveSlow = maMedium > maSlow;
+        const isFastBelowMedium = maFast < maMedium;
+        const isMediumBelowSlow = maMedium < maSlow;
+        
+        // Crossover detection
+        const isGoldenCross = isFastAboveMedium && prevMAFast <= prevMAMedium;
+        const isDeathCross = isFastBelowMedium && prevMAFast >= prevMAMedium;
+
+        let canLong = false;
+        let canShort = false;
+
+        if (hasValidMADiff) {
+            // Long: Golden cross in uptrend, price above fast MA
+            canLong = (isGoldenCross || isFastAboveMedium) && isMediumAboveSlow && price > maFast;
+            
+            // Short: Death cross in downtrend, price below fast MA  
+            canShort = (isDeathCross || isFastBelowMedium) && isMediumBelowSlow && price < maFast;
+        }
+
+        // Enhanced Support/Resistance with realistic bounds
+        const swingLevels = findRealisticSwingLevels(high, low, price, 6);
+        const currentATR = calculateATR(high, low, close, 14) || (price * 0.015);
+
+        // Apply maximum deviation bounds to S/R levels
+        const boundedResistance = Math.min(
+            swingLevels.resistance,
+            price * (1 + CONFIG.maxSRDeviation)
+        );
+        const boundedSupport = Math.max(
+            swingLevels.support,
+            price * (1 - CONFIG.maxSRDeviation)
+        );
+
+        // Calculate TP/SL with ATR-based minimum distances
+        const atrMultiplier = 1.5;
+        const minDistance = currentATR * atrMultiplier;
+        
+        const targetLong = Math.max(boundedResistance, price + minDistance);
+        const stopLossLong = Math.min(boundedSupport, price - minDistance);
+        const targetShort = Math.min(boundedSupport, price - minDistance);
+        const stopLossShort = Math.max(boundedResistance, price + minDistance);
+
+        // Validate TP/SL levels are practical
+        const longRiskReward = (targetLong - price) / (price - stopLossLong);
+        const shortRiskReward = (price - targetShort) / (stopLossShort - price);
+        
+        const minRiskReward = 1.2; // Minimum 1.2:1 risk/reward
+        
+        if (canLong && longRiskReward < minRiskReward) {
+            console.log(`⏸️ LONG signal rejected: Poor R/R ratio ${longRiskReward.toFixed(2)}`);
+            canLong = false;
+        }
+        
+        if (canShort && shortRiskReward < minRiskReward) {
+            console.log(`⏸️ SHORT signal rejected: Poor R/R ratio ${shortRiskReward.toFixed(2)}`);
+            canShort = false;
+        }
+
+        console.log(`\n📊 Enhanced Analysis ${db.pair}
+─────────────────────────────────────
+📈 Long Signal: ${canLong ? "✅ VALID" : "❌ INVALID"} ${!hasValidMADiff ? "(low MA diff)" : ""}
+📉 Short Signal: ${canShort ? "✅ VALID" : "❌ INVALID"} ${!hasValidMADiff ? "(low MA diff)" : ""}
+─────────────────────────────────────
+💰 Current Price: ${formatPrice(price)}
+📊 MA${maPeriods.fast}: ${formatPrice(maFast)} | MA${maPeriods.medium}: ${formatPrice(maMedium)}
+🎯 Resistance: ${formatPrice(boundedResistance)} ${boundedResistance !== swingLevels.resistance ? "(BOUNDED)" : ""}
+🛡️ Support: ${formatPrice(boundedSupport)} ${boundedSupport !== swingLevels.support ? "(BOUNDED)" : ""}
+📏 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(2)}%)
+📊 R/R Ratio: LONG ${longRiskReward.toFixed(2)}:1 | SHORT ${shortRiskReward.toFixed(2)}:1
+─────────────────────────────────────`);
+
+        return {
+            canLong,
+            canShort,
+            targetLong,
+            stopLossLong,
+            targetShort,
+            stopLossShort,
+            price,
+            dataQuality: hasValidMADiff ? "GOOD" : "POOR",
+            riskReward: {
+                long: longRiskReward,
+                short: shortRiskReward
+            }
+        };
+        
+    } catch (error) {
+        console.error("❌ Technical analysis failed:", error.message);
+        return {};
+    }
+};
+
 // -------------------- ENHANCED TP/SL UPDATE --------------------
 const updateTPSLForOpenPosition = async (signal) => {
-    if (!db.activePosition) return;
+    if (!db.activePosition || !signal.price) return;
     
     try {
         console.log("🔄 Checking TP/SL updates...");
@@ -172,21 +388,31 @@ const updateTPSLForOpenPosition = async (signal) => {
         let newTP = side === "buy" ? signal.targetLong : signal.targetShort;
         let newSL = side === "buy" ? signal.stopLossLong : signal.stopLossShort;
 
-        // Validate new levels
+        // Validate new levels are safe and logical
         if (side === "buy") {
             if (newTP <= entryPrice || newSL >= entryPrice) {
                 console.log("⚠️ Invalid TP/SL levels for LONG, keeping current");
                 return;
             }
             
-            // Only update TP if it's higher than current TP (trailing)
-            if (newTP <= currentTP) {
+            // Only update TP if it's higher (trailing) and not too aggressive
+            if (newTP > currentTP) {
+                const maxTP = entryPrice * (1 + CONFIG.maxProfitPercent / 100);
+                newTP = Math.min(newTP, maxTP);
+            } else {
                 console.log("📌 New TP not higher than current, keeping current TP");
                 newTP = currentTP;
             }
             
-            // Only update SL if it's higher than current SL (safer)
-            if (newSL <= currentSL) {
+            // Only update SL if it's higher (safer)
+            if (newSL > currentSL) {
+                // Don't move SL too close to current price
+                const minSlDistance = entryPrice * 0.002; // 0.2% minimum
+                if (newSL > entryPrice - minSlDistance) {
+                    console.log("📌 New SL too close to entry, keeping current SL");
+                    newSL = currentSL;
+                }
+            } else {
                 console.log("📌 New SL not safer than current, keeping current SL");
                 newSL = currentSL;
             }
@@ -197,26 +423,27 @@ const updateTPSLForOpenPosition = async (signal) => {
                 return;
             }
             
-            // Only update TP if it's lower than current TP (trailing)
-            if (newTP >= currentTP) {
+            // Only update TP if it's lower (trailing) and not too aggressive
+            if (newTP < currentTP) {
+                const maxTP = entryPrice * (1 - CONFIG.maxProfitPercent / 100);
+                newTP = Math.max(newTP, maxTP);
+            } else {
                 console.log("📌 New TP not lower than current, keeping current TP");
                 newTP = currentTP;
             }
             
-            // Only update SL if it's lower than current SL (safer)
-            if (newSL >= currentSL) {
+            // Only update SL if it's lower (safer)
+            if (newSL < currentSL) {
+                // Don't move SL too close to current price
+                const minSlDistance = entryPrice * 0.002; // 0.2% minimum
+                if (newSL < entryPrice + minSlDistance) {
+                    console.log("📌 New SL too close to entry, keeping current SL");
+                    newSL = currentSL;
+                }
+            } else {
                 console.log("📌 New SL not safer than current, keeping current SL");
                 newSL = currentSL;
             }
-        }
-
-        // Apply maximum profit limit
-        if (side === "buy") {
-            const maxTP = entryPrice * (1 + CONFIG.maxProfitPercent / 100);
-            newTP = Math.min(newTP, maxTP);
-        } else {
-            const maxTP = entryPrice * (1 - CONFIG.maxProfitPercent / 100);
-            newTP = Math.max(newTP, maxTP);
         }
 
         const tpChangePercent = Math.abs((newTP - currentTP) / currentTP * 100);
@@ -249,7 +476,7 @@ const updateTPSLForOpenPosition = async (signal) => {
     }
 };
 
-// -------------------- ENHANCED ORDER MANAGEMENT --------------------
+// -------------------- ORDER MANAGEMENT --------------------
 const placeOrder = async (side, tp, sl) => {
     console.log("🔍 Checking for active positions...");
     
@@ -422,183 +649,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
     }
 };
 
-// -------------------- ENHANCED TECHNICAL ANALYSIS --------------------
-const analyzeSignal = async () => {
-    console.log("🧠 Technical analysis started...");
-    
-    try {
-        const ohlcv = await withRetry(
-            () => exchange.fetchOHLCV(db.pair, "15m", undefined, 200),
-            "Fetch OHLCV"
-        );
-        
-        if (!ohlcv || ohlcv.length < 100) {
-            console.warn("⚠️ Insufficient OHLCV data");
-            return {};
-        }
-
-        const close = ohlcv.map(c => c[4]);
-        const high = ohlcv.map(c => c[2]);
-        const low = ohlcv.map(c => c[3]);
-
-        // Enhanced Moving Average Analysis
-        const ma7 = SMA.calculate({ values: close.slice(-50), period: 7 });
-        const ma25 = SMA.calculate({ values: close.slice(-50), period: 25 });
-        const ma99 = SMA.calculate({ values: close.slice(-100), period: 99 });
-
-        const currentMA7 = ma7[ma7.length - 1];
-        const currentMA25 = ma25[ma25.length - 1];
-        const currentMA99 = ma99[ma99.length - 1];
-
-        const prevMA7 = ma7[ma7.length - 2];
-        const prevMA25 = ma25[ma25.length - 2];
-
-        const price = close[close.length - 1];
-
-        const isCrossedUp = currentMA7 > currentMA25 && prevMA7 <= prevMA25;
-        const isCrossedDown = currentMA7 < currentMA25 && prevMA7 >= prevMA25;
-
-        let canLong = false;
-        let canShort = false;
-
-        const isMA7AboveMA99 = currentMA7 > currentMA99;
-        const isMA7BelowMA99 = currentMA7 < currentMA99;
-        const isMA25AboveMA99 = currentMA25 > currentMA99;
-        const isMA25BelowMA99 = currentMA25 < currentMA99;
-
-        // Enhanced signal logic with trend confirmation
-        if (isCrossedUp && isMA7AboveMA99 && isMA25AboveMA99) {
-            // Additional confirmation: price above MA25
-            canLong = price > currentMA25;
-        }
-
-        if (isCrossedDown && isMA7BelowMA99 && isMA25BelowMA99) {
-            // Additional confirmation: price below MA25
-            canShort = price < currentMA25;
-        }
-
-        // Enhanced Support/Resistance Detection
-        const findSwingLevels = (highArr, lowArr, lookback = 10, minStrength = 2) => {
-            const swingHighs = [];
-            const swingLows = [];
-            
-            for (let i = lookback; i < highArr.length - lookback; i++) {
-                let isSwingHigh = true;
-                let isSwingLow = true;
-                
-                for (let j = 1; j <= lookback; j++) {
-                    if (highArr[i - j] >= highArr[i]) isSwingHigh = false;
-                    if (highArr[i + j] >= highArr[i]) isSwingHigh = false;
-                    
-                    if (lowArr[i - j] <= lowArr[i]) isSwingLow = false;
-                    if (lowArr[i + j] <= lowArr[i]) isSwingLow = false;
-                }
-                
-                if (isSwingHigh) {
-                    swingHighs.push({ price: highArr[i], index: i });
-                }
-                
-                if (isSwingLow) {
-                    swingLows.push({ price: lowArr[i], index: i });
-                }
-            }
-            
-            // Group nearby levels
-            const groupLevels = (levels, threshold = 0.002) => {
-                const groups = [];
-                
-                levels.sort((a, b) => a.price - b.price).forEach(level => {
-                    const existingGroup = groups.find(g => 
-                        Math.abs(g.price - level.price) / g.price < threshold
-                    );
-                    
-                    if (existingGroup) {
-                        existingGroup.members.push(level);
-                        existingGroup.strength++;
-                    } else {
-                        groups.push({
-                            price: level.price,
-                            strength: 1,
-                            members: [level]
-                        });
-                    }
-                });
-                
-                return groups.sort((a, b) => b.strength - a.strength);
-            };
-            
-            return {
-                resistance: groupLevels(swingHighs).slice(0, 3),
-                support: groupLevels(swingLows).slice(0, 3)
-            };
-        };
-
-        // ATR Calculation for dynamic stop loss
-        const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
-            const tr = [];
-            for (let i = 1; i < highArr.length; i++) {
-                const tr1 = highArr[i] - lowArr[i];
-                const tr2 = Math.abs(highArr[i] - closeArr[i - 1]);
-                const tr3 = Math.abs(lowArr[i] - closeArr[i - 1]);
-                tr.push(Math.max(tr1, tr2, tr3));
-            }
-            
-            if (tr.length < period) return 0;
-            
-            const atr = [];
-            for (let i = period - 1; i < tr.length; i++) {
-                const slice = tr.slice(i - period + 1, i + 1);
-                atr.push(slice.reduce((a, b) => a + b) / period);
-            }
-            
-            return atr.length > 0 ? atr[atr.length - 1] : 0;
-        };
-
-        const swingLevels = findSwingLevels(high, low, 8, 2);
-        const currentATR = calculateATR(high, low, close, 14);
-        
-        // Dynamic level calculation with ATR
-        const atrMultiplier = 1.5;
-        const minDistance = currentATR * atrMultiplier;
-        
-        const nearestResistance = swingLevels.resistance.length > 0 ? 
-            swingLevels.resistance[0].price : price * 1.02;
-        const nearestSupport = swingLevels.support.length > 0 ? 
-            swingLevels.support[0].price : price * 0.98;
-
-        const targetLong = nearestResistance;
-        const stopLossLong = Math.min(nearestSupport, price - minDistance);
-        const targetShort = nearestSupport;
-        const stopLossShort = Math.max(nearestResistance, price + minDistance);
-
-        console.log(`\n📊 Analysis Results ${db.pair}
-─────────────────────────────────────
-📈 Long Signal: ${canLong ? "✅ VALID" : "❌ INVALID"}
-📉 Short Signal: ${canShort ? "✅ VALID" : "❌ INVALID"}
-─────────────────────────────────────
-💰 Current Price: ${formatPrice(price)}
-📊 MA7: ${formatPrice(currentMA7)} | MA25: ${formatPrice(currentMA25)}
-🎯 Resistance: ${formatPrice(nearestResistance)}
-🛡️ Support: ${formatPrice(nearestSupport)}
-📏 ATR: ${formatPrice(currentATR)}
-─────────────────────────────────────`);
-
-        return {
-            canLong,
-            canShort,
-            targetLong,
-            stopLossLong,
-            targetShort,
-            stopLossShort,
-            price,
-        };
-    } catch (error) {
-        console.error("❌ Technical analysis failed:", error.message);
-        return {};
-    }
-};
-
-// -------------------- ENHANCED POSITION MONITORING --------------------
+// -------------------- POSITION MONITORING --------------------
 const checkPositionStatus = async () => {
     try {
         const { position } = await getPositionFromBalance();
@@ -643,7 +694,7 @@ const checkPositionStatus = async () => {
     }
 };
 
-// -------------------- ENHANCED POSITION RECOVERY --------------------
+// -------------------- POSITION RECOVERY --------------------
 const recoverPositionState = async () => {
     try {
         console.log("🔄 Checking position sync...");
@@ -760,8 +811,8 @@ const mainLoop = async () => {
         console.log("🔍 Checking for new signals...");
 
         const signal = await analyzeSignal();
-        if (!signal.price) {
-            console.log("⚠️ Invalid signal, waiting...");
+        if (!signal.price || signal.dataQuality === "POOR") {
+            console.log("⏸️ Poor data quality, skipping signal evaluation");
             return;
         }
 
@@ -800,7 +851,8 @@ const mainLoop = async () => {
             if (signal.canLong) {
                 // Additional confirmation for long entry
                 const isGoodLongEntry = signal.price > signal.stopLossLong && 
-                                      signal.targetLong > signal.price * 1.005;
+                                      signal.targetLong > signal.price * 1.005 &&
+                                      signal.riskReward.long >= 1.2;
                 
                 if (isGoodLongEntry) {
                     console.log(`🚀 LONG Signal | TP: ${formatPrice(signal.targetLong)} | SL: ${formatPrice(signal.stopLossLong)}`);
@@ -808,12 +860,13 @@ const mainLoop = async () => {
                     saveDB();
                     await placeOrder("buy", signal.targetLong, signal.stopLossLong);
                 } else {
-                    console.log(`⏸️ LONG Signal: Poor risk/reward, skipping`);
+                    console.log(`⏸️ LONG Signal: Poor risk/reward (${signal.riskReward.long.toFixed(2)}:1), skipping`);
                 }
             } else if (signal.canShort) {
                 // Additional confirmation for short entry
                 const isGoodShortEntry = signal.price < signal.stopLossShort && 
-                                       signal.targetShort < signal.price * 0.995;
+                                       signal.targetShort < signal.price * 0.995 &&
+                                       signal.riskReward.short >= 1.2;
                 
                 if (isGoodShortEntry) {
                     console.log(`📉 SHORT Signal | TP: ${formatPrice(signal.targetShort)} | SL: ${formatPrice(signal.stopLossShort)}`);
@@ -821,7 +874,7 @@ const mainLoop = async () => {
                     saveDB();
                     await placeOrder("sell", signal.targetShort, signal.stopLossShort);
                 } else {
-                    console.log(`⏸️ SHORT Signal: Poor risk/reward, skipping`);
+                    console.log(`⏸️ SHORT Signal: Poor risk/reward (${signal.riskReward.short.toFixed(2)}:1), skipping`);
                 }
             } else {
                 console.log("💤 No valid signals, waiting...");
@@ -836,6 +889,7 @@ const mainLoop = async () => {
 
 // Start the bot
 console.log("🤖 Trading bot started...");
+mainLoop(); // Run immediately once
 setInterval(mainLoop, CONFIG.checkInterval);
 
 // Handle graceful shutdown
