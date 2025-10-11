@@ -42,10 +42,10 @@ const question = (prompt) => new Promise((resolve) => rl.question(prompt, resolv
 const initExchange = () => {
     try {
         return new ccxt.binance({
-    apiKey: process.env.API_KEY,
-    secret: process.env.API_SECRET,
-    options: { defaultType: "future" },
-});
+            apiKey: process.env.API_KEY,
+            secret: process.env.API_SECRET,
+            options: { defaultType: "future" },
+        });
     } catch (error) {
         console.log("❌ Gagal init exchange:", error.message);
         return null;
@@ -282,7 +282,7 @@ const changePair = async (db) => {
         db.pair = newPair;
         if (writeDB(db)) {
             console.log("✅ Pair berhasil diupdate!");
-            console.log("💡 Restart bot untuk apply perubahan pair!");
+            console.log("🔄 Perubahan akan aktif dalam 30 detik (tanpa restart bot)");
         }
     } else {
         console.log("❌ Update dibatalkan.");
@@ -306,6 +306,7 @@ const changeLeverageAndUsdt = async (db) => {
         db.usdtPerTrade = parseFloat(newUsdt);
         if (writeDB(db)) {
             console.log("✅ Leverage & USDT per trade berhasil diupdate!");
+            console.log("🔄 Perubahan akan aktif dalam 30 detik (tanpa restart bot)");
         }
     } else {
         console.log("❌ Update dibatalkan.");
@@ -329,6 +330,7 @@ const changeMarginMode = async (db) => {
         db.marginMode = newMode.toUpperCase();
         if (writeDB(db)) {
             console.log("✅ Margin mode berhasil diupdate!");
+            console.log("🔄 Perubahan akan aktif dalam 30 detik (tanpa restart bot)");
         }
     } else {
         console.log("❌ Update dibatalkan.");
