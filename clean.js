@@ -665,15 +665,19 @@ const updateTPSLForOpenPosition = async (signal) => {
 // -------------------- POSITION RECOVERY --------------------
 const recoverPositionState = async () => {
     try {
-        console.log("🔄 Recovery: Memeriksa sinkronisasi posisi...");
+        console.log("🔄 Memeriksa sinkronisasi posisi...");
         
         const { position } = await getPositionFromBalance();
         const amt = parseFloat(position?.positionAmt || "0");
+        const MIN_POSITION_AMOUNT = 0.000001;
         const amtSafe = isFinite(amt) ? amt : 0;
         
         // SCENARIO 1: Ada posisi di Binance tapi DB null
-        if (Math.abs(amtSafe) > 0 && !db.activePosition) {
-            console.log("⚠️ Recovery: Ditemukan posisi aktif di Binance yang tidak tercatat di DB!");
+        if (Math.abs(amtSafe) > MIN_POSITION_AMOUNT && !db.activePosition) {
+            console.log("\n⚠️  **POSITION RECOVERY NEEDED**");
+            console.log("   ──────────────────────────────");
+            console.log("   📊 Ditemukan posisi aktif di Binance");
+            console.log("   💾 Tidak tercatat di database lokal");
             
             const currentPrice = await getPrice();
             if (!currentPrice) return;
@@ -683,51 +687,46 @@ const recoverPositionState = async () => {
             const entryPrice = parseFloat(position?.entryPrice || currentPrice);
             const leverage = position?.leverage || db.leverage;
             
-            // DAPATKAN SINYAL TERKINI UNTUK TP/SL DARI RESISTANCE & SUPPORT
+            // DAPATKAN SINYAL TERKINI DENGAN FALLBACK
             const signal = await analyzeSignal();
-            
             let tp, sl;
             
-            if (side === "buy") {
-                // Untuk LONG: TP di resistance, SL di support
-                tp = signal.targetLong || (entryPrice * 1.02);
-                sl = signal.stopLossLong || (entryPrice * 0.98);
-                
-                console.log(`📊 Recovery LONG: 
-                - Resistance (TP): ${formatPrice(signal.targetLong)}
-                - Support (SL): ${formatPrice(signal.stopLossLong)}
-                - Current Price: ${formatPrice(currentPrice)}`);
-                
+            if (!signal || !signal.price) {
+                console.log("   ⚠️  Gagal analisis, menggunakan fallback TP/SL");
+                if (side === "buy") {
+                    tp = entryPrice * 1.015;
+                    sl = entryPrice * 0.995;
+                } else {
+                    tp = entryPrice * 0.985;
+                    sl = entryPrice * 1.005;
+                }
             } else {
-                // Untuk SHORT: TP di support, SL di resistance  
-                tp = signal.targetShort || (entryPrice * 0.98);
-                sl = signal.stopLossShort || (entryPrice * 1.02);
-                
-                console.log(`📊 Recovery SHORT:
-                - Support (TP): ${formatPrice(signal.targetShort)} 
-                - Resistance (SL): ${formatPrice(signal.stopLossShort)}
-                - Current Price: ${formatPrice(currentPrice)}`);
+                if (side === "buy") {
+                    tp = signal.targetLong || (entryPrice * 1.015);
+                    sl = signal.stopLossLong || (entryPrice * 0.995);
+                } else {
+                    tp = signal.targetShort || (entryPrice * 0.985);
+                    sl = signal.stopLossShort || (entryPrice * 1.005);
+                }
             }
             
-            // VALIDASI TP/SL - pastikan logika sesuai arah posisi
+            // SAFETY MARGIN
+            const SAFETY_MARGIN = 0.001;
             if (side === "buy") {
-                if (tp <= entryPrice) {
-                    console.warn("⚠️ Recovery: TP invalid (<= entry), menggunakan fallback");
-                    tp = entryPrice * 1.02;
-                }
-                if (sl >= entryPrice) {
-                    console.warn("⚠️ Recovery: SL invalid (>= entry), menggunakan fallback"); 
-                    sl = entryPrice * 0.98;
-                }
+                tp = tp * (1 - SAFETY_MARGIN);
+                sl = sl * (1 + SAFETY_MARGIN);
             } else {
-                if (tp >= entryPrice) {
-                    console.warn("⚠️ Recovery: TP invalid (>= entry), menggunakan fallback");
-                    tp = entryPrice * 0.98;
-                }
-                if (sl <= entryPrice) {
-                    console.warn("⚠️ Recovery: SL invalid (<= entry), menggunakan fallback");
-                    sl = entryPrice * 1.02;
-                }
+                tp = tp * (1 + SAFETY_MARGIN);
+                sl = sl * (1 - SAFETY_MARGIN);
+            }
+            
+            // VALIDASI TP/SL
+            if (side === "buy") {
+                if (tp <= entryPrice) tp = entryPrice * 1.015;
+                if (sl >= entryPrice) sl = entryPrice * 0.995;
+            } else {
+                if (tp >= entryPrice) tp = entryPrice * 0.985;
+                if (sl <= entryPrice) sl = entryPrice * 1.005;
             }
             
             // Hitung Risk/Reward Ratio
@@ -746,36 +745,53 @@ const recoverPositionState = async () => {
                 sl: sl,
                 orderId: "RECOVERED_" + Date.now(),
                 recovered: true,
-                rrRatio: parseFloat(rrRatio)
+                rrRatio: parseFloat(rrRatio),
+                recoveredAt: new Date().toISOString()
             };
             
             saveDB();
             
-            console.log(`✅ Recovery: Posisi ${side.toUpperCase()} direcover!
-📈 Entry: ${formatPrice(entryPrice)}
-🎯 TP: ${formatPrice(tp)} (Resistance/Support)  
-🛡️ SL: ${formatPrice(sl)} (Support/Resistance)
-📊 R/R Ratio: ${rrRatio}
-💰 P/L Unrealized: ${formatPrice(side === "buy" ? currentPrice - entryPrice : entryPrice - currentPrice)}`);
+            console.log("\n✅ **POSITION RECOVERED SUCCESSFULLY**");
+            console.log("   ──────────────────────────────────");
+            console.log(`   📈 Position: ${side.toUpperCase()}`);
+            console.log(`   💰 Entry: ${formatPrice(entryPrice)}`);
+            console.log(`   🎯 Take Profit: ${formatPrice(tp)}`);
+            console.log(`   🛡️  Stop Loss: ${formatPrice(sl)}`);
+            console.log(`   📊 Risk/Reward: ${rrRatio}`);
+            console.log(`   ⚡ Leverage: ${leverage}x`);
+            console.log(`   🕒 Recovered: ${new Date().toLocaleTimeString()}`);
+            
+            // Hitung unrealized PnL
+            const unrealizedPnl = side === "buy" ? currentPrice - entryPrice : entryPrice - currentPrice;
+            const pnlPercent = (unrealizedPnl / entryPrice * 100).toFixed(2);
+            const pnlEmoji = unrealizedPnl >= 0 ? "📈" : "📉";
+            
+            console.log(`   ${pnlEmoji} Unrealized PnL: ${formatPrice(unrealizedPnl)} (${pnlPercent}%)`);
+            console.log("   ──────────────────────────────────");
             
             logSignal(
                 side === "buy" ? "LONG" : "SHORT",
                 entryPrice,
                 tp,
                 sl,
-                "POSITION_RECOVERED_WITH_SR"
+                "POSITION_RECOVERED"
             );
         }
         
         // SCENARIO 2: DB ada posisi tapi Binance sudah closed
-        if (db.activePosition && Math.abs(amtSafe) === 0) {
-            console.log("⚠️ Recovery: Posisi di DB tidak ditemukan di Binance, cleaning...");
+        if (db.activePosition && Math.abs(amtSafe) <= MIN_POSITION_AMOUNT) {
+            console.log("\n⚠️  **POSITION CLEANUP NEEDED**");
+            console.log("   ─────────────────────────────");
+            console.log("   💾 Posisi tercatat di database");
+            console.log("   📊 Tidak ditemukan di Binance");
             
-            // Cek apakah ini posisi yang sebelumnya direcover
             const wasRecovered = db.activePosition.recovered ? " (Recovered Position)" : "";
+            const side = db.activePosition.side === "buy" ? "LONG" : "SHORT";
+            
+            console.log(`   🔄 Membersihkan: ${side}${wasRecovered}`);
             
             logSignal(
-                db.activePosition.side === "buy" ? "LONG" : "SHORT",
+                side,
                 db.activePosition.entryPrice,
                 db.activePosition.tp,
                 db.activePosition.sl,
@@ -784,29 +800,76 @@ const recoverPositionState = async () => {
             
             db.activePosition = null;
             saveDB();
-            console.log("✅ Recovery: DB cleaned" + wasRecovered);
+            
+            console.log("   ✅ Database berhasil dibersihkan");
+            console.log("   ─────────────────────────────");
         }
         
         // SCENARIO 3: Log current position status untuk monitoring
-        if (db.activePosition && Math.abs(amtSafe) > 0) {
+        if (db.activePosition && Math.abs(amtSafe) > MIN_POSITION_AMOUNT) {
             const currentPrice = await getPrice();
             if (currentPrice) {
-                const { side, entryPrice, tp, sl } = db.activePosition;
+                const { side, entryPrice, tp, sl, recovered } = db.activePosition;
                 const unrealizedPnl = side === "buy" ? currentPrice - entryPrice : entryPrice - currentPrice;
                 const pnlPercent = (unrealizedPnl / entryPrice * 100).toFixed(2);
                 
-                console.log(`📊 Position Monitor: ${side.toUpperCase()} 
-                Entry: ${formatPrice(entryPrice)} | Now: ${formatPrice(currentPrice)}
-                TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}
-                PnL: ${formatPrice(unrealizedPnl)} (${pnlPercent}%)`);
+                // Check jika mendekati TP/SL
+                let status = "🟢 NORMAL";
+                let warning = "";
+                
+                if (side === "buy") {
+                    if (currentPrice >= tp * 0.998) {
+                        status = "🟡 DEKAT TP";
+                        warning = " - Hampir Take Profit!";
+                    } else if (currentPrice <= sl * 1.002) {
+                        status = "🔴 DEKAT SL";
+                        warning = " - Hampir Stop Loss!";
+                    }
+                } else {
+                    if (currentPrice <= tp * 1.002) {
+                        status = "🟡 DEKAT TP";
+                        warning = " - Hampir Take Profit!";
+                    } else if (currentPrice >= sl * 0.998) {
+                        status = "🔴 DEKAT SL";
+                        warning = " - Hampir Stop Loss!";
+                    }
+                }
+                
+                const recoveryTag = recovered ? " ♻️ RECOVERED" : "";
+                const pnlEmoji = unrealizedPnl >= 0 ? "💹" : "🔻";
+                
+                console.log("\n📊 **POSITION MONITOR**" + recoveryTag);
+                console.log("   ─────────────────────────────");
+                console.log(`   ${side.toUpperCase()} | ${status}${warning}`);
+                console.log(`   💰 Entry: ${formatPrice(entryPrice)}`);
+                console.log(`   📈 Current: ${formatPrice(currentPrice)}`);
+                console.log(`   🎯 TP: ${formatPrice(tp)}`);
+                console.log(`   🛡️  SL: ${formatPrice(sl)}`);
+                console.log(`   ${pnlEmoji} PnL: ${formatPrice(unrealizedPnl)} (${pnlPercent}%)`);
+                
+                // Progress bar untuk TP/SL
+                if (side === "buy") {
+                    const progressToTP = Math.max(0, Math.min(100, ((currentPrice - entryPrice) / (tp - entryPrice)) * 100));
+                    const progressToSL = Math.max(0, Math.min(100, ((entryPrice - currentPrice) / (entryPrice - sl)) * 100));
+                    console.log(`   📊 Progress TP: ${progressToTP.toFixed(1)}%`);
+                    console.log(`   📊 Progress SL: ${progressToSL.toFixed(1)}%`);
+                } else {
+                    const progressToTP = Math.max(0, Math.min(100, ((entryPrice - currentPrice) / (entryPrice - tp)) * 100));
+                    const progressToSL = Math.max(0, Math.min(100, ((currentPrice - entryPrice) / (sl - entryPrice)) * 100));
+                    console.log(`   📊 Progress TP: ${progressToTP.toFixed(1)}%`);
+                    console.log(`   📊 Progress SL: ${progressToSL.toFixed(1)}%`);
+                }
+                console.log("   ─────────────────────────────");
             }
         }
         
     } catch (err) {
-        console.error("❌ Recovery: Gagal recover posisi", err.message);
+        console.log("\n❌ **RECOVERY ERROR**");
+        console.log("   ──────────────────");
+        console.log(`   💥 Error: ${err.message}`);
+        console.log("   ──────────────────");
     }
 };
-
 
 // -------------------- MAIN LOOP --------------------
 setInterval(async () => {
