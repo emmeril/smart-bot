@@ -533,6 +533,87 @@ const checkPositionStatus = async () => {
     }
 };
 
+// -------------------- DYNAMIC TP/SL UPDATE --------------------
+const updateTPSLForOpenPosition = async (signal) => {
+    if (!db.activePosition) return;
+    
+    try {
+        console.log("🔄 Update TP/SL: Memeriksa update untuk posisi terbuka...");
+        
+        const { side, entryPrice, tp: currentTP, sl: currentSL } = db.activePosition;
+        let newTP, newSL;
+
+        if (side === "buy") {
+            // Untuk LONG position - TP di Resistance, SL di Support
+            newTP = signal.targetLong;    // Resistance terbaru
+            newSL = signal.stopLossLong;  // Support terbaru
+            
+            // Validasi: TP harus > entry price, SL harus < entry price
+            if (newTP <= entryPrice || newSL >= entryPrice) {
+                console.log("⚠️ Update TP/SL: Level TP/SL tidak valid untuk LONG, skip update.");
+                return;
+            }
+            
+            // Safety: Jangan pindah SL jadi lebih riskan (lebih dekat ke entry)
+            if (newSL > currentSL) {
+                console.log("🛡️ Update TP/SL: SL baru lebih riskan untuk LONG, pertahankan SL lama.");
+                newSL = currentSL;
+            }
+            
+        } else if (side === "sell") {
+            // Untuk SHORT position - TP di Support, SL di Resistance  
+            newTP = signal.targetShort;   // Support terbaru
+            newSL = signal.stopLossShort; // Resistance terbaru
+            
+            // Validasi: TP harus < entry price, SL harus > entry price
+            if (newTP >= entryPrice || newSL <= entryPrice) {
+                console.log("⚠️ Update TP/SL: Level TP/SL tidak valid untuk SHORT, skip update.");
+                return;
+            }
+            
+            // Safety: Jangan pindah SL jadi lebih riskan (lebih dekat ke entry)
+            if (newSL < currentSL) {
+                console.log("🛡️ Update TP/SL: SL baru lebih riskan untuk SHORT, pertahankan SL lama.");
+                newSL = currentSL;
+            }
+        } else {
+            return;
+        }
+
+        // Cek apakah ada perubahan yang signifikan (minimal 0.1% perubahan)
+        const tpChangePercent = Math.abs((newTP - currentTP) / currentTP * 100);
+        const slChangePercent = Math.abs((newSL - currentSL) / currentSL * 100);
+        
+        const minChangeThreshold = 0.1; // Minimal 0.1% perubahan
+        
+        if (tpChangePercent < minChangeThreshold && slChangePercent < minChangeThreshold) {
+            console.log("ℹ️ Update TP/SL: Perubahan tidak signifikan, skip update.");
+            return;
+        }
+
+        // Update TP/SL di database
+        db.activePosition.tp = newTP;
+        db.activePosition.sl = newSL;
+        saveDB();
+
+        console.log(`✅ TP/SL Updated untuk posisi ${side.toUpperCase()}:`);
+        console.log(`   TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)} (${tpChangePercent.toFixed(2)}%)`);
+        console.log(`   SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)} (${slChangePercent.toFixed(2)}%)`);
+        
+        // Log perubahan
+        logSignal(
+            side === "buy" ? "LONG" : "SHORT",
+            entryPrice,
+            newTP,
+            newSL,
+            "TP_SL_UPDATED"
+        );
+
+    } catch (error) {
+        console.error("❌ Update TP/SL: Gagal update:", error.message);
+    }
+};
+
 // -------------------- MAIN LOOP --------------------
 setInterval(async () => {
     // ✅ AUTO RELOAD CONFIG - 6 BARIS INI SAJA!
@@ -568,6 +649,11 @@ setInterval(async () => {
         if (!signal.price) {
             console.log("⚠️ Analisis: Sinyal tidak valid, menunggu...");
             return;
+        }
+
+        // ✅ UPDATE TP/SL UNTUK POSISI TERBUKA
+        if (db.activePosition) {
+            await updateTPSLForOpenPosition(signal);
         }
 
         const hasBotPosition = db.activePosition !== null;
