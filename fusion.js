@@ -1,4 +1,4 @@
-// bot.js (Enhanced Version with botv2.js Features)
+// bot.js (Fixed Version - Enhanced with Proper RR Calculation)
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
@@ -12,15 +12,20 @@ const CONFIG = {
     minPositionAmount: 0.000001,
     safetyMargin: 0.001,
     maxRiskPerTrade: 0.02,
-    atrMultiplier: 1.5,
+    atrMultiplier: 2.0, // Increased for better RR ratios
     minRiskReward: 1.5,
-    volatilityThreshold: 0.02,
+    volatilityThreshold: 0.005, // Reduced to 0.5% minimum volatility
     maxRetryAttempts: 3,
     retryDelay: 5000,
     marketConditions: {
         highVolatility: 0.05,
         lowVolatility: 0.01,
         extremeVolatility: 0.10
+    },
+    // NEW: Realistic RR ratio validation
+    realisticRR: {
+        min: 0.3,   // Minimum realistic RR (0.3:1)
+        max: 5.0    // Maximum realistic RR (5:1)
     }
 };
 
@@ -36,7 +41,7 @@ if (!fs.existsSync(CONFIG.logPath)) {
 
 const db = fs.existsSync(CONFIG.dbPath) ?
     JSON.parse(fs.readFileSync(CONFIG.dbPath)) : {
-        pair: "XRP/USDT:USDT",
+        pair: "DOGE/USDT:USDT",
         lastLongEntryTime: 0,
         lastShortEntryTime: 0,
         leverage: 10,
@@ -212,7 +217,7 @@ const getPositionFromBalance = async () => {
     }, "Fetch position");
 };
 
-// -------------------- ENHANCED MARKET ANALYSIS --------------------
+// -------------------- FIXED MARKET ANALYSIS --------------------
 const analyzeMarketConditions = (ohlcv) => {
     const closes = ohlcv.map(c => c[4]);
     const highs = ohlcv.map(c => c[2]);
@@ -266,7 +271,79 @@ const analyzeMarketConditions = (ohlcv) => {
     };
 };
 
-// -------------------- TECHNICAL ANALYSIS (KEEPING BOT.JS LOGIC) --------------------
+// -------------------- FIXED TECHNICAL ANALYSIS --------------------
+const calculateRealisticTPSL = (price, atr, side, marketCondition) => {
+    // Base distances on ATR with multiplier
+    let tpDistance, slDistance;
+    
+    // Adjust distances based on market condition
+    switch (marketCondition) {
+        case "trending":
+            tpDistance = atr * CONFIG.atrMultiplier * 1.2;
+            slDistance = atr * CONFIG.atrMultiplier * 0.8;
+            break;
+        case "ranging":
+            tpDistance = atr * CONFIG.atrMultiplier * 0.8;
+            slDistance = atr * CONFIG.atrMultiplier * 1.2;
+            break;
+        default:
+            tpDistance = atr * CONFIG.atrMultiplier;
+            slDistance = atr * CONFIG.atrMultiplier;
+    }
+    
+    // Adjust based on volatility
+    if (marketAnalysis.volatility === "high") {
+        tpDistance *= 1.3;
+        slDistance *= 1.3;
+    } else if (marketAnalysis.volatility === "low") {
+        tpDistance *= 0.7;
+        slDistance *= 0.7;
+    }
+    
+    // Ensure minimum distances (0.5% for TP, 0.3% for SL)
+    const minTPDistance = price * 0.005;
+    const minSLDistance = price * 0.003;
+    
+    tpDistance = Math.max(tpDistance, minTPDistance);
+    slDistance = Math.max(slDistance, minSLDistance);
+    
+    if (side === "buy") {
+        return {
+            tp: price + tpDistance,
+            sl: price - slDistance
+        };
+    } else {
+        return {
+            tp: price - tpDistance,
+            sl: price + slDistance
+        };
+    }
+};
+
+// NEW: Validate RR ratio to ensure realistic values
+const validateRRRatio = (rr, side, price, tp, sl) => {
+    if (!isFinite(rr) || rr <= 0) {
+        console.log(`❌ Invalid RR ratio: ${rr}`);
+        return false;
+    }
+    
+    if (rr < CONFIG.realisticRR.min || rr > CONFIG.realisticRR.max) {
+        console.log(`⚠️ Unrealistic RR ratio ${rr.toFixed(2)}:1 for ${side}`);
+        
+        // Debug information
+        console.log(`🔍 RR Debug - ${side}:`);
+        console.log(`   Price: ${formatPrice(price)}`);
+        console.log(`   TP: ${formatPrice(tp)} (${((Math.abs(tp - price) / price) * 100).toFixed(2)}%)`);
+        console.log(`   SL: ${formatPrice(sl)} (${((Math.abs(sl - price) / price) * 100).toFixed(2)}%)`);
+        console.log(`   TP Distance: ${formatPrice(Math.abs(tp - price))}`);
+        console.log(`   SL Distance: ${formatPrice(Math.abs(sl - price))}`);
+        
+        return false;
+    }
+    
+    return true;
+};
+
 const analyzeSignal = async () => {
     console.log("🧠 Enhanced Technical analysis started...");
     
@@ -281,7 +358,7 @@ const analyzeSignal = async () => {
         const high = ohlcv.map(c => c[2]);
         const low = ohlcv.map(c => c[3]);
 
-        // Analyze market conditions from botv2.js
+        // Analyze market conditions
         marketAnalysis = analyzeMarketConditions(ohlcv);
         
         // KEEP ORIGINAL BOT.JS LOGIC FOR SIGNALS
@@ -315,142 +392,61 @@ const analyzeSignal = async () => {
             canShort = true;
         }
 
-        // Support/Resistance Detection (Original bot.js logic)
-        const findAdvancedSwingLevels = (highArr, lowArr, lookback = 10, minStrength = 2) => {
-            const swingHighs = [];
-            const swingLows = [];
-            
-            for (let i = lookback; i < highArr.length - lookback; i++) {
-                let isSwingHigh = true;
-                let isSwingLow = true;
-                let strengthHigh = 0;
-                let strengthLow = 0;
-                
-                for (let j = 1; j <= lookback; j++) {
-                    if (highArr[i - j] > highArr[i]) isSwingHigh = false;
-                    if (highArr[i + j] > highArr[i]) isSwingHigh = false;
-                    
-                    if (lowArr[i - j] < lowArr[i]) isSwingLow = false;
-                    if (lowArr[i + j] < lowArr[i]) isSwingLow = false;
-                    
-                    if (highArr[i - j] < highArr[i] && highArr[i + j] < highArr[i]) strengthHigh++;
-                    if (lowArr[i - j] > lowArr[i] && lowArr[i + j] > lowArr[i]) strengthLow++;
-                }
-                
-                if (isSwingHigh && strengthHigh >= minStrength) {
-                    swingHighs.push({
-                        price: highArr[i],
-                        strength: strengthHigh,
-                        index: i
-                    });
-                }
-                
-                if (isSwingLow && strengthLow >= minStrength) {
-                    swingLows.push({
-                        price: lowArr[i],
-                        strength: strengthLow,
-                        index: i
-                    });
-                }
-            }
-            
-            const groupLevels = (levels, threshold = 0.002) => {
-                const groups = [];
-                
-                levels.sort((a, b) => a.price - b.price).forEach(level => {
-                    const existingGroup = groups.find(g => 
-                        Math.abs(g.price - level.price) / g.price < threshold
-                    );
-                    
-                    if (existingGroup) {
-                        existingGroup.members.push(level);
-                        existingGroup.price = (existingGroup.price + level.price) / 2;
-                        existingGroup.strength += level.strength;
-                    } else {
-                        groups.push({
-                            price: level.price,
-                            strength: level.strength,
-                            members: [level]
-                        });
-                    }
-                });
-                
-                return groups.sort((a, b) => b.strength - a.strength);
-            };
-            
-            return {
-                resistance: groupLevels(swingHighs).slice(0, 3),
-                support: groupLevels(swingLows).slice(0, 3)
-            };
-        };
-
-        // ATR Calculation
-        const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
-            const tr = [];
-            for (let i = 1; i < highArr.length; i++) {
-                const tr1 = highArr[i] - lowArr[i];
-                const tr2 = Math.abs(highArr[i] - closeArr[i - 1]);
-                const tr3 = Math.abs(lowArr[i] - closeArr[i - 1]);
-                tr.push(Math.max(tr1, tr2, tr3));
-            }
-            
-            const atr = [];
-            for (let i = period - 1; i < tr.length; i++) {
-                const slice = tr.slice(i - period + 1, i + 1);
-                atr.push(slice.reduce((a, b) => a + b) / period);
-            }
-            
-            return atr;
-        };
-
-        const advancedLevels = findAdvancedSwingLevels(high, low, 8, 3);
-        const currentATR = calculateATR(high, low, close, 14).pop() || 0;
+        // FIXED: Use ATR-based TP/SL for more realistic levels
+        let targetLong, stopLossLong, targetShort, stopLossShort;
         
-        const minDistance = currentATR * 0.5;
+        // Calculate realistic TP/SL based on ATR
+        const longLevels = calculateRealisticTPSL(price, marketAnalysis.atr, "buy", marketAnalysis.marketCondition);
+        const shortLevels = calculateRealisticTPSL(price, marketAnalysis.atr, "sell", marketAnalysis.marketCondition);
         
-        const validResistance = advancedLevels.resistance
-            .filter(level => level.price > price + minDistance)
-            .sort((a, b) => a.price - b.price);
-        
-        const validSupport = advancedLevels.support
-            .filter(level => level.price < price - minDistance)
-            .sort((a, b) => b.price - a.price);
+        targetLong = longLevels.tp;
+        stopLossLong = longLevels.sl;
+        targetShort = shortLevels.tp;
+        stopLossShort = shortLevels.sl;
 
-        const resistance = validResistance.length > 0 ? 
-            validResistance[0].price : 
-            Math.max(...high.slice(-96));
-        
-        const support = validSupport.length > 0 ? 
-            validSupport[0].price : 
-            Math.min(...low.slice(-96));
-
-        const targetLong = resistance;
-        const stopLossLong = support;
-        const targetShort = support;
-        const stopLossShort = resistance;
-
-        // Enhanced risk/reward validation from botv2.js
+        // Calculate risk/reward ratios
         const longRiskReward = (targetLong - price) / (price - stopLossLong);
         const shortRiskReward = (price - targetShort) / (stopLossShort - price);
-        
+
+        // Validate RR ratios are realistic
+        const validLongRR = validateRRRatio(longRiskReward, "LONG", price, targetLong, stopLossLong);
+        const validShortRR = validateRRRatio(shortRiskReward, "SHORT", price, targetShort, stopLossShort);
+
         // Adjust minimum R/R based on market conditions
         const minRR = marketAnalysis.volatility === "high" ? CONFIG.minRiskReward * 1.2 : 
                      marketAnalysis.volatility === "extreme" ? CONFIG.minRiskReward * 1.5 : CONFIG.minRiskReward;
         
-        if (canLong && longRiskReward < minRR) {
-            console.log(`⏸️ LONG rejected: Poor R/R ${longRiskReward.toFixed(2)} in ${marketAnalysis.volatility} volatility`);
+        if (canLong && (!validLongRR || longRiskReward < minRR)) {
+            console.log(`⏸️ LONG rejected: ${!validLongRR ? 'Unrealistic R/R' : `Poor R/R ${longRiskReward.toFixed(2)}`} in ${marketAnalysis.volatility} volatility`);
             canLong = false;
         }
         
-        if (canShort && shortRiskReward < minRR) {
-            console.log(`⏸️ SHORT rejected: Poor R/R ${shortRiskReward.toFixed(2)} in ${marketAnalysis.volatility} volatility`);
+        if (canShort && (!validShortRR || shortRiskReward < minRR)) {
+            console.log(`⏸️ SHORT rejected: ${!validShortRR ? 'Unrealistic R/R' : `Poor R/R ${shortRiskReward.toFixed(2)}`} in ${marketAnalysis.volatility} volatility`);
             canShort = false;
         }
 
-        // Check minimum volatility for trading
+        // Check minimum volatility for trading (reduced threshold)
         if (marketAnalysis.atrRatio < CONFIG.volatilityThreshold) {
             console.log(`⏸️ Market too calm (volatility: ${(marketAnalysis.atrRatio * 100).toFixed(2)}%), skipping`);
             canLong = false;
+            canShort = false;
+        }
+
+        // NEW: Additional validation - ensure TP/SL distances make sense
+        const minDistancePercent = 0.002; // 0.2% minimum distance
+        const longTPDistance = (targetLong - price) / price;
+        const longSLDistance = (price - stopLossLong) / price;
+        const shortTPDistance = (price - targetShort) / price;
+        const shortSLDistance = (stopLossShort - price) / price;
+
+        if (canLong && (longTPDistance < minDistancePercent || longSLDistance < minDistancePercent)) {
+            console.log(`⏸️ LONG rejected: TP/SL distances too small (TP: ${(longTPDistance * 100).toFixed(2)}%, SL: ${(longSLDistance * 100).toFixed(2)}%)`);
+            canLong = false;
+        }
+
+        if (canShort && (shortTPDistance < minDistancePercent || shortSLDistance < minDistancePercent)) {
+            console.log(`⏸️ SHORT rejected: TP/SL distances too small (TP: ${(shortTPDistance * 100).toFixed(2)}%, SL: ${(shortSLDistance * 100).toFixed(2)}%)`);
             canShort = false;
         }
 
@@ -463,8 +459,13 @@ const analyzeSignal = async () => {
 📊 Market Condition: ${marketAnalysis.marketCondition.toUpperCase()}
 📈 Volatility: ${marketAnalysis.volatility.toUpperCase()} (${(marketAnalysis.atrRatio * 100).toFixed(2)}%)
 📏 ATR: ${formatPrice(marketAnalysis.atr)}
+📊 Trend Strength: ${(marketAnalysis.trendStrength * 100).toFixed(2)}%
 ─────────────────────────────────────
-🎯 R/R Ratio: LONG ${longRiskReward.toFixed(2)}:1 | SHORT ${shortRiskReward.toFixed(2)}:1
+🎯 LONG: TP ${formatPrice(targetLong)} | SL ${formatPrice(stopLossLong)}
+🎯 SHORT: TP ${formatPrice(targetShort)} | SL ${formatPrice(stopLossShort)}
+💰 R/R Ratio: LONG ${longRiskReward.toFixed(2)}:1 | SHORT ${shortRiskReward.toFixed(2)}:1
+📏 Distances: LONG TP+${((targetLong - price) / price * 100).toFixed(2)}% SL-${((price - stopLossLong) / price * 100).toFixed(2)}%
+📏 Distances: SHORT TP-${((price - targetShort) / price * 100).toFixed(2)}% SL+${((stopLossShort - price) / price * 100).toFixed(2)}%
 ─────────────────────────────────────`);
 
         return {
@@ -480,7 +481,8 @@ const analyzeSignal = async () => {
             riskReward: {
                 long: longRiskReward,
                 short: shortRiskReward
-            }
+            },
+            dataQuality: "GOOD"
         };
         
     } catch (error) {
@@ -531,8 +533,8 @@ const placeOrder = async (side, tp, sl) => {
     console.log(`➡️ ENHANCED ENTRY ${side.toUpperCase()}
 - Dynamic Quantity: ${qty}
 - Entry: ${formatPrice(price)}
-- TP: ${formatPrice(tp)}
-- SL: ${formatPrice(sl)}
+- TP: ${formatPrice(tp)} (${((Math.abs(tp - price) / price) * 100).toFixed(2)}%)
+- SL: ${formatPrice(sl)} (${((Math.abs(sl - price) / price) * 100).toFixed(2)}%)
 - Volatility: ${marketAnalysis.volatility}
 - Market Condition: ${marketAnalysis.marketCondition}`);
 
@@ -1040,8 +1042,8 @@ setInterval(async () => {
         console.log("🔍 Enhanced signal analysis...");
 
         const signal = await analyzeSignal();
-        if (!signal.price) {
-            console.log("⚠️ Invalid signal, waiting...");
+        if (!signal.price || signal.dataQuality !== "GOOD") {
+            console.log("⚠️ Poor data quality or no signal, skipping");
             return;
         }
 
@@ -1113,7 +1115,8 @@ setInterval(async () => {
 // Start message
 console.log("\n🤖 Enhanced Crypto Trading Bot Started!");
 console.log("⚡ Features: Dynamic position sizing, Market condition analysis, Enhanced risk management");
-console.log("📊 Technical: Multi-indicator analysis, Volatility adjustment, Advanced TP/SL management\n");
+console.log("📊 Technical: Multi-indicator analysis, Volatility adjustment, Advanced TP/SL management");
+console.log("🔧 Fixes: Realistic RR ratio validation, ATR-based TP/SL, Improved signal filtering\n");
 
 // Enhanced graceful shutdown
 process.on('SIGINT', async () => {
@@ -1135,4 +1138,13 @@ process.on('SIGINT', async () => {
     
     console.log('👋 Bot shutdown completed');
     process.exit(0);
+});
+
+// Handle uncaught errors
+process.on('uncaughtException', (error) => {
+    console.error('💥 Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
 });
