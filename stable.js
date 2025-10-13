@@ -630,7 +630,6 @@ const updateTPSLForOpenPosition = async (signal) => {
 
         // Limit maximum TP distance
         const maxProfitPercent = 2.0;
-        let currentPrice = signal.price;
         
         if (side === "buy") {
             const maxTP = entryPrice * (1 + maxProfitPercent / 100);
@@ -795,7 +794,7 @@ const recoverPositionState = async () => {
         if (db.activePosition && Math.abs(amtSafe) > MIN_POSITION_AMOUNT) {
             const currentPrice = await getPrice();
             if (currentPrice) {
-                const { side, entryPrice, tp, sl, recovered } = db.activePosition;
+                const { side, entryPrice, tp, sl } = db.activePosition;
                 const unrealizedPnl = side === "buy" ? currentPrice - entryPrice : entryPrice - currentPrice;
                 const pnlPercent = (unrealizedPnl / entryPrice * 100).toFixed(2);
                 
