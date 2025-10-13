@@ -929,7 +929,7 @@ setInterval(async () => {
 
         if (shouldExitCurrentPosition) {
             await closePosition("Signal reversal", db.activePosition.entryPrice);
-            await new Promise(resolve => setTimeout(resolve, 15000));
+            await new Promise(resolve => setTimeout(resolve, 10000));
         }
 
         const { position } = await getPositionFromBalance();
@@ -966,4 +966,4 @@ setInterval(async () => {
     } finally {
         isProcessing = false;
     }
-}, 30000);
+}, 10000);
