@@ -1,4 +1,4 @@
-// bot.js (Optimized Version)
+// bot.js (Fixed Price Monitoring Version)
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
@@ -9,17 +9,15 @@ const WebSocket = require('ws');
 const dbPath = "./db.json";
 const logPath = "./log.csv";
 const config = {
-    loopInterval: 15000, // 15 seconds for better responsiveness
-    healthCheckInterval: 30000, // 30 seconds  
+    loopInterval: 15000,
+    healthCheckInterval: 30000,
     maxRetries: 3,
-    requestTimeout: 10000, // 10 seconds
+    requestTimeout: 10000,
     enableWebSocket: true,
     logLevel: "info"
 };
 
 let isProcessing = false;
-let processingQueue = [];
-let prevPosAmt = 0;
 
 // -------------------- WEBSOCKET PRICE MONITOR --------------------
 class PriceMonitor {
@@ -28,16 +26,18 @@ class PriceMonitor {
         this.ws = null;
         this.isConnected = false;
         this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 5;
+        this.maxReconnectAttempts = 10;
+        this.lastUpdateTime = null;
     }
 
     connect() {
         try {
             const symbol = this.getSymbolForWebSocket();
+            console.log(`🔗 Connecting WebSocket for: ${symbol}`);
             this.ws = new WebSocket(`wss://fstream.binance.com/ws/${symbol}@ticker`);
             
             this.ws.on('open', () => {
-                console.log("🔗 WebSocket connected for real-time price");
+                console.log("✅ WebSocket connected for real-time price");
                 this.isConnected = true;
                 this.reconnectAttempts = 0;
             });
@@ -45,9 +45,10 @@ class PriceMonitor {
             this.ws.on('message', (data) => {
                 try {
                     const parsed = JSON.parse(data);
-                    this.currentPrice = parseFloat(parsed.c); // current price
+                    this.currentPrice = parseFloat(parsed.c);
+                    this.lastUpdateTime = Date.now();
                 } catch (err) {
-                    console.error("WebSocket parse error:", err.message);
+                    console.error("❌ WebSocket parse error:", err.message);
                 }
             });
 
@@ -58,31 +59,38 @@ class PriceMonitor {
             });
 
             this.ws.on('error', (err) => {
-                console.error("WebSocket error:", err.message);
+                console.error("❌ WebSocket error:", err.message);
                 this.isConnected = false;
             });
 
         } catch (err) {
-            console.error("WebSocket connection failed:", err.message);
+            console.error("❌ WebSocket connection failed:", err.message);
             this.handleReconnect();
         }
     }
 
     getSymbolForWebSocket() {
-        return db.pair.replace('/', '').toLowerCase().replace('usdt:usdt', 'usdt');
+        // Format: dogeusdt untuk futures
+        return db.pair.split('/')[0].toLowerCase() + 'usdt';
     }
 
     handleReconnect() {
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
             console.log(`🔄 Reconnecting WebSocket (attempt ${this.reconnectAttempts})...`);
-            setTimeout(() => this.connect(), 5000);
+            setTimeout(() => this.connect(), 3000);
         } else {
             console.error("❌ Max reconnection attempts reached");
         }
     }
 
     getPrice() {
+        // Jika WebSocket stuck, return null untuk force REST API
+        if (this.lastUpdateTime && Date.now() - this.lastUpdateTime > 30000) {
+            console.log("⚠️ WebSocket data stale");
+            this.isConnected = false;
+            return null;
+        }
         return this.currentPrice;
     }
 
@@ -102,9 +110,9 @@ if (!fs.existsSync(logPath)) {
     console.log("📝 Log file created: log.csv");
 }
 
-const db = fs.existsSync(dbPath) ?
+let db = fs.existsSync(dbPath) ?
     JSON.parse(fs.readFileSync(dbPath)) : {
-        pair: "XRP/USDT:USDT",
+        pair: "DOGE/USDT:USDT",
         lastLongEntryTime: 0,
         lastShortEntryTime: 0,
         leverage: 10,
@@ -119,7 +127,7 @@ console.log(`⚙️ Bot Configuration:
 - Margin Mode: ${db.marginMode}
 - USDT per Trade: ${db.usdtPerTrade}`);
 
-// -------------------- EXCHANGE OPTIMIZATION --------------------
+// -------------------- EXCHANGE --------------------
 const exchange = new ccxt.binance({
     apiKey: process.env.API_KEY,
     secret: process.env.API_SECRET,
@@ -138,133 +146,48 @@ const exchange = new ccxt.binance({
         await exchange.loadMarkets();
         console.log("✅ Markets loaded successfully");
         
-        // Start WebSocket after markets are loaded
         if (config.enableWebSocket) {
-            priceMonitor.connect();
+            setTimeout(() => priceMonitor.connect(), 2000);
         }
     } catch (err) {
         console.error("❌ Failed to load markets:", err.message);
     }
 })();
 
-// -------------------- ENHANCED ERROR HANDLING --------------------
-const withRetry = async (fn, operationName, maxRetries = 3, delay = 2000) => {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            return await fn();
-        } catch (err) {
-            console.error(`❌ ${operationName} attempt ${attempt}/${maxRetries} failed:`, err.message);
-            
-            if (attempt === maxRetries) {
-                throw err;
-            }
-            
-            console.log(`🔄 Retrying ${operationName} in ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            delay *= 1.5; // Exponential backoff
-        }
-    }
-};
-
-// Connection health check
-const healthCheck = async () => {
-    try {
-        await exchange.fetchTime();
-        console.log("✅ Exchange connection healthy");
-        return true;
-    } catch (err) {
-        console.error("❌ Exchange connection failed:", err.message);
-        return false;
-    }
-};
-
-// -------------------- PRIORITY QUEUE SYSTEM --------------------
-const processWithPriority = async (taskName, taskFunction, priority = 1) => {
-    processingQueue.push({ taskName, taskFunction, priority });
-    processingQueue.sort((a, b) => b.priority - a.priority); // Higher priority first
-    
-    if (!isProcessing) {
-        await processQueue();
-    }
-};
-
-const processQueue = async () => {
-    if (isProcessing || processingQueue.length === 0) return;
-    
-    isProcessing = true;
-    
-    while (processingQueue.length > 0) {
-        const task = processingQueue.shift();
-        console.log(`🔧 Executing: ${task.taskName}`);
-        
-        try {
-            await task.taskFunction();
-        } catch (err) {
-            console.error(`❌ Task ${task.taskName} failed:`, err.message);
-        }
-        
-        // Small delay between tasks
-        await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    
-    isProcessing = false;
-};
-
 // -------------------- UTIL FUNCTIONS --------------------
 const saveDB = () => {
-    if (db.activePosition) {
-        db.activePosition.entryPrice = formatPrice(db.activePosition.entryPrice);
-        db.activePosition.tp = formatPrice(db.activePosition.tp);
-        db.activePosition.sl = formatPrice(db.activePosition.sl);
-    }
     fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 };
 
 const formatPrice = (price, pair = db.pair) => {
     if (!price || !isFinite(price)) return "N/A";
-    
     try {
         const market = exchange.markets[pair];
-        if (!market) return parseFloat(price.toFixed(5));
-        
-        let decimals = market.precision?.price;
-        
-        if (decimals === undefined || decimals === null) {
-            if (price < 0.0001) decimals = 8;
-            else if (price < 0.001) decimals = 7;
-            else if (price < 0.01) decimals = 6;
-            else if (price < 0.1) decimals = 5;
-            else if (price < 1) decimals = 4;
-            else if (price < 10) decimals = 3;
-            else if (price < 100) decimals = 2;
-            else if (price < 1000) decimals = 1;
-            else decimals = 0;
-        }
-        
-        decimals = Math.max(0, Math.min(8, parseInt(decimals) || 5));
+        let decimals = market?.precision?.price ?? 5;
         return parseFloat(price.toFixed(decimals));
-        
     } catch (err) {
         return parseFloat(price.toFixed(5));
     }
 };
 
+// **FIXED: Harga REAL-TIME untuk semua keperluan**
 const getPrice = async () => {
-    // Prioritize WebSocket price
+    let price = null;
+    
+    // Priority 1: WebSocket
     if (config.enableWebSocket && priceMonitor.isConnected) {
-        const wsPrice = priceMonitor.getPrice();
-        if (wsPrice) {
-            return wsPrice;
+        price = priceMonitor.getPrice();
+        if (price) {
+            return price;
         }
     }
 
-    // Fallback to REST API
+    // Priority 2: REST API
     try {
-        const ticker = await withRetry(
-            () => exchange.fetchTicker(db.pair),
-            "Fetch Price"
-        );
-        return ticker.last;
+        const ticker = await exchange.fetchTicker(db.pair);
+        price = ticker.last;
+        console.log(`💰 Price ${db.pair}: ${formatPrice(price)}`);
+        return price;
     } catch (err) {
         console.error("❌ Failed to fetch price:", err.message);
         return null;
@@ -276,7 +199,6 @@ const calcQty = (price) => {
     let qty = db.usdtPerTrade / price;
     const prec = exchange.markets[db.pair]?.precision?.amount ?? 3;
     qty = parseFloat(qty.toFixed(prec));
-    console.log(`📐 Quantity: ${qty} (${db.usdtPerTrade} USDT)`);
     return qty;
 };
 
@@ -290,32 +212,17 @@ const logSignal = (type, entry, tp, sl, status, pnl = null) => {
     console.log("📝 Signal logged to CSV");
 };
 
-const getMarketId = () => {
-    try {
-        const market = exchange.markets[db.pair];
-        if (market && market.id) return market.id;
-    } catch (err) {
-        // ignore
-    }
-    return db.pair.replace("/", "").replace(":", "");
-};
-
 const getPositionFromBalance = async () => {
     try {
-        const balance = await withRetry(
-            () => exchange.fetchBalance(),
-            "Fetch Balance"
-        );
-        const marketId = getMarketId();
+        const balance = await exchange.fetchBalance();
         const positions = balance.info?.positions || [];
-
-        const normalize = (str) => (str || "").toString().replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-        const found = positions.find(p => 
-            normalize(p.symbol) === normalize(marketId) || 
-            normalize(p.contractCode) === normalize(marketId)
+        const symbol = db.pair.replace('/', '').replace('USDT:USDT', 'USDT');
+        
+        const position = positions.find(p => 
+            p.symbol === symbol || p.symbol === symbol.replace('USDT', '')
         );
 
-        return { balance, position: found };
+        return { balance, position };
     } catch (err) {
         console.error("❌ Failed to fetch position:", err.message);
         return { balance: null, position: null };
@@ -324,21 +231,9 @@ const getPositionFromBalance = async () => {
 
 // -------------------- ORDER MANAGEMENT --------------------
 const placeOrder = async (side, tp, sl) => {
-    console.log("🔍 Checking for active positions...");
     if (db.activePosition) {
         console.log("⚠️ Active position exists, order cancelled");
         return;
-    }
-
-    try {
-        const { position } = await getPositionFromBalance();
-        const amt = parseFloat(position?.positionAmt || "0");
-        if (isFinite(amt) && Math.abs(amt) > 0) {
-            console.log("⚠️ Active position detected, order cancelled");
-            return;
-        }
-    } catch (err) {
-        console.warn("⚠️ Failed to check live position:", err.message);
     }
 
     const price = await getPrice();
@@ -355,24 +250,10 @@ const placeOrder = async (side, tp, sl) => {
 - SL: ${formatPrice(sl)}`);
 
     try {
-        await withRetry(
-            () => exchange.setLeverage(db.leverage, db.pair),
-            "Set Leverage"
-        );
-        await withRetry(
-            () => exchange.setMarginMode(db.marginMode, db.pair),
-            "Set Margin Mode"
-        );
-        console.log("✅ Leverage and margin mode set");
-    } catch (err) {
-        console.warn("⚠️ Failed to set leverage/margin:", err.message);
-    }
-
-    try {
-        const order = await withRetry(
-            () => exchange.createOrder(db.pair, "market", side, qty),
-            `Create ${side} Order`
-        );
+        await exchange.setLeverage(db.leverage, db.pair);
+        await exchange.setMarginMode(db.marginMode, db.pair);
+        
+        const order = await exchange.createOrder(db.pair, "market", side, qty);
         console.log("✅ Market order created");
 
         db.activePosition = {
@@ -408,12 +289,9 @@ const closePosition = async (reason, entryPrice = "N/A") => {
             const side = qty > 0 ? "sell" : "buy";
             const amount = Math.abs(qty);
             
-            await withRetry(
-                () => exchange.createOrder(db.pair, "market", side, amount, undefined, {
-                    reduceOnly: true,
-                }),
-                `Close ${side} Position`
-            );
+            await exchange.createOrder(db.pair, "market", side, amount, undefined, {
+                reduceOnly: true,
+            });
             console.log(`✅ Close order created (${side}, ${amount})`);
 
             const exitPrice = await getPrice();
@@ -426,32 +304,16 @@ const closePosition = async (reason, entryPrice = "N/A") => {
             if (isTP) statusTag = "TP_REALIZED";
             else if (isSL) statusTag = "SL_REALIZED";
 
-            if (entryPrice !== "N/A" && db.activePosition) {
-                const { tp, sl, side: entrySide } = db.activePosition;
-                try {
-                    const entryNum = Number(entryPrice);
-                    const closedQty = amount;
-
-                    if (closedQty > 0) {
-                        let exitNum;
-                        if (isTP) {
-                            exitNum = entrySide === "buy" ? tp : sl;
-                        } else if (isSL) {
-                            exitNum = entrySide === "buy" ? sl : tp;
-                        } else if (isFinite(exitPrice)) {
-                            exitNum = Number(exitPrice);
-                        } else {
-                            console.warn("⚠️ PNL: Exit price not found");
-                            return;
-                        }
-
-                        const pnlGross = entrySide === "buy" ? 
-                            (exitNum - entryNum) : 
-                            (entryNum - exitNum);
-                        pnl = pnlGross * closedQty;
-                    }
-                } catch (err) {
-                    console.warn("⚠️ PNL calculation failed:", err.message);
+            // PnL Calculation
+            if (entryPrice !== "N/A" && db.activePosition && exitPrice) {
+                const { side: entrySide } = db.activePosition;
+                const entryNum = parseFloat(entryPrice);
+                const exitNum = parseFloat(exitPrice);
+                
+                if (entrySide === "buy") {
+                    pnl = (exitNum - entryNum) * amount;
+                } else {
+                    pnl = (entryNum - exitNum) * amount;
                 }
             }
 
@@ -476,12 +338,9 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 const analyzeSignal = async () => {
     console.log("🧠 Technical analysis started...");
     try {
-        const ohlcv = await withRetry(
-            () => exchange.fetchOHLCV(db.pair, "15m", undefined, 200),
-            "Fetch OHLCV"
-        );
+        const ohlcv = await exchange.fetchOHLCV(db.pair, "15m", undefined, 100);
         
-        if (!ohlcv || ohlcv.length < 200) {
+        if (!ohlcv || ohlcv.length < 50) {
             console.warn("⚠️ Insufficient OHLCV data");
             return {};
         }
@@ -491,14 +350,15 @@ const analyzeSignal = async () => {
         const low = ohlcv.map(c => c[3]);
 
         // Moving Averages
-        const ma7 = SMA.calculate({ values: close.slice(-100), period: 7 }).pop();
-        const ma25 = SMA.calculate({ values: close.slice(-100), period: 25 }).pop();
-        const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
+        const ma7 = SMA.calculate({ values: close, period: 7 }).pop();
+        const ma25 = SMA.calculate({ values: close, period: 25 }).pop();
+        const ma50 = SMA.calculate({ values: close, period: 50 }).pop();
 
-        const price = close.at(-1);
+        const price = close[close.length - 1];
 
-        const prevMA7 = SMA.calculate({ values: close.slice(-101, -1), period: 7 }).pop();
-        const prevMA25 = SMA.calculate({ values: close.slice(-101, -1), period: 25 }).pop();
+        // Previous values for crossover detection
+        const prevMA7 = SMA.calculate({ values: close.slice(0, -1), period: 7 }).pop();
+        const prevMA25 = SMA.calculate({ values: close.slice(0, -1), period: 25 }).pop();
 
         const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
         const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
@@ -506,89 +366,23 @@ const analyzeSignal = async () => {
         let canLong = false;
         let canShort = false;
 
-        const isMA7AboveMA99 = ma7 > ma99;
-        const isMA7BelowMA99 = ma7 < ma99;
-        const isMA25AboveMA99 = ma25 > ma99;
-        const isMA25BelowMA99 = ma25 < ma99;
+        // Trend detection
+        const isUptrend = ma7 > ma50 && ma25 > ma50;
+        const isDowntrend = ma7 < ma50 && ma25 < ma50;
 
-        if (isCrossedUp && isMA7AboveMA99 && isMA25AboveMA99) {
+        if (isCrossedUp && isUptrend) {
             canLong = true;
         }
 
-        if (isCrossedDown && isMA7BelowMA99 && isMA25BelowMA99) {
+        if (isCrossedDown && isDowntrend) {
             canShort = true;
         }
 
-        // Support/Resistance Detection
-        const findAdvancedSwingLevels = (highArr, lowArr, lookback = 10, minStrength = 2) => {
-            const swingHighs = [];
-            const swingLows = [];
-            
-            for (let i = lookback; i < highArr.length - lookback; i++) {
-                let isSwingHigh = true;
-                let isSwingLow = true;
-                let strengthHigh = 0;
-                let strengthLow = 0;
-                
-                for (let j = 1; j <= lookback; j++) {
-                    if (highArr[i - j] > highArr[i]) isSwingHigh = false;
-                    if (highArr[i + j] > highArr[i]) isSwingHigh = false;
-                    
-                    if (lowArr[i - j] < lowArr[i]) isSwingLow = false;
-                    if (lowArr[i + j] < lowArr[i]) isSwingLow = false;
-                    
-                    if (highArr[i - j] < highArr[i] && highArr[i + j] < highArr[i]) strengthHigh++;
-                    if (lowArr[i - j] > lowArr[i] && lowArr[i + j] > lowArr[i]) strengthLow++;
-                }
-                
-                if (isSwingHigh && strengthHigh >= minStrength) {
-                    swingHighs.push({
-                        price: highArr[i],
-                        strength: strengthHigh,
-                        index: i
-                    });
-                }
-                
-                if (isSwingLow && strengthLow >= minStrength) {
-                    swingLows.push({
-                        price: lowArr[i],
-                        strength: strengthLow,
-                        index: i
-                    });
-                }
-            }
-            
-            const groupLevels = (levels, threshold = 0.002) => {
-                const groups = [];
-                
-                levels.sort((a, b) => a.price - b.price).forEach(level => {
-                    const existingGroup = groups.find(g => 
-                        Math.abs(g.price - level.price) / g.price < threshold
-                    );
-                    
-                    if (existingGroup) {
-                        existingGroup.members.push(level);
-                        existingGroup.price = (existingGroup.price + level.price) / 2;
-                        existingGroup.strength += level.strength;
-                    } else {
-                        groups.push({
-                            price: level.price,
-                            strength: level.strength,
-                            members: [level]
-                        });
-                    }
-                });
-                
-                return groups.sort((a, b) => b.strength - a.strength);
-            };
-            
-            return {
-                resistance: groupLevels(swingHighs).slice(0, 3),
-                support: groupLevels(swingLows).slice(0, 3)
-            };
-        };
-
-        // ATR Calculation
+        // Support/Resistance
+        const recentHigh = Math.max(...high.slice(-20));
+        const recentLow = Math.min(...low.slice(-20));
+        
+        // ATR for volatility
         const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
             const tr = [];
             for (let i = 1; i < highArr.length; i++) {
@@ -604,45 +398,27 @@ const analyzeSignal = async () => {
                 atr.push(slice.reduce((a, b) => a + b) / period);
             }
             
-            return atr;
+            return atr.pop() || 0;
         };
 
-        const advancedLevels = findAdvancedSwingLevels(high, low, 8, 3);
-        const currentATR = calculateATR(high, low, close, 14).pop() || 0;
+        const atr = calculateATR(high, low, close, 14);
         
-        const minDistance = currentATR * 0.5;
-        
-        const validResistance = advancedLevels.resistance
-            .filter(level => level.price > price + minDistance)
-            .sort((a, b) => a.price - b.price);
-        
-        const validSupport = advancedLevels.support
-            .filter(level => level.price < price - minDistance)
-            .sort((a, b) => b.price - a.price);
+        // TP/SL based on ATR
+        const atrMultiplier = 2;
+        const targetLong = price + (atr * atrMultiplier);
+        const stopLossLong = price - (atr * atrMultiplier);
+        const targetShort = price - (atr * atrMultiplier);
+        const stopLossShort = price + (atr * atrMultiplier);
 
-        const resistance = validResistance.length > 0 ? 
-            validResistance[0].price : 
-            Math.max(...high.slice(-96));
-        
-        const support = validSupport.length > 0 ? 
-            validSupport[0].price : 
-            Math.min(...low.slice(-96));
-
-        const targetLong = resistance;
-        const stopLossLong = support;
-        const targetShort = support;
-        const stopLossShort = resistance;
-
-        // Analysis Results
         console.log(`\n📊 Analysis Results ${db.pair}
 ─────────────────────────────────────
 📈 Long Signal: ${canLong ? "✅ VALID" : "❌ INVALID"}
 📉 Short Signal: ${canShort ? "✅ VALID" : "❌ INVALID"}
 ─────────────────────────────────────
 💰 Current Price: ${formatPrice(price)}
-🎯 Resistance: ${formatPrice(resistance)}
-🛡️ Support: ${formatPrice(support)}
-📊 ATR: ${formatPrice(currentATR)}
+🎯 Resistance: ${formatPrice(recentHigh)}
+🛡️ Support: ${formatPrice(recentLow)}
+📊 ATR: ${formatPrice(atr)}
 ─────────────────────────────────────`);
 
         return {
@@ -660,297 +436,189 @@ const analyzeSignal = async () => {
     }
 };
 
-// -------------------- POSITION MONITORING --------------------
+// **FIXED: POSITION MONITORING dengan harga REAL-TIME**
 const checkPositionStatus = async () => {
     try {
-        const { position } = await getPositionFromBalance();
-        const amt = parseFloat(position?.positionAmt || "0");
-        const amtSafe = isFinite(amt) ? amt : 0;
+        if (!db.activePosition) return;
 
-        const prevSafe = isFinite(prevPosAmt) ? prevPosAmt : 0;
-        if (prevSafe !== 0 && amtSafe === 0) {
-            const side = prevSafe > 0 ? "LONG" : "SHORT";
-            console.log(`📉 ${side} position closed`);
-            db.activePosition = null;
-            saveDB();
-        }
+        // **PERBAIKAN PENTING: Gunakan harga REAL-TIME, bukan harga dari position**
+        const currentPrice = await getPrice();
+        if (!currentPrice) return;
 
-        if (db.activePosition && amtSafe !== 0) {
-            const { tp, sl, side, entryPrice } = db.activePosition;
-            const currentPrice = await getPrice();
-            if (!currentPrice) return;
+        const { tp, sl, side, entryPrice } = db.activePosition;
 
-            if (side === "buy") {
-                if (currentPrice >= tp) await closePosition("TP hit", entryPrice);
-                else if (currentPrice <= sl) await closePosition("SL hit", entryPrice);
-            } else if (side === "sell") {
-                if (currentPrice <= tp) await closePosition("TP hit", entryPrice);
-                else if (currentPrice >= sl) await closePosition("SL hit", entryPrice);
+        console.log(`📊 Position Check: ${side.toUpperCase()} | Current: ${formatPrice(currentPrice)} | TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
+
+        if (side === "buy") {
+            if (currentPrice >= tp) {
+                console.log("🎯 TP Hit for LONG position");
+                await closePosition("TP hit", entryPrice);
+            } else if (currentPrice <= sl) {
+                console.log("🛑 SL Hit for LONG position");
+                await closePosition("SL hit", entryPrice);
+            }
+        } else if (side === "sell") {
+            if (currentPrice <= tp) {
+                console.log("🎯 TP Hit for SHORT position");
+                await closePosition("TP hit", entryPrice);
+            } else if (currentPrice >= sl) {
+                console.log("🛑 SL Hit for SHORT position");
+                await closePosition("SL hit", entryPrice);
             }
         }
-
-        prevPosAmt = amtSafe;
     } catch (err) {
         console.error("❌ Position check failed:", err.message);
     }
 };
 
-// -------------------- DYNAMIC TP/SL UPDATE --------------------
+// -------------------- TP/SL UPDATE --------------------
 const updateTPSLForOpenPosition = async (signal) => {
-    if (!db.activePosition) return;
+    if (!db.activePosition || !signal.price) return;
     
     try {
         console.log("🔄 Checking TP/SL updates...");
         
         const { side, entryPrice, tp: currentTP, sl: currentSL } = db.activePosition;
-        let newTP, newSL;
+        let newTP = currentTP;
+        let newSL = currentSL;
+
+        const priceChangeThreshold = 0.5; // 0.5% change minimum untuk update
 
         if (side === "buy") {
-            newTP = signal.targetLong;
-            newSL = signal.stopLossLong;
-            
-            const profitToCurrentTP = (currentTP - entryPrice) / entryPrice * 100;
-            const profitToNewTP = (newTP - entryPrice) / entryPrice * 100;
-            
-            if (profitToCurrentTP >= 0.8 && newTP > currentTP) {
-                console.log(`🎯 Keeping current TP (${profitToCurrentTP.toFixed(2)}% profit)`);
-                newTP = currentTP;
+            // Untuk LONG, hanya update jika signal memberikan level yang lebih baik
+            if (signal.targetLong > currentTP) {
+                const improvement = ((signal.targetLong - currentTP) / currentTP * 100);
+                if (improvement >= priceChangeThreshold) {
+                    newTP = signal.targetLong;
+                    console.log(`📈 Improving LONG TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)} (${improvement.toFixed(2)}%)`);
+                }
             }
             
-            if (newTP <= entryPrice || newSL >= entryPrice) {
-                console.log("⚠️ Invalid TP/SL levels for LONG");
-                return;
-            }
-            
-            if (newSL > currentSL) {
-                console.log("🛡️ Keeping safer SL for LONG");
-                newSL = currentSL;
+            if (signal.stopLossLong > currentSL) {
+                const improvement = ((signal.stopLossLong - currentSL) / currentSL * 100);
+                if (improvement >= priceChangeThreshold) {
+                    newSL = signal.stopLossLong;
+                    console.log(`🛡️ Improving LONG SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)} (${improvement.toFixed(2)}%)`);
+                }
             }
             
         } else if (side === "sell") {
-            newTP = signal.targetShort;
-            newSL = signal.stopLossShort;
-            
-            const profitToCurrentTP = (entryPrice - currentTP) / entryPrice * 100;
-            const profitToNewTP = (entryPrice - newTP) / entryPrice * 100;
-            
-            if (profitToCurrentTP >= 0.8 && newTP < currentTP) {
-                console.log(`🎯 Keeping current TP (${profitToCurrentTP.toFixed(2)}% profit)`);
-                newTP = currentTP;
+            // Untuk SHORT, hanya update jika signal memberikan level yang lebih baik
+            if (signal.targetShort < currentTP) {
+                const improvement = ((currentTP - signal.targetShort) / currentTP * 100);
+                if (improvement >= priceChangeThreshold) {
+                    newTP = signal.targetShort;
+                    console.log(`📉 Improving SHORT TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)} (${improvement.toFixed(2)}%)`);
+                }
             }
             
-            if (newTP >= entryPrice || newSL <= entryPrice) {
-                console.log("⚠️ Invalid TP/SL levels for SHORT");
-                return;
+            if (signal.stopLossShort < currentSL) {
+                const improvement = ((currentSL - signal.stopLossShort) / currentSL * 100);
+                if (improvement >= priceChangeThreshold) {
+                    newSL = signal.stopLossShort;
+                    console.log(`🛡️ Improving SHORT SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)} (${improvement.toFixed(2)}%)`);
+                }
             }
+        }
+
+        // Only update if there are meaningful changes
+        if (newTP !== currentTP || newSL !== currentSL) {
+            db.activePosition.tp = newTP;
+            db.activePosition.sl = newSL;
+            saveDB();
+
+            console.log(`✅ TP/SL Updated for ${side.toUpperCase()}:`);
+            console.log(`   TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
+            console.log(`   SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
             
-            if (newSL < currentSL) {
-                console.log("🛡️ Keeping safer SL for SHORT");
-                newSL = currentSL;
-            }
+            logSignal(
+                side === "buy" ? "LONG" : "SHORT",
+                entryPrice,
+                newTP,
+                newSL,
+                "TP_SL_UPDATED"
+            );
         } else {
-            return;
+            console.log("ℹ️ No meaningful TP/SL changes needed");
         }
-
-        // Limit maximum TP distance
-        const maxProfitPercent = 2.0;
-        let currentPrice = signal.price;
-        
-        if (side === "buy") {
-            const maxTP = entryPrice * (1 + maxProfitPercent / 100);
-            if (newTP > maxTP) {
-                console.log(`📏 Limiting TP to ${formatPrice(maxTP)}`);
-                newTP = maxTP;
-            }
-        } else if (side === "sell") {
-            const maxTP = entryPrice * (1 - maxProfitPercent / 100);
-            if (newTP < maxTP) {
-                console.log(`📏 Limiting TP to ${formatPrice(maxTP)}`);
-                newTP = maxTP;
-            }
-        }
-
-        const tpChangePercent = Math.abs((newTP - currentTP) / currentTP * 100);
-        const slChangePercent = Math.abs((newSL - currentSL) / currentSL * 100);
-        
-        const minChangeThreshold = 0.2;
-        
-        if (tpChangePercent < minChangeThreshold && slChangePercent < minChangeThreshold) {
-            console.log("ℹ️ No significant changes");
-            return;
-        }
-
-        db.activePosition.tp = newTP;
-        db.activePosition.sl = newSL;
-        saveDB();
-
-        console.log(`✅ TP/SL Updated for ${side.toUpperCase()}:`);
-        console.log(`   Entry: ${formatPrice(entryPrice)}`);
-        console.log(`   TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
-        console.log(`   SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
-        
-        logSignal(
-            side === "buy" ? "LONG" : "SHORT",
-            entryPrice,
-            newTP,
-            newSL,
-            "TP_SL_UPDATED"
-        );
 
     } catch (error) {
         console.error("❌ TP/SL update failed:", error.message);
     }
 };
 
-// -------------------- POSITION RECOVERY --------------------
+// **FIXED: POSITION RECOVERY dengan harga REAL-TIME**
 const recoverPositionState = async () => {
     try {
-        console.log("🔄 Checking position sync...");
-        
         const { position } = await getPositionFromBalance();
         const amt = parseFloat(position?.positionAmt || "0");
         const MIN_POSITION_AMOUNT = 0.000001;
-        const amtSafe = isFinite(amt) ? amt : 0;
         
         // Recovery needed
-        if (Math.abs(amtSafe) > MIN_POSITION_AMOUNT && !db.activePosition) {
+        if (Math.abs(amt) > MIN_POSITION_AMOUNT && !db.activePosition) {
             console.log("⚠️ Position recovery needed");
             
+            // **PERBAIKAN: Gunakan harga REAL-TIME untuk recovery**
             const currentPrice = await getPrice();
             if (!currentPrice) return;
             
-            const side = amtSafe > 0 ? "buy" : "sell";
+            const side = amt > 0 ? "buy" : "sell";
             const entryPrice = parseFloat(position?.entryPrice || currentPrice);
-            const leverage = position?.leverage || db.leverage;
             
-            const signal = await analyzeSignal();
+            // Simple TP/SL calculation for recovery
+            const riskRewardRatio = 1.5;
             let tp, sl;
             
-            if (!signal || !signal.price) {
-                console.log("⚠️ Using fallback TP/SL");
-                if (side === "buy") {
-                    tp = entryPrice * 1.015;
-                    sl = entryPrice * 0.995;
-                } else {
-                    tp = entryPrice * 0.985;
-                    sl = entryPrice * 1.005;
-                }
-            } else {
-                if (side === "buy") {
-                    tp = signal.targetLong || (entryPrice * 1.015);
-                    sl = signal.stopLossLong || (entryPrice * 0.995);
-                } else {
-                    tp = signal.targetShort || (entryPrice * 0.985);
-                    sl = signal.stopLossShort || (entryPrice * 1.005);
-                }
-            }
-            
-            const SAFETY_MARGIN = 0.001;
             if (side === "buy") {
-                tp = tp * (1 - SAFETY_MARGIN);
-                sl = sl * (1 + SAFETY_MARGIN);
+                tp = currentPrice * 1.015; // 1.5% TP dari harga CURRENT
+                sl = currentPrice * 0.985; // 1.5% SL dari harga CURRENT
             } else {
-                tp = tp * (1 + SAFETY_MARGIN);
-                sl = sl * (1 - SAFETY_MARGIN);
+                tp = currentPrice * 0.985; // 1.5% TP dari harga CURRENT  
+                sl = currentPrice * 1.015; // 1.5% SL dari harga CURRENT
             }
             
-            if (side === "buy") {
-                if (tp <= entryPrice) tp = entryPrice * 1.015;
-                if (sl >= entryPrice) sl = entryPrice * 0.995;
-            } else {
-                if (tp >= entryPrice) tp = entryPrice * 0.985;
-                if (sl <= entryPrice) sl = entryPrice * 1.005;
-            }
-            
-            let rrRatio;
-            if (side === "buy") {
-                rrRatio = ((tp - entryPrice) / (entryPrice - sl)).toFixed(2);
-            } else {
-                rrRatio = ((entryPrice - tp) / (sl - entryPrice)).toFixed(2);
-            }
-            
-            db.activePosition = {
-                side: side,
-                entryPrice: entryPrice,
-                tp: tp,
-                sl: sl,
+            db.activePosition = { 
+                side, 
+                entryPrice, 
+                tp, 
+                sl, 
                 orderId: "RECOVERED_" + Date.now(),
-                recovered: true,
-                rrRatio: parseFloat(rrRatio),
-                recoveredAt: new Date().toISOString()
+                recovered: true 
             };
             
             saveDB();
-            
-            console.log("✅ Position recovered");
-            console.log(`   ${side.toUpperCase()} | Entry: ${formatPrice(entryPrice)}`);
-            console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
-            console.log(`   RR: ${rrRatio} | Leverage: ${leverage}x`);
-            
-            logSignal(
-                side === "buy" ? "LONG" : "SHORT",
-                entryPrice,
-                tp,
-                sl,
-                "POSITION_RECOVERED"
-            );
+            console.log("✅ Position recovered with CURRENT market prices");
         }
         
-        // Cleanup needed
-        if (db.activePosition && Math.abs(amtSafe) <= MIN_POSITION_AMOUNT) {
-            console.log("⚠️ Position cleanup needed");
-            
-            const side = db.activePosition.side === "buy" ? "LONG" : "SHORT";
-            
-            logSignal(
-                side,
-                db.activePosition.entryPrice,
-                db.activePosition.tp,
-                db.activePosition.sl,
-                "CLOSED_EXTERNALLY"
-            );
-            
-            db.activePosition = null;
-            saveDB();
-            console.log("✅ Database cleaned");
-        }
-        
-        // Position monitoring
-        if (db.activePosition && Math.abs(amtSafe) > MIN_POSITION_AMOUNT) {
+        // **FIXED: POSITION MONITOR dengan harga REAL-TIME**
+        if (db.activePosition) {
             const currentPrice = await getPrice();
             if (currentPrice) {
-                const { side, entryPrice, tp, sl, recovered } = db.activePosition;
-                const unrealizedPnl = side === "buy" ? currentPrice - entryPrice : entryPrice - currentPrice;
+                const { side, entryPrice, tp, sl } = db.activePosition;
+                
+                // **PERBAIKAN: Hitung PnL dengan harga REAL-TIME**
+                const unrealizedPnl = side === "buy" ? 
+                    (currentPrice - entryPrice) : 
+                    (entryPrice - currentPrice);
                 const pnlPercent = (unrealizedPnl / entryPrice * 100).toFixed(2);
                 
+                // Determine position status
                 let status = "🟢 NORMAL";
-                let warning = "";
-                
                 if (side === "buy") {
-                    if (currentPrice >= tp * 0.998) {
-                        status = "🟡 NEAR TP";
-                        warning = " - Near Take Profit!";
-                    } else if (currentPrice <= sl * 1.002) {
-                        status = "🔴 NEAR SL";
-                        warning = " - Near Stop Loss!";
-                    }
+                    if (currentPrice >= tp * 0.995) status = "🟡 NEAR TP";
+                    if (currentPrice <= sl * 1.005) status = "🔴 NEAR SL";
                 } else {
-                    if (currentPrice <= tp * 1.002) {
-                        status = "🟡 NEAR TP";
-                        warning = " - Near Take Profit!";
-                    } else if (currentPrice >= sl * 0.998) {
-                        status = "🔴 NEAR SL";
-                        warning = " - Near Stop Loss!";
-                    }
+                    if (currentPrice <= tp * 1.005) status = "🟡 NEAR TP";
+                    if (currentPrice >= sl * 0.995) status = "🔴 NEAR SL";
                 }
                 
                 const pnlEmoji = unrealizedPnl >= 0 ? "💹" : "🔻";
                 
-                console.log("\n📊 Position Monitor");
-                console.log(`   ${side.toUpperCase()} | ${status}${warning}`);
-                console.log(`   Entry: ${formatPrice(entryPrice)} | Current: ${formatPrice(currentPrice)}`);
-                console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
-                console.log(`   ${pnlEmoji} PnL: ${formatPrice(unrealizedPnl)} (${pnlPercent}%)`);
+                console.log(`\n📊 Position Monitor
+   ${side.toUpperCase()} | ${status}
+   Entry: ${formatPrice(entryPrice)} | Current: ${formatPrice(currentPrice)}
+   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}
+   ${pnlEmoji} PnL: ${formatPrice(unrealizedPnl)} (${pnlPercent}%)`);
             }
         }
         
@@ -959,134 +627,73 @@ const recoverPositionState = async () => {
     }
 };
 
-// -------------------- SIGNAL PROCESSING --------------------
-const processSignal = async (signal) => {
-    const hasBotPosition = db.activePosition !== null;
-    let shouldExitCurrentPosition = false;
-
-    if (hasBotPosition) {
-        const currentSide = db.activePosition.side;
-        if (currentSide === "buy" && signal.canShort) {
-            console.log("⚠️ SHORT signal detected, closing LONG");
-            shouldExitCurrentPosition = true;
-        } else if (currentSide === "sell" && signal.canLong) {
-            console.log("⚠️ LONG signal detected, closing SHORT");
-            shouldExitCurrentPosition = true;
-        }
-    }
-
-    if (shouldExitCurrentPosition) {
-        await closePosition("Signal reversal", db.activePosition.entryPrice);
-        await new Promise(resolve => setTimeout(resolve, 10000));
-    }
-
-    const { position } = await getPositionFromBalance();
-    const amt = parseFloat(position?.positionAmt || "0");
-    const hasActiveBinancePositionAfterClose = isFinite(amt) && Math.abs(amt) > 0;
-
-    if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
-        if (signal.canLong) {
-            const isLongBreakout = signal.price > signal.targetLong;
-            if (!isLongBreakout) {
-                console.log(`🚀 LONG Signal | TP: ${formatPrice(signal.targetLong)} | SL: ${formatPrice(signal.stopLossLong)}`);
-                db.lastLongEntryTime = new Date();
-                saveDB();
-                await processWithPriority("Place LONG Order", 
-                    () => placeOrder("buy", signal.targetLong, signal.stopLossLong), 5);
-            } else {
-                console.log(`⏸️ LONG Signal: Breakout detected, skipping`);
-            }
-        } else if (signal.canShort) {
-            const isShortBreakout = signal.price < signal.targetShort;
-            if (!isShortBreakout) {
-                console.log(`📉 SHORT Signal | TP: ${formatPrice(signal.targetShort)} | SL: ${formatPrice(signal.stopLossShort)}`);
-                db.lastShortEntryTime = new Date();
-                saveDB();
-                await processWithPriority("Place SHORT Order", 
-                    () => placeOrder("sell", signal.targetShort, signal.stopLossShort), 5);
-            } else {
-                console.log(`⏸️ SHORT Signal: Breakout detected, skipping`);
-            }
-        } else {
-            console.log("💤 No valid signals, waiting...");
-        }
-    }
-};
-
-// -------------------- OPTIMIZED MAIN EXECUTION --------------------
+// -------------------- MAIN TRADING LOGIC --------------------
 const executeTradingCycle = async () => {
-    try {
-        // 1. Health check pertama
-        if (!await healthCheck()) {
-            console.log("⏸️ Skipping cycle due to connection issues");
-            return;
-        }
-
-        // 2. Auto reload config
-        try {
-            const freshDb = JSON.parse(fs.readFileSync(dbPath));
-            db.pair = freshDb.pair;
-            db.leverage = freshDb.leverage; 
-            db.marginMode = freshDb.marginMode;
-            db.usdtPerTrade = freshDb.usdtPerTrade;
-        } catch (error) {
-            // Use existing config on error
-        }
-
-        // 3. Priority tasks
-        await processWithPriority("Position Recovery", recoverPositionState, 10);
-        await processWithPriority("Position Check", checkPositionStatus, 9);
-        
-        // 4. Signal analysis
-        const signal = await analyzeSignal();
-        if (!signal.price) {
-            console.log("⚠️ Invalid signal, waiting...");
-            return;
-        }
-
-        // 5. Update TP/SL untuk posisi aktif
-        if (db.activePosition) {
-            await processWithPriority("TP/SL Update", 
-                () => updateTPSLForOpenPosition(signal), 8);
-        }
-
-        // 6. Signal processing
-        await processSignal(signal);
-        
-    } catch (err) {
-        console.error("⚠️ Trading cycle error:", err.message);
-    }
-};
-
-// -------------------- MAIN LOOP & CLEANUP --------------------
-// Periodic health check
-setInterval(async () => {
-    await healthCheck();
-}, config.healthCheckInterval);
-
-// Main trading loop
-setInterval(async () => {
     if (isProcessing) {
         console.log("⏳ Skipping: Still processing...");
         return;
     }
     
-    await executeTradingCycle();
-}, config.loopInterval);
+    isProcessing = true;
+    
+    try {
+        // Reload config
+        try {
+            const freshDb = JSON.parse(fs.readFileSync(dbPath));
+            Object.assign(db, freshDb);
+        } catch (error) {
+            // Use existing config
+        }
+
+        // Position recovery & monitoring
+        await recoverPositionState();
+        await checkPositionStatus();
+
+        // Get current signal
+        console.log("🔍 Checking for new signals...");
+        const signal = await analyzeSignal();
+        
+        if (!signal.price) {
+            console.log("⚠️ No valid signal data");
+            return;
+        }
+
+        // Update TP/SL for open positions
+        if (db.activePosition) {
+            await updateTPSLForOpenPosition(signal);
+        }
+
+        // Check for new entry signals
+        if (!db.activePosition) {
+            if (signal.canLong) {
+                console.log(`🚀 LONG Signal | TP: ${formatPrice(signal.targetLong)} | SL: ${formatPrice(signal.stopLossLong)}`);
+                await placeOrder("buy", signal.targetLong, signal.stopLossLong);
+            } else if (signal.canShort) {
+                console.log(`📉 SHORT Signal | TP: ${formatPrice(signal.targetShort)} | SL: ${formatPrice(signal.stopLossShort)}`);
+                await placeOrder("sell", signal.targetShort, signal.stopLossShort);
+            } else {
+                console.log("💤 No valid entry signals");
+            }
+        }
+        
+    } catch (err) {
+        console.error("⚠️ Trading cycle error:", err.message);
+    } finally {
+        isProcessing = false;
+    }
+};
+
+// -------------------- START BOT --------------------
+console.log("✅ Bot started with REAL-TIME price monitoring");
+console.log(`🔄 Loop interval: ${config.loopInterval/1000} seconds`);
+console.log(`🔗 WebSocket: ${config.enableWebSocket ? 'ENABLED' : 'DISABLED'}`);
+
+// Main loop
+setInterval(executeTradingCycle, config.loopInterval);
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
     console.log('\n🔴 Shutting down gracefully...');
     priceMonitor.disconnect();
-    
-    if (db.activePosition) {
-        console.log('⚠️ Active position exists, monitoring will stop');
-    }
-    
-    await new Promise(resolve => setTimeout(resolve, 1000));
     process.exit(0);
 });
-
-console.log("✅ Bot started with optimized real-time execution");
-console.log(`🔄 Loop interval: ${config.loopInterval/1000} seconds`);
-console.log(`🔗 WebSocket: ${config.enableWebSocket ? 'ENABLED' : 'DISABLED'}`);
