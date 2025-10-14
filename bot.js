@@ -586,7 +586,6 @@ const updateTPSLForOpenPosition = async (signal) => {
             newSL = signal.stopLossLong;
             
             const profitToCurrentTP = (currentTP - entryPrice) / entryPrice * 100;
-            const profitToNewTP = (newTP - entryPrice) / entryPrice * 100;
             
             if (profitToCurrentTP >= 0.8 && newTP > currentTP) {
                 console.log(`🎯 Keeping current TP (${profitToCurrentTP.toFixed(2)}% profit)`);
@@ -608,7 +607,6 @@ const updateTPSLForOpenPosition = async (signal) => {
             newSL = signal.stopLossShort;
             
             const profitToCurrentTP = (entryPrice - currentTP) / entryPrice * 100;
-            const profitToNewTP = (entryPrice - newTP) / entryPrice * 100;
             
             if (profitToCurrentTP >= 0.8 && newTP < currentTP) {
                 console.log(`🎯 Keeping current TP (${profitToCurrentTP.toFixed(2)}% profit)`);
