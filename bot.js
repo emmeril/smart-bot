@@ -626,16 +626,6 @@ const updateTPSLForOpenPosition = async (signal) => {
             return;
         }
 
-        const tpChangePercent = Math.abs((newTP - currentTP) / currentTP * 100);
-        const slChangePercent = Math.abs((newSL - currentSL) / currentSL * 100);
-        
-        const minChangeThreshold = 0.2;
-        
-        if (tpChangePercent < minChangeThreshold && slChangePercent < minChangeThreshold) {
-            console.log("ℹ️ No significant changes");
-            return;
-        }
-
         db.activePosition.tp = newTP;
         db.activePosition.sl = newSL;
         saveDB();
