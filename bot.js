@@ -579,70 +579,118 @@ const updateTPSLForOpenPosition = async (signal) => {
         console.log("🔄 Checking TP/SL updates...");
         
         const { side, entryPrice, tp: currentTP, sl: currentSL } = db.activePosition;
-        let newTP, newSL;
+        const currentPrice = await getPrice();
+        if (!currentPrice) return;
+
+        let newTP = currentTP;
+        let newSL = currentSL;
+        let updated = false;
 
         if (side === "buy") {
-            newTP = signal.targetLong;
-            newSL = signal.stopLossLong;
+            // Untuk LONG position - TP mengacu pada resistance, SL pada support
+            const proposedTP = signal.targetLong;
+            const proposedSL = signal.stopLossLong;
             
-            const profitToCurrentTP = (currentTP - entryPrice) / entryPrice * 100;
-            
-            if (profitToCurrentTP >= 0.8 && newTP > currentTP) {
-                console.log(`🎯 Keeping current TP (${profitToCurrentTP.toFixed(2)}% profit)`);
-                newTP = currentTP;
-            }
-            
-            if (newTP <= entryPrice || newSL >= entryPrice) {
-                console.log("⚠️ Invalid TP/SL levels for LONG");
-                return;
-            }
-            
-            if (newSL > currentSL) {
-                console.log("🛡️ Keeping safer SL for LONG");
-                newSL = currentSL;
+            // Validasi level TP/SL harus valid untuk posisi LONG
+            if (proposedTP > entryPrice && proposedSL < entryPrice) {
+                // Update TP hanya jika resistance baru lebih tinggi dari TP saat ini DAN di atas entry
+                if (proposedTP > currentTP && proposedTP > entryPrice) {
+                    newTP = proposedTP;
+                    updated = true;
+                    console.log(`📈 Updating LONG TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
+                }
+                
+                // Update SL hanya jika support baru lebih tinggi dari SL saat ini TAPI tetap di bawah entry
+                // Ini untuk mengamankan profit (trailing stop)
+                if (proposedSL > currentSL && proposedSL < entryPrice) {
+                    newSL = proposedSL;
+                    updated = true;
+                    console.log(`🛡️ Updating LONG SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
+                }
+                
+                // Safety check: Jangan biarkan SL naik terlalu dekat dengan entry
+                const minDistanceFromEntry = (entryPrice - proposedSL) / entryPrice;
+                if (minDistanceFromEntry < 0.001) { // Minimal 0.1% dari entry
+                    console.log("⚠️ Proposed SL too close to entry, keeping current SL");
+                    newSL = currentSL;
+                }
             }
             
         } else if (side === "sell") {
-            newTP = signal.targetShort;
-            newSL = signal.stopLossShort;
+            // Untuk SHORT position - TP mengacu pada support, SL pada resistance
+            const proposedTP = signal.targetShort;
+            const proposedSL = signal.stopLossShort;
             
-            const profitToCurrentTP = (entryPrice - currentTP) / entryPrice * 100;
-            
-            if (profitToCurrentTP >= 0.8 && newTP < currentTP) {
-                console.log(`🎯 Keeping current TP (${profitToCurrentTP.toFixed(2)}% profit)`);
-                newTP = currentTP;
+            // Validasi level TP/SL harus valid untuk posisi SHORT
+            if (proposedTP < entryPrice && proposedSL > entryPrice) {
+                // Update TP hanya jika support baru lebih rendah dari TP saat ini DAN di bawah entry
+                if (proposedTP < currentTP && proposedTP < entryPrice) {
+                    newTP = proposedTP;
+                    updated = true;
+                    console.log(`📉 Updating SHORT TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
+                }
+                
+                // Update SL hanya jika resistance baru lebih rendah dari SL saat ini TAPI tetap di atas entry
+                // Ini untuk mengamankan profit (trailing stop)
+                if (proposedSL < currentSL && proposedSL > entryPrice) {
+                    newSL = proposedSL;
+                    updated = true;
+                    console.log(`🛡️ Updating SHORT SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
+                }
+                
+                // Safety check: Jangan biarkan SL turun terlalu dekat dengan entry
+                const minDistanceFromEntry = (proposedSL - entryPrice) / entryPrice;
+                if (minDistanceFromEntry < 0.001) { // Minimal 0.1% dari entry
+                    console.log("⚠️ Proposed SL too close to entry, keeping current SL");
+                    newSL = currentSL;
+                }
             }
-            
-            if (newTP >= entryPrice || newSL <= entryPrice) {
-                console.log("⚠️ Invalid TP/SL levels for SHORT");
-                return;
-            }
-            
-            if (newSL < currentSL) {
-                console.log("🛡️ Keeping safer SL for SHORT");
-                newSL = currentSL;
-            }
-        } else {
-            return;
         }
 
-        db.activePosition.tp = newTP;
-        db.activePosition.sl = newSL;
-        saveDB();
-
-        console.log(`✅ TP/SL Updated for ${side.toUpperCase()}:`);
-        console.log(`   Entry: ${formatPrice(entryPrice)}`);
-        console.log(`   TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
-        console.log(`   SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
+        // Hanya update jika ada perubahan dan level baru valid
+        if (updated) {
+            // Final validation sebelum menyimpan
+            if (side === "buy") {
+                if (newTP > entryPrice && newSL < entryPrice && newTP > newSL) {
+                    db.activePosition.tp = newTP;
+                    db.activePosition.sl = newSL;
+                    saveDB();
+                    
+                    console.log(`✅ TP/SL Updated for LONG:`);
+                    console.log(`   Entry: ${formatPrice(entryPrice)}`);
+                    console.log(`   TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
+                    console.log(`   SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
+                    console.log(`   Current Price: ${formatPrice(currentPrice)}`);
+                    
+                    // Hitung RR ratio baru
+                    const rrRatio = ((newTP - entryPrice) / (entryPrice - newSL)).toFixed(2);
+                    console.log(`   New RR Ratio: ${rrRatio}`);
+                } else {
+                    console.log("❌ Invalid TP/SL levels after update, changes reverted");
+                }
+            } else if (side === "sell") {
+                if (newTP < entryPrice && newSL > entryPrice && newTP < newSL) {
+                    db.activePosition.tp = newTP;
+                    db.activePosition.sl = newSL;
+                    saveDB();
+                    
+                    console.log(`✅ TP/SL Updated for SHORT:`);
+                    console.log(`   Entry: ${formatPrice(entryPrice)}`);
+                    console.log(`   TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
+                    console.log(`   SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
+                    console.log(`   Current Price: ${formatPrice(currentPrice)}`);
+                    
+                    // Hitung RR ratio baru
+                    const rrRatio = ((entryPrice - newTP) / (newSL - entryPrice)).toFixed(2);
+                    console.log(`   New RR Ratio: ${rrRatio}`);
+                } else {
+                    console.log("❌ Invalid TP/SL levels after update, changes reverted");
+                }
+            }
+        } else {
+            console.log("⏩ No beneficial TP/SL updates found");
+        }
         
-        // logSignal(
-        //     side === "buy" ? "LONG" : "SHORT",
-        //     entryPrice,
-        //     newTP,
-        //     newSL,
-        //     "TP_SL_UPDATED"
-        // );
-
     } catch (error) {
         console.error("❌ TP/SL update failed:", error.message);
     }
