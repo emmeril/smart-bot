@@ -635,13 +635,13 @@ const updateTPSLForOpenPosition = async (signal) => {
         console.log(`   TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
         console.log(`   SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
         
-        logSignal(
-            side === "buy" ? "LONG" : "SHORT",
-            entryPrice,
-            newTP,
-            newSL,
-            "TP_SL_UPDATED"
-        );
+        // logSignal(
+        //     side === "buy" ? "LONG" : "SHORT",
+        //     entryPrice,
+        //     newTP,
+        //     newSL,
+        //     "TP_SL_UPDATED"
+        // );
 
     } catch (error) {
         console.error("❌ TP/SL update failed:", error.message);
