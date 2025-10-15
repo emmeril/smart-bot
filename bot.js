@@ -582,117 +582,171 @@ const updateTPSLForOpenPosition = async (signal) => {
         const currentPrice = await getPrice();
         if (!currentPrice) return;
 
+        // **BATASAN REALISTIS BERDASARKAN ATR & ENTRY**
+        const atr = await calculateCurrentATR(); // Fungsi ATR dari analisis sebelumnya
+        const maxTpDistance = entryPrice * 0.05; // Max 5% dari entry
+        const maxSlDistance = entryPrice * 0.03; // Max 3% dari entry
+        const minTpDistance = entryPrice * 0.01; // Min 1% dari entry
+        const minSlDistance = entryPrice * 0.005; // Min 0.5% dari entry
+
         let newTP = currentTP;
         let newSL = currentSL;
         let updated = false;
 
-        if (side === "buy") {
-            // Untuk LONG position - TP mengacu pada resistance, SL pada support
-            const proposedTP = signal.targetLong;
-            const proposedSL = signal.stopLossLong;
+        const validateLevel = (level, isTP, isLong) => {
+            if (!level || !isFinite(level)) return false;
             
-            // Validasi level TP/SL harus valid untuk posisi LONG
-            if (proposedTP > entryPrice && proposedSL < entryPrice) {
-                // Update TP hanya jika resistance baru lebih tinggi dari TP saat ini DAN di atas entry
-                if (proposedTP > currentTP && proposedTP > entryPrice) {
+            const distanceFromEntry = Math.abs(level - entryPrice) / entryPrice;
+            
+            if (isTP) {
+                // TP harus dalam range 1%-5% dari entry
+                if (distanceFromEntry < minTpDistance || distanceFromEntry > maxTpDistance) {
+                    console.log(`⚠️ TP ${level} too ${distanceFromEntry < minTpDistance ? 'close' : 'far'} from entry (${(distanceFromEntry*100).toFixed(2)}%)`);
+                    return false;
+                }
+            } else {
+                // SL harus dalam range 0.5%-3% dari entry
+                if (distanceFromEntry < minSlDistance || distanceFromEntry > maxSlDistance) {
+                    console.log(`⚠️ SL ${level} too ${distanceFromEntry < minSlDistance ? 'close' : 'far'} from entry (${(distanceFromEntry*100).toFixed(2)}%)`);
+                    return false;
+                }
+            }
+            
+            // Validasi posisi relatif terhadap entry
+            if (isLong) {
+                if (isTP && level <= entryPrice) return false;
+                if (!isTP && level >= entryPrice) return false;
+            } else {
+                if (isTP && level >= entryPrice) return false;
+                if (!isTP && level <= entryPrice) return false;
+            }
+            
+            return true;
+        };
+
+        if (side === "buy") {
+            let proposedTP = signal.targetLong;
+            let proposedSL = signal.stopLossLong;
+            
+            // **FALLBACK: Jika level tidak realistis, gunakan level berdasarkan ATR**
+            if (!validateLevel(proposedTP, true, true)) {
+                proposedTP = entryPrice * 1.02; // 2% dari entry
+                console.log(`🔄 Using fallback TP: ${formatPrice(proposedTP)}`);
+            }
+            
+            if (!validateLevel(proposedSL, false, true)) {
+                proposedSL = entryPrice * 0.99; // 1% dari entry
+                console.log(`🔄 Using fallback SL: ${formatPrice(proposedSL)}`);
+            }
+            
+            // **UPDATE LOGIC DENGAN BATASAN**
+            // TP: hanya update jika lebih baik DAN masih realistis
+            if (proposedTP > currentTP && proposedTP > entryPrice && validateLevel(proposedTP, true, true)) {
+                // Jangan biarkan TP terlalu jauh dari current price
+                const distanceFromCurrent = (proposedTP - currentPrice) / currentPrice;
+                if (distanceFromCurrent < 0.03) { // Max 3% dari current price
                     newTP = proposedTP;
                     updated = true;
-                    console.log(`📈 Updating LONG TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
+                } else {
+                    console.log(`⏸️ TP too far from current price (${(distanceFromCurrent*100).toFixed(2)}%), keeping current TP`);
                 }
-                
-                // Update SL hanya jika support baru lebih tinggi dari SL saat ini TAPI tetap di bawah entry
-                // Ini untuk mengamankan profit (trailing stop)
-                if (proposedSL > currentSL && proposedSL < entryPrice) {
-                    newSL = proposedSL;
-                    updated = true;
-                    console.log(`🛡️ Updating LONG SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
-                }
-                
-                // Safety check: Jangan biarkan SL naik terlalu dekat dengan entry
-                const minDistanceFromEntry = (entryPrice - proposedSL) / entryPrice;
-                if (minDistanceFromEntry < 0.001) { // Minimal 0.1% dari entry
-                    console.log("⚠️ Proposed SL too close to entry, keeping current SL");
-                    newSL = currentSL;
-                }
+            }
+            
+            // SL: hanya naikkan (trailing) jika masih realistis
+            if (proposedSL > currentSL && proposedSL < entryPrice && validateLevel(proposedSL, false, true)) {
+                newSL = proposedSL;
+                updated = true;
             }
             
         } else if (side === "sell") {
-            // Untuk SHORT position - TP mengacu pada support, SL pada resistance
-            const proposedTP = signal.targetShort;
-            const proposedSL = signal.stopLossShort;
+            let proposedTP = signal.targetShort;
+            let proposedSL = signal.stopLossShort;
             
-            // Validasi level TP/SL harus valid untuk posisi SHORT
-            if (proposedTP < entryPrice && proposedSL > entryPrice) {
-                // Update TP hanya jika support baru lebih rendah dari TP saat ini DAN di bawah entry
-                if (proposedTP < currentTP && proposedTP < entryPrice) {
+            // **FALLBACK: Jika level tidak realistis**
+            if (!validateLevel(proposedTP, true, false)) {
+                proposedTP = entryPrice * 0.98; // 2% dari entry
+                console.log(`🔄 Using fallback TP: ${formatPrice(proposedTP)}`);
+            }
+            
+            if (!validateLevel(proposedSL, false, false)) {
+                proposedSL = entryPrice * 1.01; // 1% dari entry
+                console.log(`🔄 Using fallback SL: ${formatPrice(proposedSL)}`);
+            }
+            
+            // **UPDATE LOGIC DENGAN BATASAN**
+            // TP: hanya update jika lebih baik
+            if (proposedTP < currentTP && proposedTP < entryPrice && validateLevel(proposedTP, true, false)) {
+                const distanceFromCurrent = (currentPrice - proposedTP) / currentPrice;
+                if (distanceFromCurrent < 0.03) { // Max 3% dari current price
                     newTP = proposedTP;
                     updated = true;
-                    console.log(`📉 Updating SHORT TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
+                } else {
+                    console.log(`⏸️ TP too far from current price (${(distanceFromCurrent*100).toFixed(2)}%), keeping current TP`);
                 }
-                
-                // Update SL hanya jika resistance baru lebih rendah dari SL saat ini TAPI tetap di atas entry
-                // Ini untuk mengamankan profit (trailing stop)
-                if (proposedSL < currentSL && proposedSL > entryPrice) {
-                    newSL = proposedSL;
-                    updated = true;
-                    console.log(`🛡️ Updating SHORT SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
-                }
-                
-                // Safety check: Jangan biarkan SL turun terlalu dekat dengan entry
-                const minDistanceFromEntry = (proposedSL - entryPrice) / entryPrice;
-                if (minDistanceFromEntry < 0.001) { // Minimal 0.1% dari entry
-                    console.log("⚠️ Proposed SL too close to entry, keeping current SL");
-                    newSL = currentSL;
-                }
+            }
+            
+            // SL: hanya turunkan (trailing) jika masih realistis
+            if (proposedSL < currentSL && proposedSL > entryPrice && validateLevel(proposedSL, false, false)) {
+                newSL = proposedSL;
+                updated = true;
             }
         }
 
-        // Hanya update jika ada perubahan dan level baru valid
+        // **FINAL VALIDATION**
         if (updated) {
-            // Final validation sebelum menyimpan
-            if (side === "buy") {
-                if (newTP > entryPrice && newSL < entryPrice && newTP > newSL) {
-                    db.activePosition.tp = newTP;
-                    db.activePosition.sl = newSL;
-                    saveDB();
-                    
-                    console.log(`✅ TP/SL Updated for LONG:`);
-                    console.log(`   Entry: ${formatPrice(entryPrice)}`);
-                    console.log(`   TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
-                    console.log(`   SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
-                    console.log(`   Current Price: ${formatPrice(currentPrice)}`);
-                    
-                    // Hitung RR ratio baru
-                    const rrRatio = ((newTP - entryPrice) / (entryPrice - newSL)).toFixed(2);
-                    console.log(`   New RR Ratio: ${rrRatio}`);
-                } else {
-                    console.log("❌ Invalid TP/SL levels after update, changes reverted");
-                }
-            } else if (side === "sell") {
-                if (newTP < entryPrice && newSL > entryPrice && newTP < newSL) {
-                    db.activePosition.tp = newTP;
-                    db.activePosition.sl = newSL;
-                    saveDB();
-                    
-                    console.log(`✅ TP/SL Updated for SHORT:`);
-                    console.log(`   Entry: ${formatPrice(entryPrice)}`);
-                    console.log(`   TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
-                    console.log(`   SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
-                    console.log(`   Current Price: ${formatPrice(currentPrice)}`);
-                    
-                    // Hitung RR ratio baru
-                    const rrRatio = ((entryPrice - newTP) / (newSL - entryPrice)).toFixed(2);
-                    console.log(`   New RR Ratio: ${rrRatio}`);
-                } else {
-                    console.log("❌ Invalid TP/SL levels after update, changes reverted");
-                }
+            // Pastikan TP/SL tidak terbalik
+            const isValidLong = side === "buy" && newTP > entryPrice && newSL < entryPrice && newTP > newSL;
+            const isValidShort = side === "sell" && newTP < entryPrice && newSL > entryPrice && newTP < newSL;
+            
+            if (isValidLong || isValidShort) {
+                db.activePosition.tp = newTP;
+                db.activePosition.sl = newSL;
+                saveDB();
+                
+                console.log(`✅ TP/SL Updated for ${side.toUpperCase()}:`);
+                console.log(`   Entry: ${formatPrice(entryPrice)} | Current: ${formatPrice(currentPrice)}`);
+                console.log(`   TP: ${formatPrice(currentTP)} → ${formatPrice(newTP)}`);
+                console.log(`   SL: ${formatPrice(currentSL)} → ${formatPrice(newSL)}`);
+                
+                // Hitung RR ratio
+                const rrRatio = side === "buy" 
+                    ? ((newTP - entryPrice) / (entryPrice - newSL)).toFixed(2)
+                    : ((entryPrice - newTP) / (newSL - entryPrice)).toFixed(2);
+                console.log(`   RR Ratio: ${rrRatio}`);
+            } else {
+                console.log("❌ Invalid levels after validation, keeping original TP/SL");
             }
         } else {
-            console.log("⏩ No beneficial TP/SL updates found");
+            console.log("⏩ No beneficial updates within safe limits");
         }
         
     } catch (error) {
         console.error("❌ TP/SL update failed:", error.message);
+    }
+};
+
+// **FUNGSI TAMBAHAN UNTUK ATR**
+const calculateCurrentATR = async () => {
+    try {
+        const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "15m", undefined, 20);
+        if (!ohlcv || ohlcv.length < 20) return 0;
+        
+        const high = ohlcv.map(c => c[2]);
+        const low = ohlcv.map(c => c[3]);
+        const close = ohlcv.map(c => c[4]);
+        
+        let atrSum = 0;
+        for (let i = 1; i < high.length; i++) {
+            const tr1 = high[i] - low[i];
+            const tr2 = Math.abs(high[i] - close[i-1]);
+            const tr3 = Math.abs(low[i] - close[i-1]);
+            atrSum += Math.max(tr1, tr2, tr3);
+        }
+        
+        return atrSum / (high.length - 1);
+    } catch (error) {
+        console.warn("⚠️ ATR calculation failed, using default");
+        return 0;
     }
 };
 
