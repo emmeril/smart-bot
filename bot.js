@@ -395,73 +395,46 @@ const analyzeSignal = async () => {
             canShort = true;
         }
 
-        // Support/Resistance Detection
-        const findAdvancedSwingLevels = (highArr, lowArr, lookback = 10, minStrength = 2) => {
-            const swingHighs = [];
-            const swingLows = [];
+        // REVISI: Cari level yang lebih realistis untuk coin dengan ATR kecil
+        const findReasonableLevels = (highArr, lowArr, currentPrice) => {
+            const recentHighs = [];
+            const recentLows = [];
             
-            for (let i = lookback; i < highArr.length - lookback; i++) {
-                let isSwingHigh = true;
-                let isSwingLow = true;
-                let strengthHigh = 0;
-                let strengthLow = 0;
-                
-                for (let j = 1; j <= lookback; j++) {
-                    if (highArr[i - j] > highArr[i]) isSwingHigh = false;
-                    if (highArr[i + j] > highArr[i]) isSwingHigh = false;
-                    
-                    if (lowArr[i - j] < lowArr[i]) isSwingLow = false;
-                    if (lowArr[i + j] < lowArr[i]) isSwingLow = false;
-                    
-                    if (highArr[i - j] < highArr[i] && highArr[i + j] < highArr[i]) strengthHigh++;
-                    if (lowArr[i - j] > lowArr[i] && lowArr[i + j] > lowArr[i]) strengthLow++;
-                }
-                
-                if (isSwingHigh && strengthHigh >= minStrength) {
-                    swingHighs.push({
-                        price: highArr[i],
-                        strength: strengthHigh,
-                        index: i
+            // Analisis 96 candle terakhir (24 jam) untuk pattern yang lebih realistis
+            const recentData = highArr.slice(-96);
+            const recentLowData = lowArr.slice(-96);
+            
+            // Cari level-level signifikan dalam 24 jam terakhir
+            const avgRange = (Math.max(...recentData) - Math.min(...recentLowData)) * 0.1;
+            
+            // Untuk coin dengan volatilitas rendah, gunakan pendekatan berbeda
+            const resistanceCandidates = [];
+            const supportCandidates = [];
+            
+            // Identifikasi area konsolidasi dan breakout points
+            for (let i = 5; i < recentData.length - 5; i++) {
+                // Resistance: area dimana harga ditolak beberapa kali
+                if (recentData[i] > recentData[i-1] && recentData[i] > recentData[i+1] && 
+                    recentData[i] > recentData[i-2] && recentData[i] > recentData[i+2]) {
+                    resistanceCandidates.push({
+                        price: recentData[i],
+                        strength: 1,
+                        recency: i // semakin besar semakin baru
                     });
                 }
                 
-                if (isSwingLow && strengthLow >= minStrength) {
-                    swingLows.push({
-                        price: lowArr[i],
-                        strength: strengthLow,
-                        index: i
+                // Support: area dimana harga memantul beberapa kali
+                if (recentLowData[i] < recentLowData[i-1] && recentLowData[i] < recentLowData[i+1] && 
+                    recentLowData[i] < recentLowData[i-2] && recentLowData[i] < recentLowData[i+2]) {
+                    supportCandidates.push({
+                        price: recentLowData[i],
+                        strength: 1,
+                        recency: i
                     });
                 }
             }
             
-            const groupLevels = (levels, threshold = 0.002) => {
-                const groups = [];
-                
-                levels.sort((a, b) => a.price - b.price).forEach(level => {
-                    const existingGroup = groups.find(g => 
-                        Math.abs(g.price - level.price) / g.price < threshold
-                    );
-                    
-                    if (existingGroup) {
-                        existingGroup.members.push(level);
-                        existingGroup.price = (existingGroup.price + level.price) / 2;
-                        existingGroup.strength += level.strength;
-                    } else {
-                        groups.push({
-                            price: level.price,
-                            strength: level.strength,
-                            members: [level]
-                        });
-                    }
-                });
-                
-                return groups.sort((a, b) => b.strength - a.strength);
-            };
-            
-            return {
-                resistance: groupLevels(swingHighs).slice(0, 3),
-                support: groupLevels(swingLows).slice(0, 3)
-            };
+            return { resistanceCandidates, supportCandidates, avgRange };
         };
 
         // ATR Calculation
@@ -483,26 +456,99 @@ const analyzeSignal = async () => {
             return atr;
         };
 
-        const advancedLevels = findAdvancedSwingLevels(high, low, 8, 3);
         const currentATR = calculateATR(high, low, close, 14).pop() || 0;
         
-        const minDistance = currentATR * 0.5;
+        // REVISI BESAR: Untuk ATR kecil (seperti DOGE 0.00129), gunakan batasan yang lebih praktis
+        console.log(`📊 ATR Detected: ${formatPrice(currentATR)}`);
         
-        const validResistance = advancedLevels.resistance
-            .filter(level => level.price > price + minDistance)
-            .sort((a, b) => a.price - b.price);
+        // Tentukan batasan berdasarkan tipe coin
+        let minDistance, maxDistance;
         
-        const validSupport = advancedLevels.support
-            .filter(level => level.price < price - minDistance)
-            .sort((a, b) => b.price - a.price);
+        if (currentATR < 0.002) { // Coin dengan volatilitas rendah seperti DOGE
+            minDistance = price * 0.003; // 0.3% minimal
+            maxDistance = price * 0.015;  // 1.5% maksimal
+            console.log(`🎯 Using LOW volatility settings: ${(minDistance/price*100).toFixed(2)}% - ${(maxDistance/price*100).toFixed(2)}%`);
+        } else if (currentATR < 0.01) { // Coin dengan volatilitas medium
+            minDistance = price * 0.008; // 0.8% minimal
+            maxDistance = price * 0.03;  // 3% maksimal
+            console.log(`🎯 Using MEDIUM volatility settings: ${(minDistance/price*100).toFixed(2)}% - ${(maxDistance/price*100).toFixed(2)}%`);
+        } else { // Coin dengan volatilitas tinggi
+            minDistance = price * 0.015; // 1.5% minimal
+            maxDistance = price * 0.06;  // 6% maksimal
+            console.log(`🎯 Using HIGH volatility settings: ${(minDistance/price*100).toFixed(2)}% - ${(maxDistance/price*100).toFixed(2)}%`);
+        }
 
-        const resistance = validResistance.length > 0 ? 
-            validResistance[0].price : 
-            Math.max(...high.slice(-96));
+        const { resistanceCandidates, supportCandidates, avgRange } = findReasonableLevels(high, low, price);
         
-        const support = validSupport.length > 0 ? 
-            validSupport[0].price : 
-            Math.min(...low.slice(-96));
+        // REVISI: Filter level-level yang masuk akal untuk trading
+        const reasonableResistance = resistanceCandidates
+            .filter(level => {
+                const distance = level.price - price;
+                return distance >= minDistance && distance <= maxDistance;
+            })
+            .sort((a, b) => {
+                // Prioritaskan level yang lebih baru dan lebih dekat dengan current price
+                const scoreA = (b.recency * 0.7) + ((maxDistance - (a.price - price)) / maxDistance * 0.3);
+                const scoreB = (a.recency * 0.7) + ((maxDistance - (b.price - price)) / maxDistance * 0.3);
+                return scoreB - scoreA;
+            });
+        
+        const reasonableSupport = supportCandidates
+            .filter(level => {
+                const distance = price - level.price;
+                return distance >= minDistance && distance <= maxDistance;
+            })
+            .sort((a, b) => {
+                // Prioritaskan level yang lebih baru dan lebih dekat dengan current price
+                const scoreA = (b.recency * 0.7) + ((maxDistance - (price - a.price)) / maxDistance * 0.3);
+                const scoreB = (a.recency * 0.7) + ((maxDistance - (price - b.price)) / maxDistance * 0.3);
+                return scoreB - scoreA;
+            });
+
+        // REVISI: Fallback yang lebih smart untuk low volatility coins
+        let resistance, support;
+        
+        if (reasonableResistance.length > 0) {
+            resistance = reasonableResistance[0].price;
+            console.log(`✅ Found reasonable resistance: ${formatPrice(resistance)}`);
+        } else {
+            // Untuk low volatility, gunakan recent high dengan buffer kecil
+            const recentHigh = Math.max(...high.slice(-48)); // 12 jam terakhir
+            resistance = recentHigh * 1.002; // +0.2% buffer
+            console.log(`🔄 Using recent high as resistance: ${formatPrice(resistance)}`);
+        }
+        
+        if (reasonableSupport.length > 0) {
+            support = reasonableSupport[0].price;
+            console.log(`✅ Found reasonable support: ${formatPrice(support)}`);
+        } else {
+            // Untuk low volatility, gunakan recent low dengan buffer kecil
+            const recentLow = Math.min(...low.slice(-48)); // 12 jam terakhir
+            support = recentLow * 0.998; // -0.2% buffer
+            console.log(`🔄 Using recent low as support: ${formatPrice(support)}`);
+        }
+
+        // REVISI: Final validation untuk pastikan level tidak terlalu ekstrem
+        const maxAllowedMove = price * 0.02; // Maksimal 2% untuk low volatility
+        
+        if (resistance > price + maxAllowedMove) {
+            resistance = price * 1.008; // Batasi ke 0.8% di atas harga
+            console.log(`⚡ Adjusted extreme resistance to: ${formatPrice(resistance)}`);
+        }
+        
+        if (support < price - maxAllowedMove) {
+            support = price * 0.992; // Batasi ke 0.8% di bawah harga
+            console.log(`⚡ Adjusted extreme support to: ${formatPrice(support)}`);
+        }
+
+        // Pastikan ada jarak minimal antara level
+        const minLevelDistance = price * 0.004; // Minimal 0.4% antara support-resistance
+        if (resistance - support < minLevelDistance) {
+            const midpoint = (resistance + support) / 2;
+            resistance = midpoint * 1.002;
+            support = midpoint * 0.998;
+            console.log(`📏 Adjusted levels for minimum distance: R=${formatPrice(resistance)}, S=${formatPrice(support)}`);
+        }
 
         const targetLong = resistance;
         const stopLossLong = support;
@@ -516,9 +562,10 @@ const analyzeSignal = async () => {
 📉 Short Signal: ${canShort ? "✅ VALID" : "❌ INVALID"}
 ─────────────────────────────────────
 💰 Current Price: ${formatPrice(price)}
-🎯 Resistance: ${formatPrice(resistance)}
-🛡️ Support: ${formatPrice(support)}
-📊 ATR: ${formatPrice(currentATR)}
+🎯 Resistance: ${formatPrice(resistance)} (${((resistance - price) / price * 100).toFixed(3)}%)
+🛡️ Support: ${formatPrice(support)} (${((price - support) / price * 100).toFixed(3)}%)
+📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
+📏 R→S Distance: ${formatPrice(resistance - support)} (${((resistance - support)/price*100).toFixed(3)}%)
 ─────────────────────────────────────`);
 
         return {
