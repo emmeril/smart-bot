@@ -529,17 +529,17 @@ const analyzeSignal = async () => {
         }
 
         // REVISI: Final validation untuk pastikan level tidak terlalu ekstrem
-        const maxAllowedMove = price * 0.02; // Maksimal 2% untuk low volatility
+        //const maxAllowedMove = price * 0.02; // Maksimal 2% untuk low volatility
         
-        if (resistance > price + maxAllowedMove) {
-            resistance = price * 1.008; // Batasi ke 0.8% di atas harga
-            console.log(`⚡ Adjusted extreme resistance to: ${formatPrice(resistance)}`);
-        }
+       // if (resistance > price + maxAllowedMove) {
+        //    resistance = price * 1.008; // Batasi ke 0.8% di atas harga
+        //    console.log(`⚡ Adjusted extreme resistance to: ${formatPrice(resistance)}`);
+        //}
         
-        if (support < price - maxAllowedMove) {
-            support = price * 0.992; // Batasi ke 0.8% di bawah harga
-            console.log(`⚡ Adjusted extreme support to: ${formatPrice(support)}`);
-        }
+        //if (support < price - maxAllowedMove) {
+        //    support = price * 0.992; // Batasi ke 0.8% di bawah harga
+         //   console.log(`⚡ Adjusted extreme support to: ${formatPrice(support)}`);
+        //}
 
         // Pastikan ada jarak minimal antara level
         const minLevelDistance = price * 0.004; // Minimal 0.4% antara support-resistance
