@@ -2,7 +2,9 @@
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
-const { SMA } = require("technicalindicators");
+const {
+    SMA
+} = require("technicalindicators");
 
 // -------------------- CONFIG --------------------
 const dbPath = "./db.json";
@@ -28,7 +30,9 @@ const initializeExchange = async () => {
         exchange = new ccxt.binance({
             apiKey: process.env.API_KEY,
             secret: process.env.API_SECRET,
-            options: { defaultType: "future" },
+            options: {
+                defaultType: "future"
+            },
             timeout: 30000,
             enableRateLimit: true,
             recvWindow: 60000,
@@ -37,13 +41,13 @@ const initializeExchange = async () => {
         // Test connection
         await exchange.loadMarkets();
         await exchange.fetchBalance();
-        
+
         console.log("✅ Exchange connection initialized successfully");
         connectionRetries = 0;
         return exchange;
     } catch (error) {
         console.error(`❌ Exchange initialization failed (attempt ${connectionRetries + 1}/${MAX_RETRIES}):`, error.message);
-        
+
         if (connectionRetries < MAX_RETRIES) {
             connectionRetries++;
             console.log(`🔄 Retrying in ${RETRY_DELAY/1000} seconds...`);
@@ -70,7 +74,7 @@ const loadDB = () => {
     } catch (error) {
         console.warn("⚠️ Failed to load DB, using default config:", error.message);
     }
-    
+
     return {
         pair: "XRP/USDT:USDT",
         lastLongEntryTime: 0,
@@ -124,13 +128,13 @@ const saveDB = () => {
 
 const formatPrice = (price, pair = db.pair) => {
     if (!price || !isFinite(price)) return "N/A";
-    
+
     try {
         const market = exchange.markets[pair];
         if (!market) return parseFloat(price.toFixed(5));
-        
+
         let decimals = market.precision?.price;
-        
+
         if (decimals === undefined || decimals === null) {
             if (price < 0.0001) decimals = 8;
             else if (price < 0.001) decimals = 7;
@@ -142,10 +146,10 @@ const formatPrice = (price, pair = db.pair) => {
             else if (price < 1000) decimals = 1;
             else decimals = 0;
         }
-        
+
         decimals = Math.max(0, Math.min(8, parseInt(decimals) || 5));
         return parseFloat(price.toFixed(decimals));
-        
+
     } catch (err) {
         return parseFloat(price.toFixed(5));
     }
@@ -202,15 +206,21 @@ const getPositionFromBalance = async () => {
         const positions = balance.info?.positions || [];
 
         const normalize = (str) => (str || "").toString().replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-        const found = positions.find(p => 
-            normalize(p.symbol) === normalize(marketId) || 
+        const found = positions.find(p =>
+            normalize(p.symbol) === normalize(marketId) ||
             normalize(p.contractCode) === normalize(marketId)
         );
 
-        return { balance, position: found };
+        return {
+            balance,
+            position: found
+        };
     } catch (err) {
         console.error("❌ Failed to fetch position:", err.message);
-        return { balance: null, position: null };
+        return {
+            balance: null,
+            position: null
+        };
     }
 };
 
@@ -223,7 +233,9 @@ const placeOrder = async (side, tp, sl) => {
     }
 
     try {
-        const { position } = await getPositionFromBalance();
+        const {
+            position
+        } = await getPositionFromBalance();
         const amt = parseFloat(position?.positionAmt || "0");
         if (isFinite(amt) && Math.abs(amt) > 0) {
             console.log("⚠️ Active position detected, order cancelled");
@@ -282,7 +294,9 @@ const placeOrder = async (side, tp, sl) => {
 const closePosition = async (reason, entryPrice = "N/A") => {
     console.log(`🚨 Closing position: ${reason}`);
     try {
-        const { position } = await getPositionFromBalance();
+        const {
+            position
+        } = await getPositionFromBalance();
         const qty = parseFloat(position?.positionAmt || "0");
 
         if (!isFinite(qty) || Math.abs(qty) === 0) {
@@ -290,7 +304,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
         } else {
             const side = qty > 0 ? "sell" : "buy";
             const amount = Math.abs(qty);
-            
+
             await safeApiCall(exchange.createOrder, db.pair, "market", side, amount, undefined, {
                 reduceOnly: true,
             });
@@ -307,7 +321,11 @@ const closePosition = async (reason, entryPrice = "N/A") => {
             else if (isSL) statusTag = "SL_REALIZED";
 
             if (entryPrice !== "N/A" && db.activePosition) {
-                const { tp, sl, side: entrySide } = db.activePosition;
+                const {
+                    tp,
+                    sl,
+                    side: entrySide
+                } = db.activePosition;
                 try {
                     const entryNum = Number(entryPrice);
                     const closedQty = amount;
@@ -325,8 +343,8 @@ const closePosition = async (reason, entryPrice = "N/A") => {
                             return;
                         }
 
-                        const pnlGross = entrySide === "buy" ? 
-                            (exitNum - entryNum) : 
+                        const pnlGross = entrySide === "buy" ?
+                            (exitNum - entryNum) :
                             (entryNum - exitNum);
                         pnl = pnlGross * closedQty;
                     }
@@ -367,14 +385,29 @@ const analyzeSignal = async () => {
         const low = ohlcv.map(c => c[3]);
 
         // Moving Averages
-        const ma7 = SMA.calculate({ values: close.slice(-100), period: 7 }).pop();
-        const ma25 = SMA.calculate({ values: close.slice(-100), period: 25 }).pop();
-        const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
+        const ma7 = SMA.calculate({
+            values: close.slice(-100),
+            period: 7
+        }).pop();
+        const ma25 = SMA.calculate({
+            values: close.slice(-100),
+            period: 25
+        }).pop();
+        const ma99 = SMA.calculate({
+            values: close,
+            period: 99
+        }).pop();
 
         const price = close.at(-1);
 
-        const prevMA7 = SMA.calculate({ values: close.slice(-101, -1), period: 7 }).pop();
-        const prevMA25 = SMA.calculate({ values: close.slice(-101, -1), period: 25 }).pop();
+        const prevMA7 = SMA.calculate({
+            values: close.slice(-101, -1),
+            period: 7
+        }).pop();
+        const prevMA25 = SMA.calculate({
+            values: close.slice(-101, -1),
+            period: 25
+        }).pop();
 
         const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
         const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
@@ -396,36 +429,29 @@ const analyzeSignal = async () => {
         }
 
         // REVISI: Cari level yang lebih realistis untuk coin dengan ATR kecil
-        const findReasonableLevels = (highArr, lowArr, currentPrice) => {
-            const recentHighs = [];
-            const recentLows = [];
-            
+        const findReasonableLevels = (highArr, lowArr) => {
+            const resistanceCandidates = [];
+            const supportCandidates = [];
+
             // Analisis 96 candle terakhir (24 jam) untuk pattern yang lebih realistis
             const recentData = highArr.slice(-96);
             const recentLowData = lowArr.slice(-96);
-            
-            // Cari level-level signifikan dalam 24 jam terakhir
-            const avgRange = (Math.max(...recentData) - Math.min(...recentLowData)) * 0.1;
-            
-            // Untuk coin dengan volatilitas rendah, gunakan pendekatan berbeda
-            const resistanceCandidates = [];
-            const supportCandidates = [];
-            
+
             // Identifikasi area konsolidasi dan breakout points
             for (let i = 5; i < recentData.length - 5; i++) {
                 // Resistance: area dimana harga ditolak beberapa kali
-                if (recentData[i] > recentData[i-1] && recentData[i] > recentData[i+1] && 
-                    recentData[i] > recentData[i-2] && recentData[i] > recentData[i+2]) {
+                if (recentData[i] > recentData[i - 1] && recentData[i] > recentData[i + 1] &&
+                    recentData[i] > recentData[i - 2] && recentData[i] > recentData[i + 2]) {
                     resistanceCandidates.push({
                         price: recentData[i],
                         strength: 1,
                         recency: i // semakin besar semakin baru
                     });
                 }
-                
+
                 // Support: area dimana harga memantul beberapa kali
-                if (recentLowData[i] < recentLowData[i-1] && recentLowData[i] < recentLowData[i+1] && 
-                    recentLowData[i] < recentLowData[i-2] && recentLowData[i] < recentLowData[i+2]) {
+                if (recentLowData[i] < recentLowData[i - 1] && recentLowData[i] < recentLowData[i + 1] &&
+                    recentLowData[i] < recentLowData[i - 2] && recentLowData[i] < recentLowData[i + 2]) {
                     supportCandidates.push({
                         price: recentLowData[i],
                         strength: 1,
@@ -433,8 +459,11 @@ const analyzeSignal = async () => {
                     });
                 }
             }
-            
-            return { resistanceCandidates, supportCandidates, avgRange };
+
+            return {
+                resistanceCandidates,
+                supportCandidates
+            };
         };
 
         // ATR Calculation
@@ -446,40 +475,40 @@ const analyzeSignal = async () => {
                 const tr3 = Math.abs(lowArr[i] - closeArr[i - 1]);
                 tr.push(Math.max(tr1, tr2, tr3));
             }
-            
+
             const atr = [];
             for (let i = period - 1; i < tr.length; i++) {
                 const slice = tr.slice(i - period + 1, i + 1);
                 atr.push(slice.reduce((a, b) => a + b) / period);
             }
-            
+
             return atr;
         };
 
         const currentATR = calculateATR(high, low, close, 14).pop() || 0;
-        
+
         // REVISI BESAR: Untuk ATR kecil (seperti DOGE 0.00129), gunakan batasan yang lebih praktis
         console.log(`📊 ATR Detected: ${formatPrice(currentATR)}`);
-        
+
         // Tentukan batasan berdasarkan tipe coin
         let minDistance, maxDistance;
-        
+
         if (currentATR < 0.002) { // Coin dengan volatilitas rendah seperti DOGE
             minDistance = price * 0.003; // 0.3% minimal
-            maxDistance = price * 0.015;  // 1.5% maksimal
+            maxDistance = price * 0.015; // 1.5% maksimal
             console.log(`🎯 Using LOW volatility settings: ${(minDistance/price*100).toFixed(2)}% - ${(maxDistance/price*100).toFixed(2)}%`);
         } else if (currentATR < 0.01) { // Coin dengan volatilitas medium
             minDistance = price * 0.008; // 0.8% minimal
-            maxDistance = price * 0.03;  // 3% maksimal
+            maxDistance = price * 0.03; // 3% maksimal
             console.log(`🎯 Using MEDIUM volatility settings: ${(minDistance/price*100).toFixed(2)}% - ${(maxDistance/price*100).toFixed(2)}%`);
         } else { // Coin dengan volatilitas tinggi
             minDistance = price * 0.015; // 1.5% minimal
-            maxDistance = price * 0.06;  // 6% maksimal
+            maxDistance = price * 0.06; // 6% maksimal
             console.log(`🎯 Using HIGH volatility settings: ${(minDistance/price*100).toFixed(2)}% - ${(maxDistance/price*100).toFixed(2)}%`);
         }
 
-        const { resistanceCandidates, supportCandidates, avgRange } = findReasonableLevels(high, low, price);
-        
+        const { resistanceCandidates, supportCandidates } = findReasonableLevels(high, low);
+
         // REVISI: Filter level-level yang masuk akal untuk trading
         const reasonableResistance = resistanceCandidates
             .filter(level => {
@@ -492,7 +521,7 @@ const analyzeSignal = async () => {
                 const scoreB = (a.recency * 0.7) + ((maxDistance - (b.price - price)) / maxDistance * 0.3);
                 return scoreB - scoreA;
             });
-        
+
         const reasonableSupport = supportCandidates
             .filter(level => {
                 const distance = price - level.price;
@@ -507,7 +536,7 @@ const analyzeSignal = async () => {
 
         // REVISI: Fallback yang lebih smart untuk low volatility coins
         let resistance, support;
-        
+
         if (reasonableResistance.length > 0) {
             resistance = reasonableResistance[0].price;
             console.log(`✅ Found reasonable resistance: ${formatPrice(resistance)}`);
@@ -517,7 +546,7 @@ const analyzeSignal = async () => {
             resistance = recentHigh * 1.002; // +0.2% buffer
             console.log(`🔄 Using recent high as resistance: ${formatPrice(resistance)}`);
         }
-        
+
         if (reasonableSupport.length > 0) {
             support = reasonableSupport[0].price;
             console.log(`✅ Found reasonable support: ${formatPrice(support)}`);
@@ -527,19 +556,6 @@ const analyzeSignal = async () => {
             support = recentLow * 0.998; // -0.2% buffer
             console.log(`🔄 Using recent low as support: ${formatPrice(support)}`);
         }
-
-        // REVISI: Final validation untuk pastikan level tidak terlalu ekstrem
-        //const maxAllowedMove = price * 0.02; // Maksimal 2% untuk low volatility
-        
-       // if (resistance > price + maxAllowedMove) {
-        //    resistance = price * 1.008; // Batasi ke 0.8% di atas harga
-        //    console.log(`⚡ Adjusted extreme resistance to: ${formatPrice(resistance)}`);
-        //}
-        
-        //if (support < price - maxAllowedMove) {
-        //    support = price * 0.992; // Batasi ke 0.8% di bawah harga
-         //   console.log(`⚡ Adjusted extreme support to: ${formatPrice(support)}`);
-        //}
 
         // Pastikan ada jarak minimal antara level
         const minLevelDistance = price * 0.004; // Minimal 0.4% antara support-resistance
@@ -586,7 +602,9 @@ const analyzeSignal = async () => {
 // -------------------- POSITION MONITORING --------------------
 const checkPositionStatus = async () => {
     try {
-        const { position } = await getPositionFromBalance();
+        const {
+            position
+        } = await getPositionFromBalance();
         const amt = parseFloat(position?.positionAmt || "0");
         const amtSafe = isFinite(amt) ? amt : 0;
 
@@ -599,7 +617,12 @@ const checkPositionStatus = async () => {
         }
 
         if (db.activePosition && amtSafe !== 0) {
-            const { tp, sl, side, entryPrice } = db.activePosition;
+            const {
+                tp,
+                sl,
+                side,
+                entryPrice
+            } = db.activePosition;
             const currentPrice = await getPrice();
             if (!currentPrice) return;
 
@@ -623,26 +646,28 @@ const checkPositionStatus = async () => {
 const recoverPositionState = async () => {
     try {
         console.log("🔄 Checking position sync...");
-        
-        const { position } = await getPositionFromBalance();
+
+        const {
+            position
+        } = await getPositionFromBalance();
         const amt = parseFloat(position?.positionAmt || "0");
         const MIN_POSITION_AMOUNT = 0.000001;
         const amtSafe = isFinite(amt) ? amt : 0;
-        
+
         // Recovery needed
         if (Math.abs(amtSafe) > MIN_POSITION_AMOUNT && !db.activePosition) {
             console.log("⚠️ Position recovery needed");
-            
+
             const currentPrice = await getPrice();
             if (!currentPrice) return;
-            
+
             const side = amtSafe > 0 ? "buy" : "sell";
             const entryPrice = parseFloat(position?.entryPrice || currentPrice);
             const leverage = position?.leverage || db.leverage;
-            
+
             const signal = await analyzeSignal();
             let tp, sl;
-            
+
             if (!signal || !signal.price) {
                 console.log("⚠️ Using fallback TP/SL");
                 if (side === "buy") {
@@ -661,7 +686,7 @@ const recoverPositionState = async () => {
                     sl = signal.stopLossShort || (entryPrice * 1.005);
                 }
             }
-            
+
             const SAFETY_MARGIN = 0.001;
             if (side === "buy") {
                 tp = tp * (1 - SAFETY_MARGIN);
@@ -670,7 +695,7 @@ const recoverPositionState = async () => {
                 tp = tp * (1 + SAFETY_MARGIN);
                 sl = sl * (1 - SAFETY_MARGIN);
             }
-            
+
             if (side === "buy") {
                 if (tp <= entryPrice) tp = entryPrice * 1.015;
                 if (sl >= entryPrice) sl = entryPrice * 0.995;
@@ -678,14 +703,14 @@ const recoverPositionState = async () => {
                 if (tp >= entryPrice) tp = entryPrice * 0.985;
                 if (sl <= entryPrice) sl = entryPrice * 1.005;
             }
-            
+
             let rrRatio;
             if (side === "buy") {
                 rrRatio = ((tp - entryPrice) / (entryPrice - sl)).toFixed(2);
             } else {
                 rrRatio = ((entryPrice - tp) / (sl - entryPrice)).toFixed(2);
             }
-            
+
             db.activePosition = {
                 side: side,
                 entryPrice: entryPrice,
@@ -696,14 +721,14 @@ const recoverPositionState = async () => {
                 rrRatio: parseFloat(rrRatio),
                 recoveredAt: new Date().toISOString()
             };
-            
+
             saveDB();
-            
+
             console.log("✅ Position recovered");
             console.log(`   ${side.toUpperCase()} | Entry: ${formatPrice(entryPrice)}`);
             console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
             console.log(`   RR: ${rrRatio} | Leverage: ${leverage}x`);
-            
+
             logSignal(
                 side === "buy" ? "LONG" : "SHORT",
                 entryPrice,
@@ -712,13 +737,13 @@ const recoverPositionState = async () => {
                 "POSITION_RECOVERED"
             );
         }
-        
+
         // Cleanup needed
         if (db.activePosition && Math.abs(amtSafe) <= MIN_POSITION_AMOUNT) {
             console.log("⚠️ Position cleanup needed");
-            
+
             const side = db.activePosition.side === "buy" ? "LONG" : "SHORT";
-            
+
             logSignal(
                 side,
                 db.activePosition.entryPrice,
@@ -726,23 +751,28 @@ const recoverPositionState = async () => {
                 db.activePosition.sl,
                 "CLOSED_EXTERNALLY"
             );
-            
+
             db.activePosition = null;
             saveDB();
             console.log("✅ Database cleaned");
         }
-        
+
         // Position monitoring
         if (db.activePosition && Math.abs(amtSafe) > MIN_POSITION_AMOUNT) {
             const currentPrice = await getPrice();
             if (currentPrice) {
-                const { side, entryPrice, tp, sl } = db.activePosition;
+                const {
+                    side,
+                    entryPrice,
+                    tp,
+                    sl
+                } = db.activePosition;
                 const unrealizedPnl = side === "buy" ? currentPrice - entryPrice : entryPrice - currentPrice;
                 const pnlPercent = (unrealizedPnl / entryPrice * 100).toFixed(2);
-                
+
                 let status = "🟢 NORMAL";
                 let warning = "";
-                
+
                 if (side === "buy") {
                     if (currentPrice >= tp * 0.998) {
                         status = "🟡 NEAR TP";
@@ -760,9 +790,9 @@ const recoverPositionState = async () => {
                         warning = " - Near Stop Loss!";
                     }
                 }
-                
+
                 const pnlEmoji = unrealizedPnl >= 0 ? "💹" : "🔻";
-                
+
                 console.log("\n📊 Position Monitor");
                 console.log(`   ${side.toUpperCase()} | ${status}${warning}`);
                 console.log(`   Entry: ${formatPrice(entryPrice)} | Current: ${formatPrice(currentPrice)}`);
@@ -770,7 +800,7 @@ const recoverPositionState = async () => {
                 console.log(`   ${pnlEmoji} PnL: ${formatPrice(unrealizedPnl)} (${pnlPercent}%)`);
             }
         }
-        
+
     } catch (err) {
         console.error("❌ Recovery error:", err.message);
     }
@@ -782,7 +812,7 @@ const healthCheck = async () => {
         await initializeExchange();
         const balance = await safeApiCall(exchange.fetchBalance);
         const price = await getPrice();
-        
+
         return {
             healthy: true,
             exchange: 'connected',
@@ -823,7 +853,7 @@ setInterval(async () => {
     try {
         const freshDb = loadDB();
         db.pair = freshDb.pair;
-        db.leverage = freshDb.leverage; 
+        db.leverage = freshDb.leverage;
         db.marginMode = freshDb.marginMode;
         db.usdtPerTrade = freshDb.usdtPerTrade;
     } catch (error) {
@@ -834,11 +864,11 @@ setInterval(async () => {
         console.log("⏳ Skipping: Still processing...");
         return;
     }
-    
+
     isProcessing = true;
     try {
         const now = new Date();
-        
+
         await recoverPositionState();
         await checkPositionStatus();
 
@@ -869,7 +899,9 @@ setInterval(async () => {
             await new Promise(resolve => setTimeout(resolve, 10000));
         }
 
-        const { position } = await getPositionFromBalance();
+        const {
+            position
+        } = await getPositionFromBalance();
         const amt = parseFloat(position?.positionAmt || "0");
         const hasActiveBinancePositionAfterClose = isFinite(amt) && Math.abs(amt) > 0;
 
