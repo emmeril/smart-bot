@@ -579,7 +579,7 @@ const analyzeSignal = async () => {
 ─────────────────────────────────────
 💰 Current Price: ${formatPrice(price)}
 🎯 Resistance: ${formatPrice(resistance)} (${((resistance - price) / price * 100).toFixed(3)}%)
-🛡️ Support: ${formatPrice(support)} (${((price - support) / price * 100).toFixed(3)}%)
+🛡️  Support: ${formatPrice(support)} (${((price - support) / price * 100).toFixed(3)}%)
 📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
 📏 R→S Distance: ${formatPrice(resistance - support)} (${((resistance - support)/price*100).toFixed(3)}%)
 ─────────────────────────────────────`);
