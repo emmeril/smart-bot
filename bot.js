@@ -543,7 +543,7 @@ const analyzeSignal = async () => {
         } else {
             // Untuk low volatility, gunakan recent high dengan buffer kecil
             const recentHigh = Math.max(...high.slice(-96)); // 24 jam terakhir
-            resistance = recentHigh * 1.002; // +0.2% buffer
+            resistance = recentHigh ; 
             console.log(`🔄 Using recent high as resistance: ${formatPrice(resistance)}`);
         }
 
@@ -553,7 +553,7 @@ const analyzeSignal = async () => {
         } else {
             // Untuk low volatility, gunakan recent low dengan buffer kecil
             const recentLow = Math.min(...low.slice(-96)); // 24 jam terakhir
-            support = recentLow * 0.998; // -0.2% buffer
+            support = recentLow; 
             console.log(`🔄 Using recent low as support: ${formatPrice(support)}`);
         }
 
