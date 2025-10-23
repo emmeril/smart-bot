@@ -1,4 +1,4 @@
-// signal.js (Stabilized Connection Version)
+// signal.js (Advanced Support & Resistance Version)
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
@@ -224,6 +224,519 @@ const getPositionFromBalance = async () => {
     }
 };
 
+// -------------------- ADVANCED SUPPORT & RESISTANCE DETECTION --------------------
+const findAdvancedLevels = (high, low, close, volume, price) => {
+    console.log("🔍 Starting advanced S/R detection...");
+    
+    // 1. MULTI-TIMEFRAME ANALYSIS (15m, 1h, 4h)
+    const detectMultiTimeframeLevels = () => {
+        const levels = {
+            strongResistance: [],
+            strongSupport: [],
+            weakResistance: [],
+            weakSupport: []
+        };
+
+        // Analyze different timeframes within the data
+        const timeframes = [
+            { period: 20, weight: 1.0, name: "short" },    // Last 5 hours
+            { period: 50, weight: 1.5, name: "medium" },   // Last 12.5 hours  
+            { period: 96, weight: 2.0, name: "long" }      // Last 24 hours
+        ];
+
+        timeframes.forEach(tf => {
+            const sliceIndex = Math.max(0, high.length - tf.period);
+            const highSlice = high.slice(sliceIndex);
+            const lowSlice = low.slice(sliceIndex);
+            const closeSlice = close.slice(sliceIndex);
+            const volumeSlice = volume.slice(sliceIndex);
+
+            // Find pivot highs and lows
+            for (let i = 3; i < highSlice.length - 3; i++) {
+                // Pivot High detection (Resistance)
+                if (highSlice[i] > highSlice[i-1] && highSlice[i] > highSlice[i-2] &&
+                    highSlice[i] > highSlice[i+1] && highSlice[i] > highSlice[i+2] &&
+                    highSlice[i] === Math.max(...highSlice.slice(i-2, i+3))) {
+                    
+                    const level = {
+                        price: highSlice[i],
+                        strength: tf.weight * (1 + (volumeSlice[i] / Math.max(...volumeSlice))),
+                        timeframe: tf.name,
+                        touches: 1,
+                        recency: i
+                    };
+                    
+                    // Check if this is strong resistance (price rejected multiple times)
+                    let isStrong = false;
+                    for (let j = i + 1; j < Math.min(i + 20, highSlice.length); j++) {
+                        if (Math.abs(highSlice[j] - highSlice[i]) / highSlice[i] < 0.002) {
+                            level.touches++;
+                            level.strength += 0.5;
+                        }
+                    }
+                    
+                    if (level.touches > 1) {
+                        levels.strongResistance.push(level);
+                    } else {
+                        levels.weakResistance.push(level);
+                    }
+                }
+
+                // Pivot Low detection (Support)
+                if (lowSlice[i] < lowSlice[i-1] && lowSlice[i] < lowSlice[i-2] &&
+                    lowSlice[i] < lowSlice[i+1] && lowSlice[i] < lowSlice[i+2] &&
+                    lowSlice[i] === Math.min(...lowSlice.slice(i-2, i+3))) {
+                    
+                    const level = {
+                        price: lowSlice[i],
+                        strength: tf.weight * (1 + (volumeSlice[i] / Math.max(...volumeSlice))),
+                        timeframe: tf.name,
+                        touches: 1,
+                        recency: i
+                    };
+                    
+                    // Check if this is strong support (price bounced multiple times)
+                    let isStrong = false;
+                    for (let j = i + 1; j < Math.min(i + 20, lowSlice.length); j++) {
+                        if (Math.abs(lowSlice[j] - lowSlice[i]) / lowSlice[i] < 0.002) {
+                            level.touches++;
+                            level.strength += 0.5;
+                        }
+                    }
+                    
+                    if (level.touches > 1) {
+                        levels.strongSupport.push(level);
+                    } else {
+                        levels.weakSupport.push(level);
+                    }
+                }
+            }
+        });
+
+        return levels;
+    };
+
+    // 2. FIBONACCI RETRACEMENT LEVELS
+    const calculateFibonacciLevels = () => {
+        const recentHigh = Math.max(...high.slice(-50));
+        const recentLow = Math.min(...low.slice(-50));
+        const range = recentHigh - recentLow;
+
+        return {
+            fib236: recentHigh - range * 0.236,
+            fib382: recentHigh - range * 0.382,
+            fib500: recentHigh - range * 0.500,
+            fib618: recentHigh - range * 0.618,
+            fib786: recentHigh - range * 0.786
+        };
+    };
+
+    // 3. VOLUME PROFILE ANALYSIS
+    const calculateVolumeProfile = () => {
+        const priceLevels = {};
+        const range = Math.max(...high.slice(-50)) - Math.min(...low.slice(-50));
+        const bucketSize = range / 20; // 20 price buckets
+
+        // Group volume by price levels
+        for (let i = 0; i < close.length; i++) {
+            const bucket = Math.floor(close[i] / bucketSize) * bucketSize;
+            if (!priceLevels[bucket]) {
+                priceLevels[bucket] = { volume: 0, count: 0 };
+            }
+            priceLevels[bucket].volume += volume[i];
+            priceLevels[bucket].count++;
+        }
+
+        // Find high volume nodes (support/resistance)
+        const highVolumeLevels = Object.entries(priceLevels)
+            .filter(([_, data]) => data.volume > Math.max(...Object.values(priceLevels).map(d => d.volume)) * 0.7)
+            .map(([price, data]) => ({
+                price: parseFloat(price),
+                volume: data.volume,
+                strength: data.volume / Math.max(...Object.values(priceLevels).map(d => d.volume))
+            }))
+            .sort((a, b) => b.volume - a.volume);
+
+        return {
+            pointOfControl: highVolumeLevels[0]?.price || price,
+            highVolumeNodes: highVolumeLevels.slice(0, 5)
+        };
+    };
+
+    // 4. DYNAMIC SUPPORT/RESISTANCE BASED ON MARKET STRUCTURE
+    const detectMarketStructure = () => {
+        const structure = {
+            higherHighs: [],
+            lowerLows: [],
+            consolidationZones: []
+        };
+
+        // Detect Higher Highs and Lower Lows
+        for (let i = 10; i < high.length - 5; i++) {
+            const windowHigh = high.slice(i - 5, i + 5);
+            const windowLow = low.slice(i - 5, i + 5);
+            
+            if (high[i] === Math.max(...windowHigh)) {
+                structure.higherHighs.push({
+                    price: high[i],
+                    index: i
+                });
+            }
+            
+            if (low[i] === Math.min(...windowLow)) {
+                structure.lowerLows.push({
+                    price: low[i],
+                    index: i
+                });
+            }
+        }
+
+        // Detect Consolidation Zones (price congestion)
+        const priceChanges = [];
+        for (let i = 1; i < close.length; i++) {
+            priceChanges.push(Math.abs(close[i] - close[i-1]) / close[i-1]);
+        }
+        
+        const volatility = priceChanges.reduce((a, b) => a + b) / priceChanges.length;
+        const lowVolatilityThreshold = volatility * 0.3;
+
+        for (let i = 20; i < close.length - 10; i++) {
+            const recentVolatility = priceChanges.slice(i - 10, i).reduce((a, b) => a + b) / 10;
+            if (recentVolatility < lowVolatilityThreshold) {
+                const zoneHigh = Math.max(...high.slice(i - 10, i));
+                const zoneLow = Math.min(...low.slice(i - 10, i));
+                
+                if ((zoneHigh - zoneLow) / zoneLow < volatility * 2) {
+                    structure.consolidationZones.push({
+                        high: zoneHigh,
+                        low: zoneLow,
+                        midpoint: (zoneHigh + zoneLow) / 2
+                    });
+                }
+            }
+        }
+
+        return structure;
+    };
+
+    // EXECUTE ALL ANALYSES
+    const multiTFLevels = detectMultiTimeframeLevels();
+    const fibLevels = calculateFibonacciLevels();
+    const volumeProfile = calculateVolumeProfile();
+    const marketStructure = detectMarketStructure();
+
+    // COMBINE AND WEIGHT ALL FACTORS
+    const calculateFinalLevels = () => {
+        const resistanceCandidates = [];
+        const supportCandidates = [];
+
+        // 1. Add multi-timeframe levels with weights
+        [...multiTFLevels.strongResistance, ...multiTFLevels.weakResistance].forEach(level => {
+            resistanceCandidates.push({
+                price: level.price,
+                confidence: level.strength * (level.touches > 1 ? 1.5 : 1.0),
+                source: `pivot_${level.timeframe}`,
+                touches: level.touches
+            });
+        });
+
+        [...multiTFLevels.strongSupport, ...multiTFLevels.weakSupport].forEach(level => {
+            supportCandidates.push({
+                price: level.price,
+                confidence: level.strength * (level.touches > 1 ? 1.5 : 1.0),
+                source: `pivot_${level.timeframe}`,
+                touches: level.touches
+            });
+        });
+
+        // 2. Add Fibonacci levels (moderate confidence)
+        Object.entries(fibLevels).forEach(([level, fibPrice]) => {
+            if (fibPrice > price) {
+                resistanceCandidates.push({
+                    price: fibPrice,
+                    confidence: 1.2,
+                    source: `fib_${level}`,
+                    touches: 0
+                });
+            } else {
+                supportCandidates.push({
+                    price: fibPrice,
+                    confidence: 1.2,
+                    source: `fib_${level}`,
+                    touches: 0
+                });
+            }
+        });
+
+        // 3. Add volume profile levels (high confidence)
+        volumeProfile.highVolumeNodes.forEach(node => {
+            if (node.price > price) {
+                resistanceCandidates.push({
+                    price: node.price,
+                    confidence: node.strength * 2.0,
+                    source: 'volume_profile',
+                    touches: Math.round(node.strength * 10)
+                });
+            } else {
+                supportCandidates.push({
+                    price: node.price,
+                    confidence: node.strength * 2.0,
+                    source: 'volume_profile',
+                    touches: Math.round(node.strength * 10)
+                });
+            }
+        });
+
+        // 4. Add market structure levels
+        marketStructure.higherHighs.forEach(hh => {
+            if (hh.price > price) {
+                resistanceCandidates.push({
+                    price: hh.price,
+                    confidence: 1.3,
+                    source: 'market_structure',
+                    touches: 1
+                });
+            }
+        });
+
+        marketStructure.lowerLows.forEach(ll => {
+            if (ll.price < price) {
+                supportCandidates.push({
+                    price: ll.price,
+                    confidence: 1.3,
+                    source: 'market_structure',
+                    touches: 1
+                });
+            }
+        });
+
+        // 5. Filter and select best candidates
+        const filterCandidates = (candidates, isResistance) => {
+            // Group nearby levels (within 0.5%)
+            const groups = [];
+            candidates.sort((a, b) => a.price - b.price);
+            
+            for (const candidate of candidates) {
+                let grouped = false;
+                for (const group of groups) {
+                    const avgPrice = group.reduce((sum, c) => sum + c.price, 0) / group.length;
+                    if (Math.abs(candidate.price - avgPrice) / avgPrice < 0.005) {
+                        group.push(candidate);
+                        grouped = true;
+                        break;
+                    }
+                }
+                if (!grouped) {
+                    groups.push([candidate]);
+                }
+            }
+
+            // Select best candidate from each group
+            return groups.map(group => {
+                return group.reduce((best, current) => {
+                    const currentScore = current.confidence * (1 + current.touches * 0.1);
+                    const bestScore = best.confidence * (1 + best.touches * 0.1);
+                    return currentScore > bestScore ? current : best;
+                });
+            })
+            .filter(candidate => {
+                // Filter by distance from current price
+                const distance = isResistance ? 
+                    (candidate.price - price) / price : 
+                    (price - candidate.price) / price;
+                return distance >= 0.002 && distance <= 0.03; // 0.2% to 3% distance
+            })
+            .sort((a, b) => {
+                // Sort by confidence and proximity
+                const scoreA = a.confidence * (1 + a.touches * 0.1);
+                const scoreB = b.confidence * (1 + b.touches * 0.1);
+                return scoreB - scoreA;
+            });
+        };
+
+        const bestResistance = filterCandidates(resistanceCandidates, true);
+        const bestSupport = filterCandidates(supportCandidates, false);
+
+        return {
+            resistance: bestResistance[0]?.price || null,
+            support: bestSupport[0]?.price || null,
+            allResistance: bestResistance,
+            allSupport: bestSupport,
+            volumePOC: volumeProfile.pointOfControl,
+            fibLevels: fibLevels,
+            marketStructure: marketStructure
+        };
+    };
+
+    return calculateFinalLevels();
+};
+
+// -------------------- TECHNICAL ANALYSIS --------------------
+const analyzeSignal = async () => {
+    console.log("🧠 Advanced technical analysis started...");
+    try {
+        const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "15m", undefined, 300);
+        if (!ohlcv || ohlcv.length < 200) {
+            console.warn("⚠️ Insufficient OHLCV data");
+            return {};
+        }
+
+        const close = ohlcv.map(c => c[4]);
+        const high = ohlcv.map(c => c[2]);
+        const low = ohlcv.map(c => c[3]);
+        const volume = ohlcv.map(c => c[5]);
+        const price = close.at(-1);
+
+        // Moving Averages
+        const ma7 = SMA.calculate({
+            values: close.slice(-100),
+            period: 7
+        }).pop();
+        const ma25 = SMA.calculate({
+            values: close.slice(-100),
+            period: 25
+        }).pop();
+        const ma99 = SMA.calculate({
+            values: close,
+            period: 99
+        }).pop();
+
+        const prevMA7 = SMA.calculate({
+            values: close.slice(-101, -1),
+            period: 7
+        }).pop();
+        const prevMA25 = SMA.calculate({
+            values: close.slice(-101, -1),
+            period: 25
+        }).pop();
+
+        const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
+        const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
+
+        let canLong = false;
+        let canShort = false;
+
+        const isMA7AboveMA99 = ma7 > ma99;
+        const isMA7BelowMA99 = ma7 < ma99;
+        const isMA25AboveMA99 = ma25 > ma99;
+        const isMA25BelowMA99 = ma25 < ma99;
+
+        if (isCrossedUp && isMA7AboveMA99 && isMA25AboveMA99) {
+            canLong = true;
+        }
+
+        if (isCrossedDown && isMA7BelowMA99 && isMA25BelowMA99) {
+            canShort = true;
+        }
+
+        // ATR Calculation
+        const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
+            const tr = [];
+            for (let i = 1; i < highArr.length; i++) {
+                const tr1 = highArr[i] - lowArr[i];
+                const tr2 = Math.abs(highArr[i] - closeArr[i - 1]);
+                const tr3 = Math.abs(lowArr[i] - closeArr[i - 1]);
+                tr.push(Math.max(tr1, tr2, tr3));
+            }
+
+            const atr = [];
+            for (let i = period - 1; i < tr.length; i++) {
+                const slice = tr.slice(i - period + 1, i + 1);
+                atr.push(slice.reduce((a, b) => a + b) / period);
+            }
+
+            return atr;
+        };
+
+        const currentATR = calculateATR(high, low, close, 14).pop() || 0;
+
+        // USE ADVANCED S/R DETECTION
+        const advancedLevels = findAdvancedLevels(high, low, close, volume, price);
+        
+        let resistance = advancedLevels.resistance;
+        let support = advancedLevels.support;
+
+        // Fallback logic if advanced detection fails
+        if (!resistance || !support) {
+            console.log("🔄 Advanced S/R detection failed, using fallback...");
+            const recentHigh = Math.max(...high.slice(-96));
+            const recentLow = Math.min(...low.slice(-96));
+            
+            resistance = recentHigh + (currentATR * 0.5);
+            support = recentLow - (currentATR * 0.5);
+        }
+
+        // Ensure minimum distance based on ATR
+        const minDistance = currentATR * 0.8;
+        const maxDistance = currentATR * 3;
+
+        if (resistance - price < minDistance) {
+            resistance = price + minDistance;
+        }
+        if (price - support < minDistance) {
+            support = price - minDistance;
+        }
+
+        // Ensure levels are within reasonable range
+        if (resistance - price > maxDistance) {
+            resistance = price + maxDistance;
+        }
+        if (price - support > maxDistance) {
+            support = price - maxDistance;
+        }
+
+        const targetLong = resistance;
+        const stopLossLong = support;
+        const targetShort = support;
+        const stopLossShort = resistance;
+
+        // Enhanced Analysis Results
+        console.log(`\n🎯 ADVANCED Analysis Results ${db.pair}
+══════════════════════════════════════════════════
+📈 Long Signal: ${canLong ? "✅ VALID" : "❌ INVALID"}
+📉 Short Signal: ${canShort ? "✅ VALID" : "❌ INVALID"}
+══════════════════════════════════════════════════
+💰 Current Price: ${formatPrice(price)}
+🎯 Resistance: ${formatPrice(resistance)} (${((resistance - price) / price * 100).toFixed(3)}%)
+🛡️  Support: ${formatPrice(support)} (${((price - support) / price * 100).toFixed(3)}%)
+📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
+══════════════════════════════════════════════════
+📊 Volume POC: ${formatPrice(advancedLevels.volumePOC)}
+🔍 Detected R Levels: ${advancedLevels.allResistance?.length || 0}
+🔍 Detected S Levels: ${advancedLevels.allSupport?.length || 0}
+══════════════════════════════════════════════════`);
+
+        // Log additional resistance/support levels for context
+        if (advancedLevels.allResistance && advancedLevels.allResistance.length > 0) {
+            console.log("📈 Additional Resistance Levels:");
+            advancedLevels.allResistance.slice(0, 3).forEach(level => {
+                console.log(`   - ${formatPrice(level.price)} (conf: ${level.confidence.toFixed(2)})`);
+            });
+        }
+
+        if (advancedLevels.allSupport && advancedLevels.allSupport.length > 0) {
+            console.log("📉 Additional Support Levels:");
+            advancedLevels.allSupport.slice(0, 3).forEach(level => {
+                console.log(`   - ${formatPrice(level.price)} (conf: ${level.confidence.toFixed(2)})`);
+            });
+        }
+
+        return {
+            canLong,
+            canShort,
+            targetLong,
+            stopLossLong,
+            targetShort,
+            stopLossShort,
+            price,
+            advancedLevels
+        };
+    } catch (error) {
+        console.error("❌ Advanced technical analysis failed:", error.message);
+        return {};
+    }
+};
+
 // -------------------- ORDER MANAGEMENT --------------------
 const placeOrder = async (side, tp, sl) => {
     console.log("🔍 Checking for active positions...");
@@ -370,235 +883,6 @@ const closePosition = async (reason, entryPrice = "N/A") => {
     }
 };
 
-// -------------------- TECHNICAL ANALYSIS --------------------
-const analyzeSignal = async () => {
-    console.log("🧠 Technical analysis started...");
-    try {
-        const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "15m", undefined, 200);
-        if (!ohlcv || ohlcv.length < 200) {
-            console.warn("⚠️ Insufficient OHLCV data");
-            return {};
-        }
-
-        const close = ohlcv.map(c => c[4]);
-        const high = ohlcv.map(c => c[2]);
-        const low = ohlcv.map(c => c[3]);
-
-        // Moving Averages
-        const ma7 = SMA.calculate({
-            values: close.slice(-100),
-            period: 7
-        }).pop();
-        const ma25 = SMA.calculate({
-            values: close.slice(-100),
-            period: 25
-        }).pop();
-        const ma99 = SMA.calculate({
-            values: close,
-            period: 99
-        }).pop();
-
-        const price = close.at(-1);
-
-        const prevMA7 = SMA.calculate({
-            values: close.slice(-101, -1),
-            period: 7
-        }).pop();
-        const prevMA25 = SMA.calculate({
-            values: close.slice(-101, -1),
-            period: 25
-        }).pop();
-
-        const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
-        const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
-
-        let canLong = false;
-        let canShort = false;
-
-        const isMA7AboveMA99 = ma7 > ma99;
-        const isMA7BelowMA99 = ma7 < ma99;
-        const isMA25AboveMA99 = ma25 > ma99;
-        const isMA25BelowMA99 = ma25 < ma99;
-
-        if (isCrossedUp && isMA7AboveMA99 && isMA25AboveMA99) {
-            canLong = true;
-        }
-
-        if (isCrossedDown && isMA7BelowMA99 && isMA25BelowMA99) {
-            canShort = true;
-        }
-
-        // REVISI: Cari level yang lebih realistis untuk coin dengan ATR kecil
-        const findReasonableLevels = (highArr, lowArr) => {
-            const resistanceCandidates = [];
-            const supportCandidates = [];
-
-            // Analisis 96 candle terakhir (24 jam) untuk pattern yang lebih realistis
-            const recentData = highArr.slice(-96);
-            const recentLowData = lowArr.slice(-96);
-
-            // Identifikasi area konsolidasi dan breakout points
-            for (let i = 5; i < recentData.length - 5; i++) {
-                // Resistance: area dimana harga ditolak beberapa kali
-                if (recentData[i] > recentData[i - 1] && recentData[i] > recentData[i + 1] &&
-                    recentData[i] > recentData[i - 2] && recentData[i] > recentData[i + 2]) {
-                    resistanceCandidates.push({
-                        price: recentData[i],
-                        strength: 1,
-                        recency: i // semakin besar semakin baru
-                    });
-                }
-
-                // Support: area dimana harga memantul beberapa kali
-                if (recentLowData[i] < recentLowData[i - 1] && recentLowData[i] < recentLowData[i + 1] &&
-                    recentLowData[i] < recentLowData[i - 2] && recentLowData[i] < recentLowData[i + 2]) {
-                    supportCandidates.push({
-                        price: recentLowData[i],
-                        strength: 1,
-                        recency: i
-                    });
-                }
-            }
-
-            return {
-                resistanceCandidates,
-                supportCandidates
-            };
-        };
-
-        // ATR Calculation
-        const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
-            const tr = [];
-            for (let i = 1; i < highArr.length; i++) {
-                const tr1 = highArr[i] - lowArr[i];
-                const tr2 = Math.abs(highArr[i] - closeArr[i - 1]);
-                const tr3 = Math.abs(lowArr[i] - closeArr[i - 1]);
-                tr.push(Math.max(tr1, tr2, tr3));
-            }
-
-            const atr = [];
-            for (let i = period - 1; i < tr.length; i++) {
-                const slice = tr.slice(i - period + 1, i + 1);
-                atr.push(slice.reduce((a, b) => a + b) / period);
-            }
-
-            return atr;
-        };
-
-        const currentATR = calculateATR(high, low, close, 14).pop() || 0;
-
-        // REVISI BESAR: Untuk ATR kecil (seperti DOGE 0.00129), gunakan batasan yang lebih praktis
-        console.log(`📊 ATR Detected: ${formatPrice(currentATR)}`);
-
-        // Tentukan batasan berdasarkan tipe coin
-        let minDistance, maxDistance;
-
-        if (currentATR < 0.002) { // Coin dengan volatilitas rendah seperti DOGE
-            minDistance = price * 0.003; // 0.3% minimal
-            maxDistance = price * 0.015; // 1.5% maksimal
-            console.log(`🎯 Using LOW volatility settings: ${(minDistance/price*100).toFixed(2)}% - ${(maxDistance/price*100).toFixed(2)}%`);
-        } else if (currentATR < 0.01) { // Coin dengan volatilitas medium
-            minDistance = price * 0.008; // 0.8% minimal
-            maxDistance = price * 0.03; // 3% maksimal
-            console.log(`🎯 Using MEDIUM volatility settings: ${(minDistance/price*100).toFixed(2)}% - ${(maxDistance/price*100).toFixed(2)}%`);
-        } else { // Coin dengan volatilitas tinggi
-            minDistance = price * 0.015; // 1.5% minimal
-            maxDistance = price * 0.06; // 6% maksimal
-            console.log(`🎯 Using HIGH volatility settings: ${(minDistance/price*100).toFixed(2)}% - ${(maxDistance/price*100).toFixed(2)}%`);
-        }
-
-        const { resistanceCandidates, supportCandidates } = findReasonableLevels(high, low);
-
-        // REVISI: Filter level-level yang masuk akal untuk trading
-        const reasonableResistance = resistanceCandidates
-            .filter(level => {
-                const distance = level.price - price;
-                return distance >= minDistance && distance <= maxDistance;
-            })
-            .sort((a, b) => {
-                // Prioritaskan level yang lebih baru dan lebih dekat dengan current price
-                const scoreA = (b.recency * 0.7) + ((maxDistance - (a.price - price)) / maxDistance * 0.3);
-                const scoreB = (a.recency * 0.7) + ((maxDistance - (b.price - price)) / maxDistance * 0.3);
-                return scoreB - scoreA;
-            });
-
-        const reasonableSupport = supportCandidates
-            .filter(level => {
-                const distance = price - level.price;
-                return distance >= minDistance && distance <= maxDistance;
-            })
-            .sort((a, b) => {
-                // Prioritaskan level yang lebih baru dan lebih dekat dengan current price
-                const scoreA = (b.recency * 0.7) + ((maxDistance - (price - a.price)) / maxDistance * 0.3);
-                const scoreB = (a.recency * 0.7) + ((maxDistance - (price - b.price)) / maxDistance * 0.3);
-                return scoreB - scoreA;
-            });
-
-        // REVISI: Fallback yang lebih smart untuk low volatility coins
-        let resistance, support;
-
-        if (reasonableResistance.length > 0) {
-            resistance = reasonableResistance[0].price;
-            console.log(`✅ Found reasonable resistance: ${formatPrice(resistance)}`);
-        } else {
-            // Untuk low volatility, gunakan recent high dengan buffer kecil
-            const recentHigh = Math.max(...high.slice(-96)); // 24 jam terakhir
-            resistance = recentHigh ; 
-            console.log(`🔄 Using recent high as resistance: ${formatPrice(resistance)}`);
-        }
-
-        if (reasonableSupport.length > 0) {
-            support = reasonableSupport[0].price;
-            console.log(`✅ Found reasonable support: ${formatPrice(support)}`);
-        } else {
-            // Untuk low volatility, gunakan recent low dengan buffer kecil
-            const recentLow = Math.min(...low.slice(-96)); // 24 jam terakhir
-            support = recentLow; 
-            console.log(`🔄 Using recent low as support: ${formatPrice(support)}`);
-        }
-
-        // Pastikan ada jarak minimal antara level
-        const minLevelDistance = price * 0.004; // Minimal 0.4% antara support-resistance
-        if (resistance - support < minLevelDistance) {
-            const midpoint = (resistance + support) / 2;
-            resistance = midpoint * 1.002;
-            support = midpoint * 0.998;
-            console.log(`📏 Adjusted levels for minimum distance: R=${formatPrice(resistance)}, S=${formatPrice(support)}`);
-        }
-
-        const targetLong = resistance;
-        const stopLossLong = support;
-        const targetShort = support;
-        const stopLossShort = resistance;
-
-        // Analysis Results
-        console.log(`\n📊 Analysis Results ${db.pair}
-─────────────────────────────────────
-📈 Long Signal: ${canLong ? "✅ VALID" : "❌ INVALID"}
-📉 Short Signal: ${canShort ? "✅ VALID" : "❌ INVALID"}
-─────────────────────────────────────
-💰 Current Price: ${formatPrice(price)}
-🎯 Resistance: ${formatPrice(resistance)} (${((resistance - price) / price * 100).toFixed(3)}%)
-🛡️  Support: ${formatPrice(support)} (${((price - support) / price * 100).toFixed(3)}%)
-📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
-📏 R→S Distance: ${formatPrice(resistance - support)} (${((resistance - support)/price*100).toFixed(3)}%)
-─────────────────────────────────────`);
-
-        return {
-            canLong,
-            canShort,
-            targetLong,
-            stopLossLong,
-            targetShort,
-            stopLossShort,
-            price,
-        };
-    } catch (error) {
-        console.error("❌ Technical analysis failed:", error.message);
-        return {};
-    }
-};
-
 // -------------------- POSITION MONITORING --------------------
 const checkPositionStatus = async () => {
     try {
@@ -640,7 +924,6 @@ const checkPositionStatus = async () => {
         console.error("❌ Position check failed:", err.message);
     }
 };
-
 
 // -------------------- POSITION RECOVERY --------------------
 const recoverPositionState = async () => {
@@ -837,7 +1120,7 @@ let prevPosAmt = 0;
 // Initialize connection on startup
 (async () => {
     await initializeExchange();
-    console.log("🚀 Bot started with stabilized connection");
+    console.log("🚀 Bot started with advanced S/R detection");
 })();
 
 setInterval(async () => {
