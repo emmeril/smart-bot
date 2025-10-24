@@ -1,41 +1,70 @@
-// bot.js (Fully Cleaned and Organized Version)
+// signal.js (Advanced Support & Resistance Version - Cleaned)
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
 const { SMA } = require("technicalindicators");
 
-// ==================== CONFIGURATION ====================
-const CONFIG = {
-    dbPath: "./db.json",
-    logPath: "./log.csv",
-    maxRetries: 5,
-    retryDelay: 10000,
-    checkInterval: 10000,
-    MIN_POSITION_AMOUNT: 0.000001,
-    SAFETY_MARGIN: 0.001
-};
+// -------------------- CONFIG --------------------
+const dbPath = "./db.json";
+const logPath = "./log.csv";
+let isProcessing = false;
+let exchange = null;
+let connectionRetries = 0;
+const MAX_RETRIES = 5;
+const RETRY_DELAY = 10000;
 
-// ==================== STATE MANAGEMENT ====================
-let state = {
-    isProcessing: false,
-    exchange: null,
-    connectionRetries: 0,
-    prevPosAmt: 0,
-    db: loadDB()
-};
+// -------------------- CONNECTION MANAGEMENT --------------------
+const initializeExchange = async () => {
+    try {
+        if (exchange) {
+            try {
+                await exchange.fetchBalance();
+                return exchange;
+            } catch (e) {
+                console.log("🔄 Connection lost, reinitializing...");
+            }
+        }
 
-// ==================== INITIALIZATION ====================
-function initializeFiles() {
-    if (!fs.existsSync(CONFIG.logPath)) {
-        fs.writeFileSync(CONFIG.logPath, "timestamp,pair,type,entry,tp,sl,status,pnl\n");
-        console.log("📝 Log file created: log.csv");
+        exchange = new ccxt.binance({
+            apiKey: process.env.API_KEY,
+            secret: process.env.API_SECRET,
+            options: { defaultType: "future" },
+            timeout: 30000,
+            enableRateLimit: true,
+            recvWindow: 60000,
+        });
+
+        await exchange.loadMarkets();
+        await exchange.fetchBalance();
+
+        console.log("✅ Exchange connection initialized successfully");
+        connectionRetries = 0;
+        return exchange;
+    } catch (error) {
+        console.error(`❌ Exchange initialization failed (attempt ${connectionRetries + 1}/${MAX_RETRIES}):`, error.message);
+
+        if (connectionRetries < MAX_RETRIES) {
+            connectionRetries++;
+            console.log(`🔄 Retrying in ${RETRY_DELAY/1000} seconds...`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            return initializeExchange();
+        } else {
+            console.error("💥 Maximum connection retries reached. Please check your network and API credentials.");
+            throw error;
+        }
     }
+};
+
+// -------------------- FILE INIT --------------------
+if (!fs.existsSync(logPath)) {
+    fs.writeFileSync(logPath, "timestamp,pair,type,entry,tp,sl,status,pnl\n");
+    console.log("📝 Log file created: log.csv");
 }
 
-function loadDB() {
+const loadDB = () => {
     try {
-        if (fs.existsSync(CONFIG.dbPath)) {
-            return JSON.parse(fs.readFileSync(CONFIG.dbPath));
+        if (fs.existsSync(dbPath)) {
+            return JSON.parse(fs.readFileSync(dbPath));
         }
     } catch (error) {
         console.warn("⚠️ Failed to load DB, using default config:", error.message);
@@ -50,133 +79,123 @@ function loadDB() {
         activePosition: null,
         usdtPerTrade: 5.1,
     };
-}
+};
 
-// ==================== EXCHANGE MANAGEMENT ====================
-async function initializeExchange() {
+let db = loadDB();
+
+console.log(`⚙️ Bot Configuration:
+- Pair: ${db.pair}
+- Leverage: ${db.leverage}x
+- Margin Mode: ${db.marginMode}
+- USDT per Trade: ${db.usdtPerTrade}`);
+
+// -------------------- STABLE API CALLS --------------------
+const safeApiCall = async (apiFunction, ...args) => {
     try {
-        if (state.exchange) {
-            try {
-                await state.exchange.fetchBalance();
-                return state.exchange;
-            } catch (e) {
-                console.log("🔄 Connection lost, reinitializing...");
-            }
-        }
-
-        state.exchange = new ccxt.binance({
-            apiKey: process.env.API_KEY,
-            secret: process.env.API_SECRET,
-            options: { defaultType: "future" },
-            timeout: 30000,
-            enableRateLimit: true,
-            recvWindow: 60000,
-        });
-
-        await state.exchange.loadMarkets();
-        await state.exchange.fetchBalance();
-
-        console.log("✅ Exchange connection initialized successfully");
-        state.connectionRetries = 0;
-        return state.exchange;
-    } catch (error) {
-        console.error(`❌ Exchange initialization failed (attempt ${state.connectionRetries + 1}/${CONFIG.maxRetries}):`, error.message);
-
-        if (state.connectionRetries < CONFIG.maxRetries) {
-            state.connectionRetries++;
-            console.log(`🔄 Retrying in ${CONFIG.retryDelay/1000} seconds...`);
-            await new Promise(resolve => setTimeout(resolve, CONFIG.retryDelay));
-            return initializeExchange();
-        } else {
-            console.error("💥 Maximum connection retries reached. Please check your network and API credentials.");
-            throw error;
-        }
-    }
-}
-
-// ==================== UTILITY FUNCTIONS ====================
-function saveDB() {
-    try {
-        if (state.db.activePosition) {
-            state.db.activePosition.entryPrice = formatPrice(state.db.activePosition.entryPrice);
-            state.db.activePosition.tp = formatPrice(state.db.activePosition.tp);
-            state.db.activePosition.sl = formatPrice(state.db.activePosition.sl);
-        }
-        fs.writeFileSync(CONFIG.dbPath, JSON.stringify(state.db, null, 2));
-    } catch (error) {
-        console.error("❌ Failed to save DB:", error.message);
-    }
-}
-
-function formatPrice(price, pair = state.db.pair) {
-    if (!price || !isFinite(price)) return "N/A";
-
-    try {
-        const market = state.exchange.markets[pair];
-        if (!market) return parseFloat(price.toFixed(5));
-
-        let decimals = market.precision?.price ?? 5;
-        decimals = Math.max(0, Math.min(8, parseInt(decimals)));
-        return parseFloat(price.toFixed(decimals));
-    } catch (err) {
-        return parseFloat(price.toFixed(5));
-    }
-}
-
-async function safeApiCall(apiFunction, ...args) {
-    try {
-        if (!state.exchange) {
+        if (!exchange) {
             await initializeExchange();
         }
-        return await apiFunction.call(state.exchange, ...args);
+        return await apiFunction.call(exchange, ...args);
     } catch (error) {
         if (error instanceof ccxt.NetworkError || error.message.includes('network') || error.message.includes('timeout')) {
             console.log("🌐 Network issue detected, reinitializing connection...");
             await initializeExchange();
-            return await apiFunction.call(state.exchange, ...args);
+            return await apiFunction.call(exchange, ...args);
         }
         throw error;
     }
-}
+};
 
-function logSignal(type, entry, tp, sl, status, pnl = null) {
+// -------------------- UTIL FUNCTIONS --------------------
+const saveDB = () => {
     try {
-        const entryStr = entry ?? "";
-        const tpStr = tp ?? "";
-        const slStr = sl ?? "";
-        const pnlStr = pnl !== null && isFinite(pnl) ? Number(pnl).toFixed(6) : "";
-        const line = `${new Date().toISOString()},${state.db.pair},${type},${entryStr},${tpStr},${slStr},${status},${pnlStr}\n`;
-        fs.appendFileSync(CONFIG.logPath, line);
-        console.log("📝 Signal logged to CSV");
+        if (db.activePosition) {
+            db.activePosition.entryPrice = formatPrice(db.activePosition.entryPrice);
+            db.activePosition.tp = formatPrice(db.activePosition.tp);
+            db.activePosition.sl = formatPrice(db.activePosition.sl);
+        }
+        fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
     } catch (error) {
-        console.error("❌ Failed to log signal:", error.message);
+        console.error("❌ Failed to save DB:", error.message);
     }
-}
+};
 
-// ==================== PRICE & POSITION MANAGEMENT ====================
-async function getPrice() {
+const formatPrice = (price, pair = db.pair) => {
+    if (!price || !isFinite(price)) return "N/A";
+
     try {
-        const ticker = await safeApiCall(state.exchange.fetchTicker, state.db.pair);
-        console.log(`💰 Price ${state.db.pair}: ${formatPrice(ticker.last)}`);
+        const market = exchange.markets[pair];
+        if (!market) return parseFloat(price.toFixed(5));
+
+        let decimals = market.precision?.price;
+
+        if (decimals === undefined || decimals === null) {
+            if (price < 0.0001) decimals = 8;
+            else if (price < 0.001) decimals = 7;
+            else if (price < 0.01) decimals = 6;
+            else if (price < 0.1) decimals = 5;
+            else if (price < 1) decimals = 4;
+            else if (price < 10) decimals = 3;
+            else if (price < 100) decimals = 2;
+            else if (price < 1000) decimals = 1;
+            else decimals = 0;
+        }
+
+        decimals = Math.max(0, Math.min(8, parseInt(decimals) || 5));
+        return parseFloat(price.toFixed(decimals));
+
+    } catch (err) {
+        return parseFloat(price.toFixed(5));
+    }
+};
+
+const getPrice = async () => {
+    try {
+        const ticker = await safeApiCall(exchange.fetchTicker, db.pair);
+        console.log(`💰 Price ${db.pair}: ${formatPrice(ticker.last)}`);
         return ticker.last;
     } catch (err) {
         console.error("❌ Failed to fetch price:", err.message);
         return null;
     }
-}
+};
 
-function calcQty(price) {
+const calcQty = (price) => {
     if (!price) return 0;
-    let qty = state.db.usdtPerTrade / price;
-    const prec = state.exchange.markets[state.db.pair]?.precision?.amount ?? 3;
+    let qty = db.usdtPerTrade / price;
+    const prec = exchange.markets[db.pair]?.precision?.amount ?? 3;
     qty = parseFloat(qty.toFixed(prec));
-    console.log(`📐 Quantity: ${qty} (${state.db.usdtPerTrade} USDT)`);
+    console.log(`📐 Quantity: ${qty} (${db.usdtPerTrade} USDT)`);
     return qty;
-}
+};
 
-async function getPositionFromBalance() {
+const logSignal = (type, entry, tp, sl, status, pnl = null) => {
     try {
-        const balance = await safeApiCall(state.exchange.fetchBalance);
+        const entryStr = entry !== undefined && entry !== null ? entry : "";
+        const tpStr = tp !== undefined && tp !== null ? tp : "";
+        const slStr = sl !== undefined && sl !== null ? sl : "";
+        const pnlStr = pnl !== null && isFinite(pnl) ? Number(pnl).toFixed(6) : "";
+        const line = `${new Date().toISOString()},${db.pair},${type},${entryStr},${tpStr},${slStr},${status},${pnlStr}\n`;
+        fs.appendFileSync(logPath, line);
+        console.log("📝 Signal logged to CSV");
+    } catch (error) {
+        console.error("❌ Failed to log signal:", error.message);
+    }
+};
+
+const getMarketId = () => {
+    try {
+        const market = exchange.markets[db.pair];
+        if (market && market.id) return market.id;
+    } catch (err) {
+        // ignore
+    }
+    return db.pair.replace("/", "").replace(":", "");
+};
+
+const getPositionFromBalance = async () => {
+    try {
+        const balance = await safeApiCall(exchange.fetchBalance);
         const marketId = getMarketId();
         const positions = balance.info?.positions || [];
 
@@ -186,42 +205,24 @@ async function getPositionFromBalance() {
             normalize(p.contractCode) === normalize(marketId)
         );
 
-        return { balance, position: found };
+        return {
+            balance,
+            position: found
+        };
     } catch (err) {
         console.error("❌ Failed to fetch position:", err.message);
-        return { balance: null, position: null };
+        return {
+            balance: null,
+            position: null
+        };
     }
-}
+};
 
-function getMarketId() {
-    try {
-        const market = state.exchange.markets[state.db.pair];
-        if (market?.id) return market.id;
-    } catch (err) {}
-    return state.db.pair.replace("/", "").replace(":", "");
-}
-
-// ==================== TECHNICAL ANALYSIS UTILITIES ====================
-const TechnicalAnalysis = {
-    calculateATR(highArr, lowArr, closeArr, period = 14) {
-        const tr = [];
-        for (let i = 1; i < highArr.length; i++) {
-            const tr1 = highArr[i] - lowArr[i];
-            const tr2 = Math.abs(highArr[i] - closeArr[i - 1]);
-            const tr3 = Math.abs(lowArr[i] - closeArr[i - 1]);
-            tr.push(Math.max(tr1, tr2, tr3));
-        }
-
-        const atr = [];
-        for (let i = period - 1; i < tr.length; i++) {
-            const slice = tr.slice(i - period + 1, i + 1);
-            atr.push(slice.reduce((a, b) => a + b) / period);
-        }
-
-        return atr;
-    },
-
-    detectMultiTimeframeLevels(high, low, close, volume) {
+// -------------------- ADVANCED SUPPORT & RESISTANCE DETECTION --------------------
+const findAdvancedLevels = (high, low, close, volume, price) => {
+    console.log("🔍 Starting advanced S/R detection...");
+    
+    const detectMultiTimeframeLevels = () => {
         const levels = {
             strongResistance: [],
             strongSupport: [],
@@ -239,64 +240,68 @@ const TechnicalAnalysis = {
             const sliceIndex = Math.max(0, high.length - tf.period);
             const highSlice = high.slice(sliceIndex);
             const lowSlice = low.slice(sliceIndex);
+            const closeSlice = close.slice(sliceIndex);
             const volumeSlice = volume.slice(sliceIndex);
 
             for (let i = 3; i < highSlice.length - 3; i++) {
-                // Pivot High detection (Resistance)
-                if (this.isPivotHigh(highSlice, i)) {
-                    const level = this.createLevel(highSlice[i], tf, volumeSlice, i, "resistance");
-                    level.touches > 1 ? levels.strongResistance.push(level) : levels.weakResistance.push(level);
+                if (highSlice[i] > highSlice[i-1] && highSlice[i] > highSlice[i-2] &&
+                    highSlice[i] > highSlice[i+1] && highSlice[i] > highSlice[i+2] &&
+                    highSlice[i] === Math.max(...highSlice.slice(i-2, i+3))) {
+                    
+                    const level = {
+                        price: highSlice[i],
+                        strength: tf.weight * (1 + (volumeSlice[i] / Math.max(...volumeSlice))),
+                        timeframe: tf.name,
+                        touches: 1,
+                        recency: i
+                    };
+                    
+                    for (let j = i + 1; j < Math.min(i + 20, highSlice.length); j++) {
+                        if (Math.abs(highSlice[j] - highSlice[i]) / highSlice[i] < 0.002) {
+                            level.touches++;
+                            level.strength += 0.5;
+                        }
+                    }
+                    
+                    if (level.touches > 1) {
+                        levels.strongResistance.push(level);
+                    } else {
+                        levels.weakResistance.push(level);
+                    }
                 }
 
-                // Pivot Low detection (Support)
-                if (this.isPivotLow(lowSlice, i)) {
-                    const level = this.createLevel(lowSlice[i], tf, volumeSlice, i, "support");
-                    level.touches > 1 ? levels.strongSupport.push(level) : levels.weakSupport.push(level);
+                if (lowSlice[i] < lowSlice[i-1] && lowSlice[i] < lowSlice[i-2] &&
+                    lowSlice[i] < lowSlice[i+1] && lowSlice[i] < lowSlice[i+2] &&
+                    lowSlice[i] === Math.min(...lowSlice.slice(i-2, i+3))) {
+                    
+                    const level = {
+                        price: lowSlice[i],
+                        strength: tf.weight * (1 + (volumeSlice[i] / Math.max(...volumeSlice))),
+                        timeframe: tf.name,
+                        touches: 1,
+                        recency: i
+                    };
+                    
+                    for (let j = i + 1; j < Math.min(i + 20, lowSlice.length); j++) {
+                        if (Math.abs(lowSlice[j] - lowSlice[i]) / lowSlice[i] < 0.002) {
+                            level.touches++;
+                            level.strength += 0.5;
+                        }
+                    }
+                    
+                    if (level.touches > 1) {
+                        levels.strongSupport.push(level);
+                    } else {
+                        levels.weakSupport.push(level);
+                    }
                 }
             }
         });
 
         return levels;
-    },
+    };
 
-    isPivotHigh(data, index) {
-        return data[index] > data[index-1] && 
-               data[index] > data[index-2] &&
-               data[index] > data[index+1] && 
-               data[index] > data[index+2] &&
-               data[index] === Math.max(...data.slice(index-2, index+3));
-    },
-
-    isPivotLow(data, index) {
-        return data[index] < data[index-1] && 
-               data[index] < data[index-2] &&
-               data[index] < data[index+1] && 
-               data[index] < data[index+2] &&
-               data[index] === Math.min(...data.slice(index-2, index+3));
-    },
-
-    createLevel(price, timeframe, volumeSlice, index, type) {
-        const level = {
-            price,
-            strength: timeframe.weight * (1 + (volumeSlice[index] / Math.max(...volumeSlice))),
-            timeframe: timeframe.name,
-            touches: 1,
-            recency: index
-        };
-
-        // Count touches within proximity
-        const checkRange = Math.min(index + 20, volumeSlice.length);
-        for (let j = index + 1; j < checkRange; j++) {
-            if (Math.abs(volumeSlice[j] - price) / price < 0.002) {
-                level.touches++;
-                level.strength += 0.5;
-            }
-        }
-
-        return level;
-    },
-
-    calculateFibonacciLevels(high, low) {
+    const calculateFibonacciLevels = () => {
         const recentHigh = Math.max(...high.slice(-50));
         const recentLow = Math.min(...low.slice(-50));
         const range = recentHigh - recentLow;
@@ -308,152 +313,236 @@ const TechnicalAnalysis = {
             fib618: recentHigh - range * 0.618,
             fib786: recentHigh - range * 0.786
         };
-    },
+    };
 
-    calculateVolumeProfile(close, volume, high, low) {
+    const calculateVolumeProfile = () => {
         const priceLevels = {};
         const range = Math.max(...high.slice(-50)) - Math.min(...low.slice(-50));
         const bucketSize = range / 20;
 
         for (let i = 0; i < close.length; i++) {
             const bucket = Math.floor(close[i] / bucketSize) * bucketSize;
-            priceLevels[bucket] = priceLevels[bucket] || { volume: 0, count: 0 };
+            if (!priceLevels[bucket]) {
+                priceLevels[bucket] = { volume: 0, count: 0 };
+            }
             priceLevels[bucket].volume += volume[i];
             priceLevels[bucket].count++;
         }
 
-        const volumes = Object.values(priceLevels).map(d => d.volume);
-        const maxVolume = Math.max(...volumes);
-        
         const highVolumeLevels = Object.entries(priceLevels)
-            .filter(([_, data]) => data.volume > maxVolume * 0.7)
+            .filter(([_, data]) => data.volume > Math.max(...Object.values(priceLevels).map(d => d.volume)) * 0.7)
             .map(([price, data]) => ({
                 price: parseFloat(price),
                 volume: data.volume,
-                strength: data.volume / maxVolume
+                strength: data.volume / Math.max(...Object.values(priceLevels).map(d => d.volume))
             }))
             .sort((a, b) => b.volume - a.volume);
 
         return {
-            pointOfControl: highVolumeLevels[0]?.price || close[close.length - 1],
+            pointOfControl: highVolumeLevels[0]?.price || price,
             highVolumeNodes: highVolumeLevels.slice(0, 5)
         };
-    }
-};
-
-// ==================== SUPPORT/RESISTANCE DETECTION ====================
-function findAdvancedLevels(high, low, close, volume, price) {
-    console.log("🔍 Starting advanced S/R detection...");
-    
-    const multiTFLevels = TechnicalAnalysis.detectMultiTimeframeLevels(high, low, close, volume);
-    const fibLevels = TechnicalAnalysis.calculateFibonacciLevels(high, low);
-    const volumeProfile = TechnicalAnalysis.calculateVolumeProfile(close, volume, high, low);
-
-    return calculateFinalLevels(multiTFLevels, fibLevels, volumeProfile, price);
-}
-
-function calculateFinalLevels(multiTFLevels, fibLevels, volumeProfile, price) {
-    const resistanceCandidates = [];
-    const supportCandidates = [];
-
-    // Add multi-timeframe levels
-    [...multiTFLevels.strongResistance, ...multiTFLevels.weakResistance].forEach(level => {
-        resistanceCandidates.push({
-            price: level.price,
-            confidence: level.strength * (level.touches > 1 ? 1.5 : 1.0),
-            source: `pivot_${level.timeframe}`,
-            touches: level.touches
-        });
-    });
-
-    [...multiTFLevels.strongSupport, ...multiTFLevels.weakSupport].forEach(level => {
-        supportCandidates.push({
-            price: level.price,
-            confidence: level.strength * (level.touches > 1 ? 1.5 : 1.0),
-            source: `pivot_${level.timeframe}`,
-            touches: level.touches
-        });
-    });
-
-    // Add Fibonacci levels
-    Object.entries(fibLevels).forEach(([level, fibPrice]) => {
-        const targetArray = fibPrice > price ? resistanceCandidates : supportCandidates;
-        targetArray.push({
-            price: fibPrice,
-            confidence: 1.2,
-            source: `fib_${level}`,
-            touches: 0
-        });
-    });
-
-    // Add volume profile levels
-    volumeProfile.highVolumeNodes.forEach(node => {
-        const targetArray = node.price > price ? resistanceCandidates : supportCandidates;
-        targetArray.push({
-            price: node.price,
-            confidence: node.strength * 2.0,
-            source: 'volume_profile',
-            touches: Math.round(node.strength * 10)
-        });
-    });
-
-    const bestResistance = filterCandidates(resistanceCandidates, true, price);
-    const bestSupport = filterCandidates(supportCandidates, false, price);
-
-    return {
-        resistance: bestResistance[0]?.price || null,
-        support: bestSupport[0]?.price || null,
-        allResistance: bestResistance,
-        allSupport: bestSupport,
-        volumePOC: volumeProfile.pointOfControl,
-        fibLevels
     };
-}
 
-function filterCandidates(candidates, isResistance, price) {
-    const groups = [];
-    candidates.sort((a, b) => a.price - b.price);
-    
-    // Group nearby levels
-    for (const candidate of candidates) {
-        let grouped = false;
-        for (const group of groups) {
-            const avgPrice = group.reduce((sum, c) => sum + c.price, 0) / group.length;
-            if (Math.abs(candidate.price - avgPrice) / avgPrice < 0.005) {
-                group.push(candidate);
-                grouped = true;
-                break;
+    const detectMarketStructure = () => {
+        const structure = {
+            higherHighs: [],
+            lowerLows: [],
+            consolidationZones: []
+        };
+
+        for (let i = 10; i < high.length - 5; i++) {
+            const windowHigh = high.slice(i - 5, i + 5);
+            const windowLow = low.slice(i - 5, i + 5);
+            
+            if (high[i] === Math.max(...windowHigh)) {
+                structure.higherHighs.push({
+                    price: high[i],
+                    index: i
+                });
+            }
+            
+            if (low[i] === Math.min(...windowLow)) {
+                structure.lowerLows.push({
+                    price: low[i],
+                    index: i
+                });
             }
         }
-        if (!grouped) groups.push([candidate]);
-    }
 
-    // Select best candidate from each group and filter by distance
-    return groups.map(group => 
-        group.reduce((best, current) => {
-            const currentScore = current.confidence * (1 + current.touches * 0.1);
-            const bestScore = best.confidence * (1 + best.touches * 0.1);
-            return currentScore > bestScore ? current : best;
-        })
-    )
-    .filter(candidate => {
-        const distance = isResistance ? 
-            (candidate.price - price) / price : 
-            (price - candidate.price) / price;
-        return distance >= 0.002 && distance <= 0.03;
-    })
-    .sort((a, b) => {
-        const scoreA = a.confidence * (1 + a.touches * 0.1);
-        const scoreB = b.confidence * (1 + b.touches * 0.1);
-        return scoreB - scoreA;
-    });
-}
+        const priceChanges = [];
+        for (let i = 1; i < close.length; i++) {
+            priceChanges.push(Math.abs(close[i] - close[i-1]) / close[i-1]);
+        }
+        
+        const volatility = priceChanges.reduce((a, b) => a + b) / priceChanges.length;
+        const lowVolatilityThreshold = volatility * 0.3;
 
-// ==================== SIGNAL ANALYSIS ====================
-async function analyzeSignal() {
+        for (let i = 20; i < close.length - 10; i++) {
+            const recentVolatility = priceChanges.slice(i - 10, i).reduce((a, b) => a + b) / 10;
+            if (recentVolatility < lowVolatilityThreshold) {
+                const zoneHigh = Math.max(...high.slice(i - 10, i));
+                const zoneLow = Math.min(...low.slice(i - 10, i));
+                
+                if ((zoneHigh - zoneLow) / zoneLow < volatility * 2) {
+                    structure.consolidationZones.push({
+                        high: zoneHigh,
+                        low: zoneLow,
+                        midpoint: (zoneHigh + zoneLow) / 2
+                    });
+                }
+            }
+        }
+
+        return structure;
+    };
+
+    const multiTFLevels = detectMultiTimeframeLevels();
+    const fibLevels = calculateFibonacciLevels();
+    const volumeProfile = calculateVolumeProfile();
+    const marketStructure = detectMarketStructure();
+
+    const calculateFinalLevels = () => {
+        const resistanceCandidates = [];
+        const supportCandidates = [];
+
+        [...multiTFLevels.strongResistance, ...multiTFLevels.weakResistance].forEach(level => {
+            resistanceCandidates.push({
+                price: level.price,
+                confidence: level.strength * (level.touches > 1 ? 1.5 : 1.0),
+                source: `pivot_${level.timeframe}`,
+                touches: level.touches
+            });
+        });
+
+        [...multiTFLevels.strongSupport, ...multiTFLevels.weakSupport].forEach(level => {
+            supportCandidates.push({
+                price: level.price,
+                confidence: level.strength * (level.touches > 1 ? 1.5 : 1.0),
+                source: `pivot_${level.timeframe}`,
+                touches: level.touches
+            });
+        });
+
+        Object.entries(fibLevels).forEach(([level, fibPrice]) => {
+            if (fibPrice > price) {
+                resistanceCandidates.push({
+                    price: fibPrice,
+                    confidence: 1.2,
+                    source: `fib_${level}`,
+                    touches: 0
+                });
+            } else {
+                supportCandidates.push({
+                    price: fibPrice,
+                    confidence: 1.2,
+                    source: `fib_${level}`,
+                    touches: 0
+                });
+            }
+        });
+
+        volumeProfile.highVolumeNodes.forEach(node => {
+            if (node.price > price) {
+                resistanceCandidates.push({
+                    price: node.price,
+                    confidence: node.strength * 2.0,
+                    source: 'volume_profile',
+                    touches: Math.round(node.strength * 10)
+                });
+            } else {
+                supportCandidates.push({
+                    price: node.price,
+                    confidence: node.strength * 2.0,
+                    source: 'volume_profile',
+                    touches: Math.round(node.strength * 10)
+                });
+            }
+        });
+
+        marketStructure.higherHighs.forEach(hh => {
+            if (hh.price > price) {
+                resistanceCandidates.push({
+                    price: hh.price,
+                    confidence: 1.3,
+                    source: 'market_structure',
+                    touches: 1
+                });
+            }
+        });
+
+        marketStructure.lowerLows.forEach(ll => {
+            if (ll.price < price) {
+                supportCandidates.push({
+                    price: ll.price,
+                    confidence: 1.3,
+                    source: 'market_structure',
+                    touches: 1
+                });
+            }
+        });
+
+        const filterCandidates = (candidates, isResistance) => {
+            const groups = [];
+            candidates.sort((a, b) => a.price - b.price);
+            
+            for (const candidate of candidates) {
+                let grouped = false;
+                for (const group of groups) {
+                    const avgPrice = group.reduce((sum, c) => sum + c.price, 0) / group.length;
+                    if (Math.abs(candidate.price - avgPrice) / avgPrice < 0.005) {
+                        group.push(candidate);
+                        grouped = true;
+                        break;
+                    }
+                }
+                if (!grouped) {
+                    groups.push([candidate]);
+                }
+            }
+
+            return groups.map(group => {
+                return group.reduce((best, current) => {
+                    const currentScore = current.confidence * (1 + current.touches * 0.1);
+                    const bestScore = best.confidence * (1 + best.touches * 0.1);
+                    return currentScore > bestScore ? current : best;
+                });
+            })
+            .filter(candidate => {
+                const distance = isResistance ? 
+                    (candidate.price - price) / price : 
+                    (price - candidate.price) / price;
+                return distance >= 0.002 && distance <= 0.03;
+            })
+            .sort((a, b) => {
+                const scoreA = a.confidence * (1 + a.touches * 0.1);
+                const scoreB = b.confidence * (1 + b.touches * 0.1);
+                return scoreB - scoreA;
+            });
+        };
+
+        const bestResistance = filterCandidates(resistanceCandidates, true);
+        const bestSupport = filterCandidates(supportCandidates, false);
+
+        return {
+            resistance: bestResistance[0]?.price || null,
+            support: bestSupport[0]?.price || null,
+            allResistance: bestResistance,
+            allSupport: bestSupport,
+            volumePOC: volumeProfile.pointOfControl,
+            fibLevels: fibLevels,
+            marketStructure: marketStructure
+        };
+    };
+
+    return calculateFinalLevels();
+};
+
+// -------------------- TECHNICAL ANALYSIS --------------------
+const analyzeSignal = async () => {
     console.log("🧠 Advanced technical analysis started...");
     try {
-        const ohlcv = await safeApiCall(state.exchange.fetchOHLCV, state.db.pair, "15m", undefined, 300);
+        const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "15m", undefined, 300);
         if (!ohlcv || ohlcv.length < 200) {
             console.warn("⚠️ Insufficient OHLCV data");
             return {};
@@ -463,37 +552,74 @@ async function analyzeSignal() {
         const high = ohlcv.map(c => c[2]);
         const low = ohlcv.map(c => c[3]);
         const volume = ohlcv.map(c => c[5]);
-        const price = close[close.length - 1];
+        const price = close.at(-1);
 
-        // Moving Averages Analysis
-        const ma7 = SMA.calculate({ values: close.slice(-100), period: 7 }).pop();
-        const ma25 = SMA.calculate({ values: close.slice(-100), period: 25 }).pop();
-        const ma99 = SMA.calculate({ values: close, period: 99 }).pop();
+        const ma7 = SMA.calculate({
+            values: close.slice(-100),
+            period: 7
+        }).pop();
+        const ma25 = SMA.calculate({
+            values: close.slice(-100),
+            period: 25
+        }).pop();
+        const ma99 = SMA.calculate({
+            values: close,
+            period: 99
+        }).pop();
 
-        const prevMA7 = SMA.calculate({ values: close.slice(-101, -1), period: 7 }).pop();
-        const prevMA25 = SMA.calculate({ values: close.slice(-101, -1), period: 25 }).pop();
+        const prevMA7 = SMA.calculate({
+            values: close.slice(-101, -1),
+            period: 7
+        }).pop();
+        const prevMA25 = SMA.calculate({
+            values: close.slice(-101, -1),
+            period: 25
+        }).pop();
 
         const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
         const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
+
+        let canLong = false;
+        let canShort = false;
 
         const isMA7AboveMA99 = ma7 > ma99;
         const isMA7BelowMA99 = ma7 < ma99;
         const isMA25AboveMA99 = ma25 > ma99;
         const isMA25BelowMA99 = ma25 < ma99;
 
-        const canLong = isCrossedUp && isMA7AboveMA99 && isMA25AboveMA99;
-        const canShort = isCrossedDown && isMA7BelowMA99 && isMA25BelowMA99;
+        if (isCrossedUp && isMA7AboveMA99 && isMA25AboveMA99) {
+            canLong = true;
+        }
 
-        // ATR Calculation for risk management
-        const currentATR = TechnicalAnalysis.calculateATR(high, low, close, 14).pop() || 0;
+        if (isCrossedDown && isMA7BelowMA99 && isMA25BelowMA99) {
+            canShort = true;
+        }
 
-        // Advanced S/R Detection
+        const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
+            const tr = [];
+            for (let i = 1; i < highArr.length; i++) {
+                const tr1 = highArr[i] - lowArr[i];
+                const tr2 = Math.abs(highArr[i] - closeArr[i - 1]);
+                const tr3 = Math.abs(lowArr[i] - closeArr[i - 1]);
+                tr.push(Math.max(tr1, tr2, tr3));
+            }
+
+            const atr = [];
+            for (let i = period - 1; i < tr.length; i++) {
+                const slice = tr.slice(i - period + 1, i + 1);
+                atr.push(slice.reduce((a, b) => a + b) / period);
+            }
+
+            return atr;
+        };
+
+        const currentATR = calculateATR(high, low, close, 14).pop() || 0;
+
         const advancedLevels = findAdvancedLevels(high, low, close, volume, price);
         
         let resistance = advancedLevels.resistance;
         let support = advancedLevels.support;
 
-        // Fallback logic if advanced detection fails
         if (!resistance || !support) {
             console.log("🔄 Advanced S/R detection failed, using fallback...");
             const recentHigh = Math.max(...high.slice(-96));
@@ -503,20 +629,29 @@ async function analyzeSignal() {
             support = recentLow - (currentATR * 0.5);
         }
 
-        // Ensure minimum and maximum distance based on ATR
         const minDistance = currentATR * 0.8;
         const maxDistance = currentATR * 3;
 
-        resistance = Math.min(Math.max(resistance, price + minDistance), price + maxDistance);
-        support = Math.max(Math.min(support, price - minDistance), price - maxDistance);
+        if (resistance - price < minDistance) {
+            resistance = price + minDistance;
+        }
+        if (price - support < minDistance) {
+            support = price - minDistance;
+        }
+
+        if (resistance - price > maxDistance) {
+            resistance = price + maxDistance;
+        }
+        if (price - support > maxDistance) {
+            support = price - maxDistance;
+        }
 
         const targetLong = resistance;
         const stopLossLong = support;
         const targetShort = support;
         const stopLossShort = resistance;
 
-        // Display analysis results
-        console.log(`\n🎯 ADVANCED Analysis Results ${state.db.pair}
+        console.log(`\n🎯 ADVANCED Analysis Results ${db.pair}
 ══════════════════════════════════════════════════
 📈 Long Signal: ${canLong ? "✅ VALID" : "❌ INVALID"}
 📉 Short Signal: ${canShort ? "✅ VALID" : "❌ INVALID"}
@@ -525,45 +660,59 @@ async function analyzeSignal() {
 🎯 Resistance: ${formatPrice(resistance)} (${((resistance - price) / price * 100).toFixed(3)}%)
 🛡️  Support: ${formatPrice(support)} (${((price - support) / price * 100).toFixed(3)}%)
 📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
+══════════════════════════════════════════════════
+📊 Volume POC: ${formatPrice(advancedLevels.volumePOC)}
+🔍 Detected R Levels: ${advancedLevels.allResistance?.length || 0}
+🔍 Detected S Levels: ${advancedLevels.allSupport?.length || 0}
 ══════════════════════════════════════════════════`);
 
-        return { 
-            canLong, 
-            canShort, 
-            targetLong, 
-            stopLossLong, 
-            targetShort, 
-            stopLossShort, 
-            price, 
-            advancedLevels 
+        if (advancedLevels.allResistance && advancedLevels.allResistance.length > 0) {
+            console.log("📈 Additional Resistance Levels:");
+            advancedLevels.allResistance.slice(0, 3).forEach(level => {
+                console.log(`   - ${formatPrice(level.price)} (conf: ${level.confidence.toFixed(2)})`);
+            });
+        }
+
+        if (advancedLevels.allSupport && advancedLevels.allSupport.length > 0) {
+            console.log("📉 Additional Support Levels:");
+            advancedLevels.allSupport.slice(0, 3).forEach(level => {
+                console.log(`   - ${formatPrice(level.price)} (conf: ${level.confidence.toFixed(2)})`);
+            });
+        }
+
+        return {
+            canLong,
+            canShort,
+            targetLong,
+            stopLossLong,
+            targetShort,
+            stopLossShort,
+            price,
+            advancedLevels
         };
     } catch (error) {
         console.error("❌ Advanced technical analysis failed:", error.message);
         return {};
     }
-}
+};
 
-// ==================== ORDER MANAGEMENT ====================
-async function placeOrder(side, tp, sl) {
+// -------------------- ORDER MANAGEMENT --------------------
+const placeOrder = async (side, tp, sl) => {
     console.log("🔍 Checking for active positions...");
-    
-    // Check local database
-    if (state.db.activePosition) {
-        console.log("⚠️ Active position exists in DB, order cancelled");
+    if (db.activePosition) {
+        console.log("⚠️ Active position exists, order cancelled");
         return;
     }
 
-    // Check exchange position
     try {
         const { position } = await getPositionFromBalance();
         const amt = parseFloat(position?.positionAmt || "0");
         if (isFinite(amt) && Math.abs(amt) > 0) {
-            console.log("⚠️ Active position detected on exchange, order cancelled");
+            console.log("⚠️ Active position detected, order cancelled");
             return;
         }
     } catch (err) {
         console.warn("⚠️ Failed to check live position:", err.message);
-        return;
     }
 
     const price = await getPrice();
@@ -580,33 +729,39 @@ async function placeOrder(side, tp, sl) {
 - SL: ${formatPrice(sl)}`);
 
     try {
-        await safeApiCall(state.exchange.setLeverage, state.db.leverage, state.db.pair);
-        await safeApiCall(state.exchange.setMarginMode, state.db.marginMode, state.db.pair);
+        await safeApiCall(exchange.setLeverage, db.leverage, db.pair);
+        await safeApiCall(exchange.setMarginMode, db.marginMode, db.pair);
         console.log("✅ Leverage and margin mode set");
     } catch (err) {
         console.warn("⚠️ Failed to set leverage/margin:", err.message);
     }
 
     try {
-        const order = await safeApiCall(state.exchange.createOrder, state.db.pair, "market", side, qty);
+        const order = await safeApiCall(exchange.createOrder, db.pair, "market", side, qty);
         console.log("✅ Market order created");
 
-        state.db.activePosition = { 
-            side, 
-            entryPrice: price, 
-            tp, 
-            sl, 
-            orderId: order.id 
+        db.activePosition = {
+            side: side,
+            entryPrice: price,
+            tp: tp,
+            sl: sl,
+            orderId: order.id,
         };
         saveDB();
 
-        logSignal(side === "buy" ? "LONG" : "SHORT", price, tp, sl, "ORDER_PLACED");
+        logSignal(
+            side === "buy" ? "LONG" : "SHORT",
+            price,
+            tp,
+            sl,
+            "ORDER_PLACED"
+        );
     } catch (err) {
         console.error("❌ Order failed:", err.message);
     }
-}
+};
 
-async function closePosition(reason, entryPrice = "N/A") {
+const closePosition = async (reason, entryPrice = "N/A") => {
     console.log(`🚨 Closing position: ${reason}`);
     try {
         const { position } = await getPositionFromBalance();
@@ -618,12 +773,12 @@ async function closePosition(reason, entryPrice = "N/A") {
             const side = qty > 0 ? "sell" : "buy";
             const amount = Math.abs(qty);
 
-            await safeApiCall(state.exchange.createOrder, state.db.pair, "market", side, amount, undefined, {
+            await safeApiCall(exchange.createOrder, db.pair, "market", side, amount, undefined, {
                 reduceOnly: true,
             });
             console.log(`✅ Close order created (${side}, ${amount})`);
 
-            // Calculate PnL if possible
+            const exitPrice = await getPrice();
             let pnl = null;
             let statusTag = "CLOSED_MANUAL";
 
@@ -633,26 +788,29 @@ async function closePosition(reason, entryPrice = "N/A") {
             if (isTP) statusTag = "TP_REALIZED";
             else if (isSL) statusTag = "SL_REALIZED";
 
-            if (entryPrice !== "N/A" && state.db.activePosition) {
-                const { tp, sl, side: entrySide } = state.db.activePosition;
+            if (entryPrice !== "N/A" && db.activePosition) {
+                const { tp, sl, side: entrySide } = db.activePosition;
                 try {
                     const entryNum = Number(entryPrice);
                     const closedQty = amount;
 
                     if (closedQty > 0) {
                         let exitNum;
-                        if (isTP) exitNum = entrySide === "buy" ? tp : sl;
-                        else if (isSL) exitNum = entrySide === "buy" ? sl : tp;
-                        else {
-                            const exitPrice = await getPrice();
-                            if (isFinite(exitPrice)) exitNum = Number(exitPrice);
+                        if (isTP) {
+                            exitNum = entrySide === "buy" ? tp : sl;
+                        } else if (isSL) {
+                            exitNum = entrySide === "buy" ? sl : tp;
+                        } else if (isFinite(exitPrice)) {
+                            exitNum = Number(exitPrice);
+                        } else {
+                            console.warn("⚠️ PNL: Exit price not found");
+                            return;
                         }
 
-                        if (exitNum !== undefined) {
-                            pnl = entrySide === "buy" ? 
-                                (exitNum - entryNum) * closedQty : 
-                                (entryNum - exitNum) * closedQty;
-                        }
+                        const pnlGross = entrySide === "buy" ?
+                            (exitNum - entryNum) :
+                            (entryNum - exitNum);
+                        pnl = pnlGross * closedQty;
                     }
                 } catch (err) {
                     console.warn("⚠️ PNL calculation failed:", err.message);
@@ -662,8 +820,8 @@ async function closePosition(reason, entryPrice = "N/A") {
             logSignal(
                 qty > 0 ? "LONG" : "SHORT",
                 entryPrice,
-                state.db.activePosition?.tp ?? "",
-                state.db.activePosition?.sl ?? "",
+                db.activePosition?.tp ?? "",
+                db.activePosition?.sl ?? "",
                 statusTag,
                 pnl
             );
@@ -671,188 +829,28 @@ async function closePosition(reason, entryPrice = "N/A") {
     } catch (err) {
         console.error("❌ Close position failed:", err.message);
     } finally {
-        state.db.activePosition = null;
+        db.activePosition = null;
         saveDB();
     }
-}
+};
 
-// ==================== POSITION RECOVERY & MONITORING ====================
-async function recoverPositionState() {
-    try {
-        console.log("🔄 Checking position sync...");
-
-        const { position } = await getPositionFromBalance();
-        const amt = parseFloat(position?.positionAmt || "0");
-        const amtSafe = isFinite(amt) ? amt : 0;
-
-        // Recovery needed: position exists on exchange but not in local DB
-        if (Math.abs(amtSafe) > CONFIG.MIN_POSITION_AMOUNT && !state.db.activePosition) {
-            await recoverPosition(amtSafe, position);
-        }
-
-        // Cleanup needed: position in local DB but not on exchange
-        if (state.db.activePosition && Math.abs(amtSafe) <= CONFIG.MIN_POSITION_AMOUNT) {
-            await cleanupPosition();
-        }
-
-        // Monitor active position
-        if (state.db.activePosition && Math.abs(amtSafe) > CONFIG.MIN_POSITION_AMOUNT) {
-            await monitorActivePosition();
-        }
-
-    } catch (err) {
-        console.error("❌ Recovery error:", err.message);
-    }
-}
-
-async function recoverPosition(amtSafe, position) {
-    console.log("⚠️ Position recovery needed");
-
-    const currentPrice = await getPrice();
-    if (!currentPrice) return;
-
-    const side = amtSafe > 0 ? "buy" : "sell";
-    const entryPrice = parseFloat(position?.entryPrice || currentPrice);
-    const leverage = position?.leverage || state.db.leverage;
-
-    const signal = await analyzeSignal();
-    let tp, sl;
-
-    if (!signal?.price) {
-        console.log("⚠️ Using fallback TP/SL");
-        tp = side === "buy" ? entryPrice * 1.015 : entryPrice * 0.985;
-        sl = side === "buy" ? entryPrice * 0.995 : entryPrice * 1.005;
-    } else {
-        tp = side === "buy" ? 
-            (signal.targetLong || entryPrice * 1.015) : 
-            (signal.targetShort || entryPrice * 0.985);
-        sl = side === "buy" ? 
-            (signal.stopLossLong || entryPrice * 0.995) : 
-            (signal.stopLossShort || entryPrice * 1.005);
-    }
-
-    // Apply safety margins
-    if (side === "buy") {
-        tp *= (1 - CONFIG.SAFETY_MARGIN);
-        sl *= (1 + CONFIG.SAFETY_MARGIN);
-    } else {
-        tp *= (1 + CONFIG.SAFETY_MARGIN);
-        sl *= (1 - CONFIG.SAFETY_MARGIN);
-    }
-
-    // Ensure TP/SL are valid
-    if (side === "buy") {
-        if (tp <= entryPrice) tp = entryPrice * 1.015;
-        if (sl >= entryPrice) sl = entryPrice * 0.995;
-    } else {
-        if (tp >= entryPrice) tp = entryPrice * 0.985;
-        if (sl <= entryPrice) sl = entryPrice * 1.005;
-    }
-
-    // Calculate risk-reward ratio
-    const rrRatio = side === "buy" ? 
-        ((tp - entryPrice) / (entryPrice - sl)).toFixed(2) : 
-        ((entryPrice - tp) / (sl - entryPrice)).toFixed(2);
-
-    state.db.activePosition = {
-        side: side,
-        entryPrice: entryPrice,
-        tp: tp,
-        sl: sl,
-        orderId: "RECOVERED_" + Date.now(),
-        recovered: true,
-        rrRatio: parseFloat(rrRatio),
-        recoveredAt: new Date().toISOString()
-    };
-
-    saveDB();
-
-    console.log("✅ Position recovered");
-    console.log(`   ${side.toUpperCase()} | Entry: ${formatPrice(entryPrice)}`);
-    console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
-    console.log(`   RR: ${rrRatio} | Leverage: ${leverage}x`);
-
-    logSignal(
-        side === "buy" ? "LONG" : "SHORT",
-        entryPrice,
-        tp,
-        sl,
-        "POSITION_RECOVERED"
-    );
-}
-
-async function cleanupPosition() {
-    console.log("⚠️ Position cleanup needed");
-
-    const side = state.db.activePosition.side === "buy" ? "LONG" : "SHORT";
-
-    logSignal(
-        side,
-        state.db.activePosition.entryPrice,
-        state.db.activePosition.tp,
-        state.db.activePosition.sl,
-        "CLOSED_EXTERNALLY"
-    );
-
-    state.db.activePosition = null;
-    saveDB();
-    console.log("✅ Database cleaned");
-}
-
-async function monitorActivePosition() {
-    const currentPrice = await getPrice();
-    if (!currentPrice) return;
-
-    const { side, entryPrice, tp, sl } = state.db.activePosition;
-    const unrealizedPnl = side === "buy" ? currentPrice - entryPrice : entryPrice - currentPrice;
-    const pnlPercent = (unrealizedPnl / entryPrice * 100).toFixed(2);
-
-    let status = "🟢 NORMAL";
-    let warning = "";
-
-    if (side === "buy") {
-        if (currentPrice >= tp * 0.998) {
-            status = "🟡 NEAR TP";
-            warning = " - Near Take Profit!";
-        } else if (currentPrice <= sl * 1.002) {
-            status = "🔴 NEAR SL";
-            warning = " - Near Stop Loss!";
-        }
-    } else {
-        if (currentPrice <= tp * 1.002) {
-            status = "🟡 NEAR TP";
-            warning = " - Near Take Profit!";
-        } else if (currentPrice >= sl * 0.998) {
-            status = "🔴 NEAR SL";
-            warning = " - Near Stop Loss!";
-        }
-    }
-
-    const pnlEmoji = unrealizedPnl >= 0 ? "💹" : "🔻";
-
-    console.log("\n📊 Position Monitor");
-    console.log(`   ${side.toUpperCase()} | ${status}${warning}`);
-    console.log(`   Entry: ${formatPrice(entryPrice)} | Current: ${formatPrice(currentPrice)}`);
-    console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
-    console.log(`   ${pnlEmoji} PnL: ${formatPrice(unrealizedPnl)} (${pnlPercent}%)`);
-}
-
-async function checkPositionStatus() {
+// -------------------- POSITION MONITORING --------------------
+const checkPositionStatus = async () => {
     try {
         const { position } = await getPositionFromBalance();
         const amt = parseFloat(position?.positionAmt || "0");
         const amtSafe = isFinite(amt) ? amt : 0;
 
-        const prevSafe = isFinite(state.prevPosAmt) ? state.prevPosAmt : 0;
+        const prevSafe = isFinite(prevPosAmt) ? prevPosAmt : 0;
         if (prevSafe !== 0 && amtSafe === 0) {
             const side = prevSafe > 0 ? "LONG" : "SHORT";
             console.log(`📉 ${side} position closed`);
-            state.db.activePosition = null;
+            db.activePosition = null;
             saveDB();
         }
 
-        if (state.db.activePosition && amtSafe !== 0) {
-            const { tp, sl, side, entryPrice } = state.db.activePosition;
+        if (db.activePosition && amtSafe !== 0) {
+            const { tp, sl, side, entryPrice } = db.activePosition;
             const currentPrice = await getPrice();
             if (!currentPrice) return;
 
@@ -865,17 +863,171 @@ async function checkPositionStatus() {
             }
         }
 
-        state.prevPosAmt = amtSafe;
+        prevPosAmt = amtSafe;
     } catch (err) {
         console.error("❌ Position check failed:", err.message);
     }
-}
+};
 
-// ==================== HEALTH CHECK ====================
-async function healthCheck() {
+// -------------------- POSITION RECOVERY --------------------
+const recoverPositionState = async () => {
+    try {
+        console.log("🔄 Checking position sync...");
+
+        const { position } = await getPositionFromBalance();
+        const amt = parseFloat(position?.positionAmt || "0");
+        const MIN_POSITION_AMOUNT = 0.000001;
+        const amtSafe = isFinite(amt) ? amt : 0;
+
+        if (Math.abs(amtSafe) > MIN_POSITION_AMOUNT && !db.activePosition) {
+            console.log("⚠️ Position recovery needed");
+
+            const currentPrice = await getPrice();
+            if (!currentPrice) return;
+
+            const side = amtSafe > 0 ? "buy" : "sell";
+            const entryPrice = parseFloat(position?.entryPrice || currentPrice);
+            const leverage = position?.leverage || db.leverage;
+
+            const signal = await analyzeSignal();
+            let tp, sl;
+
+            if (!signal || !signal.price) {
+                console.log("⚠️ Using fallback TP/SL");
+                if (side === "buy") {
+                    tp = entryPrice * 1.015;
+                    sl = entryPrice * 0.995;
+                } else {
+                    tp = entryPrice * 0.985;
+                    sl = entryPrice * 1.005;
+                }
+            } else {
+                if (side === "buy") {
+                    tp = signal.targetLong || (entryPrice * 1.015);
+                    sl = signal.stopLossLong || (entryPrice * 0.995);
+                } else {
+                    tp = signal.targetShort || (entryPrice * 0.985);
+                    sl = signal.stopLossShort || (entryPrice * 1.005);
+                }
+            }
+
+            const SAFETY_MARGIN = 0.001;
+            if (side === "buy") {
+                tp = tp * (1 - SAFETY_MARGIN);
+                sl = sl * (1 + SAFETY_MARGIN);
+            } else {
+                tp = tp * (1 + SAFETY_MARGIN);
+                sl = sl * (1 - SAFETY_MARGIN);
+            }
+
+            if (side === "buy") {
+                if (tp <= entryPrice) tp = entryPrice * 1.015;
+                if (sl >= entryPrice) sl = entryPrice * 0.995;
+            } else {
+                if (tp >= entryPrice) tp = entryPrice * 0.985;
+                if (sl <= entryPrice) sl = entryPrice * 1.005;
+            }
+
+            let rrRatio;
+            if (side === "buy") {
+                rrRatio = ((tp - entryPrice) / (entryPrice - sl)).toFixed(2);
+            } else {
+                rrRatio = ((entryPrice - tp) / (sl - entryPrice)).toFixed(2);
+            }
+
+            db.activePosition = {
+                side: side,
+                entryPrice: entryPrice,
+                tp: tp,
+                sl: sl,
+                orderId: "RECOVERED_" + Date.now(),
+                recovered: true,
+                rrRatio: parseFloat(rrRatio),
+                recoveredAt: new Date().toISOString()
+            };
+
+            saveDB();
+
+            console.log("✅ Position recovered");
+            console.log(`   ${side.toUpperCase()} | Entry: ${formatPrice(entryPrice)}`);
+            console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
+            console.log(`   RR: ${rrRatio} | Leverage: ${leverage}x`);
+
+            logSignal(
+                side === "buy" ? "LONG" : "SHORT",
+                entryPrice,
+                tp,
+                sl,
+                "POSITION_RECOVERED"
+            );
+        }
+
+        if (db.activePosition && Math.abs(amtSafe) <= MIN_POSITION_AMOUNT) {
+            console.log("⚠️ Position cleanup needed");
+
+            const side = db.activePosition.side === "buy" ? "LONG" : "SHORT";
+
+            logSignal(
+                side,
+                db.activePosition.entryPrice,
+                db.activePosition.tp,
+                db.activePosition.sl,
+                "CLOSED_EXTERNALLY"
+            );
+
+            db.activePosition = null;
+            saveDB();
+            console.log("✅ Database cleaned");
+        }
+
+        if (db.activePosition && Math.abs(amtSafe) > MIN_POSITION_AMOUNT) {
+            const currentPrice = await getPrice();
+            if (currentPrice) {
+                const { side, entryPrice, tp, sl } = db.activePosition;
+                const unrealizedPnl = side === "buy" ? currentPrice - entryPrice : entryPrice - currentPrice;
+                const pnlPercent = (unrealizedPnl / entryPrice * 100).toFixed(2);
+
+                let status = "🟢 NORMAL";
+                let warning = "";
+
+                if (side === "buy") {
+                    if (currentPrice >= tp * 0.998) {
+                        status = "🟡 NEAR TP";
+                        warning = " - Near Take Profit!";
+                    } else if (currentPrice <= sl * 1.002) {
+                        status = "🔴 NEAR SL";
+                        warning = " - Near Stop Loss!";
+                    }
+                } else {
+                    if (currentPrice <= tp * 1.002) {
+                        status = "🟡 NEAR TP";
+                        warning = " - Near Take Profit!";
+                    } else if (currentPrice >= sl * 0.998) {
+                        status = "🔴 NEAR SL";
+                        warning = " - Near Stop Loss!";
+                    }
+                }
+
+                const pnlEmoji = unrealizedPnl >= 0 ? "💹" : "🔻";
+
+                console.log("\n📊 Position Monitor");
+                console.log(`   ${side.toUpperCase()} | ${status}${warning}`);
+                console.log(`   Entry: ${formatPrice(entryPrice)} | Current: ${formatPrice(currentPrice)}`);
+                console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
+                console.log(`   ${pnlEmoji} PnL: ${formatPrice(unrealizedPnl)} (${pnlPercent}%)`);
+            }
+        }
+
+    } catch (err) {
+        console.error("❌ Recovery error:", err.message);
+    }
+};
+
+// -------------------- CONNECTION HEALTH CHECK --------------------
+const healthCheck = async () => {
     try {
         await initializeExchange();
-        const balance = await safeApiCall(state.exchange.fetchBalance);
+        const balance = await safeApiCall(exchange.fetchBalance);
         const price = await getPrice();
 
         return {
@@ -894,51 +1046,59 @@ async function healthCheck() {
             timestamp: new Date().toISOString()
         };
     }
-}
+};
 
-// ==================== MAIN LOOP ====================
-async function mainLoop() {
+// -------------------- MAIN LOOP --------------------
+let prevPosAmt = 0;
+
+(async () => {
+    await initializeExchange();
+    console.log("🚀 Bot started with advanced S/R detection");
+})();
+
+setInterval(async () => {
     const health = await healthCheck();
     if (!health.healthy) {
         console.log("⚠️ Health check failed, skipping cycle...");
-        state.isProcessing = false;
+        isProcessing = false;
         return;
     }
 
-    // Auto reload config
     try {
         const freshDb = loadDB();
-        Object.assign(state.db, freshDb);
+        db.pair = freshDb.pair;
+        db.leverage = freshDb.leverage;
+        db.marginMode = freshDb.marginMode;
+        db.usdtPerTrade = freshDb.usdtPerTrade;
     } catch (error) {
         // Use existing config on error
     }
 
-    if (state.isProcessing) {
+    if (isProcessing) {
         console.log("⏳ Skipping: Still processing...");
         return;
     }
 
-    state.isProcessing = true;
+    isProcessing = true;
     try {
         const now = new Date();
-        
-        // Position recovery and monitoring
+
         await recoverPositionState();
         await checkPositionStatus();
 
         console.log("🔍 Checking for new signals...");
+
         const signal = await analyzeSignal();
         if (!signal.price) {
             console.log("⚠️ Invalid signal, waiting...");
             return;
         }
 
-        const hasBotPosition = state.db.activePosition !== null;
+        const hasBotPosition = db.activePosition !== null;
         let shouldExitCurrentPosition = false;
 
-        // Check for signal reversal
         if (hasBotPosition) {
-            const currentSide = state.db.activePosition.side;
+            const currentSide = db.activePosition.side;
             if (currentSide === "buy" && signal.canShort) {
                 console.log("⚠️ SHORT signal detected, closing LONG");
                 shouldExitCurrentPosition = true;
@@ -949,7 +1109,7 @@ async function mainLoop() {
         }
 
         if (shouldExitCurrentPosition) {
-            await closePosition("Signal reversal", state.db.activePosition.entryPrice);
+            await closePosition("Signal reversal", db.activePosition.entryPrice);
             await new Promise(resolve => setTimeout(resolve, 10000));
         }
 
@@ -957,13 +1117,12 @@ async function mainLoop() {
         const amt = parseFloat(position?.positionAmt || "0");
         const hasActiveBinancePositionAfterClose = isFinite(amt) && Math.abs(amt) > 0;
 
-        // Enter new position if conditions are met
-        if (!state.db.activePosition && !hasActiveBinancePositionAfterClose) {
+        if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
             if (signal.canLong) {
                 const isLongBreakout = signal.price > signal.targetLong;
                 if (!isLongBreakout) {
                     console.log(`🚀 LONG Signal | TP: ${formatPrice(signal.targetLong)} | SL: ${formatPrice(signal.stopLossLong)}`);
-                    state.db.lastLongEntryTime = now;
+                    db.lastLongEntryTime = now;
                     saveDB();
                     await placeOrder("buy", signal.targetLong, signal.stopLossLong);
                 } else {
@@ -973,7 +1132,7 @@ async function mainLoop() {
                 const isShortBreakout = signal.price < signal.targetShort;
                 if (!isShortBreakout) {
                     console.log(`📉 SHORT Signal | TP: ${formatPrice(signal.targetShort)} | SL: ${formatPrice(signal.stopLossShort)}`);
-                    state.db.lastShortEntryTime = now;
+                    db.lastShortEntryTime = now;
                     saveDB();
                     await placeOrder("sell", signal.targetShort, signal.stopLossShort);
                 } else {
@@ -986,21 +1145,6 @@ async function mainLoop() {
     } catch (err) {
         console.error("⚠️ Main loop error:", err.message);
     } finally {
-        state.isProcessing = false;
+        isProcessing = false;
     }
-}
-
-// ==================== STARTUP ====================
-initializeFiles();
-console.log(`⚙️ Bot Configuration:
-- Pair: ${state.db.pair}
-- Leverage: ${state.db.leverage}x
-- Margin Mode: ${state.db.marginMode}
-- USDT per Trade: ${state.db.usdtPerTrade}`);
-
-// Initialize connection and start main loop
-(async () => {
-    await initializeExchange();
-    console.log("🚀 Bot started with advanced S/R detection");
-    setInterval(mainLoop, CONFIG.checkInterval);
-})();
+}, 10000);
