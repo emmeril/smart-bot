@@ -1168,9 +1168,11 @@ setInterval(async () => {
             }
         }
 
-    
+        // Display balance every 10 cycles (approximately every 100 seconds)
+        if (Math.floor(Date.now() / 10000) % 10 === 0) {
+            console.log("\n💰 Periodic Balance Update:");
             await displayBalance();
-        
+        }
     } catch (err) {
         console.error("⚠️ Main loop error:", err.message);
     } finally {
