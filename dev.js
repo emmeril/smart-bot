@@ -149,6 +149,26 @@ const formatPrice = (price, pair = db.pair) => {
     }
 };
 
+// -------------------- BALANCE DISPLAY FUNCTION --------------------
+const displayBalance = async () => {
+    try {
+        const balance = await safeApiCall(exchange.fetchBalance);
+        const totalUSDT = balance.total?.USDT || 0;
+        const freeUSDT = balance.free?.USDT || 0;
+        const usedUSDT = balance.used?.USDT || 0;
+        
+        console.log(`💰 Balance Summary:
+   Total: ${totalUSDT.toFixed(2)} USDT
+   Free: ${freeUSDT.toFixed(2)} USDT
+   Used: ${usedUSDT.toFixed(2)} USDT`);
+        
+        return { totalUSDT, freeUSDT, usedUSDT };
+    } catch (error) {
+        console.error("❌ Failed to fetch balance:", error.message);
+        return null;
+    }
+};
+
 const getPrice = async () => {
     try {
         const ticker = await safeApiCall(exchange.fetchTicker, db.pair);
@@ -1053,7 +1073,12 @@ let prevPosAmt = 0;
 
 (async () => {
     await initializeExchange();
-    console.log("🚀 Bot started with advanced S/R detection");
+    
+    // Display initial balance
+    console.log("\n💰 Initial Account Balance:");
+    await displayBalance();
+    
+    console.log("\n🚀 Bot started with advanced S/R detection");
 })();
 
 setInterval(async () => {
@@ -1141,6 +1166,12 @@ setInterval(async () => {
             } else {
                 console.log("💤 No valid signals, waiting...");
             }
+        }
+
+        // Display balance every 10 cycles (approximately every 100 seconds)
+        if (Math.floor(Date.now() / 10000) % 10 === 0) {
+            console.log("\n💰 Periodic Balance Update:");
+            await displayBalance();
         }
     } catch (err) {
         console.error("⚠️ Main loop error:", err.message);
