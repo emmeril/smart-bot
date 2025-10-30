@@ -1,10 +1,8 @@
-// signal.js (Advanced Support & Resistance Version)
+// signal.js (Advanced Support & Resistance Version - Optimized)
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
-const {
-    SMA
-} = require("technicalindicators");
+const { SMA, RSI, EMA } = require("technicalindicators");
 
 // -------------------- CONFIG --------------------
 const dbPath = "./db.json";
@@ -13,7 +11,7 @@ let isProcessing = false;
 let exchange = null;
 let connectionRetries = 0;
 const MAX_RETRIES = 5;
-const RETRY_DELAY = 10000; // 10 seconds
+const RETRY_DELAY = 10000;
 
 // -------------------- CONNECTION MANAGEMENT --------------------
 const initializeExchange = async () => {
@@ -21,7 +19,7 @@ const initializeExchange = async () => {
         if (exchange) {
             try {
                 await exchange.fetchBalance();
-                return exchange; // Connection is still valid
+                return exchange;
             } catch (e) {
                 console.log("🔄 Connection lost, reinitializing...");
             }
@@ -30,15 +28,12 @@ const initializeExchange = async () => {
         exchange = new ccxt.binance({
             apiKey: process.env.API_KEY,
             secret: process.env.API_SECRET,
-            options: {
-                defaultType: "future"
-            },
+            options: { defaultType: "future" },
             timeout: 30000,
             enableRateLimit: true,
             recvWindow: 60000,
         });
 
-        // Test connection
         await exchange.loadMarkets();
         await exchange.fetchBalance();
 
@@ -105,7 +100,6 @@ const safeApiCall = async (apiFunction, ...args) => {
         if (error instanceof ccxt.NetworkError || error.message.includes('network') || error.message.includes('timeout')) {
             console.log("🌐 Network issue detected, reinitializing connection...");
             await initializeExchange();
-            // Retry once after reconnection
             return await apiFunction.call(exchange, ...args);
         }
         throw error;
@@ -152,6 +146,26 @@ const formatPrice = (price, pair = db.pair) => {
 
     } catch (err) {
         return parseFloat(price.toFixed(5));
+    }
+};
+
+// -------------------- BALANCE DISPLAY FUNCTION --------------------
+const displayBalance = async () => {
+    try {
+        const balance = await safeApiCall(exchange.fetchBalance);
+        const totalUSDT = balance.total?.USDT || 0;
+        const freeUSDT = balance.free?.USDT || 0;
+        const usedUSDT = balance.used?.USDT || 0;
+        
+        console.log(`💰 Balance Summary:
+   Total: ${totalUSDT.toFixed(2)} USDT
+   Free: ${freeUSDT.toFixed(2)} USDT
+   Used: ${usedUSDT.toFixed(2)} USDT`);
+        
+        return { totalUSDT, freeUSDT, usedUSDT };
+    } catch (error) {
+        console.error("❌ Failed to fetch balance:", error.message);
+        return null;
     }
 };
 
@@ -224,12 +238,11 @@ const getPositionFromBalance = async () => {
     }
 };
 
-// -------------------- ADVANCED SUPPORT & RESISTANCE DETECTION --------------------
-const findAdvancedLevels = (high, low, close, volume, price) => {
-    console.log("🔍 Starting advanced S/R detection...");
+// -------------------- ENHANCED SUPPORT & RESISTANCE DETECTION --------------------
+const findEnhancedLevels = (high, low, close, volume, price) => {
+    console.log("🔍 Starting enhanced S/R detection...");
     
-    // 1. MULTI-TIMEFRAME ANALYSIS (15m, 1h, 4h)
-    const detectMultiTimeframeLevels = () => {
+    const detectDynamicLevels = () => {
         const levels = {
             strongResistance: [],
             strongSupport: [],
@@ -237,11 +250,12 @@ const findAdvancedLevels = (high, low, close, volume, price) => {
             weakSupport: []
         };
 
-        // Analyze different timeframes within the data
+        // Use multiple timeframes for better accuracy
         const timeframes = [
-            { period: 20, weight: 1.0, name: "short" },    // Last 5 hours
-            { period: 50, weight: 1.5, name: "medium" },   // Last 12.5 hours  
-            { period: 96, weight: 2.0, name: "long" }      // Last 24 hours
+            { period: 15, weight: 1.0, name: "very_short" },
+            { period: 30, weight: 1.3, name: "short" },
+            { period: 50, weight: 1.6, name: "medium" },
+            { period: 75, weight: 2.0, name: "long" }
         ];
 
         timeframes.forEach(tf => {
@@ -251,60 +265,66 @@ const findAdvancedLevels = (high, low, close, volume, price) => {
             const closeSlice = close.slice(sliceIndex);
             const volumeSlice = volume.slice(sliceIndex);
 
-            // Find pivot highs and lows
+            // Enhanced pivot point detection with volume confirmation
             for (let i = 3; i < highSlice.length - 3; i++) {
-                // Pivot High detection (Resistance)
+                // Resistance detection with volume confirmation
                 if (highSlice[i] > highSlice[i-1] && highSlice[i] > highSlice[i-2] &&
                     highSlice[i] > highSlice[i+1] && highSlice[i] > highSlice[i+2] &&
                     highSlice[i] === Math.max(...highSlice.slice(i-2, i+3))) {
                     
+                    const levelStrength = tf.weight * 
+                        (1 + (volumeSlice[i] / Math.max(1, Math.max(...volumeSlice))) * 
+                        (1 + (i / highSlice.length))); // Favor recent levels
+
                     const level = {
                         price: highSlice[i],
-                        strength: tf.weight * (1 + (volumeSlice[i] / Math.max(...volumeSlice))),
+                        strength: levelStrength,
                         timeframe: tf.name,
                         touches: 1,
                         recency: i
                     };
                     
-                    // Check if this is strong resistance (price rejected multiple times)
-                    let isStrong = false;
-                    for (let j = i + 1; j < Math.min(i + 20, highSlice.length); j++) {
-                        if (Math.abs(highSlice[j] - highSlice[i]) / highSlice[i] < 0.002) {
+                    // Count touches within tighter range for more sensitivity
+                    for (let j = i + 1; j < Math.min(i + 15, highSlice.length); j++) {
+                        if (Math.abs(highSlice[j] - highSlice[i]) / highSlice[i] < 0.0015) {
                             level.touches++;
-                            level.strength += 0.5;
+                            level.strength += 0.3;
                         }
                     }
                     
-                    if (level.touches > 1) {
+                    if (level.touches >= 1 && level.strength > 1.5) {
                         levels.strongResistance.push(level);
                     } else {
                         levels.weakResistance.push(level);
                     }
                 }
 
-                // Pivot Low detection (Support)
+                // Support detection with volume confirmation
                 if (lowSlice[i] < lowSlice[i-1] && lowSlice[i] < lowSlice[i-2] &&
                     lowSlice[i] < lowSlice[i+1] && lowSlice[i] < lowSlice[i+2] &&
                     lowSlice[i] === Math.min(...lowSlice.slice(i-2, i+3))) {
                     
+                    const levelStrength = tf.weight * 
+                        (1 + (volumeSlice[i] / Math.max(1, Math.max(...volumeSlice))) * 
+                        (1 + (i / lowSlice.length))); // Favor recent levels
+
                     const level = {
                         price: lowSlice[i],
-                        strength: tf.weight * (1 + (volumeSlice[i] / Math.max(...volumeSlice))),
+                        strength: levelStrength,
                         timeframe: tf.name,
                         touches: 1,
                         recency: i
                     };
                     
-                    // Check if this is strong support (price bounced multiple times)
-                    let isStrong = false;
-                    for (let j = i + 1; j < Math.min(i + 20, lowSlice.length); j++) {
-                        if (Math.abs(lowSlice[j] - lowSlice[i]) / lowSlice[i] < 0.002) {
+                    // Count touches within tighter range for more sensitivity
+                    for (let j = i + 1; j < Math.min(i + 15, lowSlice.length); j++) {
+                        if (Math.abs(lowSlice[j] - lowSlice[i]) / lowSlice[i] < 0.0015) {
                             level.touches++;
-                            level.strength += 0.5;
+                            level.strength += 0.3;
                         }
                     }
                     
-                    if (level.touches > 1) {
+                    if (level.touches >= 1 && level.strength > 1.5) {
                         levels.strongSupport.push(level);
                     } else {
                         levels.weakSupport.push(level);
@@ -316,10 +336,9 @@ const findAdvancedLevels = (high, low, close, volume, price) => {
         return levels;
     };
 
-    // 2. FIBONACCI RETRACEMENT LEVELS
-    const calculateFibonacciLevels = () => {
-        const recentHigh = Math.max(...high.slice(-50));
-        const recentLow = Math.min(...low.slice(-50));
+    const calculateDynamicFibonacci = () => {
+        const recentHigh = Math.max(...high.slice(-30));
+        const recentLow = Math.min(...low.slice(-30));
         const range = recentHigh - recentLow;
 
         return {
@@ -331,14 +350,12 @@ const findAdvancedLevels = (high, low, close, volume, price) => {
         };
     };
 
-    // 3. VOLUME PROFILE ANALYSIS
-    const calculateVolumeProfile = () => {
+    const calculateEnhancedVolumeProfile = () => {
         const priceLevels = {};
-        const range = Math.max(...high.slice(-50)) - Math.min(...low.slice(-50));
-        const bucketSize = range / 20; // 20 price buckets
+        const range = Math.max(...high.slice(-30)) - Math.min(...low.slice(-30));
+        const bucketSize = range / 15; // More buckets for better precision
 
-        // Group volume by price levels
-        for (let i = 0; i < close.length; i++) {
+        for (let i = Math.max(0, close.length - 100); i < close.length; i++) {
             const bucket = Math.floor(close[i] / bucketSize) * bucketSize;
             if (!priceLevels[bucket]) {
                 priceLevels[bucket] = { volume: 0, count: 0 };
@@ -347,9 +364,8 @@ const findAdvancedLevels = (high, low, close, volume, price) => {
             priceLevels[bucket].count++;
         }
 
-        // Find high volume nodes (support/resistance)
         const highVolumeLevels = Object.entries(priceLevels)
-            .filter(([_, data]) => data.volume > Math.max(...Object.values(priceLevels).map(d => d.volume)) * 0.7)
+            .filter(([_, data]) => data.volume > Math.max(...Object.values(priceLevels).map(d => d.volume)) * 0.6)
             .map(([price, data]) => ({
                 price: parseFloat(price),
                 volume: data.volume,
@@ -359,22 +375,21 @@ const findAdvancedLevels = (high, low, close, volume, price) => {
 
         return {
             pointOfControl: highVolumeLevels[0]?.price || price,
-            highVolumeNodes: highVolumeLevels.slice(0, 5)
+            highVolumeNodes: highVolumeLevels.slice(0, 8) // More nodes for better coverage
         };
     };
 
-    // 4. DYNAMIC SUPPORT/RESISTANCE BASED ON MARKET STRUCTURE
-    const detectMarketStructure = () => {
+    const detectTrendStructure = () => {
         const structure = {
             higherHighs: [],
             lowerLows: [],
             consolidationZones: []
         };
 
-        // Detect Higher Highs and Lower Lows
-        for (let i = 10; i < high.length - 5; i++) {
-            const windowHigh = high.slice(i - 5, i + 5);
-            const windowLow = low.slice(i - 5, i + 5);
+        // Use shorter windows for more responsive detection
+        for (let i = 8; i < high.length - 4; i++) {
+            const windowHigh = high.slice(i - 4, i + 4);
+            const windowLow = low.slice(i - 4, i + 4);
             
             if (high[i] === Math.max(...windowHigh)) {
                 structure.higherHighs.push({
@@ -391,22 +406,22 @@ const findAdvancedLevels = (high, low, close, volume, price) => {
             }
         }
 
-        // Detect Consolidation Zones (price congestion)
+        // Detect consolidation with tighter parameters
         const priceChanges = [];
         for (let i = 1; i < close.length; i++) {
             priceChanges.push(Math.abs(close[i] - close[i-1]) / close[i-1]);
         }
         
-        const volatility = priceChanges.reduce((a, b) => a + b) / priceChanges.length;
-        const lowVolatilityThreshold = volatility * 0.3;
+        const volatility = priceChanges.reduce((a, b) => a + b, 0) / priceChanges.length;
+        const lowVolatilityThreshold = volatility * 0.4;
 
-        for (let i = 20; i < close.length - 10; i++) {
-            const recentVolatility = priceChanges.slice(i - 10, i).reduce((a, b) => a + b) / 10;
+        for (let i = 15; i < close.length - 8; i++) {
+            const recentVolatility = priceChanges.slice(i - 8, i).reduce((a, b) => a + b, 0) / 8;
             if (recentVolatility < lowVolatilityThreshold) {
-                const zoneHigh = Math.max(...high.slice(i - 10, i));
-                const zoneLow = Math.min(...low.slice(i - 10, i));
+                const zoneHigh = Math.max(...high.slice(i - 8, i));
+                const zoneLow = Math.min(...low.slice(i - 8, i));
                 
-                if ((zoneHigh - zoneLow) / zoneLow < volatility * 2) {
+                if ((zoneHigh - zoneLow) / zoneLow < volatility * 1.5) {
                     structure.consolidationZones.push({
                         high: zoneHigh,
                         low: zoneLow,
@@ -419,108 +434,119 @@ const findAdvancedLevels = (high, low, close, volume, price) => {
         return structure;
     };
 
-    // EXECUTE ALL ANALYSES
-    const multiTFLevels = detectMultiTimeframeLevels();
-    const fibLevels = calculateFibonacciLevels();
-    const volumeProfile = calculateVolumeProfile();
-    const marketStructure = detectMarketStructure();
+    const dynamicLevels = detectDynamicLevels();
+    const fibLevels = calculateDynamicFibonacci();
+    const volumeProfile = calculateEnhancedVolumeProfile();
+    const trendStructure = detectTrendStructure();
 
-    // COMBINE AND WEIGHT ALL FACTORS
-    const calculateFinalLevels = () => {
+    const calculateOptimalLevels = () => {
         const resistanceCandidates = [];
         const supportCandidates = [];
 
-        // 1. Add multi-timeframe levels with weights
-        [...multiTFLevels.strongResistance, ...multiTFLevels.weakResistance].forEach(level => {
+        // Combine all resistance levels with enhanced scoring
+        [...dynamicLevels.strongResistance, ...dynamicLevels.weakResistance].forEach(level => {
+            const score = level.strength * (level.touches > 1 ? 1.8 : 1.0) * (1 + (level.recency / 100));
             resistanceCandidates.push({
                 price: level.price,
-                confidence: level.strength * (level.touches > 1 ? 1.5 : 1.0),
+                confidence: score,
                 source: `pivot_${level.timeframe}`,
-                touches: level.touches
+                touches: level.touches,
+                recency: level.recency
             });
         });
 
-        [...multiTFLevels.strongSupport, ...multiTFLevels.weakSupport].forEach(level => {
+        // Combine all support levels with enhanced scoring
+        [...dynamicLevels.strongSupport, ...dynamicLevels.weakSupport].forEach(level => {
+            const score = level.strength * (level.touches > 1 ? 1.8 : 1.0) * (1 + (level.recency / 100));
             supportCandidates.push({
                 price: level.price,
-                confidence: level.strength * (level.touches > 1 ? 1.5 : 1.0),
+                confidence: score,
                 source: `pivot_${level.timeframe}`,
-                touches: level.touches
+                touches: level.touches,
+                recency: level.recency
             });
         });
 
-        // 2. Add Fibonacci levels (moderate confidence)
+        // Add Fibonacci levels with dynamic weighting
         Object.entries(fibLevels).forEach(([level, fibPrice]) => {
+            const distance = Math.abs(fibPrice - price) / price;
+            const fibWeight = distance < 0.02 ? 1.5 : 1.2; // Higher weight for closer levels
+            
             if (fibPrice > price) {
                 resistanceCandidates.push({
                     price: fibPrice,
-                    confidence: 1.2,
+                    confidence: fibWeight,
                     source: `fib_${level}`,
-                    touches: 0
+                    touches: 0,
+                    recency: 50
                 });
             } else {
                 supportCandidates.push({
                     price: fibPrice,
-                    confidence: 1.2,
+                    confidence: fibWeight,
                     source: `fib_${level}`,
-                    touches: 0
+                    touches: 0,
+                    recency: 50
                 });
             }
         });
 
-        // 3. Add volume profile levels (high confidence)
+        // Add volume profile levels with enhanced weighting
         volumeProfile.highVolumeNodes.forEach(node => {
+            const distance = Math.abs(node.price - price) / price;
+            const volumeWeight = node.strength * (distance < 0.015 ? 2.5 : 1.8);
+            
             if (node.price > price) {
                 resistanceCandidates.push({
                     price: node.price,
-                    confidence: node.strength * 2.0,
+                    confidence: volumeWeight,
                     source: 'volume_profile',
-                    touches: Math.round(node.strength * 10)
+                    touches: Math.round(node.strength * 8)
                 });
             } else {
                 supportCandidates.push({
                     price: node.price,
-                    confidence: node.strength * 2.0,
+                    confidence: volumeWeight,
                     source: 'volume_profile',
-                    touches: Math.round(node.strength * 10)
+                    touches: Math.round(node.strength * 8)
                 });
             }
         });
 
-        // 4. Add market structure levels
-        marketStructure.higherHighs.forEach(hh => {
+        // Add trend structure levels
+        trendStructure.higherHighs.forEach(hh => {
             if (hh.price > price) {
                 resistanceCandidates.push({
                     price: hh.price,
-                    confidence: 1.3,
-                    source: 'market_structure',
+                    confidence: 1.4,
+                    source: 'trend_structure',
                     touches: 1
                 });
             }
         });
 
-        marketStructure.lowerLows.forEach(ll => {
+        trendStructure.lowerLows.forEach(ll => {
             if (ll.price < price) {
                 supportCandidates.push({
                     price: ll.price,
-                    confidence: 1.3,
-                    source: 'market_structure',
+                    confidence: 1.4,
+                    source: 'trend_structure',
                     touches: 1
                 });
             }
         });
 
-        // 5. Filter and select best candidates
-        const filterCandidates = (candidates, isResistance) => {
-            // Group nearby levels (within 0.5%)
+        // Enhanced filtering and grouping
+        const filterAndGroupCandidates = (candidates, isResistance) => {
             const groups = [];
             candidates.sort((a, b) => a.price - b.price);
             
+            // Tighter grouping for more precise levels
             for (const candidate of candidates) {
                 let grouped = false;
                 for (const group of groups) {
                     const avgPrice = group.reduce((sum, c) => sum + c.price, 0) / group.length;
-                    if (Math.abs(candidate.price - avgPrice) / avgPrice < 0.005) {
+                    if (Math.abs(candidate.price - avgPrice) / avgPrice < 0.003) {
                         group.push(candidate);
                         grouped = true;
                         break;
@@ -531,52 +557,58 @@ const findAdvancedLevels = (high, low, close, volume, price) => {
                 }
             }
 
-            // Select best candidate from each group
             return groups.map(group => {
                 return group.reduce((best, current) => {
-                    const currentScore = current.confidence * (1 + current.touches * 0.1);
-                    const bestScore = best.confidence * (1 + best.touches * 0.1);
+                    const currentScore = current.confidence * (1 + current.touches * 0.15);
+                    const bestScore = best.confidence * (1 + best.touches * 0.15);
                     return currentScore > bestScore ? current : best;
                 });
             })
             .filter(candidate => {
-                // Filter by distance from current price
                 const distance = isResistance ? 
                     (candidate.price - price) / price : 
                     (price - candidate.price) / price;
-                return distance >= 0.002 && distance <= 0.03; // 0.2% to 3% distance
+                // Wider acceptable distance range for more opportunities
+                return distance >= 0.001 && distance <= 0.04;
             })
             .sort((a, b) => {
-                // Sort by confidence and proximity
-                const scoreA = a.confidence * (1 + a.touches * 0.1);
-                const scoreB = b.confidence * (1 + b.touches * 0.1);
+                const scoreA = a.confidence * (1 + a.touches * 0.15);
+                const scoreB = b.confidence * (1 + b.touches * 0.15);
                 return scoreB - scoreA;
-            });
+            })
+            .slice(0, 5); // Return top 5 candidates
         };
 
-        const bestResistance = filterCandidates(resistanceCandidates, true);
-        const bestSupport = filterCandidates(supportCandidates, false);
+        const bestResistance = filterAndGroupCandidates(resistanceCandidates, true);
+        const bestSupport = filterAndGroupCandidates(supportCandidates, false);
+
+        // Select optimal levels with preference for closer, stronger levels
+        const optimalResistance = bestResistance.length > 0 ? 
+            bestResistance[0].price : price * 1.02;
+            
+        const optimalSupport = bestSupport.length > 0 ? 
+            bestSupport[0].price : price * 0.98;
 
         return {
-            resistance: bestResistance[0]?.price || null,
-            support: bestSupport[0]?.price || null,
+            resistance: optimalResistance,
+            support: optimalSupport,
             allResistance: bestResistance,
             allSupport: bestSupport,
             volumePOC: volumeProfile.pointOfControl,
             fibLevels: fibLevels,
-            marketStructure: marketStructure
+            trendStructure: trendStructure
         };
     };
 
-    return calculateFinalLevels();
+    return calculateOptimalLevels();
 };
 
-// -------------------- TECHNICAL ANALYSIS --------------------
-const analyzeSignal = async () => {
-    console.log("🧠 Advanced technical analysis started...");
+// -------------------- ENHANCED TECHNICAL ANALYSIS --------------------
+const analyzeEnhancedSignal = async () => {
+    console.log("🧠 Enhanced technical analysis started...");
     try {
-        const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "15m", undefined, 300);
-        if (!ohlcv || ohlcv.length < 200) {
+        const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "5m", undefined, 200); // Shorter timeframe for more signals
+        if (!ohlcv || ohlcv.length < 100) {
             console.warn("⚠️ Insufficient OHLCV data");
             return {};
         }
@@ -585,51 +617,65 @@ const analyzeSignal = async () => {
         const high = ohlcv.map(c => c[2]);
         const low = ohlcv.map(c => c[3]);
         const volume = ohlcv.map(c => c[5]);
-        const price = close.at(-1);
+        const price = close[close.length - 1];
 
-        // Moving Averages
-        const ma7 = SMA.calculate({
-            values: close.slice(-100),
-            period: 7
-        }).pop();
-        const ma25 = SMA.calculate({
-            values: close.slice(-100),
-            period: 25
-        }).pop();
-        const ma99 = SMA.calculate({
-            values: close,
-            period: 99
-        }).pop();
+        // Calculate multiple MAs for better trend detection
+        const maFast = SMA.calculate({
+            values: close.slice(-50),
+            period: 5
+        });
+        const maMedium = SMA.calculate({
+            values: close.slice(-50),
+            period: 13
+        });
+        const maSlow = SMA.calculate({
+            values: close.slice(-50),
+            period: 21
+        });
 
-        const prevMA7 = SMA.calculate({
-            values: close.slice(-101, -1),
-            period: 7
-        }).pop();
-        const prevMA25 = SMA.calculate({
-            values: close.slice(-101, -1),
-            period: 25
-        }).pop();
+        const currentMAFast = maFast[maFast.length - 1];
+        const currentMAMedium = maMedium[maMedium.length - 1];
+        const currentMASlow = maSlow[maSlow.length - 1];
 
-        const isCrossedUp = ma7 > ma25 && prevMA7 <= prevMA25;
-        const isCrossedDown = ma7 < ma25 && prevMA7 >= prevMA25;
+        const prevMAFast = maFast[maFast.length - 2];
+        const prevMAMedium = maMedium[maMedium.length - 2];
+        const prevMASlow = maSlow[maSlow.length - 2];
+
+        // Calculate RSI for momentum confirmation
+        const rsi = RSI.calculate({
+            values: close.slice(-50),
+            period: 14
+        });
+        const currentRSI = rsi[rsi.length - 1];
+
+        // Enhanced trend detection
+        const isUptrend = currentMAFast > currentMAMedium && currentMAMedium > currentMASlow;
+        const isDowntrend = currentMAFast < currentMAMedium && currentMAMedium < currentMASlow;
+
+        // MA crossover detection
+        const isFastCrossAboveMedium = currentMAFast > currentMAMedium && prevMAFast <= prevMAMedium;
+        const isFastCrossBelowMedium = currentMAFast < currentMAMedium && prevMAFast >= prevMAMedium;
+
+        // Price position relative to MAs
+        const priceAboveAllMAs = price > currentMAFast && price > currentMAMedium && price > currentMASlow;
+        const priceBelowAllMAs = price < currentMAFast && price < currentMAMedium && price < currentMASlow;
 
         let canLong = false;
         let canShort = false;
 
-        const isMA7AboveMA99 = ma7 > ma99;
-        const isMA7BelowMA99 = ma7 < ma99;
-        const isMA25AboveMA99 = ma25 > ma99;
-        const isMA25BelowMA99 = ma25 < ma99;
-
-        if (isCrossedUp && isMA7AboveMA99 && isMA25AboveMA99) {
+        // Enhanced LONG conditions
+        if ((isFastCrossAboveMedium || (isUptrend && priceAboveAllMAs)) && 
+            currentRSI > 45 && currentRSI < 75) {
             canLong = true;
         }
 
-        if (isCrossedDown && isMA7BelowMA99 && isMA25BelowMA99) {
+        // Enhanced SHORT conditions  
+        if ((isFastCrossBelowMedium || (isDowntrend && priceBelowAllMAs)) && 
+            currentRSI < 55 && currentRSI > 25) {
             canShort = true;
         }
 
-        // ATR Calculation
+        // Calculate dynamic ATR
         const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
             const tr = [];
             for (let i = 1; i < highArr.length; i++) {
@@ -650,26 +696,27 @@ const analyzeSignal = async () => {
 
         const currentATR = calculateATR(high, low, close, 14).pop() || 0;
 
-        // USE ADVANCED S/R DETECTION
-        const advancedLevels = findAdvancedLevels(high, low, close, volume, price);
+        // Get enhanced support/resistance levels
+        const enhancedLevels = findEnhancedLevels(high, low, close, volume, price);
         
-        let resistance = advancedLevels.resistance;
-        let support = advancedLevels.support;
+        let resistance = enhancedLevels.resistance;
+        let support = enhancedLevels.support;
 
-        // Fallback logic if advanced detection fails
+        // Fallback if levels not detected
         if (!resistance || !support) {
-            console.log("🔄 Advanced S/R detection failed, using fallback...");
-            const recentHigh = Math.max(...high.slice(-96));
-            const recentLow = Math.min(...low.slice(-96));
+            console.log("🔄 Enhanced S/R detection failed, using dynamic fallback...");
+            const recentHigh = Math.max(...high.slice(-50));
+            const recentLow = Math.min(...low.slice(-50));
             
-            resistance = recentHigh + (currentATR * 0.5);
-            support = recentLow - (currentATR * 0.5);
+            resistance = recentHigh + (currentATR * 0.3);
+            support = recentLow - (currentATR * 0.3);
         }
 
-        // Ensure minimum distance based on ATR
-        const minDistance = currentATR * 0.8;
-        const maxDistance = currentATR * 3;
+        // Dynamic distance adjustment based on volatility
+        const minDistance = currentATR * 0.6;
+        const maxDistance = currentATR * 2.5;
 
+        // Ensure reasonable distances
         if (resistance - price < minDistance) {
             resistance = price + minDistance;
         }
@@ -677,7 +724,6 @@ const analyzeSignal = async () => {
             support = price - minDistance;
         }
 
-        // Ensure levels are within reasonable range
         if (resistance - price > maxDistance) {
             resistance = price + maxDistance;
         }
@@ -685,38 +731,41 @@ const analyzeSignal = async () => {
             support = price - maxDistance;
         }
 
+        // Calculate targets with improved risk-reward
         const targetLong = resistance;
-        const stopLossLong = support;
+        const stopLossLong = Math.min(support, price - (currentATR * 0.8));
         const targetShort = support;
-        const stopLossShort = resistance;
+        const stopLossShort = Math.max(resistance, price + (currentATR * 0.8));
 
-        // Enhanced Analysis Results
-        console.log(`\n🎯 ADVANCED Analysis Results ${db.pair}
+        console.log(`\n🎯 ENHANCED Analysis Results ${db.pair}
 ══════════════════════════════════════════════════
 📈 Long Signal: ${canLong ? "✅ VALID" : "❌ INVALID"}
 📉 Short Signal: ${canShort ? "✅ VALID" : "❌ INVALID"}
 ══════════════════════════════════════════════════
 💰 Current Price: ${formatPrice(price)}
+📊 RSI: ${currentRSI ? currentRSI.toFixed(2) : "N/A"}
 🎯 Resistance: ${formatPrice(resistance)} (${((resistance - price) / price * 100).toFixed(3)}%)
 🛡️  Support: ${formatPrice(support)} (${((price - support) / price * 100).toFixed(3)}%)
+📈 MA Fast: ${formatPrice(currentMAFast)}
+📈 MA Medium: ${formatPrice(currentMAMedium)}
+📈 MA Slow: ${formatPrice(currentMASlow)}
 📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
 ══════════════════════════════════════════════════
-📊 Volume POC: ${formatPrice(advancedLevels.volumePOC)}
-🔍 Detected R Levels: ${advancedLevels.allResistance?.length || 0}
-🔍 Detected S Levels: ${advancedLevels.allSupport?.length || 0}
+📊 Volume POC: ${formatPrice(enhancedLevels.volumePOC)}
+🔍 Detected R Levels: ${enhancedLevels.allResistance?.length || 0}
+🔍 Detected S Levels: ${enhancedLevels.allSupport?.length || 0}
 ══════════════════════════════════════════════════`);
 
-        // Log additional resistance/support levels for context
-        if (advancedLevels.allResistance && advancedLevels.allResistance.length > 0) {
-            console.log("📈 Additional Resistance Levels:");
-            advancedLevels.allResistance.slice(0, 3).forEach(level => {
+        if (enhancedLevels.allResistance && enhancedLevels.allResistance.length > 0) {
+            console.log("📈 Top Resistance Levels:");
+            enhancedLevels.allResistance.slice(0, 3).forEach(level => {
                 console.log(`   - ${formatPrice(level.price)} (conf: ${level.confidence.toFixed(2)})`);
             });
         }
 
-        if (advancedLevels.allSupport && advancedLevels.allSupport.length > 0) {
-            console.log("📉 Additional Support Levels:");
-            advancedLevels.allSupport.slice(0, 3).forEach(level => {
+        if (enhancedLevels.allSupport && enhancedLevels.allSupport.length > 0) {
+            console.log("📉 Top Support Levels:");
+            enhancedLevels.allSupport.slice(0, 3).forEach(level => {
                 console.log(`   - ${formatPrice(level.price)} (conf: ${level.confidence.toFixed(2)})`);
             });
         }
@@ -729,10 +778,13 @@ const analyzeSignal = async () => {
             targetShort,
             stopLossShort,
             price,
-            advancedLevels
+            enhancedLevels,
+            rsi: currentRSI,
+            maFast: currentMAFast,
+            maMedium: currentMAMedium
         };
     } catch (error) {
-        console.error("❌ Advanced technical analysis failed:", error.message);
+        console.error("❌ Enhanced technical analysis failed:", error.message);
         return {};
     }
 };
@@ -746,9 +798,7 @@ const placeOrder = async (side, tp, sl) => {
     }
 
     try {
-        const {
-            position
-        } = await getPositionFromBalance();
+        const { position } = await getPositionFromBalance();
         const amt = parseFloat(position?.positionAmt || "0");
         if (isFinite(amt) && Math.abs(amt) > 0) {
             console.log("⚠️ Active position detected, order cancelled");
@@ -807,9 +857,7 @@ const placeOrder = async (side, tp, sl) => {
 const closePosition = async (reason, entryPrice = "N/A") => {
     console.log(`🚨 Closing position: ${reason}`);
     try {
-        const {
-            position
-        } = await getPositionFromBalance();
+        const { position } = await getPositionFromBalance();
         const qty = parseFloat(position?.positionAmt || "0");
 
         if (!isFinite(qty) || Math.abs(qty) === 0) {
@@ -834,11 +882,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
             else if (isSL) statusTag = "SL_REALIZED";
 
             if (entryPrice !== "N/A" && db.activePosition) {
-                const {
-                    tp,
-                    sl,
-                    side: entrySide
-                } = db.activePosition;
+                const { tp, sl, side: entrySide } = db.activePosition;
                 try {
                     const entryNum = Number(entryPrice);
                     const closedQty = amount;
@@ -886,9 +930,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 // -------------------- POSITION MONITORING --------------------
 const checkPositionStatus = async () => {
     try {
-        const {
-            position
-        } = await getPositionFromBalance();
+        const { position } = await getPositionFromBalance();
         const amt = parseFloat(position?.positionAmt || "0");
         const amtSafe = isFinite(amt) ? amt : 0;
 
@@ -901,12 +943,7 @@ const checkPositionStatus = async () => {
         }
 
         if (db.activePosition && amtSafe !== 0) {
-            const {
-                tp,
-                sl,
-                side,
-                entryPrice
-            } = db.activePosition;
+            const { tp, sl, side, entryPrice } = db.activePosition;
             const currentPrice = await getPrice();
             if (!currentPrice) return;
 
@@ -930,14 +967,11 @@ const recoverPositionState = async () => {
     try {
         console.log("🔄 Checking position sync...");
 
-        const {
-            position
-        } = await getPositionFromBalance();
+        const { position } = await getPositionFromBalance();
         const amt = parseFloat(position?.positionAmt || "0");
         const MIN_POSITION_AMOUNT = 0.000001;
         const amtSafe = isFinite(amt) ? amt : 0;
 
-        // Recovery needed
         if (Math.abs(amtSafe) > MIN_POSITION_AMOUNT && !db.activePosition) {
             console.log("⚠️ Position recovery needed");
 
@@ -948,7 +982,7 @@ const recoverPositionState = async () => {
             const entryPrice = parseFloat(position?.entryPrice || currentPrice);
             const leverage = position?.leverage || db.leverage;
 
-            const signal = await analyzeSignal();
+            const signal = await analyzeEnhancedSignal();
             let tp, sl;
 
             if (!signal || !signal.price) {
@@ -1021,7 +1055,6 @@ const recoverPositionState = async () => {
             );
         }
 
-        // Cleanup needed
         if (db.activePosition && Math.abs(amtSafe) <= MIN_POSITION_AMOUNT) {
             console.log("⚠️ Position cleanup needed");
 
@@ -1040,16 +1073,10 @@ const recoverPositionState = async () => {
             console.log("✅ Database cleaned");
         }
 
-        // Position monitoring
         if (db.activePosition && Math.abs(amtSafe) > MIN_POSITION_AMOUNT) {
             const currentPrice = await getPrice();
             if (currentPrice) {
-                const {
-                    side,
-                    entryPrice,
-                    tp,
-                    sl
-                } = db.activePosition;
+                const { side, entryPrice, tp, sl } = db.activePosition;
                 const unrealizedPnl = side === "buy" ? currentPrice - entryPrice : entryPrice - currentPrice;
                 const pnlPercent = (unrealizedPnl / entryPrice * 100).toFixed(2);
 
@@ -1117,14 +1144,17 @@ const healthCheck = async () => {
 // -------------------- MAIN LOOP --------------------
 let prevPosAmt = 0;
 
-// Initialize connection on startup
 (async () => {
     await initializeExchange();
-    console.log("🚀 Bot started with advanced S/R detection");
+    
+    // Display initial balance
+    console.log("\n💰 Initial Account Balance:");
+    await displayBalance();
+    
+    console.log("\n🚀 Bot started with ENHANCED S/R detection");
 })();
 
 setInterval(async () => {
-    // Health check first
     const health = await healthCheck();
     if (!health.healthy) {
         console.log("⚠️ Health check failed, skipping cycle...");
@@ -1132,7 +1162,6 @@ setInterval(async () => {
         return;
     }
 
-    // Auto reload config
     try {
         const freshDb = loadDB();
         db.pair = freshDb.pair;
@@ -1157,7 +1186,7 @@ setInterval(async () => {
 
         console.log("🔍 Checking for new signals...");
 
-        const signal = await analyzeSignal();
+        const signal = await analyzeEnhancedSignal();
         if (!signal.price) {
             console.log("⚠️ Invalid signal, waiting...");
             return;
@@ -1179,12 +1208,10 @@ setInterval(async () => {
 
         if (shouldExitCurrentPosition) {
             await closePosition("Signal reversal", db.activePosition.entryPrice);
-            await new Promise(resolve => setTimeout(resolve, 10000));
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Reduced delay for faster re-entry
         }
 
-        const {
-            position
-        } = await getPositionFromBalance();
+        const { position } = await getPositionFromBalance();
         const amt = parseFloat(position?.positionAmt || "0");
         const hasActiveBinancePositionAfterClose = isFinite(amt) && Math.abs(amt) > 0;
 
@@ -1213,9 +1240,15 @@ setInterval(async () => {
                 console.log("💤 No valid signals, waiting...");
             }
         }
+
+        // Display balance every 5 cycles (approximately every 50 seconds)
+        if (Math.floor(Date.now() / 10000) % 5 === 0) {
+            console.log("\n💰 Periodic Balance Update:");
+            await displayBalance();
+        }
     } catch (err) {
         console.error("⚠️ Main loop error:", err.message);
     } finally {
         isProcessing = false;
     }
-}, 10000);
+}, 10000); // 10 second interval for faster response
