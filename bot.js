@@ -1,4 +1,4 @@
-// signal.js (Advanced Support & Resistance Version - Optimized)
+// signal.js (Advanced Support & Resistance Version - Optimized with Signal Confirmation)
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
@@ -12,6 +12,31 @@ let exchange = null;
 let connectionRetries = 0;
 const MAX_RETRIES = 5;
 const RETRY_DELAY = 10000;
+
+// -------------------- WEEKEND CHECK --------------------
+const isWeekend = () => {
+    const now = new Date();
+    const day = now.getUTCDay(); // 0 = Minggu, 6 = Sabtu
+    const isWeekend = day === 0 || day === 6;
+    
+    if (isWeekend) {
+        const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+        console.log(`📅 ${days[day]} - Weekend mode: Trading dihentikan sementara`);
+    }
+    
+    return isWeekend;
+};
+
+// -------------------- SIGNAL CONFIRMATION SYSTEM --------------------
+let signalConfirmation = {
+    pendingReversal: false,
+    reversalDirection: null, // 'long' or 'short'
+    confirmationCount: 0,
+    requiredConfirmations: 2,
+    firstSignalTime: null,
+    lastSignalPrice: null,
+    signalsHistory: []
+};
 
 // -------------------- CONNECTION MANAGEMENT --------------------
 const initializeExchange = async () => {
@@ -78,16 +103,137 @@ const loadDB = () => {
         marginMode: "ISOLATED",
         activePosition: null,
         usdtPerTrade: 5.1,
+        useDynamicPositionSizing: true,
+        positionSizePercentage: 90,
+        signalConfirmation: {
+            enabled: true,
+            requiredConfirmations: 2,
+            maxConfirmationTime: 300000 // 5 minutes
+        },
+        weekendTrading: false // Default nonaktifkan trading weekend
     };
 };
 
 let db = loadDB();
 
+// -------------------- SIGNAL CONFIRMATION MANAGEMENT --------------------
+const updateSignalConfirmation = (newDirection, currentPrice) => {
+    const now = Date.now();
+    
+    // Reset jika signal direction berubah
+    if (signalConfirmation.reversalDirection !== newDirection) {
+        signalConfirmation = {
+            pendingReversal: true,
+            reversalDirection: newDirection,
+            confirmationCount: 1,
+            requiredConfirmations: db.signalConfirmation.requiredConfirmations,
+            firstSignalTime: now,
+            lastSignalPrice: currentPrice,
+            signalsHistory: [{
+                direction: newDirection,
+                price: currentPrice,
+                timestamp: now
+            }]
+        };
+        console.log(`🔄 New reversal signal detected: ${newDirection.toUpperCase()} | Confirmations: 1/${signalConfirmation.requiredConfirmations}`);
+        return false;
+    }
+    
+    // Tambah konfirmasi jika direction sama
+    signalConfirmation.confirmationCount++;
+    signalConfirmation.lastSignalPrice = currentPrice;
+    signalConfirmation.signalsHistory.push({
+        direction: newDirection,
+        price: currentPrice,
+        timestamp: now
+    });
+    
+    console.log(`🔄 Reversal signal confirmed: ${newDirection.toUpperCase()} | Confirmations: ${signalConfirmation.confirmationCount}/${signalConfirmation.requiredConfirmations}`);
+    
+    // Check jika konfirmasi sudah cukup
+    if (signalConfirmation.confirmationCount >= signalConfirmation.requiredConfirmations) {
+        console.log(`✅ REVERSAL CONFIRMED: ${newDirection.toUpperCase()} - Proceeding with position change`);
+        return true;
+    }
+    
+    // Check jika waktu konfirmasi sudah habis
+    if (now - signalConfirmation.firstSignalTime > db.signalConfirmation.maxConfirmationTime) {
+        console.log(`⏰ Reversal confirmation timeout - Resetting confirmation system`);
+        resetSignalConfirmation();
+        return false;
+    }
+    
+    return false;
+};
+
+const resetSignalConfirmation = () => {
+    signalConfirmation = {
+        pendingReversal: false,
+        reversalDirection: null,
+        confirmationCount: 0,
+        requiredConfirmations: db.signalConfirmation.requiredConfirmations,
+        firstSignalTime: null,
+        lastSignalPrice: null,
+        signalsHistory: []
+    };
+};
+
+const checkSignalConsistency = () => {
+    if (signalConfirmation.signalsHistory.length < 2) return true;
+    
+    const recentSignals = signalConfirmation.signalsHistory.slice(-3);
+    const directions = recentSignals.map(s => s.direction);
+    const allSameDirection = directions.every(d => d === directions[0]);
+    
+    if (!allSameDirection) {
+        console.log("⚠️ Signal inconsistency detected - Resetting confirmation");
+        resetSignalConfirmation();
+        return false;
+    }
+    
+    return true;
+};
+
+// -------------------- DYNAMIC POSITION SIZING --------------------
+const calculateDynamicPositionSize = async () => {
+    try {
+        if (!db.useDynamicPositionSizing) {
+            console.log(`⚙️ Using fixed position size: ${db.usdtPerTrade} USDT`);
+            return db.usdtPerTrade;
+        }
+
+        const balance = await safeApiCall(exchange.fetchBalance);
+        const totalUSDT = balance.total?.USDT || 0;
+        
+        if (totalUSDT <= 0) {
+            console.warn("⚠️ Balance is zero or negative, using fixed position size");
+            return db.usdtPerTrade;
+        }
+
+        const dynamicSize = totalUSDT * (db.positionSizePercentage / 100);
+        
+        const minTradeSize = 1;
+        const finalSize = Math.max(dynamicSize, minTradeSize);
+        
+        console.log(`💰 Dynamic Position Sizing:
+   Total Balance: ${totalUSDT.toFixed(2)} USDT
+   Percentage: ${db.positionSizePercentage}%
+   Calculated Size: ${finalSize.toFixed(2)} USDT`);
+
+        return finalSize;
+    } catch (error) {
+        console.error("❌ Failed to calculate dynamic position size, using fixed:", error.message);
+        return db.usdtPerTrade;
+    }
+};
+
 console.log(`⚙️ Bot Configuration:
 - Pair: ${db.pair}
 - Leverage: ${db.leverage}x
 - Margin Mode: ${db.marginMode}
-- USDT per Trade: ${db.usdtPerTrade}`);
+- Position Sizing: ${db.useDynamicPositionSizing ? `Dynamic (${db.positionSizePercentage}% of balance)` : `Fixed (${db.usdtPerTrade} USDT)`}
+- Signal Confirmation: ${db.signalConfirmation.enabled ? `Enabled (${db.signalConfirmation.requiredConfirmations} confirmations)` : 'Disabled'}
+- Weekend Trading: ${db.weekendTrading ? 'Enabled' : 'Disabled'}`);
 
 // -------------------- STABLE API CALLS --------------------
 const safeApiCall = async (apiFunction, ...args) => {
@@ -180,12 +326,15 @@ const getPrice = async () => {
     }
 };
 
-const calcQty = (price) => {
+const calcQty = async (price) => {
     if (!price) return 0;
-    let qty = db.usdtPerTrade / price;
+    
+    const currentUsdtPerTrade = await calculateDynamicPositionSize();
+    
+    let qty = currentUsdtPerTrade / price;
     const prec = exchange.markets[db.pair]?.precision?.amount ?? 3;
     qty = parseFloat(qty.toFixed(prec));
-    console.log(`📐 Quantity: ${qty} (${db.usdtPerTrade} USDT)`);
+    console.log(`📐 Quantity: ${qty} (${currentUsdtPerTrade.toFixed(2)} USDT)`);
     return qty;
 };
 
@@ -250,7 +399,6 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
             weakSupport: []
         };
 
-        // Use multiple timeframes for better accuracy
         const timeframes = [
             { period: 15, weight: 1.0, name: "very_short" },
             { period: 30, weight: 1.3, name: "short" },
@@ -265,16 +413,14 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
             const closeSlice = close.slice(sliceIndex);
             const volumeSlice = volume.slice(sliceIndex);
 
-            // Enhanced pivot point detection with volume confirmation
             for (let i = 3; i < highSlice.length - 3; i++) {
-                // Resistance detection with volume confirmation
                 if (highSlice[i] > highSlice[i-1] && highSlice[i] > highSlice[i-2] &&
                     highSlice[i] > highSlice[i+1] && highSlice[i] > highSlice[i+2] &&
                     highSlice[i] === Math.max(...highSlice.slice(i-2, i+3))) {
                     
                     const levelStrength = tf.weight * 
                         (1 + (volumeSlice[i] / Math.max(1, Math.max(...volumeSlice))) * 
-                        (1 + (i / highSlice.length))); // Favor recent levels
+                        (1 + (i / highSlice.length)));
 
                     const level = {
                         price: highSlice[i],
@@ -284,7 +430,6 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
                         recency: i
                     };
                     
-                    // Count touches within tighter range for more sensitivity
                     for (let j = i + 1; j < Math.min(i + 15, highSlice.length); j++) {
                         if (Math.abs(highSlice[j] - highSlice[i]) / highSlice[i] < 0.0015) {
                             level.touches++;
@@ -299,14 +444,13 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
                     }
                 }
 
-                // Support detection with volume confirmation
                 if (lowSlice[i] < lowSlice[i-1] && lowSlice[i] < lowSlice[i-2] &&
                     lowSlice[i] < lowSlice[i+1] && lowSlice[i] < lowSlice[i+2] &&
                     lowSlice[i] === Math.min(...lowSlice.slice(i-2, i+3))) {
                     
                     const levelStrength = tf.weight * 
                         (1 + (volumeSlice[i] / Math.max(1, Math.max(...volumeSlice))) * 
-                        (1 + (i / lowSlice.length))); // Favor recent levels
+                        (1 + (i / lowSlice.length)));
 
                     const level = {
                         price: lowSlice[i],
@@ -316,7 +460,6 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
                         recency: i
                     };
                     
-                    // Count touches within tighter range for more sensitivity
                     for (let j = i + 1; j < Math.min(i + 15, lowSlice.length); j++) {
                         if (Math.abs(lowSlice[j] - lowSlice[i]) / lowSlice[i] < 0.0015) {
                             level.touches++;
@@ -353,7 +496,7 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
     const calculateEnhancedVolumeProfile = () => {
         const priceLevels = {};
         const range = Math.max(...high.slice(-30)) - Math.min(...low.slice(-30));
-        const bucketSize = range / 15; // More buckets for better precision
+        const bucketSize = range / 15;
 
         for (let i = Math.max(0, close.length - 100); i < close.length; i++) {
             const bucket = Math.floor(close[i] / bucketSize) * bucketSize;
@@ -375,7 +518,7 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
 
         return {
             pointOfControl: highVolumeLevels[0]?.price || price,
-            highVolumeNodes: highVolumeLevels.slice(0, 8) // More nodes for better coverage
+            highVolumeNodes: highVolumeLevels.slice(0, 8)
         };
     };
 
@@ -386,7 +529,6 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
             consolidationZones: []
         };
 
-        // Use shorter windows for more responsive detection
         for (let i = 8; i < high.length - 4; i++) {
             const windowHigh = high.slice(i - 4, i + 4);
             const windowLow = low.slice(i - 4, i + 4);
@@ -406,7 +548,6 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
             }
         }
 
-        // Detect consolidation with tighter parameters
         const priceChanges = [];
         for (let i = 1; i < close.length; i++) {
             priceChanges.push(Math.abs(close[i] - close[i-1]) / close[i-1]);
@@ -443,7 +584,6 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
         const resistanceCandidates = [];
         const supportCandidates = [];
 
-        // Combine all resistance levels with enhanced scoring
         [...dynamicLevels.strongResistance, ...dynamicLevels.weakResistance].forEach(level => {
             const score = level.strength * (level.touches > 1 ? 1.8 : 1.0) * (1 + (level.recency / 100));
             resistanceCandidates.push({
@@ -455,7 +595,6 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
             });
         });
 
-        // Combine all support levels with enhanced scoring
         [...dynamicLevels.strongSupport, ...dynamicLevels.weakSupport].forEach(level => {
             const score = level.strength * (level.touches > 1 ? 1.8 : 1.0) * (1 + (level.recency / 100));
             supportCandidates.push({
@@ -467,10 +606,9 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
             });
         });
 
-        // Add Fibonacci levels with dynamic weighting
         Object.entries(fibLevels).forEach(([level, fibPrice]) => {
             const distance = Math.abs(fibPrice - price) / price;
-            const fibWeight = distance < 0.02 ? 1.5 : 1.2; // Higher weight for closer levels
+            const fibWeight = distance < 0.02 ? 1.5 : 1.2;
             
             if (fibPrice > price) {
                 resistanceCandidates.push({
@@ -491,7 +629,6 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
             }
         });
 
-        // Add volume profile levels with enhanced weighting
         volumeProfile.highVolumeNodes.forEach(node => {
             const distance = Math.abs(node.price - price) / price;
             const volumeWeight = node.strength * (distance < 0.015 ? 2.5 : 1.8);
@@ -513,7 +650,6 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
             }
         });
 
-        // Add trend structure levels
         trendStructure.higherHighs.forEach(hh => {
             if (hh.price > price) {
                 resistanceCandidates.push({
@@ -536,12 +672,10 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
             }
         });
 
-        // Enhanced filtering and grouping
         const filterAndGroupCandidates = (candidates, isResistance) => {
             const groups = [];
             candidates.sort((a, b) => a.price - b.price);
             
-            // Tighter grouping for more precise levels
             for (const candidate of candidates) {
                 let grouped = false;
                 for (const group of groups) {
@@ -568,7 +702,6 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
                 const distance = isResistance ? 
                     (candidate.price - price) / price : 
                     (price - candidate.price) / price;
-                // Wider acceptable distance range for more opportunities
                 return distance >= 0.001 && distance <= 0.04;
             })
             .sort((a, b) => {
@@ -576,13 +709,12 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
                 const scoreB = b.confidence * (1 + b.touches * 0.15);
                 return scoreB - scoreA;
             })
-            .slice(0, 5); // Return top 5 candidates
+            .slice(0, 5);
         };
 
         const bestResistance = filterAndGroupCandidates(resistanceCandidates, true);
         const bestSupport = filterAndGroupCandidates(supportCandidates, false);
 
-        // Select optimal levels with preference for closer, stronger levels
         const optimalResistance = bestResistance.length > 0 ? 
             bestResistance[0].price : price * 1.02;
             
@@ -607,7 +739,7 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
 const analyzeEnhancedSignal = async () => {
     console.log("🧠 Enhanced technical analysis started...");
     try {
-        const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "5m", undefined, 200); // Shorter timeframe for more signals
+        const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "5m", undefined, 200);
         if (!ohlcv || ohlcv.length < 100) {
             console.warn("⚠️ Insufficient OHLCV data");
             return {};
@@ -619,7 +751,6 @@ const analyzeEnhancedSignal = async () => {
         const volume = ohlcv.map(c => c[5]);
         const price = close[close.length - 1];
 
-        // Calculate multiple MAs for better trend detection
         const maFast = SMA.calculate({
             values: close.slice(-50),
             period: 5
@@ -641,41 +772,34 @@ const analyzeEnhancedSignal = async () => {
         const prevMAMedium = maMedium[maMedium.length - 2];
         const prevMASlow = maSlow[maSlow.length - 2];
 
-        // Calculate RSI for momentum confirmation
         const rsi = RSI.calculate({
             values: close.slice(-50),
             period: 14
         });
         const currentRSI = rsi[rsi.length - 1];
 
-        // Enhanced trend detection
         const isUptrend = currentMAFast > currentMAMedium && currentMAMedium > currentMASlow;
         const isDowntrend = currentMAFast < currentMAMedium && currentMAMedium < currentMASlow;
 
-        // MA crossover detection
         const isFastCrossAboveMedium = currentMAFast > currentMAMedium && prevMAFast <= prevMAMedium;
         const isFastCrossBelowMedium = currentMAFast < currentMAMedium && prevMAFast >= prevMAMedium;
 
-        // Price position relative to MAs
         const priceAboveAllMAs = price > currentMAFast && price > currentMAMedium && price > currentMASlow;
         const priceBelowAllMAs = price < currentMAFast && price < currentMAMedium && price < currentMASlow;
 
         let canLong = false;
         let canShort = false;
 
-        // Enhanced LONG conditions
         if ((isFastCrossAboveMedium || (isUptrend && priceAboveAllMAs)) && 
             currentRSI > 45 && currentRSI < 75) {
             canLong = true;
         }
 
-        // Enhanced SHORT conditions  
         if ((isFastCrossBelowMedium || (isDowntrend && priceBelowAllMAs)) && 
             currentRSI < 55 && currentRSI > 25) {
             canShort = true;
         }
 
-        // Calculate dynamic ATR
         const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
             const tr = [];
             for (let i = 1; i < highArr.length; i++) {
@@ -696,13 +820,11 @@ const analyzeEnhancedSignal = async () => {
 
         const currentATR = calculateATR(high, low, close, 14).pop() || 0;
 
-        // Get enhanced support/resistance levels
         const enhancedLevels = findEnhancedLevels(high, low, close, volume, price);
         
         let resistance = enhancedLevels.resistance;
         let support = enhancedLevels.support;
 
-        // Fallback if levels not detected
         if (!resistance || !support) {
             console.log("🔄 Enhanced S/R detection failed, using dynamic fallback...");
             const recentHigh = Math.max(...high.slice(-50));
@@ -712,11 +834,9 @@ const analyzeEnhancedSignal = async () => {
             support = recentLow - (currentATR * 0.3);
         }
 
-        // Dynamic distance adjustment based on volatility
         const minDistance = currentATR * 0.6;
         const maxDistance = currentATR * 2.5;
 
-        // Ensure reasonable distances
         if (resistance - price < minDistance) {
             resistance = price + minDistance;
         }
@@ -731,7 +851,6 @@ const analyzeEnhancedSignal = async () => {
             support = price - maxDistance;
         }
 
-        // Calculate targets with improved risk-reward
         const targetLong = resistance;
         const stopLossLong = Math.min(support, price - (currentATR * 0.8));
         const targetShort = support;
@@ -814,7 +933,7 @@ const placeOrder = async (side, tp, sl) => {
         return;
     }
 
-    const qty = calcQty(price);
+    const qty = await calcQty(price);
     console.log(`➡️ ENTRY ${side.toUpperCase()}
 - Quantity: ${qty}
 - Entry: ${formatPrice(price)}
@@ -924,6 +1043,8 @@ const closePosition = async (reason, entryPrice = "N/A") => {
     } finally {
         db.activePosition = null;
         saveDB();
+        // Reset signal confirmation ketika posisi ditutup
+        resetSignalConfirmation();
     }
 };
 
@@ -940,6 +1061,7 @@ const checkPositionStatus = async () => {
             console.log(`📉 ${side} position closed`);
             db.activePosition = null;
             saveDB();
+            resetSignalConfirmation();
         }
 
         if (db.activePosition && amtSafe !== 0) {
@@ -1070,6 +1192,7 @@ const recoverPositionState = async () => {
 
             db.activePosition = null;
             saveDB();
+            resetSignalConfirmation();
             console.log("✅ Database cleaned");
         }
 
@@ -1141,20 +1264,77 @@ const healthCheck = async () => {
     }
 };
 
+// -------------------- REVERSAL SIGNAL MANAGEMENT --------------------
+const handleReversalSignal = async (signal) => {
+    if (!db.signalConfirmation.enabled) {
+        return true; // Langsung proses jika confirmation disabled
+    }
+
+    const hasBotPosition = db.activePosition !== null;
+    if (!hasBotPosition) {
+        resetSignalConfirmation();
+        return false;
+    }
+
+    const currentSide = db.activePosition.side;
+    let reversalDirection = null;
+
+    // Deteksi reversal signal
+    if (currentSide === "buy" && signal.canShort) {
+        reversalDirection = "short";
+    } else if (currentSide === "sell" && signal.canLong) {
+        reversalDirection = "long";
+    }
+
+    if (!reversalDirection) {
+        // Tidak ada reversal signal, reset confirmation
+        if (signalConfirmation.pendingReversal) {
+            console.log("🔄 Reversal signal disappeared - Resetting confirmation");
+            resetSignalConfirmation();
+        }
+        return false;
+    }
+
+    // Update dan check confirmation
+    const isConfirmed = updateSignalConfirmation(reversalDirection, signal.price);
+    
+    if (!checkSignalConsistency()) {
+        return false;
+    }
+
+    if (isConfirmed) {
+        console.log(`✅ REVERSAL CONFIRMED: Closing ${currentSide.toUpperCase()} and preparing for ${reversalDirection.toUpperCase()}`);
+        await closePosition(`Reversal to ${reversalDirection} confirmed`, db.activePosition.entryPrice);
+        resetSignalConfirmation();
+        return true;
+    }
+
+    return false;
+};
+
 // -------------------- MAIN LOOP --------------------
 let prevPosAmt = 0;
 
 (async () => {
     await initializeExchange();
     
-    // Display initial balance
     console.log("\n💰 Initial Account Balance:");
     await displayBalance();
     
-    console.log("\n🚀 Bot started with ENHANCED S/R detection");
+    const initialPositionSize = await calculateDynamicPositionSize();
+    console.log(`📊 Initial Position Size: ${initialPositionSize.toFixed(2)} USDT`);
+    
+    console.log("\n🚀 Bot started with ENHANCED S/R detection, DYNAMIC POSITION SIZING and SIGNAL CONFIRMATION");
 })();
 
 setInterval(async () => {
+    // Cek apakah weekend dan weekend trading tidak diaktifkan
+    if (isWeekend() && !db.weekendTrading) {
+        console.log("⛔ WEEKEND MODE: Trading dihentikan sampai Senin");
+        isProcessing = false;
+        return;
+    }
+
     const health = await healthCheck();
     if (!health.healthy) {
         console.log("⚠️ Health check failed, skipping cycle...");
@@ -1168,6 +1348,10 @@ setInterval(async () => {
         db.leverage = freshDb.leverage;
         db.marginMode = freshDb.marginMode;
         db.usdtPerTrade = freshDb.usdtPerTrade;
+        db.useDynamicPositionSizing = freshDb.useDynamicPositionSizing;
+        db.positionSizePercentage = freshDb.positionSizePercentage;
+        db.signalConfirmation = freshDb.signalConfirmation;
+        db.weekendTrading = freshDb.weekendTrading; // Load weekend trading setting
     } catch (error) {
         // Use existing config on error
     }
@@ -1192,23 +1376,17 @@ setInterval(async () => {
             return;
         }
 
-        const hasBotPosition = db.activePosition !== null;
-        let shouldExitCurrentPosition = false;
-
-        if (hasBotPosition) {
-            const currentSide = db.activePosition.side;
-            if (currentSide === "buy" && signal.canShort) {
-                console.log("⚠️ SHORT signal detected, closing LONG");
-                shouldExitCurrentPosition = true;
-            } else if (currentSide === "sell" && signal.canLong) {
-                console.log("⚠️ LONG signal detected, closing SHORT");
-                shouldExitCurrentPosition = true;
-            }
+        // Handle reversal signals dengan konfirmasi
+        const reversalHandled = await handleReversalSignal(signal);
+        if (reversalHandled) {
+            console.log("🔄 Reversal processed, waiting for next cycle...");
+            return;
         }
 
-        if (shouldExitCurrentPosition) {
-            await closePosition("Signal reversal", db.activePosition.entryPrice);
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Reduced delay for faster re-entry
+        // Jika sedang menunggu konfirmasi reversal, skip entry baru
+        if (signalConfirmation.pendingReversal) {
+            console.log(`⏳ Waiting for reversal confirmation (${signalConfirmation.confirmationCount}/${signalConfirmation.requiredConfirmations})...`);
+            return;
         }
 
         const { position } = await getPositionFromBalance();
@@ -1241,14 +1419,25 @@ setInterval(async () => {
             }
         }
 
-        // Display balance every 5 cycles (approximately every 50 seconds)
         if (Math.floor(Date.now() / 10000) % 5 === 0) {
             console.log("\n💰 Periodic Balance Update:");
             await displayBalance();
+            const currentPositionSize = await calculateDynamicPositionSize();
+            console.log(`📊 Current Position Size: ${currentPositionSize.toFixed(2)} USDT`);
+            
+            // Display signal confirmation status jika aktif
+            if (signalConfirmation.pendingReversal) {
+                console.log(`🔄 Signal Confirmation: ${signalConfirmation.confirmationCount}/${signalConfirmation.requiredConfirmations} for ${signalConfirmation.reversalDirection.toUpperCase()}`);
+            }
+
+            // Tampilkan status weekend trading
+            const dayNames = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+            const today = new Date().getUTCDay();
+            console.log(`📅 Hari ini: ${dayNames[today]} | Weekend Trading: ${db.weekendTrading ? 'Aktif' : 'Nonaktif'}`);
         }
     } catch (err) {
         console.error("⚠️ Main loop error:", err.message);
     } finally {
         isProcessing = false;
     }
-}, 10000); // 10 second interval for faster response
+}, 10000);
