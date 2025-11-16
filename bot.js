@@ -3,19 +3,9 @@ const fs = require("fs");
 const { SMA, RSI, EMA } = require("technicalindicators");
 
 // -------------------- BINANCE CLIENT --------------------
-const Binance = require('node-binance-api');
-const exchange = new Binance().options({
-  APIKEY: process.env.API_KEY,
-  APISECRET: process.env.API_SECRET,
-  family: 4,
-  recvWindow: 60000,
-  useServerTime: true,
-  test: false, // Set true untuk testnet
-  urls: {
-    base: 'https://fapi.binance.com/fapi/',
-    combineStream: 'https://fstream.binance.com/stream?streams=',
-    stream: 'wss://fstream.binance.com/ws/'
-  }
+const { Spot, Futures } = require('@binance/connector');
+const client = new Futures(process.env.API_KEY, process.env.API_SECRET, {
+  baseURL: 'https://fapi.binance.com'
 });
 
 // -------------------- CONFIG --------------------
@@ -54,11 +44,11 @@ let signalConfirmation = {
 // -------------------- CONNECTION MANAGEMENT --------------------
 const initializeExchange = async () => {
     try {
-        // Test connection dengan mendapatkan futures account info
-        await exchange.futuresAccount();
+        // Test connection dengan mendapatkan account info
+        await client.account();
         console.log("✅ Binance Futures connection initialized successfully");
         connectionRetries = 0;
-        return exchange;
+        return client;
     } catch (error) {
         console.error(`❌ Binance Futures initialization failed (attempt ${connectionRetries + 1}/${MAX_RETRIES}):`, error.message);
 
@@ -196,9 +186,8 @@ const calculateDynamicPositionSize = async () => {
             return db.usdtPerTrade;
         }
 
-        const account = await safeApiCall(exchange.futuresAccount);
-        const usdtBalance = account.assets.find(asset => asset.asset === 'USDT');
-        const totalUSDT = parseFloat(usdtBalance?.walletBalance) || 0;
+        const account = await safeApiCall(client.account);
+        const totalUSDT = parseFloat(account.totalWalletBalance) || 0;
         
         if (totalUSDT <= 0) {
             console.warn("⚠️ Balance is zero or negative, using fixed position size");
@@ -233,12 +222,14 @@ console.log(`⚙️ Bot Configuration:
 // -------------------- STABLE API CALLS --------------------
 const safeApiCall = async (apiFunction, ...args) => {
     try {
-        return await apiFunction(...args);
+        const response = await apiFunction(...args);
+        return response.data;
     } catch (error) {
         if (error.message.includes('network') || error.message.includes('timeout') || error.message.includes('ECONNREFUSED')) {
             console.log("🌐 Network issue detected, reinitializing connection...");
             await initializeExchange();
-            return await apiFunction(...args);
+            const response = await apiFunction(...args);
+            return response.data;
         }
         throw error;
     }
@@ -266,10 +257,9 @@ const formatPrice = (price) => {
 // -------------------- BALANCE DISPLAY FUNCTION --------------------
 const displayBalance = async () => {
     try {
-        const account = await safeApiCall(exchange.futuresAccount);
-        const usdtBalance = account.assets.find(asset => asset.asset === 'USDT');
-        const totalUSDT = parseFloat(usdtBalance?.walletBalance) || 0;
-        const freeUSDT = parseFloat(usdtBalance?.availableBalance) || 0;
+        const account = await safeApiCall(client.account);
+        const totalUSDT = parseFloat(account.totalWalletBalance) || 0;
+        const freeUSDT = parseFloat(account.availableBalance) || 0;
         const usedUSDT = totalUSDT - freeUSDT;
         
         console.log(`💰 Balance Summary:
@@ -286,8 +276,8 @@ const displayBalance = async () => {
 
 const getPrice = async () => {
     try {
-        const ticker = await safeApiCall(exchange.futuresPrices);
-        const price = parseFloat(ticker[db.pair]);
+        const ticker = await safeApiCall(client.tickerPrice, { symbol: db.pair });
+        const price = parseFloat(ticker.price);
         if (!price || !isFinite(price)) {
             throw new Error("Invalid price received");
         }
@@ -327,7 +317,10 @@ const logSignal = (type, entry, tp, sl, status, pnl = null) => {
 // -------------------- BINANCE FUTURES FUNCTIONS --------------------
 const setLeverage = async (leverage, symbol) => {
     try {
-        await exchange.futuresLeverage(symbol, leverage);
+        await client.leverage({
+            symbol: symbol,
+            leverage: leverage
+        });
         console.log(`✅ Leverage set to ${leverage}x for ${symbol}`);
     } catch (error) {
         console.error("❌ Failed to set leverage:", error.message);
@@ -336,7 +329,10 @@ const setLeverage = async (leverage, symbol) => {
 
 const setMarginMode = async (marginMode, symbol) => {
     try {
-        await exchange.futuresMarginType(symbol, marginMode);
+        await client.marginType({
+            symbol: symbol,
+            marginType: marginMode
+        });
         console.log(`✅ Margin mode set to ${marginMode} for ${symbol}`);
     } catch (error) {
         console.error("❌ Failed to set margin mode:", error.message);
@@ -345,11 +341,13 @@ const setMarginMode = async (marginMode, symbol) => {
 
 const getPositionFromBalance = async () => {
     try {
-        const positions = await safeApiCall(exchange.futuresPositionRisk);
+        const account = await safeApiCall(client.account);
+        const positions = account.positions || [];
+        
         const position = positions.find(p => p.symbol === db.pair && Math.abs(parseFloat(p.positionAmt)) > 0);
         
         return {
-            balance: null, // Tidak digunakan lagi
+            balance: account,
             position
         };
     } catch (err) {
@@ -713,17 +711,22 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
 const analyzeEnhancedSignal = async () => {
     console.log("🧠 SMA Combination Strategy analysis started...");
     try {
-        const candles = await safeApiCall(exchange.futuresCandles, db.pair, "5m", 200);
-        if (!candles || candles.length < 100) {
+        const klines = await safeApiCall(client.klines, {
+            symbol: db.pair,
+            interval: '5m',
+            limit: 200
+        });
+
+        if (!klines || klines.length < 100) {
             console.warn("⚠️ Insufficient OHLCV data");
             return {};
         }
 
-        // Convert Binance candles format
-        const close = candles.map(c => parseFloat(c.close));
-        const high = candles.map(c => parseFloat(c.high));
-        const low = candles.map(c => parseFloat(c.low));
-        const volume = candles.map(c => parseFloat(c.volume));
+        // Convert Binance klines format
+        const close = klines.map(k => parseFloat(k[4]));
+        const high = klines.map(k => parseFloat(k[2]));
+        const low = klines.map(k => parseFloat(k[3]));
+        const volume = klines.map(k => parseFloat(k[5]));
         const price = close[close.length - 1];
 
         // Calculate SMAs
@@ -964,18 +967,21 @@ const placeOrder = async (side, tp, sl) => {
 
     try {
         // Place market order
-        const order = await exchange.futuresMarket(db.pair, side.toUpperCase(), qty, {
-            reduceOnly: false
+        const order = await client.newOrder({
+            symbol: db.pair,
+            side: side.toUpperCase(),
+            type: 'MARKET',
+            quantity: qty
         });
         
-        console.log("✅ Market order created:", order);
+        console.log("✅ Market order created:", order.data);
 
         db.activePosition = {
             side: side,
             entryPrice: price,
             tp: tp,
             sl: sl,
-            orderId: order.orderId,
+            orderId: order.data.orderId,
         };
         saveDB();
 
@@ -1003,11 +1009,15 @@ const closePosition = async (reason, entryPrice = "N/A") => {
             const side = qty > 0 ? "SELL" : "BUY";
             const amount = Math.abs(qty);
 
-            const order = await exchange.futuresMarket(db.pair, side, amount, {
+            const order = await client.newOrder({
+                symbol: db.pair,
+                side: side,
+                type: 'MARKET',
+                quantity: amount,
                 reduceOnly: true
             });
             
-            console.log(`✅ Close order created (${side}, ${amount}):`, order);
+            console.log(`✅ Close order created (${side}, ${amount}):`, order.data);
 
             const exitPrice = await getPrice();
             let pnl = null;
@@ -1264,7 +1274,7 @@ const recoverPositionState = async () => {
 const healthCheck = async () => {
     try {
         await initializeExchange();
-        const account = await safeApiCall(exchange.futuresAccount);
+        const account = await safeApiCall(client.account);
         const price = await getPrice();
 
         return {
