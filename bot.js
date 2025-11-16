@@ -10,7 +10,12 @@ const exchange = new Binance().options({
   family: 4,
   recvWindow: 60000,
   useServerTime: true,
-  test: false // Set true untuk testnet
+  test: false, // Set true untuk testnet
+  urls: {
+    base: 'https://fapi.binance.com/fapi/',
+    combineStream: 'https://fstream.binance.com/stream?streams=',
+    stream: 'wss://fstream.binance.com/ws/'
+  }
 });
 
 // -------------------- CONFIG --------------------
@@ -49,13 +54,13 @@ let signalConfirmation = {
 // -------------------- CONNECTION MANAGEMENT --------------------
 const initializeExchange = async () => {
     try {
-        // Test connection dengan mendapatkan balance
-        await exchange.futuresBalance();
-        console.log("✅ Binance connection initialized successfully");
+        // Test connection dengan mendapatkan futures account info
+        await exchange.futuresAccount();
+        console.log("✅ Binance Futures connection initialized successfully");
         connectionRetries = 0;
         return exchange;
     } catch (error) {
-        console.error(`❌ Binance initialization failed (attempt ${connectionRetries + 1}/${MAX_RETRIES}):`, error.message);
+        console.error(`❌ Binance Futures initialization failed (attempt ${connectionRetries + 1}/${MAX_RETRIES}):`, error.message);
 
         if (connectionRetries < MAX_RETRIES) {
             connectionRetries++;
@@ -191,8 +196,9 @@ const calculateDynamicPositionSize = async () => {
             return db.usdtPerTrade;
         }
 
-        const balance = await safeApiCall(exchange.futuresBalance);
-        const totalUSDT = balance.USDT?.available || 0;
+        const account = await safeApiCall(exchange.futuresAccount);
+        const usdtBalance = account.assets.find(asset => asset.asset === 'USDT');
+        const totalUSDT = parseFloat(usdtBalance?.walletBalance) || 0;
         
         if (totalUSDT <= 0) {
             console.warn("⚠️ Balance is zero or negative, using fixed position size");
@@ -260,10 +266,11 @@ const formatPrice = (price) => {
 // -------------------- BALANCE DISPLAY FUNCTION --------------------
 const displayBalance = async () => {
     try {
-        const balance = await safeApiCall(exchange.futuresBalance);
-        const totalUSDT = balance.USDT?.available || 0;
-        const freeUSDT = balance.USDT?.available || 0;
-        const usedUSDT = (balance.USDT?.onOrder || 0);
+        const account = await safeApiCall(exchange.futuresAccount);
+        const usdtBalance = account.assets.find(asset => asset.asset === 'USDT');
+        const totalUSDT = parseFloat(usdtBalance?.walletBalance) || 0;
+        const freeUSDT = parseFloat(usdtBalance?.availableBalance) || 0;
+        const usedUSDT = totalUSDT - freeUSDT;
         
         console.log(`💰 Balance Summary:
    Total: ${totalUSDT.toFixed(2)} USDT
@@ -281,6 +288,9 @@ const getPrice = async () => {
     try {
         const ticker = await safeApiCall(exchange.futuresPrices);
         const price = parseFloat(ticker[db.pair]);
+        if (!price || !isFinite(price)) {
+            throw new Error("Invalid price received");
+        }
         console.log(`💰 Price ${db.pair}: ${formatPrice(price)}`);
         return price;
     } catch (err) {
@@ -335,13 +345,11 @@ const setMarginMode = async (marginMode, symbol) => {
 
 const getPositionFromBalance = async () => {
     try {
-        const balance = await safeApiCall(exchange.futuresBalance);
         const positions = await safeApiCall(exchange.futuresPositionRisk);
-        
         const position = positions.find(p => p.symbol === db.pair && Math.abs(parseFloat(p.positionAmt)) > 0);
         
         return {
-            balance,
+            balance: null, // Tidak digunakan lagi
             position
         };
     } catch (err) {
@@ -935,6 +943,11 @@ const placeOrder = async (side, tp, sl) => {
     }
 
     const qty = await calcQty(price);
+    if (qty <= 0) {
+        console.log("❌ Invalid quantity, order cancelled");
+        return;
+    }
+
     console.log(`➡️ ENTRY ${side.toUpperCase()}
 - Quantity: ${qty}
 - Entry: ${formatPrice(price)}
@@ -951,7 +964,9 @@ const placeOrder = async (side, tp, sl) => {
 
     try {
         // Place market order
-        const order = await exchange.futuresMarket(db.pair, side.toUpperCase(), qty);
+        const order = await exchange.futuresMarket(db.pair, side.toUpperCase(), qty, {
+            reduceOnly: false
+        });
         
         console.log("✅ Market order created:", order);
 
@@ -988,7 +1003,9 @@ const closePosition = async (reason, entryPrice = "N/A") => {
             const side = qty > 0 ? "SELL" : "BUY";
             const amount = Math.abs(qty);
 
-            const order = await exchange.futuresMarket(db.pair, side, amount);
+            const order = await exchange.futuresMarket(db.pair, side, amount, {
+                reduceOnly: true
+            });
             
             console.log(`✅ Close order created (${side}, ${amount}):`, order);
 
@@ -1247,13 +1264,13 @@ const recoverPositionState = async () => {
 const healthCheck = async () => {
     try {
         await initializeExchange();
-        const balance = await safeApiCall(exchange.futuresBalance);
+        const account = await safeApiCall(exchange.futuresAccount);
         const price = await getPrice();
 
         return {
             healthy: true,
             exchange: 'connected',
-            balance: !!balance,
+            balance: !!account,
             price: !!price,
             timestamp: new Date().toISOString()
         };
