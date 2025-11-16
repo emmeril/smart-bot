@@ -1,4 +1,8 @@
 // signal.js (SMA Combination Strategy Version)
+globalThis.fetch = require('node-fetch');
+globalThis.Headers = require('node-fetch').Headers;
+globalThis.Request = require('node-fetch').Request;
+globalThis.Response = require('node-fetch').Response;
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
