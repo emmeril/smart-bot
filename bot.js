@@ -4,7 +4,7 @@ const { SMA, RSI, EMA } = require("technicalindicators");
 
 // -------------------- BINANCE CLIENT --------------------
 const Binance = require('node-binance-api');
-const exchange = Binance({
+const exchange = new Binance().options({
   APIKEY: process.env.API_KEY,
   APISECRET: process.env.API_SECRET,
   family: 4,
@@ -50,7 +50,7 @@ let signalConfirmation = {
 const initializeExchange = async () => {
     try {
         // Test connection dengan mendapatkan balance
-        await exchange.balance();
+        await exchange.futuresBalance();
         console.log("✅ Binance connection initialized successfully");
         connectionRetries = 0;
         return exchange;
@@ -191,7 +191,7 @@ const calculateDynamicPositionSize = async () => {
             return db.usdtPerTrade;
         }
 
-        const balance = await safeApiCall(exchange.balance);
+        const balance = await safeApiCall(exchange.futuresBalance);
         const totalUSDT = balance.USDT?.available || 0;
         
         if (totalUSDT <= 0) {
@@ -227,12 +227,12 @@ console.log(`⚙️ Bot Configuration:
 // -------------------- STABLE API CALLS --------------------
 const safeApiCall = async (apiFunction, ...args) => {
     try {
-        return await apiFunction.call(exchange, ...args);
+        return await apiFunction(...args);
     } catch (error) {
         if (error.message.includes('network') || error.message.includes('timeout') || error.message.includes('ECONNREFUSED')) {
             console.log("🌐 Network issue detected, reinitializing connection...");
             await initializeExchange();
-            return await apiFunction.call(exchange, ...args);
+            return await apiFunction(...args);
         }
         throw error;
     }
@@ -260,7 +260,7 @@ const formatPrice = (price) => {
 // -------------------- BALANCE DISPLAY FUNCTION --------------------
 const displayBalance = async () => {
     try {
-        const balance = await safeApiCall(exchange.balance);
+        const balance = await safeApiCall(exchange.futuresBalance);
         const totalUSDT = balance.USDT?.available || 0;
         const freeUSDT = balance.USDT?.available || 0;
         const usedUSDT = (balance.USDT?.onOrder || 0);
@@ -279,7 +279,7 @@ const displayBalance = async () => {
 
 const getPrice = async () => {
     try {
-        const ticker = await safeApiCall(exchange.prices, db.pair);
+        const ticker = await safeApiCall(exchange.futuresPrices);
         const price = parseFloat(ticker[db.pair]);
         console.log(`💰 Price ${db.pair}: ${formatPrice(price)}`);
         return price;
@@ -705,7 +705,7 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
 const analyzeEnhancedSignal = async () => {
     console.log("🧠 SMA Combination Strategy analysis started...");
     try {
-        const candles = await safeApiCall(exchange.futuresCandles, db.pair, "5m", { limit: 200 });
+        const candles = await safeApiCall(exchange.futuresCandles, db.pair, "5m", 200);
         if (!candles || candles.length < 100) {
             console.warn("⚠️ Insufficient OHLCV data");
             return {};
@@ -951,9 +951,7 @@ const placeOrder = async (side, tp, sl) => {
 
     try {
         // Place market order
-        const order = await exchange.futuresMarketOrder(db.pair, side.toUpperCase(), qty, {
-            reduceOnly: false
-        });
+        const order = await exchange.futuresMarket(db.pair, side.toUpperCase(), qty);
         
         console.log("✅ Market order created:", order);
 
@@ -990,9 +988,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
             const side = qty > 0 ? "SELL" : "BUY";
             const amount = Math.abs(qty);
 
-            const order = await exchange.futuresMarketOrder(db.pair, side, amount, {
-                reduceOnly: true
-            });
+            const order = await exchange.futuresMarket(db.pair, side, amount);
             
             console.log(`✅ Close order created (${side}, ${amount}):`, order);
 
@@ -1251,7 +1247,7 @@ const recoverPositionState = async () => {
 const healthCheck = async () => {
     try {
         await initializeExchange();
-        const balance = await safeApiCall(exchange.balance);
+        const balance = await safeApiCall(exchange.futuresBalance);
         const price = await getPrice();
 
         return {
