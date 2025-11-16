@@ -1,4 +1,4 @@
-// signal.js (Advanced Support & Resistance Version - Optimized with Signal Confirmation)
+// signal.js (SMA Combination Strategy Version)
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
@@ -735,9 +735,9 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
     return calculateOptimalLevels();
 };
 
-// -------------------- ENHANCED TECHNICAL ANALYSIS --------------------
+// -------------------- SMA COMBINATION STRATEGY --------------------
 const analyzeEnhancedSignal = async () => {
-    console.log("🧠 Enhanced technical analysis started...");
+    console.log("🧠 SMA Combination Strategy analysis started...");
     try {
         const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "5m", undefined, 200);
         if (!ohlcv || ohlcv.length < 100) {
@@ -751,55 +751,78 @@ const analyzeEnhancedSignal = async () => {
         const volume = ohlcv.map(c => c[5]);
         const price = close[close.length - 1];
 
-        const maFast = SMA.calculate({
-            values: close.slice(-50),
-            period: 5
+        // Calculate SMAs
+        const sma7 = SMA.calculate({
+            values: close,
+            period: 7
         });
-        const maMedium = SMA.calculate({
-            values: close.slice(-50),
-            period: 13
+        const sma25 = SMA.calculate({
+            values: close,
+            period: 25
         });
-        const maSlow = SMA.calculate({
-            values: close.slice(-50),
-            period: 21
+        const sma99 = SMA.calculate({
+            values: close,
+            period: 99
         });
 
-        const currentMAFast = maFast[maFast.length - 1];
-        const currentMAMedium = maMedium[maMedium.length - 1];
-        const currentMASlow = maSlow[maSlow.length - 1];
+        // Get current values
+        const currentSMA7 = sma7[sma7.length - 1];
+        const currentSMA25 = sma25[sma25.length - 1];
+        const currentSMA99 = sma99[sma99.length - 1];
 
-        const prevMAFast = maFast[maFast.length - 2];
-        const prevMAMedium = maMedium[maMedium.length - 2];
-        const prevMASlow = maSlow[maSlow.length - 2];
+        // Get previous values for crossover detection
+        const prevSMA7 = sma7[sma7.length - 2];
+        const prevSMA25 = sma25[sma25.length - 2];
+        const prevSMA99 = sma99[sma99.length - 2];
 
+        // Calculate RSI
         const rsi = RSI.calculate({
             values: close.slice(-50),
             period: 14
         });
         const currentRSI = rsi[rsi.length - 1];
 
-        const isUptrend = currentMAFast > currentMAMedium && currentMAMedium > currentMASlow;
-        const isDowntrend = currentMAFast < currentMAMedium && currentMAMedium < currentMASlow;
+        // SMA Combination Strategy Conditions
+        const isBullishAlignment = currentSMA7 > currentSMA25 && currentSMA25 > currentSMA99;
+        const isBearishAlignment = currentSMA7 < currentSMA25 && currentSMA25 < currentSMA99;
+        
+        const isSMA7Above25 = currentSMA7 > currentSMA25;
+        const isSMA7Below25 = currentSMA7 < currentSMA25;
+        
+        const isPriceAboveSMA7 = price > currentSMA7;
+        const isPriceBelowSMA7 = price < currentSMA7;
+        const isPriceAboveSMA25 = price > currentSMA25;
+        const isPriceBelowSMA25 = price < currentSMA25;
+        const isPriceAboveSMA99 = price > currentSMA99;
+        const isPriceBelowSMA99 = price < currentSMA99;
 
-        const isFastCrossAboveMedium = currentMAFast > currentMAMedium && prevMAFast <= prevMAMedium;
-        const isFastCrossBelowMedium = currentMAFast < currentMAMedium && prevMAFast >= prevMAMedium;
+        // Crossover conditions
+        const isSMA7CrossAbove25 = currentSMA7 > currentSMA25 && prevSMA7 <= prevSMA25;
+        const isSMA7CrossBelow25 = currentSMA7 < currentSMA25 && prevSMA7 >= prevSMA25;
+        const isSMA25CrossAbove99 = currentSMA25 > currentSMA99 && prevSMA25 <= prevSMA99;
+        const isSMA25CrossBelow99 = currentSMA25 < currentSMA99 && prevSMA25 >= prevSMA99;
 
-        const priceAboveAllMAs = price > currentMAFast && price > currentMAMedium && price > currentMASlow;
-        const priceBelowAllMAs = price < currentMAFast && price < currentMAMedium && price < currentMASlow;
-
+        // STRATEGY RULES
         let canLong = false;
         let canShort = false;
 
-        if ((isFastCrossAboveMedium || (isUptrend && priceAboveAllMAs)) && 
-            currentRSI > 45 && currentRSI < 75) {
-            canLong = true;
-        }
+        // LONG Conditions (Multiple scenarios)
+        const longCondition1 = isBullishAlignment && isPriceAboveSMA7 && currentRSI > 40 && currentRSI < 70;
+        const longCondition2 = isSMA7CrossAbove25 && isPriceAboveSMA25 && currentRSI > 45 && currentRSI < 65;
+        const longCondition3 = isSMA25CrossAbove99 && isPriceAboveSMA99 && currentRSI > 40 && currentRSI < 70;
+        const longCondition4 = isPriceAboveSMA7 && isSMA7Above25 && !isBearishAlignment && currentRSI > 50 && currentRSI < 65;
 
-        if ((isFastCrossBelowMedium || (isDowntrend && priceBelowAllMAs)) && 
-            currentRSI < 55 && currentRSI > 25) {
-            canShort = true;
-        }
+        // SHORT Conditions (Multiple scenarios)
+        const shortCondition1 = isBearishAlignment && isPriceBelowSMA7 && currentRSI < 60 && currentRSI > 30;
+        const shortCondition2 = isSMA7CrossBelow25 && isPriceBelowSMA25 && currentRSI < 55 && currentRSI > 35;
+        const shortCondition3 = isSMA25CrossBelow99 && isPriceBelowSMA99 && currentRSI < 60 && currentRSI > 30;
+        const shortCondition4 = isPriceBelowSMA7 && isSMA7Below25 && !isBullishAlignment && currentRSI < 50 && currentRSI > 35;
 
+        // Apply conditions
+        canLong = longCondition1 || longCondition2 || longCondition3 || longCondition4;
+        canShort = shortCondition1 || shortCondition2 || shortCondition3 || shortCondition4;
+
+        // Calculate ATR for volatility
         const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
             const tr = [];
             for (let i = 1; i < highArr.length; i++) {
@@ -820,6 +843,7 @@ const analyzeEnhancedSignal = async () => {
 
         const currentATR = calculateATR(high, low, close, 14).pop() || 0;
 
+        // Enhanced S/R Levels
         const enhancedLevels = findEnhancedLevels(high, low, close, volume, price);
         
         let resistance = enhancedLevels.resistance;
@@ -834,6 +858,7 @@ const analyzeEnhancedSignal = async () => {
             support = recentLow - (currentATR * 0.3);
         }
 
+        // Ensure minimum and maximum distances
         const minDistance = currentATR * 0.6;
         const maxDistance = currentATR * 2.5;
 
@@ -851,23 +876,30 @@ const analyzeEnhancedSignal = async () => {
             support = price - maxDistance;
         }
 
+        // Calculate targets
         const targetLong = resistance;
         const stopLossLong = Math.min(support, price - (currentATR * 0.8));
         const targetShort = support;
         const stopLossShort = Math.max(resistance, price + (currentATR * 0.8));
 
-        console.log(`\n🎯 ENHANCED Analysis Results ${db.pair}
+        console.log(`\n🎯 SMA COMBINATION Strategy Results ${db.pair}
 ══════════════════════════════════════════════════
 📈 Long Signal: ${canLong ? "✅ VALID" : "❌ INVALID"}
 📉 Short Signal: ${canShort ? "✅ VALID" : "❌ INVALID"}
 ══════════════════════════════════════════════════
 💰 Current Price: ${formatPrice(price)}
 📊 RSI: ${currentRSI ? currentRSI.toFixed(2) : "N/A"}
+══════════════════════════════════════════════════
+📈 SMA(7): ${formatPrice(currentSMA7)} ${isSMA7Above25 ? "🟢" : "🔴"} Above SMA25
+📈 SMA(25): ${formatPrice(currentSMA25)} ${isSMA25 > currentSMA99 ? "🟢" : "🔴"} Above SMA99  
+📈 SMA(99): ${formatPrice(currentSMA99)}
+══════════════════════════════════════════════════
+🎯 Alignment: ${isBullishAlignment ? "BULLISH 🟢" : isBearishAlignment ? "BEARISH 🔴" : "MIXED 🟡"}
+🎯 Crossovers: ${isSMA7CrossAbove25 ? "SMA7↑25" : isSMA7CrossBelow25 ? "SMA7↓25" : "NONE"}
+                 ${isSMA25CrossAbove99 ? "SMA25↑99" : isSMA25CrossBelow99 ? "SMA25↓99" : "NONE"}
+══════════════════════════════════════════════════
 🎯 Resistance: ${formatPrice(resistance)} (${((resistance - price) / price * 100).toFixed(3)}%)
 🛡️  Support: ${formatPrice(support)} (${((price - support) / price * 100).toFixed(3)}%)
-📈 MA Fast: ${formatPrice(currentMAFast)}
-📈 MA Medium: ${formatPrice(currentMAMedium)}
-📈 MA Slow: ${formatPrice(currentMASlow)}
 📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
 ══════════════════════════════════════════════════
 📊 Volume POC: ${formatPrice(enhancedLevels.volumePOC)}
@@ -875,19 +907,18 @@ const analyzeEnhancedSignal = async () => {
 🔍 Detected S Levels: ${enhancedLevels.allSupport?.length || 0}
 ══════════════════════════════════════════════════`);
 
-        if (enhancedLevels.allResistance && enhancedLevels.allResistance.length > 0) {
-            console.log("📈 Top Resistance Levels:");
-            enhancedLevels.allResistance.slice(0, 3).forEach(level => {
-                console.log(`   - ${formatPrice(level.price)} (conf: ${level.confidence.toFixed(2)})`);
-            });
-        }
+        // Display detailed SMA conditions
+        console.log("📊 LONG Conditions:");
+        console.log(`   Bullish Alignment: ${longCondition1 ? '✅' : '❌'} (${isBullishAlignment ? 'YES' : 'NO'})`);
+        console.log(`   SMA7 Cross Above 25: ${longCondition2 ? '✅' : '❌'} (${isSMA7CrossAbove25 ? 'YES' : 'NO'})`);
+        console.log(`   SMA25 Cross Above 99: ${longCondition3 ? '✅' : '❌'} (${isSMA25CrossAbove99 ? 'YES' : 'NO'})`);
+        console.log(`   Price Above SMA7 & Bullish: ${longCondition4 ? '✅' : '❌'} (${isPriceAboveSMA7 && isSMA7Above25 ? 'YES' : 'NO'})`);
 
-        if (enhancedLevels.allSupport && enhancedLevels.allSupport.length > 0) {
-            console.log("📉 Top Support Levels:");
-            enhancedLevels.allSupport.slice(0, 3).forEach(level => {
-                console.log(`   - ${formatPrice(level.price)} (conf: ${level.confidence.toFixed(2)})`);
-            });
-        }
+        console.log("📊 SHORT Conditions:");
+        console.log(`   Bearish Alignment: ${shortCondition1 ? '✅' : '❌'} (${isBearishAlignment ? 'YES' : 'NO'})`);
+        console.log(`   SMA7 Cross Below 25: ${shortCondition2 ? '✅' : '❌'} (${isSMA7CrossBelow25 ? 'YES' : 'NO'})`);
+        console.log(`   SMA25 Cross Below 99: ${shortCondition3 ? '✅' : '❌'} (${isSMA25CrossBelow99 ? 'YES' : 'NO'})`);
+        console.log(`   Price Below SMA7 & Bearish: ${shortCondition4 ? '✅' : '❌'} (${isPriceBelowSMA7 && isSMA7Below25 ? 'YES' : 'NO'})`);
 
         return {
             canLong,
@@ -899,11 +930,14 @@ const analyzeEnhancedSignal = async () => {
             price,
             enhancedLevels,
             rsi: currentRSI,
-            maFast: currentMAFast,
-            maMedium: currentMAMedium
+            sma7: currentSMA7,
+            sma25: currentSMA25,
+            sma99: currentSMA99,
+            isBullishAlignment,
+            isBearishAlignment
         };
     } catch (error) {
-        console.error("❌ Enhanced technical analysis failed:", error.message);
+        console.error("❌ SMA Combination analysis failed:", error.message);
         return {};
     }
 };
@@ -1324,7 +1358,7 @@ let prevPosAmt = 0;
     const initialPositionSize = await calculateDynamicPositionSize();
     console.log(`📊 Initial Position Size: ${initialPositionSize.toFixed(2)} USDT`);
     
-    console.log("\n🚀 Bot started with ENHANCED S/R detection, DYNAMIC POSITION SIZING and SIGNAL CONFIRMATION");
+    console.log("\n🚀 Bot started with SMA COMBINATION STRATEGY (7, 25, 99)");
 })();
 
 setInterval(async () => {
