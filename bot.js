@@ -860,6 +860,9 @@ const analyzeEnhancedSignal = async () => {
         const targetShort = support;
         const stopLossShort = Math.max(resistance, price + (currentATR * 0.8));
 
+        // PERBAIKAN: Definisikan variabel isSMA25Above99 yang hilang
+        const isSMA25Above99 = currentSMA25 > currentSMA99;
+
         console.log(`\n🎯 SMA COMBINATION Strategy Results ${db.pair}
 ══════════════════════════════════════════════════
 📈 Long Signal: ${canLong ? "✅ VALID" : "❌ INVALID"}
@@ -869,7 +872,7 @@ const analyzeEnhancedSignal = async () => {
 📊 RSI: ${currentRSI ? currentRSI.toFixed(2) : "N/A"}
 ══════════════════════════════════════════════════
 📈 SMA(7): ${formatPrice(currentSMA7)} ${isSMA7Above25 ? "🟢" : "🔴"} Above SMA25
-📈 SMA(25): ${formatPrice(currentSMA25)} ${isSMA25 > currentSMA99 ? "🟢" : "🔴"} Above SMA99  
+📈 SMA(25): ${formatPrice(currentSMA25)} ${isSMA25Above99 ? "🟢" : "🔴"} Above SMA99  
 📈 SMA(99): ${formatPrice(currentSMA99)}
 ══════════════════════════════════════════════════
 🎯 Alignment: ${isBullishAlignment ? "BULLISH 🟢" : isBearishAlignment ? "BEARISH 🔴" : "MIXED 🟡"}
