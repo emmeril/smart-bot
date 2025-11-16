@@ -102,6 +102,25 @@ const loadDB = () => {
 
 let db = loadDB();
 
+// -------------------- SYMBOL PRECISION MANAGEMENT --------------------
+const symbolPrecision = {
+    'DOGEUSDT': { quantity: 0, price: 5 },
+    'XRPUSDT': { quantity: 1, price: 4 },
+    'ADAUSDT': { quantity: 0, price: 5 },
+    'BTCUSDT': { quantity: 3, price: 1 },
+    'ETHUSDT': { quantity: 3, price: 2 },
+    'BNBUSDT': { quantity: 2, price: 2 },
+    'SOLUSDT': { quantity: 1, price: 3 },
+    'MATICUSDT': { quantity: 0, price: 5 },
+    'DOTUSDT': { quantity: 1, price: 3 },
+    'LTCUSDT': { quantity: 2, price: 2 }
+};
+
+// Fallback precision jika symbol tidak ditemukan
+const getSymbolPrecision = (symbol) => {
+    return symbolPrecision[symbol] || { quantity: 3, price: 4 };
+};
+
 // -------------------- SIGNAL CONFIRMATION MANAGEMENT --------------------
 const updateSignalConfirmation = (newDirection, currentPrice) => {
     const now = Date.now();
@@ -251,7 +270,14 @@ const saveDB = () => {
 
 const formatPrice = (price) => {
     if (!price || !isFinite(price)) return "N/A";
-    return parseFloat(price.toFixed(6));
+    const precision = getSymbolPrecision(db.pair).price;
+    return parseFloat(price.toFixed(precision));
+};
+
+const formatQuantity = (quantity) => {
+    if (!quantity || !isFinite(quantity)) return 0;
+    const precision = getSymbolPrecision(db.pair).quantity;
+    return parseFloat(quantity.toFixed(precision));
 };
 
 // -------------------- BALANCE DISPLAY FUNCTION --------------------
@@ -295,7 +321,16 @@ const calcQty = async (price) => {
     const currentUsdtPerTrade = await calculateDynamicPositionSize();
     
     let qty = currentUsdtPerTrade / price;
-    qty = parseFloat(qty.toFixed(3)); // Default precision
+    
+    // Format quantity sesuai precision symbol
+    qty = formatQuantity(qty);
+    
+    // Validasi minimum quantity
+    if (qty <= 0) {
+        console.warn("⚠️ Calculated quantity is zero or negative");
+        return 0;
+    }
+    
     console.log(`📐 Quantity: ${qty} (${currentUsdtPerTrade.toFixed(2)} USDT)`);
     return qty;
 };
@@ -335,7 +370,12 @@ const setMarginMode = async (marginMode, symbol) => {
         });
         console.log(`✅ Margin mode set to ${marginMode} for ${symbol}`);
     } catch (error) {
-        console.error("❌ Failed to set margin mode:", error.message);
+        // Ignore error jika margin type sudah sesuai
+        if (error.message.includes('No need to change margin type')) {
+            console.log(`✅ Margin mode already set to ${marginMode} for ${symbol}`);
+        } else {
+            console.error("❌ Failed to set margin mode:", error.message);
+        }
     }
 };
 
@@ -997,6 +1037,58 @@ const placeOrder = async (side, tp, sl) => {
         );
     } catch (err) {
         console.error("❌ Order failed:", err.message);
+        
+        // Specific error handling untuk precision issues
+        if (err.message.includes('Precision is over the maximum')) {
+            console.log("🔄 Precision error detected, adjusting quantity...");
+            
+            // Kurangi quantity secara bertahap sampai berhasil
+            let adjustedQty = qty;
+            let attempts = 0;
+            const maxAttempts = 5;
+            
+            while (attempts < maxAttempts && adjustedQty > 0) {
+                attempts++;
+                adjustedQty = formatQuantity(adjustedQty * 0.9); // Kurangi 10%
+                
+                console.log(`🔄 Attempt ${attempts}: Trying quantity ${adjustedQty}`);
+                
+                try {
+                    const retryOrder = await client.futuresOrder({
+                        symbol: db.pair,
+                        side: side.toUpperCase(),
+                        type: 'MARKET',
+                        quantity: adjustedQty.toString()
+                    });
+                    
+                    console.log("✅ Market order created with adjusted quantity:", retryOrder);
+
+                    db.activePosition = {
+                        side: side,
+                        entryPrice: price,
+                        tp: tp,
+                        sl: sl,
+                        orderId: retryOrder.orderId,
+                    };
+                    saveDB();
+
+                    logSignal(
+                        side === "buy" ? "LONG" : "SHORT",
+                        price,
+                        tp,
+                        sl,
+                        "ORDER_PLACED_ADJUSTED"
+                    );
+                    break;
+                } catch (retryError) {
+                    console.error(`❌ Order attempt ${attempts} failed:`, retryError.message);
+                    
+                    if (attempts === maxAttempts) {
+                        console.error("💥 All order attempts failed");
+                    }
+                }
+            }
+        }
     }
 };
 
