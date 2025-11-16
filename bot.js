@@ -3,7 +3,7 @@ const fs = require("fs");
 const { SMA, RSI, EMA } = require("technicalindicators");
 
 // -------------------- BINANCE CLIENT --------------------
-const { Spot, Futures } = require('@binance/connector');
+const { Futures } = require('@binance/connector');
 const client = new Futures(process.env.API_KEY, process.env.API_SECRET, {
   baseURL: 'https://fapi.binance.com'
 });
