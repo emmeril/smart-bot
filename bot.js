@@ -102,7 +102,6 @@ const loadDB = () => {
     };
 };
 
-let db = loadDB();
 
 // -------------------- SIGNAL CONFIRMATION MANAGEMENT --------------------
 const updateSignalConfirmation = (newDirection, currentPrice) => {
