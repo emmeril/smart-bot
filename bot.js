@@ -2,6 +2,7 @@ require("dotenv").config();
 const fs = require("fs");
 const { SMA, RSI, EMA } = require("technicalindicators");
 
+let db = loadDB();
 // -------------------- BINANCE CLIENT --------------------
 const Binance = require('binance-api-node').default;
 const client = Binance({
