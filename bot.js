@@ -7,8 +7,7 @@ const Binance = require('binance-api-node').default;
 const client = Binance({
   apiKey: process.env.API_KEY,
   apiSecret: process.env.API_SECRET,
-  futures: true,
-  baseURL: 'https://testnet.binancefuture.com'
+  futures: true
 });
 
 // -------------------- CONFIG --------------------
