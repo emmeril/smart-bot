@@ -2,14 +2,12 @@ require("dotenv").config();
 const fs = require("fs");
 const { SMA, RSI, EMA } = require("technicalindicators");
 
-let db = loadDB();
 // -------------------- BINANCE CLIENT --------------------
 const Binance = require('binance-api-node').default;
 const client = Binance({
   apiKey: process.env.API_KEY,
   apiSecret: process.env.API_SECRET,
-  futures: true,
-  baseURL: db.testnet ? db.testnetBaseURL : 'https://fapi.binance.com'
+  futures: true // Gunakan futures API
 });
 
 // -------------------- CONFIG --------------------
@@ -102,6 +100,7 @@ const loadDB = () => {
     };
 };
 
+let db = loadDB();
 
 // -------------------- SIGNAL CONFIRMATION MANAGEMENT --------------------
 const updateSignalConfirmation = (newDirection, currentPrice) => {
