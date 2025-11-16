@@ -1,13 +1,22 @@
 require("dotenv").config();
 const fs = require("fs");
-const ccxt = require("ccxt");
 const { SMA, RSI, EMA } = require("technicalindicators");
+
+// -------------------- BINANCE CLIENT --------------------
+const Binance = require('node-binance-api');
+const exchange = Binance({
+  APIKEY: process.env.API_KEY,
+  APISECRET: process.env.API_SECRET,
+  family: 4,
+  recvWindow: 60000,
+  useServerTime: true,
+  test: false // Set true untuk testnet
+});
 
 // -------------------- CONFIG --------------------
 const dbPath = "./db.json";
 const logPath = "./log.csv";
 let isProcessing = false;
-let exchange = null;
 let connectionRetries = 0;
 const MAX_RETRIES = 5;
 const RETRY_DELAY = 10000;
@@ -40,32 +49,13 @@ let signalConfirmation = {
 // -------------------- CONNECTION MANAGEMENT --------------------
 const initializeExchange = async () => {
     try {
-        if (exchange) {
-            try {
-                await exchange.fetchBalance();
-                return exchange;
-            } catch (e) {
-                console.log("🔄 Connection lost, reinitializing...");
-            }
-        }
-
-        exchange = new ccxt.binance({
-            apiKey: process.env.API_KEY,
-            secret: process.env.API_SECRET,
-            options: { defaultType: "future" },
-            timeout: 30000,
-            enableRateLimit: true,
-            recvWindow: 60000,
-        });
-
-        await exchange.loadMarkets();
-        await exchange.fetchBalance();
-
-        console.log("✅ Exchange connection initialized successfully");
+        // Test connection dengan mendapatkan balance
+        await exchange.balance();
+        console.log("✅ Binance connection initialized successfully");
         connectionRetries = 0;
         return exchange;
     } catch (error) {
-        console.error(`❌ Exchange initialization failed (attempt ${connectionRetries + 1}/${MAX_RETRIES}):`, error.message);
+        console.error(`❌ Binance initialization failed (attempt ${connectionRetries + 1}/${MAX_RETRIES}):`, error.message);
 
         if (connectionRetries < MAX_RETRIES) {
             connectionRetries++;
@@ -95,7 +85,7 @@ const loadDB = () => {
     }
 
     return {
-        pair: "XRP/USDT:USDT",
+        pair: "XRPUSDT",
         lastLongEntryTime: 0,
         lastShortEntryTime: 0,
         leverage: 10,
@@ -201,8 +191,8 @@ const calculateDynamicPositionSize = async () => {
             return db.usdtPerTrade;
         }
 
-        const balance = await safeApiCall(exchange.fetchBalance);
-        const totalUSDT = balance.total?.USDT || 0;
+        const balance = await safeApiCall(exchange.balance);
+        const totalUSDT = balance.USDT?.available || 0;
         
         if (totalUSDT <= 0) {
             console.warn("⚠️ Balance is zero or negative, using fixed position size");
@@ -237,12 +227,9 @@ console.log(`⚙️ Bot Configuration:
 // -------------------- STABLE API CALLS --------------------
 const safeApiCall = async (apiFunction, ...args) => {
     try {
-        if (!exchange) {
-            await initializeExchange();
-        }
         return await apiFunction.call(exchange, ...args);
     } catch (error) {
-        if (error instanceof ccxt.NetworkError || error.message.includes('network') || error.message.includes('timeout')) {
+        if (error.message.includes('network') || error.message.includes('timeout') || error.message.includes('ECONNREFUSED')) {
             console.log("🌐 Network issue detected, reinitializing connection...");
             await initializeExchange();
             return await apiFunction.call(exchange, ...args);
@@ -265,42 +252,18 @@ const saveDB = () => {
     }
 };
 
-const formatPrice = (price, pair = db.pair) => {
+const formatPrice = (price) => {
     if (!price || !isFinite(price)) return "N/A";
-
-    try {
-        const market = exchange.markets[pair];
-        if (!market) return parseFloat(price.toFixed(5));
-
-        let decimals = market.precision?.price;
-
-        if (decimals === undefined || decimals === null) {
-            if (price < 0.0001) decimals = 8;
-            else if (price < 0.001) decimals = 7;
-            else if (price < 0.01) decimals = 6;
-            else if (price < 0.1) decimals = 5;
-            else if (price < 1) decimals = 4;
-            else if (price < 10) decimals = 3;
-            else if (price < 100) decimals = 2;
-            else if (price < 1000) decimals = 1;
-            else decimals = 0;
-        }
-
-        decimals = Math.max(0, Math.min(8, parseInt(decimals) || 5));
-        return parseFloat(price.toFixed(decimals));
-
-    } catch (err) {
-        return parseFloat(price.toFixed(5));
-    }
+    return parseFloat(price.toFixed(6));
 };
 
 // -------------------- BALANCE DISPLAY FUNCTION --------------------
 const displayBalance = async () => {
     try {
-        const balance = await safeApiCall(exchange.fetchBalance);
-        const totalUSDT = balance.total?.USDT || 0;
-        const freeUSDT = balance.free?.USDT || 0;
-        const usedUSDT = balance.used?.USDT || 0;
+        const balance = await safeApiCall(exchange.balance);
+        const totalUSDT = balance.USDT?.available || 0;
+        const freeUSDT = balance.USDT?.available || 0;
+        const usedUSDT = (balance.USDT?.onOrder || 0);
         
         console.log(`💰 Balance Summary:
    Total: ${totalUSDT.toFixed(2)} USDT
@@ -316,9 +279,10 @@ const displayBalance = async () => {
 
 const getPrice = async () => {
     try {
-        const ticker = await safeApiCall(exchange.fetchTicker, db.pair);
-        console.log(`💰 Price ${db.pair}: ${formatPrice(ticker.last)}`);
-        return ticker.last;
+        const ticker = await safeApiCall(exchange.prices, db.pair);
+        const price = parseFloat(ticker[db.pair]);
+        console.log(`💰 Price ${db.pair}: ${formatPrice(price)}`);
+        return price;
     } catch (err) {
         console.error("❌ Failed to fetch price:", err.message);
         return null;
@@ -331,8 +295,7 @@ const calcQty = async (price) => {
     const currentUsdtPerTrade = await calculateDynamicPositionSize();
     
     let qty = currentUsdtPerTrade / price;
-    const prec = exchange.markets[db.pair]?.precision?.amount ?? 3;
-    qty = parseFloat(qty.toFixed(prec));
+    qty = parseFloat(qty.toFixed(3)); // Default precision
     console.log(`📐 Quantity: ${qty} (${currentUsdtPerTrade.toFixed(2)} USDT)`);
     return qty;
 };
@@ -351,31 +314,35 @@ const logSignal = (type, entry, tp, sl, status, pnl = null) => {
     }
 };
 
-const getMarketId = () => {
+// -------------------- BINANCE FUTURES FUNCTIONS --------------------
+const setLeverage = async (leverage, symbol) => {
     try {
-        const market = exchange.markets[db.pair];
-        if (market && market.id) return market.id;
-    } catch (err) {
-        // ignore
+        await exchange.futuresLeverage(symbol, leverage);
+        console.log(`✅ Leverage set to ${leverage}x for ${symbol}`);
+    } catch (error) {
+        console.error("❌ Failed to set leverage:", error.message);
     }
-    return db.pair.replace("/", "").replace(":", "");
+};
+
+const setMarginMode = async (marginMode, symbol) => {
+    try {
+        await exchange.futuresMarginType(symbol, marginMode);
+        console.log(`✅ Margin mode set to ${marginMode} for ${symbol}`);
+    } catch (error) {
+        console.error("❌ Failed to set margin mode:", error.message);
+    }
 };
 
 const getPositionFromBalance = async () => {
     try {
-        const balance = await safeApiCall(exchange.fetchBalance);
-        const marketId = getMarketId();
-        const positions = balance.info?.positions || [];
-
-        const normalize = (str) => (str || "").toString().replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-        const found = positions.find(p =>
-            normalize(p.symbol) === normalize(marketId) ||
-            normalize(p.contractCode) === normalize(marketId)
-        );
-
+        const balance = await safeApiCall(exchange.futuresBalance);
+        const positions = await safeApiCall(exchange.futuresPositionRisk);
+        
+        const position = positions.find(p => p.symbol === db.pair && Math.abs(parseFloat(p.positionAmt)) > 0);
+        
         return {
             balance,
-            position: found
+            position
         };
     } catch (err) {
         console.error("❌ Failed to fetch position:", err.message);
@@ -738,16 +705,17 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
 const analyzeEnhancedSignal = async () => {
     console.log("🧠 SMA Combination Strategy analysis started...");
     try {
-        const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "5m", undefined, 200);
-        if (!ohlcv || ohlcv.length < 100) {
+        const candles = await safeApiCall(exchange.futuresCandles, db.pair, "5m", { limit: 200 });
+        if (!candles || candles.length < 100) {
             console.warn("⚠️ Insufficient OHLCV data");
             return {};
         }
 
-        const close = ohlcv.map(c => c[4]);
-        const high = ohlcv.map(c => c[2]);
-        const low = ohlcv.map(c => c[3]);
-        const volume = ohlcv.map(c => c[5]);
+        // Convert Binance candles format
+        const close = candles.map(c => parseFloat(c.close));
+        const high = candles.map(c => parseFloat(c.high));
+        const low = candles.map(c => parseFloat(c.low));
+        const volume = candles.map(c => parseFloat(c.volume));
         const price = close[close.length - 1];
 
         // Calculate SMAs
@@ -974,23 +942,27 @@ const placeOrder = async (side, tp, sl) => {
 - SL: ${formatPrice(sl)}`);
 
     try {
-        await safeApiCall(exchange.setLeverage, db.leverage, db.pair);
-        await safeApiCall(exchange.setMarginMode, db.marginMode, db.pair);
+        await setLeverage(db.leverage, db.pair);
+        await setMarginMode(db.marginMode, db.pair);
         console.log("✅ Leverage and margin mode set");
     } catch (err) {
         console.warn("⚠️ Failed to set leverage/margin:", err.message);
     }
 
     try {
-        const order = await safeApiCall(exchange.createOrder, db.pair, "market", side, qty);
-        console.log("✅ Market order created");
+        // Place market order
+        const order = await exchange.futuresMarketOrder(db.pair, side.toUpperCase(), qty, {
+            reduceOnly: false
+        });
+        
+        console.log("✅ Market order created:", order);
 
         db.activePosition = {
             side: side,
             entryPrice: price,
             tp: tp,
             sl: sl,
-            orderId: order.id,
+            orderId: order.orderId,
         };
         saveDB();
 
@@ -1015,13 +987,14 @@ const closePosition = async (reason, entryPrice = "N/A") => {
         if (!isFinite(qty) || Math.abs(qty) === 0) {
             console.log("ℹ️ No position to close");
         } else {
-            const side = qty > 0 ? "sell" : "buy";
+            const side = qty > 0 ? "SELL" : "BUY";
             const amount = Math.abs(qty);
 
-            await safeApiCall(exchange.createOrder, db.pair, "market", side, amount, undefined, {
-                reduceOnly: true,
+            const order = await exchange.futuresMarketOrder(db.pair, side, amount, {
+                reduceOnly: true
             });
-            console.log(`✅ Close order created (${side}, ${amount})`);
+            
+            console.log(`✅ Close order created (${side}, ${amount}):`, order);
 
             const exitPrice = await getPrice();
             let pnl = null;
@@ -1082,6 +1055,8 @@ const closePosition = async (reason, entryPrice = "N/A") => {
 };
 
 // -------------------- POSITION MONITORING --------------------
+let prevPosAmt = 0;
+
 const checkPositionStatus = async () => {
     try {
         const { position } = await getPositionFromBalance();
@@ -1276,7 +1251,7 @@ const recoverPositionState = async () => {
 const healthCheck = async () => {
     try {
         await initializeExchange();
-        const balance = await safeApiCall(exchange.fetchBalance);
+        const balance = await safeApiCall(exchange.balance);
         const price = await getPrice();
 
         return {
@@ -1346,8 +1321,6 @@ const handleReversalSignal = async (signal) => {
 };
 
 // -------------------- MAIN LOOP --------------------
-let prevPosAmt = 0;
-
 (async () => {
     await initializeExchange();
     
