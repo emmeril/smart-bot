@@ -1,6 +1,6 @@
 require("dotenv").config();
 const fs = require("fs");
-const { SMA, RSI, EMA, ATR } = require("technicalindicators");
+const { SMA, RSI, EMA } = require("technicalindicators");
 
 // -------------------- BINANCE CLIENT --------------------
 const Binance = require('binance-api-node').default;
@@ -218,12 +218,48 @@ const checkSignalConsistency = () => {
     return true;
 };
 
+// -------------------- IMPROVED ATR CALCULATION --------------------
+const calculateATR = (high, low, close, period = 14) => {
+    try {
+        if (high.length < period + 1 || low.length < period + 1 || close.length < period + 1) {
+            console.warn(`⚠️ Insufficient data for ATR calculation. Need ${period + 1} periods, got ${high.length}`);
+            return 0;
+        }
+
+        const trueRanges = [];
+        
+        // Calculate True Range for each period
+        for (let i = 1; i < high.length; i++) {
+            const tr1 = high[i] - low[i]; // Current high - current low
+            const tr2 = Math.abs(high[i] - close[i - 1]); // Current high - previous close
+            const tr3 = Math.abs(low[i] - close[i - 1]); // Current low - previous close
+            
+            const trueRange = Math.max(tr1, tr2, tr3);
+            trueRanges.push(trueRange);
+        }
+
+        // Calculate initial ATR as SMA of first 'period' true ranges
+        let atr = trueRanges.slice(0, period).reduce((sum, tr) => sum + tr, 0) / period;
+
+        // Calculate subsequent ATR values using the formula
+        for (let i = period; i < trueRanges.length; i++) {
+            atr = ((atr * (period - 1)) + trueRanges[i]) / period;
+        }
+
+        console.log(`📊 ATR Calculation: ${atr} (based on ${trueRanges.length} true ranges)`);
+        return atr;
+    } catch (error) {
+        console.error("❌ ATR calculation failed:", error.message);
+        return 0;
+    }
+};
+
 // -------------------- DYNAMIC TRAILING STOP MANAGEMENT --------------------
 const calculateDynamicTrailingParams = (atr, price, volatility, trendStrength) => {
-    // Base parameters berdasarkan ATR
-    const atrPercent = (atr / price) * 100;
+    // Jika ATR = 0, gunakan fallback berdasarkan price
+    const atrPercent = atr > 0 ? (atr / price) * 100 : 0.5; // Fallback 0.5% jika ATR invalid
     
-    // Hitung parameter trailing berdasarkan volatilitas dan kekuatan trend
+    // Base parameters berdasarkan ATR atau fallback
     let activationProfit, trailPercentage, maxTrailDistance;
     
     if (volatility === 'high') {
@@ -983,26 +1019,22 @@ const analyzeEnhancedSignal = async () => {
         });
         const currentRSI = rsi[rsi.length - 1];
 
-        // Calculate ATR untuk volatilitas
-        const atr = ATR.calculate({
-            high: high.slice(-14),
-            low: low.slice(-14),
-            close: close.slice(-14),
-            period: 14
-        });
-        const currentATR = atr[atr.length - 1] || 0;
+        // Calculate ATR menggunakan fungsi manual kita
+        const currentATR = calculateATR(high, low, close, 14);
 
         // Analisa volatilitas berdasarkan ATR
-        const atrPercent = (currentATR / price) * 100;
+        const atrPercent = currentATR > 0 ? (currentATR / price) * 100 : 0.5;
         let volatility = 'medium';
         if (atrPercent > 0.8) volatility = 'high';
         else if (atrPercent < 0.3) volatility = 'low';
 
         // Analisa kekuatan trend
         let trendStrength = 'medium';
-        const priceChange1h = ((price - close[close.length - 12]) / close[close.length - 12]) * 100;
-        if (Math.abs(priceChange1h) > 1.5) trendStrength = 'strong';
-        else if (Math.abs(priceChange1h) < 0.5) trendStrength = 'weak';
+        if (close.length >= 12) {
+            const priceChange1h = ((price - close[close.length - 12]) / close[close.length - 12]) * 100;
+            if (Math.abs(priceChange1h) > 1.5) trendStrength = 'strong';
+            else if (Math.abs(priceChange1h) < 0.5) trendStrength = 'weak';
+        }
 
         // Hitung parameter trailing stop dinamis
         let dynamicTrailingParams = null;
@@ -1098,7 +1130,7 @@ const analyzeEnhancedSignal = async () => {
 ══════════════════════════════════════════════════
 💰 Current Price: ${formatPrice(price)}
 📊 RSI: ${currentRSI ? currentRSI.toFixed(2) : "N/A"}
-📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
+📊 ATR: ${formatPrice(currentATR)} (${atrPercent.toFixed(3)}%)
 📊 Volatility: ${volatility.toUpperCase()}
 📊 Trend Strength: ${trendStrength.toUpperCase()}
 ══════════════════════════════════════════════════
