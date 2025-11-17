@@ -43,17 +43,6 @@ let signalConfirmation = {
     signalsHistory: []
 };
 
-// -------------------- TRAILING STOP SYSTEM --------------------
-let trailingStop = {
-    enabled: false,
-    activationPrice: null,
-    currentStopLoss: null,
-    trailPercentage: 0.5, // 0.5% trailing
-    activated: false,
-    maxTrailDistance: 2.0,
-    activationProfit: 0.8
-};
-
 // -------------------- CONNECTION MANAGEMENT --------------------
 const initializeExchange = async () => {
     try {
@@ -79,7 +68,7 @@ const initializeExchange = async () => {
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
-    fs.writeFileSync(logPath, "timestamp,pair,type,entry,tp,sl,status,pnl,trailing_activated\n");
+    fs.writeFileSync(logPath, "timestamp,pair,type,entry,tp,sl,status,pnl\n");
     console.log("📝 Log file created: log.csv");
 }
 
@@ -107,15 +96,7 @@ const loadDB = () => {
             requiredConfirmations: 2,
             maxConfirmationTime: 300000 // 5 minutes
         },
-        weekendTrading: false, // Default nonaktifkan trading weekend
-        trailingStop: {
-            enabled: true,
-            useDynamicParams: true, // Gunakan parameter dinamis dari analisa
-            // Parameter default jika analisa gagal
-            activationProfit: 0.8,
-            trailPercentage: 0.3,
-            maxTrailDistance: 2.0
-        }
+        weekendTrading: false // Default nonaktifkan trading weekend
     };
 };
 
@@ -218,204 +199,6 @@ const checkSignalConsistency = () => {
     return true;
 };
 
-// -------------------- IMPROVED ATR CALCULATION --------------------
-const calculateATR = (high, low, close, period = 14) => {
-    try {
-        if (high.length < period + 1 || low.length < period + 1 || close.length < period + 1) {
-            console.warn(`⚠️ Insufficient data for ATR calculation. Need ${period + 1} periods, got ${high.length}`);
-            return 0;
-        }
-
-        const trueRanges = [];
-        
-        // Calculate True Range for each period
-        for (let i = 1; i < high.length; i++) {
-            const tr1 = high[i] - low[i]; // Current high - current low
-            const tr2 = Math.abs(high[i] - close[i - 1]); // Current high - previous close
-            const tr3 = Math.abs(low[i] - close[i - 1]); // Current low - previous close
-            
-            const trueRange = Math.max(tr1, tr2, tr3);
-            trueRanges.push(trueRange);
-        }
-
-        // Calculate initial ATR as SMA of first 'period' true ranges
-        let atr = trueRanges.slice(0, period).reduce((sum, tr) => sum + tr, 0) / period;
-
-        // Calculate subsequent ATR values using the formula
-        for (let i = period; i < trueRanges.length; i++) {
-            atr = ((atr * (period - 1)) + trueRanges[i]) / period;
-        }
-
-        console.log(`📊 ATR Calculation: ${atr} (based on ${trueRanges.length} true ranges)`);
-        return atr;
-    } catch (error) {
-        console.error("❌ ATR calculation failed:", error.message);
-        return 0;
-    }
-};
-
-// -------------------- DYNAMIC TRAILING STOP MANAGEMENT --------------------
-const calculateDynamicTrailingParams = (atr, price, volatility, trendStrength) => {
-    // Jika ATR = 0, gunakan fallback berdasarkan price
-    const atrPercent = atr > 0 ? (atr / price) * 100 : 0.5; // Fallback 0.5% jika ATR invalid
-    
-    // Base parameters berdasarkan ATR atau fallback
-    let activationProfit, trailPercentage, maxTrailDistance;
-    
-    if (volatility === 'high') {
-        // Volatilitas tinggi: gunakan trailing yang lebih longgar
-        activationProfit = Math.min(atrPercent * 1.2, 1.5); // Maksimal 1.5%
-        trailPercentage = Math.min(atrPercent * 0.8, 1.0);  // Maksimal 1.0%
-        maxTrailDistance = Math.min(atrPercent * 3, 4.0);   // Maksimal 4.0%
-    } else if (volatility === 'low') {
-        // Volatilitas rendah: gunakan trailing yang ketat
-        activationProfit = Math.max(atrPercent * 0.6, 0.4); // Minimal 0.4%
-        trailPercentage = Math.max(atrPercent * 0.4, 0.2);  // Minimal 0.2%
-        maxTrailDistance = Math.max(atrPercent * 1.5, 1.0); // Minimal 1.0%
-    } else {
-        // Volatilitas medium
-        activationProfit = Math.min(Math.max(atrPercent * 0.8, 0.5), 1.0);
-        trailPercentage = Math.min(Math.max(atrPercent * 0.5, 0.3), 0.7);
-        maxTrailDistance = Math.min(Math.max(atrPercent * 2, 1.5), 3.0);
-    }
-    
-    // Adjust berdasarkan trend strength
-    if (trendStrength === 'strong') {
-        // Trend kuat: beri lebih banyak ruang untuk profit
-        activationProfit *= 1.2;
-        maxTrailDistance *= 1.3;
-    } else if (trendStrength === 'weak') {
-        // Trend lemah: trailing ketat
-        activationProfit *= 0.8;
-        trailPercentage *= 0.9;
-    }
-    
-    // Batasan akhir
-    const finalParams = {
-        activationProfit: Math.min(Math.max(activationProfit, 0.3), 2.0),
-        trailPercentage: Math.min(Math.max(trailPercentage, 0.15), 1.5),
-        maxTrailDistance: Math.min(Math.max(maxTrailDistance, 0.8), 5.0)
-    };
-    
-    console.log(`📊 Dynamic Trailing Params: 
-   Activation: ${finalParams.activationProfit.toFixed(2)}%
-   Trail: ${finalParams.trailPercentage.toFixed(2)}%
-   Max Distance: ${finalParams.maxTrailDistance.toFixed(2)}%
-   ATR%: ${atrPercent.toFixed(3)}%
-   Volatility: ${volatility}
-   Trend: ${trendStrength}`);
-    
-    return finalParams;
-};
-
-const initializeTrailingStop = (entryPrice, initialStopLoss, side, trailingParams = null) => {
-    if (!db.trailingStop.enabled) return;
-    
-    // Gunakan parameter dinamis jika tersedia, else gunakan dari config
-    const params = trailingParams || db.trailingStop;
-    
-    trailingStop = {
-        enabled: true,
-        activationPrice: side === 'buy' ? 
-            entryPrice * (1 + params.activationProfit / 100) :
-            entryPrice * (1 - params.activationProfit / 100),
-        currentStopLoss: initialStopLoss,
-        trailPercentage: params.trailPercentage,
-        activated: false,
-        maxTrailDistance: params.maxTrailDistance,
-        activationProfit: params.activationProfit,
-        highestProfit: side === 'buy' ? entryPrice : entryPrice,
-        lowestPrice: side === 'sell' ? entryPrice : entryPrice,
-        side: side
-    };
-    
-    console.log(`🎯 Trailing Stop Initialized:
-   Activation: ${formatPrice(trailingStop.activationPrice)} (${trailingStop.activationProfit}% profit)
-   Initial SL: ${formatPrice(initialStopLoss)}
-   Trail: ${trailingStop.trailPercentage}%
-   Max Distance: ${trailingStop.maxTrailDistance}%`);
-};
-
-const updateTrailingStop = async (currentPrice) => {
-    if (!trailingStop.enabled || !db.activePosition) return trailingStop.currentStopLoss;
-    
-    const { side, entryPrice } = db.activePosition;
-    
-    // Update highest profit untuk long, lowest price untuk short
-    if (side === 'buy') {
-        if (currentPrice > trailingStop.highestProfit) {
-            trailingStop.highestProfit = currentPrice;
-        }
-        
-        // Aktifkan trailing stop jika harga mencapai activation price
-        if (!trailingStop.activated && currentPrice >= trailingStop.activationPrice) {
-            trailingStop.activated = true;
-            console.log("🎯 TRAILING STOP ACTIVATED!");
-        }
-        
-        // Update stop loss jika trailing sudah aktif
-        if (trailingStop.activated) {
-            const newStopLoss = trailingStop.highestProfit * (1 - trailingStop.trailPercentage / 100);
-            const minStopLoss = entryPrice * (1 - trailingStop.maxTrailDistance / 100);
-            const finalStopLoss = Math.max(newStopLoss, minStopLoss);
-            
-            // Only update if new stop loss is better (higher) than current
-            if (finalStopLoss > trailingStop.currentStopLoss) {
-                trailingStop.currentStopLoss = finalStopLoss;
-                console.log(`📈 Trailing Stop Updated: ${formatPrice(trailingStop.currentStopLoss)}`);
-                
-                // Update di database juga
-                db.activePosition.sl = finalStopLoss;
-                saveDB();
-            }
-        }
-    } else if (side === 'sell') {
-        if (currentPrice < trailingStop.lowestPrice) {
-            trailingStop.lowestPrice = currentPrice;
-        }
-        
-        // Aktifkan trailing stop jika harga mencapai activation price
-        if (!trailingStop.activated && currentPrice <= trailingStop.activationPrice) {
-            trailingStop.activated = true;
-            console.log("🎯 TRAILING STOP ACTIVATED!");
-        }
-        
-        // Update stop loss jika trailing sudah aktif
-        if (trailingStop.activated) {
-            const newStopLoss = trailingStop.lowestPrice * (1 + trailingStop.trailPercentage / 100);
-            const maxStopLoss = entryPrice * (1 + trailingStop.maxTrailDistance / 100);
-            const finalStopLoss = Math.min(newStopLoss, maxStopLoss);
-            
-            // Only update if new stop loss is better (lower) than current
-            if (finalStopLoss < trailingStop.currentStopLoss) {
-                trailingStop.currentStopLoss = finalStopLoss;
-                console.log(`📉 Trailing Stop Updated: ${formatPrice(trailingStop.currentStopLoss)}`);
-                
-                // Update di database juga
-                db.activePosition.sl = finalStopLoss;
-                saveDB();
-            }
-        }
-    }
-    
-    return trailingStop.currentStopLoss;
-};
-
-const resetTrailingStop = () => {
-    trailingStop = {
-        enabled: false,
-        activationPrice: null,
-        currentStopLoss: null,
-        trailPercentage: 0.5,
-        activated: false,
-        maxTrailDistance: 2.0,
-        activationProfit: 0.8,
-        highestProfit: null,
-        lowestPrice: null,
-        side: null
-    };
-};
-
 // -------------------- DYNAMIC POSITION SIZING --------------------
 const calculateDynamicPositionSize = async () => {
     try {
@@ -455,8 +238,7 @@ console.log(`⚙️ Bot Configuration:
 - Margin Mode: ${db.marginMode}
 - Position Sizing: ${db.useDynamicPositionSizing ? `Dynamic (${db.positionSizePercentage}% of balance)` : `Fixed (${db.usdtPerTrade} USDT)`}
 - Signal Confirmation: ${db.signalConfirmation.enabled ? `Enabled (${db.signalConfirmation.requiredConfirmations} confirmations)` : 'Disabled'}
-- Weekend Trading: ${db.weekendTrading ? 'Enabled' : 'Disabled'}
-- Trailing Stop: ${db.trailingStop.enabled ? `Enabled (${db.trailingStop.useDynamicParams ? 'Dynamic Parameters' : 'Fixed Parameters'})` : 'Disabled'}`);
+- Weekend Trading: ${db.weekendTrading ? 'Enabled' : 'Disabled'}`);
 
 // -------------------- STABLE API CALLS --------------------
 const safeApiCall = async (apiFunction, ...args) => {
@@ -553,14 +335,13 @@ const calcQty = async (price) => {
     return qty;
 };
 
-const logSignal = (type, entry, tp, sl, status, pnl = null, trailingActivated = false) => {
+const logSignal = (type, entry, tp, sl, status, pnl = null) => {
     try {
         const entryStr = entry !== undefined && entry !== null ? entry : "";
         const tpStr = tp !== undefined && tp !== null ? tp : "";
         const slStr = sl !== undefined && sl !== null ? sl : "";
         const pnlStr = pnl !== null && isFinite(pnl) ? Number(pnl).toFixed(6) : "";
-        const trailingStr = trailingActivated ? "YES" : "NO";
-        const line = `${new Date().toISOString()},${db.pair},${type},${entryStr},${tpStr},${slStr},${status},${pnlStr},${trailingStr}\n`;
+        const line = `${new Date().toISOString()},${db.pair},${type},${entryStr},${tpStr},${slStr},${status},${pnlStr}\n`;
         fs.appendFileSync(logPath, line);
         console.log("📝 Signal logged to CSV");
     } catch (error) {
@@ -1019,29 +800,6 @@ const analyzeEnhancedSignal = async () => {
         });
         const currentRSI = rsi[rsi.length - 1];
 
-        // Calculate ATR menggunakan fungsi manual kita
-        const currentATR = calculateATR(high, low, close, 14);
-
-        // Analisa volatilitas berdasarkan ATR
-        const atrPercent = currentATR > 0 ? (currentATR / price) * 100 : 0.5;
-        let volatility = 'medium';
-        if (atrPercent > 0.8) volatility = 'high';
-        else if (atrPercent < 0.3) volatility = 'low';
-
-        // Analisa kekuatan trend
-        let trendStrength = 'medium';
-        if (close.length >= 12) {
-            const priceChange1h = ((price - close[close.length - 12]) / close[close.length - 12]) * 100;
-            if (Math.abs(priceChange1h) > 1.5) trendStrength = 'strong';
-            else if (Math.abs(priceChange1h) < 0.5) trendStrength = 'weak';
-        }
-
-        // Hitung parameter trailing stop dinamis
-        let dynamicTrailingParams = null;
-        if (db.trailingStop.useDynamicParams) {
-            dynamicTrailingParams = calculateDynamicTrailingParams(currentATR, price, volatility, trendStrength);
-        }
-
         // SMA Combination Strategy Conditions
         const isBullishAlignment = currentSMA7 > currentSMA25 && currentSMA25 > currentSMA99;
         const isBearishAlignment = currentSMA7 < currentSMA25 && currentSMA25 < currentSMA99;
@@ -1082,6 +840,27 @@ const analyzeEnhancedSignal = async () => {
         canLong = longCondition1 || longCondition2 || longCondition3 || longCondition4;
         canShort = shortCondition1 || shortCondition2 || shortCondition3 || shortCondition4;
 
+        // Calculate ATR for volatility
+        const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
+            const tr = [];
+            for (let i = 1; i < highArr.length; i++) {
+                const tr1 = highArr[i] - lowArr[i];
+                const tr2 = Math.abs(highArr[i] - closeArr[i - 1]);
+                const tr3 = Math.abs(lowArr[i] - closeArr[i - 1]);
+                tr.push(Math.max(tr1, tr2, tr3));
+            }
+
+            const atr = [];
+            for (let i = period - 1; i < tr.length; i++) {
+                const slice = tr.slice(i - period + 1, i + 1);
+                atr.push(slice.reduce((a, b) => a + b) / period);
+            }
+
+            return atr;
+        };
+
+        const currentATR = calculateATR(high, low, close, 14).pop() || 0;
+
         // Enhanced S/R Levels
         const enhancedLevels = findEnhancedLevels(high, low, close, volume, price);
         
@@ -1121,6 +900,7 @@ const analyzeEnhancedSignal = async () => {
         const targetShort = support;
         const stopLossShort = Math.max(resistance, price + (currentATR * 0.8));
 
+        // PERBAIKAN: Definisikan variabel isSMA25Above99 yang hilang
         const isSMA25Above99 = currentSMA25 > currentSMA99;
 
         console.log(`\n🎯 SMA COMBINATION Strategy Results ${db.pair}
@@ -1130,9 +910,6 @@ const analyzeEnhancedSignal = async () => {
 ══════════════════════════════════════════════════
 💰 Current Price: ${formatPrice(price)}
 📊 RSI: ${currentRSI ? currentRSI.toFixed(2) : "N/A"}
-📊 ATR: ${formatPrice(currentATR)} (${atrPercent.toFixed(3)}%)
-📊 Volatility: ${volatility.toUpperCase()}
-📊 Trend Strength: ${trendStrength.toUpperCase()}
 ══════════════════════════════════════════════════
 📈 SMA(7): ${formatPrice(currentSMA7)} ${isSMA7Above25 ? "🟢" : "🔴"} Above SMA25
 📈 SMA(25): ${formatPrice(currentSMA25)} ${isSMA25Above99 ? "🟢" : "🔴"} Above SMA99  
@@ -1144,6 +921,7 @@ const analyzeEnhancedSignal = async () => {
 ══════════════════════════════════════════════════
 🎯 Resistance: ${formatPrice(resistance)} (${((resistance - price) / price * 100).toFixed(3)}%)
 🛡️  Support: ${formatPrice(support)} (${((price - support) / price * 100).toFixed(3)}%)
+📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
 ══════════════════════════════════════════════════
 📊 Volume POC: ${formatPrice(enhancedLevels.volumePOC)}
 🔍 Detected R Levels: ${enhancedLevels.allResistance?.length || 0}
@@ -1176,10 +954,6 @@ const analyzeEnhancedSignal = async () => {
             sma7: currentSMA7,
             sma25: currentSMA25,
             sma99: currentSMA99,
-            atr: currentATR,
-            volatility,
-            trendStrength,
-            trailingParams: dynamicTrailingParams,
             isBullishAlignment,
             isBearishAlignment
         };
@@ -1190,7 +964,7 @@ const analyzeEnhancedSignal = async () => {
 };
 
 // -------------------- ORDER MANAGEMENT --------------------
-const placeOrder = async (side, tp, sl, trailingParams = null) => {
+const placeOrder = async (side, tp, sl) => {
     console.log("🔍 Checking for active positions...");
     if (db.activePosition) {
         console.log("⚠️ Active position exists, order cancelled");
@@ -1254,11 +1028,6 @@ const placeOrder = async (side, tp, sl, trailingParams = null) => {
         };
         saveDB();
 
-        // Initialize trailing stop dengan parameter dinamis
-        if (db.trailingStop.enabled) {
-            initializeTrailingStop(price, sl, side, trailingParams);
-        }
-
         logSignal(
             side === "buy" ? "LONG" : "SHORT",
             price,
@@ -1302,11 +1071,6 @@ const placeOrder = async (side, tp, sl, trailingParams = null) => {
                         orderId: retryOrder.orderId,
                     };
                     saveDB();
-
-                    // Initialize trailing stop untuk adjusted order
-                    if (db.trailingStop.enabled) {
-                        initializeTrailingStop(price, sl, side, trailingParams);
-                    }
 
                     logSignal(
                         side === "buy" ? "LONG" : "SHORT",
@@ -1353,15 +1117,12 @@ const closePosition = async (reason, entryPrice = "N/A") => {
             const exitPrice = await getPrice();
             let pnl = null;
             let statusTag = "CLOSED_MANUAL";
-            let trailingActivated = trailingStop.activated;
 
             const isTP = /TP/i.test(reason);
             const isSL = /SL/i.test(reason);
-            const isTrailing = /TRAILING/i.test(reason);
 
             if (isTP) statusTag = "TP_REALIZED";
             else if (isSL) statusTag = "SL_REALIZED";
-            else if (isTrailing) statusTag = "TRAILING_STOP";
 
             if (entryPrice !== "N/A" && db.activePosition) {
                 const { tp, sl, side: entrySide } = db.activePosition;
@@ -1373,7 +1134,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
                         let exitNum;
                         if (isTP) {
                             exitNum = entrySide === "buy" ? tp : sl;
-                        } else if (isSL || isTrailing) {
+                        } else if (isSL) {
                             exitNum = entrySide === "buy" ? sl : tp;
                         } else if (isFinite(exitPrice)) {
                             exitNum = Number(exitPrice);
@@ -1398,8 +1159,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
                 db.activePosition?.tp ?? "",
                 db.activePosition?.sl ?? "",
                 statusTag,
-                pnl,
-                trailingActivated
+                pnl
             );
         }
     } catch (err) {
@@ -1407,9 +1167,8 @@ const closePosition = async (reason, entryPrice = "N/A") => {
     } finally {
         db.activePosition = null;
         saveDB();
-        // Reset signal confirmation dan trailing stop ketika posisi ditutup
+        // Reset signal confirmation ketika posisi ditutup
         resetSignalConfirmation();
-        resetTrailingStop();
     }
 };
 
@@ -1429,7 +1188,6 @@ const checkPositionStatus = async () => {
             db.activePosition = null;
             saveDB();
             resetSignalConfirmation();
-            resetTrailingStop();
         }
 
         if (db.activePosition && amtSafe !== 0) {
@@ -1437,26 +1195,12 @@ const checkPositionStatus = async () => {
             const currentPrice = await getPrice();
             if (!currentPrice) return;
 
-            // Update trailing stop terlebih dahulu
-            let currentStopLoss = sl;
-            if (db.trailingStop.enabled) {
-                currentStopLoss = await updateTrailingStop(currentPrice);
-            }
-
             if (side === "buy") {
-                if (currentPrice >= tp) {
-                    await closePosition("TP hit", entryPrice);
-                } else if (currentPrice <= currentStopLoss) {
-                    const reason = trailingStop.activated ? "TRAILING STOP hit" : "SL hit";
-                    await closePosition(reason, entryPrice);
-                }
+                if (currentPrice >= tp) await closePosition("TP hit", entryPrice);
+                else if (currentPrice <= sl) await closePosition("SL hit", entryPrice);
             } else if (side === "sell") {
-                if (currentPrice <= tp) {
-                    await closePosition("TP hit", entryPrice);
-                } else if (currentPrice >= currentStopLoss) {
-                    const reason = trailingStop.activated ? "TRAILING STOP hit" : "SL hit";
-                    await closePosition(reason, entryPrice);
-                }
+                if (currentPrice <= tp) await closePosition("TP hit", entryPrice);
+                else if (currentPrice >= sl) await closePosition("SL hit", entryPrice);
             }
         }
 
@@ -1543,18 +1287,12 @@ const recoverPositionState = async () => {
                 recoveredAt: new Date().toISOString()
             };
 
-            // Initialize trailing stop untuk recovered position (gunakan fixed params)
-            if (db.trailingStop.enabled) {
-                initializeTrailingStop(entryPrice, sl, side);
-            }
-
             saveDB();
 
             console.log("✅ Position recovered");
             console.log(`   ${side.toUpperCase()} | Entry: ${formatPrice(entryPrice)}`);
             console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
             console.log(`   RR: ${rrRatio} | Leverage: ${leverage}x`);
-            console.log(`   Trailing Stop: ${db.trailingStop.enabled ? 'Enabled' : 'Disabled'}`);
 
             logSignal(
                 side === "buy" ? "LONG" : "SHORT",
@@ -1581,7 +1319,6 @@ const recoverPositionState = async () => {
             db.activePosition = null;
             saveDB();
             resetSignalConfirmation();
-            resetTrailingStop();
             console.log("✅ Database cleaned");
         }
 
@@ -1594,11 +1331,6 @@ const recoverPositionState = async () => {
 
                 let status = "🟢 NORMAL";
                 let warning = "";
-                let trailingInfo = "";
-
-                if (trailingStop.activated) {
-                    trailingInfo = " | 🎯 TRAILING ACTIVE";
-                }
 
                 if (side === "buy") {
                     if (currentPrice >= tp * 0.998) {
@@ -1621,12 +1353,9 @@ const recoverPositionState = async () => {
                 const pnlEmoji = unrealizedPnl >= 0 ? "💹" : "🔻";
 
                 console.log("\n📊 Position Monitor");
-                console.log(`   ${side.toUpperCase()} | ${status}${warning}${trailingInfo}`);
+                console.log(`   ${side.toUpperCase()} | ${status}${warning}`);
                 console.log(`   Entry: ${formatPrice(entryPrice)} | Current: ${formatPrice(currentPrice)}`);
                 console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
-                if (trailingStop.activated) {
-                    console.log(`   🎯 Trailing SL: ${formatPrice(trailingStop.currentStopLoss)}`);
-                }
                 console.log(`   ${pnlEmoji} PnL: ${formatPrice(unrealizedPnl)} (${pnlPercent}%)`);
             }
         }
@@ -1720,7 +1449,6 @@ const handleReversalSignal = async (signal) => {
     console.log(`📊 Initial Position Size: ${initialPositionSize.toFixed(2)} USDT`);
     
     console.log("\n🚀 Bot started with SMA COMBINATION STRATEGY (7, 25, 99)");
-    console.log("🎯 Dynamic Trailing Stop: ENABLED - Parameters from technical analysis");
 })();
 
 setInterval(async () => {
@@ -1747,8 +1475,7 @@ setInterval(async () => {
         db.useDynamicPositionSizing = freshDb.useDynamicPositionSizing;
         db.positionSizePercentage = freshDb.positionSizePercentage;
         db.signalConfirmation = freshDb.signalConfirmation;
-        db.weekendTrading = freshDb.weekendTrading;
-        db.trailingStop = freshDb.trailingStop;
+        db.weekendTrading = freshDb.weekendTrading; // Load weekend trading setting
     } catch (error) {
         // Use existing config on error
     }
@@ -1797,7 +1524,7 @@ setInterval(async () => {
                     console.log(`🚀 LONG Signal | TP: ${formatPrice(signal.targetLong)} | SL: ${formatPrice(signal.stopLossLong)}`);
                     db.lastLongEntryTime = now;
                     saveDB();
-                    await placeOrder("buy", signal.targetLong, signal.stopLossLong, signal.trailingParams);
+                    await placeOrder("buy", signal.targetLong, signal.stopLossLong);
                 } else {
                     console.log(`⏸️ LONG Signal: Breakout detected, skipping`);
                 }
@@ -1807,7 +1534,7 @@ setInterval(async () => {
                     console.log(`📉 SHORT Signal | TP: ${formatPrice(signal.targetShort)} | SL: ${formatPrice(signal.stopLossShort)}`);
                     db.lastShortEntryTime = now;
                     saveDB();
-                    await placeOrder("sell", signal.targetShort, signal.stopLossShort, signal.trailingParams);
+                    await placeOrder("sell", signal.targetShort, signal.stopLossShort);
                 } else {
                     console.log(`⏸️ SHORT Signal: Breakout detected, skipping`);
                 }
@@ -1825,12 +1552,6 @@ setInterval(async () => {
             // Display signal confirmation status jika aktif
             if (signalConfirmation.pendingReversal) {
                 console.log(`🔄 Signal Confirmation: ${signalConfirmation.confirmationCount}/${signalConfirmation.requiredConfirmations} for ${signalConfirmation.reversalDirection.toUpperCase()}`);
-            }
-
-            // Display trailing stop status
-            if (trailingStop.enabled && db.activePosition) {
-                console.log(`🎯 Trailing Stop: ${trailingStop.activated ? 'ACTIVE' : 'WAITING'} | Current SL: ${formatPrice(trailingStop.currentStopLoss)}`);
-                console.log(`   Activation: ${trailingStop.activationProfit}% | Trail: ${trailingStop.trailPercentage}% | Max: ${trailingStop.maxTrailDistance}%`);
             }
 
             // Tampilkan status weekend trading
