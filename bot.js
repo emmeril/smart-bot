@@ -1,6 +1,6 @@
 require("dotenv").config();
 const fs = require("fs");
-const { SMA, RSI, EMA } = require("technicalindicators");
+const { SMA, RSI, EMA, ATR } = require("technicalindicators");
 
 // -------------------- BINANCE CLIENT --------------------
 const Binance = require('binance-api-node').default;
@@ -77,7 +77,7 @@ const initializeExchange = async () => {
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
-    fs.writeFileSync(logPath, "timestamp,pair,type,entry,tp,sl,status,pnl,trailing_activated\n");
+    fs.writeFileSync(logPath, "timestamp,pair,type,entry,tp,sl,status,pnl,trailing_activated,rr_ratio\n");
     console.log("📝 Log file created: log.csv");
 }
 
@@ -111,6 +111,14 @@ const loadDB = () => {
             activationProfit: 0.8, // Aktifkan trailing setelah profit 0.8%
             trailPercentage: 0.3, // Trail 0.3% dari highest profit
             maxTrailDistance: 2.0 // Maksimal trail distance 2%
+        },
+        riskManagement: {
+            maxRiskPerTrade: 1.5, // Maksimal risk 1.5% per trade
+            minRewardRiskRatio: 1.5, // Minimal reward:risk ratio 1.5
+            useATRforSL: true, // Gunakan ATR untuk stop loss
+            atrMultiplier: 1.8, // Multiplier ATR untuk SL
+            useSupportResistance: true, // Gunakan S/R levels untuk TP/SL
+            dynamicPositionSizing: true // Position sizing berdasarkan risk
         }
     };
 };
@@ -348,6 +356,117 @@ const calculateDynamicPositionSize = async () => {
     }
 };
 
+// -------------------- OPTIMIZED TP/SL CALCULATION --------------------
+const calculateOptimalTP_SL = (signal, side, currentPrice) => {
+    const { atr, enhancedLevels, isBullishAlignment, isBearishAlignment } = signal;
+    
+    let stopLoss, takeProfit;
+    let riskRewardRatio = 0;
+    
+    // Gunakan ATR untuk menentukan stop loss yang realistis
+    const atrBasedSL = atr * db.riskManagement.atrMultiplier;
+    
+    if (side === 'buy') {
+        // Stop Loss: harga terendah antara support terdekat dan ATR-based SL
+        const supportBasedSL = enhancedLevels.support;
+        stopLoss = Math.min(supportBasedSL, currentPrice - atrBasedSL);
+        
+        // Pastikan SL tidak terlalu ketat (minimal 0.5% dari current price)
+        const minSLDistance = currentPrice * 0.005;
+        if (currentPrice - stopLoss < minSLDistance) {
+            stopLoss = currentPrice - minSLDistance;
+        }
+        
+        // Take Profit: resistance terdekat atau berdasarkan risk-reward ratio
+        const resistanceBasedTP = enhancedLevels.resistance;
+        const rrBasedTP = currentPrice + (currentPrice - stopLoss) * db.riskManagement.minRewardRiskRatio;
+        
+        takeProfit = Math.min(resistanceBasedTP, rrBasedTP);
+        
+        // Jika trend bullish kuat, beri TP lebih tinggi
+        if (isBullishAlignment) {
+            takeProfit = takeProfit * 1.02; // Tambah 2% untuk trend kuat
+        }
+        
+    } else { // side === 'sell'
+        // Stop Loss: harga tertinggi antara resistance terdekat dan ATR-based SL
+        const resistanceBasedSL = enhancedLevels.resistance;
+        stopLoss = Math.max(resistanceBasedSL, currentPrice + atrBasedSL);
+        
+        // Pastikan SL tidak terlalu ketat (minimal 0.5% dari current price)
+        const minSLDistance = currentPrice * 0.005;
+        if (stopLoss - currentPrice < minSLDistance) {
+            stopLoss = currentPrice + minSLDistance;
+        }
+        
+        // Take Profit: support terdekat atau berdasarkan risk-reward ratio
+        const supportBasedTP = enhancedLevels.support;
+        const rrBasedTP = currentPrice - (stopLoss - currentPrice) * db.riskManagement.minRewardRiskRatio;
+        
+        takeProfit = Math.max(supportBasedTP, rrBasedTP);
+        
+        // Jika trend bearish kuat, beri TP lebih rendah
+        if (isBearishAlignment) {
+            takeProfit = takeProfit * 0.98; // Kurang 2% untuk trend kuat
+        }
+    }
+    
+    // Calculate actual risk-reward ratio
+    if (side === 'buy') {
+        riskRewardRatio = (takeProfit - currentPrice) / (currentPrice - stopLoss);
+    } else {
+        riskRewardRatio = (currentPrice - takeProfit) / (stopLoss - currentPrice);
+    }
+    
+    // Validasi RR ratio minimal
+    if (riskRewardRatio < db.riskManagement.minRewardRiskRatio) {
+        console.log(`⚠️ RR Ratio too low: ${riskRewardRatio.toFixed(2)}, adjusting...`);
+        
+        if (side === 'buy') {
+            takeProfit = currentPrice + (currentPrice - stopLoss) * db.riskManagement.minRewardRiskRatio;
+        } else {
+            takeProfit = currentPrice - (stopLoss - currentPrice) * db.riskManagement.minRewardRiskRatio;
+        }
+        
+        // Recalculate RR ratio setelah adjustment
+        if (side === 'buy') {
+            riskRewardRatio = (takeProfit - currentPrice) / (currentPrice - stopLoss);
+        } else {
+            riskRewardRatio = (currentPrice - takeProfit) / (stopLoss - currentPrice);
+        }
+    }
+    
+    // Final validation - pastikan TP dan SL realistic
+    if (side === 'buy') {
+        if (takeProfit <= currentPrice) {
+            takeProfit = currentPrice * 1.015; // Fallback 1.5%
+        }
+        if (stopLoss >= currentPrice) {
+            stopLoss = currentPrice * 0.985; // Fallback 1.5%
+        }
+    } else {
+        if (takeProfit >= currentPrice) {
+            takeProfit = currentPrice * 0.985; // Fallback 1.5%
+        }
+        if (stopLoss <= currentPrice) {
+            stopLoss = currentPrice * 1.015; // Fallback 1.5%
+        }
+    }
+    
+    console.log(`🎯 Optimized ${side.toUpperCase()} Levels:
+   Entry: ${formatPrice(currentPrice)}
+   TP: ${formatPrice(takeProfit)} (${((takeProfit - currentPrice) / currentPrice * 100).toFixed(2)}%)
+   SL: ${formatPrice(stopLoss)} (${Math.abs((stopLoss - currentPrice) / currentPrice * 100).toFixed(2)}%)
+   RR Ratio: ${riskRewardRatio.toFixed(2)}:1
+   ATR: ${formatPrice(atr)} (${(atr/currentPrice*100).toFixed(2)}%)`);
+    
+    return {
+        tp: takeProfit,
+        sl: stopLoss,
+        rrRatio: riskRewardRatio
+    };
+};
+
 console.log(`⚙️ Bot Configuration:
 - Pair: ${db.pair}
 - Leverage: ${db.leverage}x
@@ -355,7 +474,8 @@ console.log(`⚙️ Bot Configuration:
 - Position Sizing: ${db.useDynamicPositionSizing ? `Dynamic (${db.positionSizePercentage}% of balance)` : `Fixed (${db.usdtPerTrade} USDT)`}
 - Signal Confirmation: ${db.signalConfirmation.enabled ? `Enabled (${db.signalConfirmation.requiredConfirmations} confirmations)` : 'Disabled'}
 - Weekend Trading: ${db.weekendTrading ? 'Enabled' : 'Disabled'}
-- Trailing Stop: ${db.trailingStop.enabled ? `Enabled (Activation: ${db.trailingStop.activationProfit}%, Trail: ${db.trailingStop.trailPercentage}%)` : 'Disabled'}`);
+- Trailing Stop: ${db.trailingStop.enabled ? `Enabled (Activation: ${db.trailingStop.activationProfit}%, Trail: ${db.trailingStop.trailPercentage}%)` : 'Disabled'}
+- Risk Management: Max Risk ${db.riskManagement.maxRiskPerTrade}%, Min RR ${db.riskManagement.minRewardRiskRatio}:1`);
 
 // -------------------- STABLE API CALLS --------------------
 const safeApiCall = async (apiFunction, ...args) => {
@@ -432,15 +552,32 @@ const getPrice = async () => {
     }
 };
 
-const calcQty = async (price) => {
+const calcQty = async (price, stopLoss, side) => {
     if (!price) return 0;
     
     const currentUsdtPerTrade = await calculateDynamicPositionSize();
     
-    let qty = currentUsdtPerTrade / price;
+    // Calculate position size based on risk management
+    let riskAmount = currentUsdtPerTrade * (db.riskManagement.maxRiskPerTrade / 100);
+    
+    // Calculate position size based on stop loss distance
+    let priceDifference;
+    if (side === 'buy') {
+        priceDifference = price - stopLoss;
+    } else {
+        priceDifference = stopLoss - price;
+    }
+    
+    const riskPerUnit = priceDifference;
+    let calculatedQty = riskAmount / riskPerUnit;
+    
+    // Fallback jika perhitungan risk-based tidak valid
+    if (!isFinite(calculatedQty) || calculatedQty <= 0) {
+        calculatedQty = currentUsdtPerTrade / price;
+    }
     
     // Format quantity sesuai precision symbol
-    qty = formatQuantity(qty);
+    let qty = formatQuantity(calculatedQty);
     
     // Validasi minimum quantity
     if (qty <= 0) {
@@ -448,18 +585,19 @@ const calcQty = async (price) => {
         return 0;
     }
     
-    console.log(`📐 Quantity: ${qty} (${currentUsdtPerTrade.toFixed(2)} USDT)`);
+    console.log(`📐 Risk-Based Quantity: ${qty} (Risk: ${riskAmount.toFixed(2)} USDT, ${db.riskManagement.maxRiskPerTrade}% of ${currentUsdtPerTrade.toFixed(2)} USDT)`);
     return qty;
 };
 
-const logSignal = (type, entry, tp, sl, status, pnl = null, trailingActivated = false) => {
+const logSignal = (type, entry, tp, sl, status, pnl = null, trailingActivated = false, rrRatio = null) => {
     try {
         const entryStr = entry !== undefined && entry !== null ? entry : "";
         const tpStr = tp !== undefined && tp !== null ? tp : "";
         const slStr = sl !== undefined && sl !== null ? sl : "";
         const pnlStr = pnl !== null && isFinite(pnl) ? Number(pnl).toFixed(6) : "";
         const trailingStr = trailingActivated ? "YES" : "NO";
-        const line = `${new Date().toISOString()},${db.pair},${type},${entryStr},${tpStr},${slStr},${status},${pnlStr},${trailingStr}\n`;
+        const rrStr = rrRatio !== null && isFinite(rrRatio) ? rrRatio.toFixed(2) : "";
+        const line = `${new Date().toISOString()},${db.pair},${type},${entryStr},${tpStr},${slStr},${status},${pnlStr},${trailingStr},${rrStr}\n`;
         fs.appendFileSync(logPath, line);
         console.log("📝 Signal logged to CSV");
     } catch (error) {
@@ -918,6 +1056,15 @@ const analyzeEnhancedSignal = async () => {
         });
         const currentRSI = rsi[rsi.length - 1];
 
+        // Calculate ATR untuk volatility-based TP/SL
+        const atr = ATR.calculate({
+            high: high.slice(-30),
+            low: low.slice(-30),
+            close: close.slice(-30),
+            period: 14
+        });
+        const currentATR = atr[atr.length - 1] || 0;
+
         // SMA Combination Strategy Conditions
         const isBullishAlignment = currentSMA7 > currentSMA25 && currentSMA25 > currentSMA99;
         const isBearishAlignment = currentSMA7 < currentSMA25 && currentSMA25 < currentSMA99;
@@ -958,67 +1105,22 @@ const analyzeEnhancedSignal = async () => {
         canLong = longCondition1 || longCondition2 || longCondition3 || longCondition4;
         canShort = shortCondition1 || shortCondition2 || shortCondition3 || shortCondition4;
 
-        // Calculate ATR for volatility
-        const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
-            const tr = [];
-            for (let i = 1; i < highArr.length; i++) {
-                const tr1 = highArr[i] - lowArr[i];
-                const tr2 = Math.abs(highArr[i] - closeArr[i - 1]);
-                const tr3 = Math.abs(lowArr[i] - closeArr[i - 1]);
-                tr.push(Math.max(tr1, tr2, tr3));
-            }
-
-            const atr = [];
-            for (let i = period - 1; i < tr.length; i++) {
-                const slice = tr.slice(i - period + 1, i + 1);
-                atr.push(slice.reduce((a, b) => a + b) / period);
-            }
-
-            return atr;
-        };
-
-        const currentATR = calculateATR(high, low, close, 14).pop() || 0;
-
         // Enhanced S/R Levels
         const enhancedLevels = findEnhancedLevels(high, low, close, volume, price);
         
-        let resistance = enhancedLevels.resistance;
-        let support = enhancedLevels.support;
+        // Calculate optimal TP/SL menggunakan metode baru
+        const longLevels = calculateOptimalTP_SL(
+            { atr: currentATR, enhancedLevels, isBullishAlignment, isBearishAlignment }, 
+            'buy', 
+            price
+        );
+        
+        const shortLevels = calculateOptimalTP_SL(
+            { atr: currentATR, enhancedLevels, isBullishAlignment, isBearishAlignment }, 
+            'sell', 
+            price
+        );
 
-        if (!resistance || !support) {
-            console.log("🔄 Enhanced S/R detection failed, using dynamic fallback...");
-            const recentHigh = Math.max(...high.slice(-50));
-            const recentLow = Math.min(...low.slice(-50));
-            
-            resistance = recentHigh + (currentATR * 0.3);
-            support = recentLow - (currentATR * 0.3);
-        }
-
-        // Ensure minimum and maximum distances
-        const minDistance = currentATR * 0.6;
-        const maxDistance = currentATR * 2.5;
-
-        if (resistance - price < minDistance) {
-            resistance = price + minDistance;
-        }
-        if (price - support < minDistance) {
-            support = price - minDistance;
-        }
-
-        if (resistance - price > maxDistance) {
-            resistance = price + maxDistance;
-        }
-        if (price - support > maxDistance) {
-            support = price - maxDistance;
-        }
-
-        // Calculate targets
-        const targetLong = resistance;
-        const stopLossLong = Math.min(support, price - (currentATR * 0.8));
-        const targetShort = support;
-        const stopLossShort = Math.max(resistance, price + (currentATR * 0.8));
-
-        // PERBAIKAN: Definisikan variabel isSMA25Above99 yang hilang
         const isSMA25Above99 = currentSMA25 > currentSMA99;
 
         console.log(`\n🎯 SMA COMBINATION Strategy Results ${db.pair}
@@ -1028,6 +1130,7 @@ const analyzeEnhancedSignal = async () => {
 ══════════════════════════════════════════════════
 💰 Current Price: ${formatPrice(price)}
 📊 RSI: ${currentRSI ? currentRSI.toFixed(2) : "N/A"}
+📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
 ══════════════════════════════════════════════════
 📈 SMA(7): ${formatPrice(currentSMA7)} ${isSMA7Above25 ? "🟢" : "🔴"} Above SMA25
 📈 SMA(25): ${formatPrice(currentSMA25)} ${isSMA25Above99 ? "🟢" : "🔴"} Above SMA99  
@@ -1037,9 +1140,8 @@ const analyzeEnhancedSignal = async () => {
 🎯 Crossovers: ${isSMA7CrossAbove25 ? "SMA7↑25" : isSMA7CrossBelow25 ? "SMA7↓25" : "NONE"}
                  ${isSMA25CrossAbove99 ? "SMA25↑99" : isSMA25CrossBelow99 ? "SMA25↓99" : "NONE"}
 ══════════════════════════════════════════════════
-🎯 Resistance: ${formatPrice(resistance)} (${((resistance - price) / price * 100).toFixed(3)}%)
-🛡️  Support: ${formatPrice(support)} (${((price - support) / price * 100).toFixed(3)}%)
-📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
+🎯 LONG TP: ${formatPrice(longLevels.tp)} | SL: ${formatPrice(longLevels.sl)} | RR: ${longLevels.rrRatio.toFixed(2)}:1
+🎯 SHORT TP: ${formatPrice(shortLevels.tp)} | SL: ${formatPrice(shortLevels.sl)} | RR: ${shortLevels.rrRatio.toFixed(2)}:1
 ══════════════════════════════════════════════════
 📊 Volume POC: ${formatPrice(enhancedLevels.volumePOC)}
 🔍 Detected R Levels: ${enhancedLevels.allResistance?.length || 0}
@@ -1062,10 +1164,10 @@ const analyzeEnhancedSignal = async () => {
         return {
             canLong,
             canShort,
-            targetLong,
-            stopLossLong,
-            targetShort,
-            stopLossShort,
+            targetLong: longLevels.tp,
+            stopLossLong: longLevels.sl,
+            targetShort: shortLevels.tp,
+            stopLossShort: shortLevels.sl,
             price,
             enhancedLevels,
             rsi: currentRSI,
@@ -1073,7 +1175,10 @@ const analyzeEnhancedSignal = async () => {
             sma25: currentSMA25,
             sma99: currentSMA99,
             isBullishAlignment,
-            isBearishAlignment
+            isBearishAlignment,
+            atr: currentATR,
+            rrRatioLong: longLevels.rrRatio,
+            rrRatioShort: shortLevels.rrRatio
         };
     } catch (error) {
         console.error("❌ SMA Combination analysis failed:", error.message);
@@ -1082,7 +1187,7 @@ const analyzeEnhancedSignal = async () => {
 };
 
 // -------------------- ORDER MANAGEMENT --------------------
-const placeOrder = async (side, tp, sl) => {
+const placeOrder = async (side, tp, sl, rrRatio) => {
     console.log("🔍 Checking for active positions...");
     if (db.activePosition) {
         console.log("⚠️ Active position exists, order cancelled");
@@ -1106,7 +1211,7 @@ const placeOrder = async (side, tp, sl) => {
         return;
     }
 
-    const qty = await calcQty(price);
+    const qty = await calcQty(price, sl, side);
     if (qty <= 0) {
         console.log("❌ Invalid quantity, order cancelled");
         return;
@@ -1116,7 +1221,8 @@ const placeOrder = async (side, tp, sl) => {
 - Quantity: ${qty}
 - Entry: ${formatPrice(price)}
 - TP: ${formatPrice(tp)}
-- SL: ${formatPrice(sl)}`);
+- SL: ${formatPrice(sl)}
+- RR Ratio: ${rrRatio.toFixed(2)}:1`);
 
     try {
         await setLeverage(db.leverage, db.pair);
@@ -1143,6 +1249,7 @@ const placeOrder = async (side, tp, sl) => {
             tp: tp,
             sl: sl,
             orderId: order.orderId,
+            rrRatio: rrRatio
         };
         saveDB();
 
@@ -1156,7 +1263,10 @@ const placeOrder = async (side, tp, sl) => {
             price,
             tp,
             sl,
-            "ORDER_PLACED"
+            "ORDER_PLACED",
+            null,
+            false,
+            rrRatio
         );
     } catch (err) {
         console.error("❌ Order failed:", err.message);
@@ -1192,6 +1302,7 @@ const placeOrder = async (side, tp, sl) => {
                         tp: tp,
                         sl: sl,
                         orderId: retryOrder.orderId,
+                        rrRatio: rrRatio
                     };
                     saveDB();
 
@@ -1205,7 +1316,10 @@ const placeOrder = async (side, tp, sl) => {
                         price,
                         tp,
                         sl,
-                        "ORDER_PLACED_ADJUSTED"
+                        "ORDER_PLACED_ADJUSTED",
+                        null,
+                        false,
+                        rrRatio
                     );
                     break;
                 } catch (retryError) {
@@ -1246,6 +1360,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
             let pnl = null;
             let statusTag = "CLOSED_MANUAL";
             let trailingActivated = trailingStop.activated;
+            let rrRatio = db.activePosition?.rrRatio || null;
 
             const isTP = /TP/i.test(reason);
             const isSL = /SL/i.test(reason);
@@ -1291,7 +1406,8 @@ const closePosition = async (reason, entryPrice = "N/A") => {
                 db.activePosition?.sl ?? "",
                 statusTag,
                 pnl,
-                trailingActivated
+                trailingActivated,
+                rrRatio
             );
         }
     } catch (err) {
@@ -1379,7 +1495,7 @@ const recoverPositionState = async () => {
             const leverage = position?.leverage || db.leverage;
 
             const signal = await analyzeEnhancedSignal();
-            let tp, sl;
+            let tp, sl, rrRatio;
 
             if (!signal || !signal.price) {
                 console.log("⚠️ Using fallback TP/SL");
@@ -1390,13 +1506,16 @@ const recoverPositionState = async () => {
                     tp = entryPrice * 0.985;
                     sl = entryPrice * 1.005;
                 }
+                rrRatio = 1.5;
             } else {
                 if (side === "buy") {
                     tp = signal.targetLong || (entryPrice * 1.015);
                     sl = signal.stopLossLong || (entryPrice * 0.995);
+                    rrRatio = signal.rrRatioLong || 1.5;
                 } else {
                     tp = signal.targetShort || (entryPrice * 0.985);
                     sl = signal.stopLossShort || (entryPrice * 1.005);
+                    rrRatio = signal.rrRatioShort || 1.5;
                 }
             }
 
@@ -1417,7 +1536,7 @@ const recoverPositionState = async () => {
                 if (sl <= entryPrice) sl = entryPrice * 1.005;
             }
 
-            let rrRatio;
+            // Recalculate RR ratio untuk recovered position
             if (side === "buy") {
                 rrRatio = ((tp - entryPrice) / (entryPrice - sl)).toFixed(2);
             } else {
@@ -1453,7 +1572,10 @@ const recoverPositionState = async () => {
                 entryPrice,
                 tp,
                 sl,
-                "POSITION_RECOVERED"
+                "POSITION_RECOVERED",
+                null,
+                false,
+                rrRatio
             );
         }
 
@@ -1461,13 +1583,17 @@ const recoverPositionState = async () => {
             console.log("⚠️ Position cleanup needed");
 
             const side = db.activePosition.side === "buy" ? "LONG" : "SHORT";
+            const rrRatio = db.activePosition.rrRatio || null;
 
             logSignal(
                 side,
                 db.activePosition.entryPrice,
                 db.activePosition.tp,
                 db.activePosition.sl,
-                "CLOSED_EXTERNALLY"
+                "CLOSED_EXTERNALLY",
+                null,
+                false,
+                rrRatio
             );
 
             db.activePosition = null;
@@ -1480,7 +1606,7 @@ const recoverPositionState = async () => {
         if (db.activePosition && Math.abs(amtSafe) > MIN_POSITION_AMOUNT) {
             const currentPrice = await getPrice();
             if (currentPrice) {
-                const { side, entryPrice, tp, sl } = db.activePosition;
+                const { side, entryPrice, tp, sl, rrRatio } = db.activePosition;
                 const unrealizedPnl = side === "buy" ? currentPrice - entryPrice : entryPrice - currentPrice;
                 const pnlPercent = (unrealizedPnl / entryPrice * 100).toFixed(2);
 
@@ -1516,6 +1642,7 @@ const recoverPositionState = async () => {
                 console.log(`   ${side.toUpperCase()} | ${status}${warning}${trailingInfo}`);
                 console.log(`   Entry: ${formatPrice(entryPrice)} | Current: ${formatPrice(currentPrice)}`);
                 console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
+                console.log(`   RR Ratio: ${rrRatio ? rrRatio.toFixed(2) + ':1' : 'N/A'}`);
                 if (trailingStop.activated) {
                     console.log(`   🎯 Trailing SL: ${formatPrice(trailingStop.currentStopLoss)}`);
                 }
@@ -1611,7 +1738,8 @@ const handleReversalSignal = async (signal) => {
     const initialPositionSize = await calculateDynamicPositionSize();
     console.log(`📊 Initial Position Size: ${initialPositionSize.toFixed(2)} USDT`);
     
-    console.log("\n🚀 Bot started with SMA COMBINATION STRATEGY (7, 25, 99)");
+    console.log("\n🚀 Bot started with OPTIMIZED SMA COMBINATION STRATEGY");
+    console.log("🎯 Using REALISTIC TP/SL with ATR, Support/Resistance, and Risk Management");
 })();
 
 setInterval(async () => {
@@ -1638,8 +1766,9 @@ setInterval(async () => {
         db.useDynamicPositionSizing = freshDb.useDynamicPositionSizing;
         db.positionSizePercentage = freshDb.positionSizePercentage;
         db.signalConfirmation = freshDb.signalConfirmation;
-        db.weekendTrading = freshDb.weekendTrading; // Load weekend trading setting
-        db.trailingStop = freshDb.trailingStop; // Load trailing stop setting
+        db.weekendTrading = freshDb.weekendTrading;
+        db.trailingStop = freshDb.trailingStop;
+        db.riskManagement = freshDb.riskManagement;
     } catch (error) {
         // Use existing config on error
     }
@@ -1685,20 +1814,20 @@ setInterval(async () => {
             if (signal.canLong) {
                 const isLongBreakout = signal.price > signal.targetLong;
                 if (!isLongBreakout) {
-                    console.log(`🚀 LONG Signal | TP: ${formatPrice(signal.targetLong)} | SL: ${formatPrice(signal.stopLossLong)}`);
+                    console.log(`🚀 LONG Signal | TP: ${formatPrice(signal.targetLong)} | SL: ${formatPrice(signal.stopLossLong)} | RR: ${signal.rrRatioLong.toFixed(2)}:1`);
                     db.lastLongEntryTime = now;
                     saveDB();
-                    await placeOrder("buy", signal.targetLong, signal.stopLossLong);
+                    await placeOrder("buy", signal.targetLong, signal.stopLossLong, signal.rrRatioLong);
                 } else {
                     console.log(`⏸️ LONG Signal: Breakout detected, skipping`);
                 }
             } else if (signal.canShort) {
                 const isShortBreakout = signal.price < signal.targetShort;
                 if (!isShortBreakout) {
-                    console.log(`📉 SHORT Signal | TP: ${formatPrice(signal.targetShort)} | SL: ${formatPrice(signal.stopLossShort)}`);
+                    console.log(`📉 SHORT Signal | TP: ${formatPrice(signal.targetShort)} | SL: ${formatPrice(signal.stopLossShort)} | RR: ${signal.rrRatioShort.toFixed(2)}:1`);
                     db.lastShortEntryTime = now;
                     saveDB();
-                    await placeOrder("sell", signal.targetShort, signal.stopLossShort);
+                    await placeOrder("sell", signal.targetShort, signal.stopLossShort, signal.rrRatioShort);
                 } else {
                     console.log(`⏸️ SHORT Signal: Breakout detected, skipping`);
                 }
@@ -1727,6 +1856,9 @@ setInterval(async () => {
             const dayNames = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
             const today = new Date().getUTCDay();
             console.log(`📅 Hari ini: ${dayNames[today]} | Weekend Trading: ${db.weekendTrading ? 'Aktif' : 'Nonaktif'}`);
+            
+            // Tampilkan risk management status
+            console.log(`⚡ Risk Management: Max Risk ${db.riskManagement.maxRiskPerTrade}% | Min RR ${db.riskManagement.minRewardRiskRatio}:1 | ATR Multiplier ${db.riskManagement.atrMultiplier}`);
         }
     } catch (err) {
         console.error("⚠️ Main loop error:", err.message);
