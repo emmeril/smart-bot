@@ -43,6 +43,15 @@ let signalConfirmation = {
     signalsHistory: []
 };
 
+// -------------------- TRAILING STOP SYSTEM --------------------
+let trailingStop = {
+    enabled: false,
+    activationPrice: null,
+    currentStopLoss: null,
+    trailPercentage: 0.5, // 0.5% trailing
+    activated: false
+};
+
 // -------------------- CONNECTION MANAGEMENT --------------------
 const initializeExchange = async () => {
     try {
@@ -68,7 +77,7 @@ const initializeExchange = async () => {
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
-    fs.writeFileSync(logPath, "timestamp,pair,type,entry,tp,sl,status,pnl\n");
+    fs.writeFileSync(logPath, "timestamp,pair,type,entry,tp,sl,status,pnl,trailing_activated\n");
     console.log("📝 Log file created: log.csv");
 }
 
@@ -96,7 +105,13 @@ const loadDB = () => {
             requiredConfirmations: 2,
             maxConfirmationTime: 300000 // 5 minutes
         },
-        weekendTrading: false // Default nonaktifkan trading weekend
+        weekendTrading: false, // Default nonaktifkan trading weekend
+        trailingStop: {
+            enabled: true, // Enable trailing stop by default
+            activationProfit: 0.8, // Aktifkan trailing setelah profit 0.8%
+            trailPercentage: 0.3, // Trail 0.3% dari highest profit
+            maxTrailDistance: 2.0 // Maksimal trail distance 2%
+        }
     };
 };
 
@@ -199,6 +214,107 @@ const checkSignalConsistency = () => {
     return true;
 };
 
+// -------------------- TRAILING STOP MANAGEMENT --------------------
+const initializeTrailingStop = (entryPrice, initialStopLoss, side) => {
+    if (!db.trailingStop.enabled) return;
+    
+    trailingStop = {
+        enabled: true,
+        activationPrice: side === 'buy' ? 
+            entryPrice * (1 + db.trailingStop.activationProfit / 100) :
+            entryPrice * (1 - db.trailingStop.activationProfit / 100),
+        currentStopLoss: initialStopLoss,
+        trailPercentage: db.trailingStop.trailPercentage,
+        activated: false,
+        highestProfit: side === 'buy' ? entryPrice : entryPrice,
+        lowestPrice: side === 'sell' ? entryPrice : entryPrice,
+        side: side
+    };
+    
+    console.log(`🎯 Trailing Stop Initialized:
+   Activation: ${formatPrice(trailingStop.activationPrice)} (${db.trailingStop.activationProfit}% profit)
+   Initial SL: ${formatPrice(initialStopLoss)}
+   Trail: ${db.trailingStop.trailPercentage}%`);
+};
+
+const updateTrailingStop = async (currentPrice) => {
+    if (!trailingStop.enabled || !db.activePosition) return trailingStop.currentStopLoss;
+    
+    const { side, entryPrice } = db.activePosition;
+    
+    // Update highest profit untuk long, lowest price untuk short
+    if (side === 'buy') {
+        if (currentPrice > trailingStop.highestProfit) {
+            trailingStop.highestProfit = currentPrice;
+        }
+        
+        // Aktifkan trailing stop jika harga mencapai activation price
+        if (!trailingStop.activated && currentPrice >= trailingStop.activationPrice) {
+            trailingStop.activated = true;
+            console.log("🎯 TRAILING STOP ACTIVATED!");
+        }
+        
+        // Update stop loss jika trailing sudah aktif
+        if (trailingStop.activated) {
+            const newStopLoss = trailingStop.highestProfit * (1 - trailingStop.trailPercentage / 100);
+            const minStopLoss = entryPrice * (1 - db.trailingStop.maxTrailDistance / 100);
+            const finalStopLoss = Math.max(newStopLoss, minStopLoss);
+            
+            // Only update if new stop loss is better (higher) than current
+            if (finalStopLoss > trailingStop.currentStopLoss) {
+                trailingStop.currentStopLoss = finalStopLoss;
+                console.log(`📈 Trailing Stop Updated: ${formatPrice(trailingStop.currentStopLoss)}`);
+                
+                // Update di database juga
+                db.activePosition.sl = finalStopLoss;
+                saveDB();
+            }
+        }
+    } else if (side === 'sell') {
+        if (currentPrice < trailingStop.lowestPrice) {
+            trailingStop.lowestPrice = currentPrice;
+        }
+        
+        // Aktifkan trailing stop jika harga mencapai activation price
+        if (!trailingStop.activated && currentPrice <= trailingStop.activationPrice) {
+            trailingStop.activated = true;
+            console.log("🎯 TRAILING STOP ACTIVATED!");
+        }
+        
+        // Update stop loss jika trailing sudah aktif
+        if (trailingStop.activated) {
+            const newStopLoss = trailingStop.lowestPrice * (1 + trailingStop.trailPercentage / 100);
+            const maxStopLoss = entryPrice * (1 + db.trailingStop.maxTrailDistance / 100);
+            const finalStopLoss = Math.min(newStopLoss, maxStopLoss);
+            
+            // Only update if new stop loss is better (lower) than current
+            if (finalStopLoss < trailingStop.currentStopLoss) {
+                trailingStop.currentStopLoss = finalStopLoss;
+                console.log(`📉 Trailing Stop Updated: ${formatPrice(trailingStop.currentStopLoss)}`);
+                
+                // Update di database juga
+                db.activePosition.sl = finalStopLoss;
+                saveDB();
+            }
+        }
+    }
+    
+    return trailingStop.currentStopLoss;
+};
+
+const resetTrailingStop = () => {
+    trailingStop = {
+        enabled: false,
+        activationPrice: null,
+        currentStopLoss: null,
+        trailPercentage: 0.5,
+        activated: false,
+        highestProfit: null,
+        lowestPrice: null,
+        side: null
+    };
+};
+
 // -------------------- DYNAMIC POSITION SIZING --------------------
 const calculateDynamicPositionSize = async () => {
     try {
@@ -238,7 +354,8 @@ console.log(`⚙️ Bot Configuration:
 - Margin Mode: ${db.marginMode}
 - Position Sizing: ${db.useDynamicPositionSizing ? `Dynamic (${db.positionSizePercentage}% of balance)` : `Fixed (${db.usdtPerTrade} USDT)`}
 - Signal Confirmation: ${db.signalConfirmation.enabled ? `Enabled (${db.signalConfirmation.requiredConfirmations} confirmations)` : 'Disabled'}
-- Weekend Trading: ${db.weekendTrading ? 'Enabled' : 'Disabled'}`);
+- Weekend Trading: ${db.weekendTrading ? 'Enabled' : 'Disabled'}
+- Trailing Stop: ${db.trailingStop.enabled ? `Enabled (Activation: ${db.trailingStop.activationProfit}%, Trail: ${db.trailingStop.trailPercentage}%)` : 'Disabled'}`);
 
 // -------------------- STABLE API CALLS --------------------
 const safeApiCall = async (apiFunction, ...args) => {
@@ -335,13 +452,14 @@ const calcQty = async (price) => {
     return qty;
 };
 
-const logSignal = (type, entry, tp, sl, status, pnl = null) => {
+const logSignal = (type, entry, tp, sl, status, pnl = null, trailingActivated = false) => {
     try {
         const entryStr = entry !== undefined && entry !== null ? entry : "";
         const tpStr = tp !== undefined && tp !== null ? tp : "";
         const slStr = sl !== undefined && sl !== null ? sl : "";
         const pnlStr = pnl !== null && isFinite(pnl) ? Number(pnl).toFixed(6) : "";
-        const line = `${new Date().toISOString()},${db.pair},${type},${entryStr},${tpStr},${slStr},${status},${pnlStr}\n`;
+        const trailingStr = trailingActivated ? "YES" : "NO";
+        const line = `${new Date().toISOString()},${db.pair},${type},${entryStr},${tpStr},${slStr},${status},${pnlStr},${trailingStr}\n`;
         fs.appendFileSync(logPath, line);
         console.log("📝 Signal logged to CSV");
     } catch (error) {
@@ -1028,6 +1146,11 @@ const placeOrder = async (side, tp, sl) => {
         };
         saveDB();
 
+        // Initialize trailing stop
+        if (db.trailingStop.enabled) {
+            initializeTrailingStop(price, sl, side);
+        }
+
         logSignal(
             side === "buy" ? "LONG" : "SHORT",
             price,
@@ -1071,6 +1194,11 @@ const placeOrder = async (side, tp, sl) => {
                         orderId: retryOrder.orderId,
                     };
                     saveDB();
+
+                    // Initialize trailing stop untuk adjusted order
+                    if (db.trailingStop.enabled) {
+                        initializeTrailingStop(price, sl, side);
+                    }
 
                     logSignal(
                         side === "buy" ? "LONG" : "SHORT",
@@ -1117,12 +1245,15 @@ const closePosition = async (reason, entryPrice = "N/A") => {
             const exitPrice = await getPrice();
             let pnl = null;
             let statusTag = "CLOSED_MANUAL";
+            let trailingActivated = trailingStop.activated;
 
             const isTP = /TP/i.test(reason);
             const isSL = /SL/i.test(reason);
+            const isTrailing = /TRAILING/i.test(reason);
 
             if (isTP) statusTag = "TP_REALIZED";
             else if (isSL) statusTag = "SL_REALIZED";
+            else if (isTrailing) statusTag = "TRAILING_STOP";
 
             if (entryPrice !== "N/A" && db.activePosition) {
                 const { tp, sl, side: entrySide } = db.activePosition;
@@ -1134,7 +1265,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
                         let exitNum;
                         if (isTP) {
                             exitNum = entrySide === "buy" ? tp : sl;
-                        } else if (isSL) {
+                        } else if (isSL || isTrailing) {
                             exitNum = entrySide === "buy" ? sl : tp;
                         } else if (isFinite(exitPrice)) {
                             exitNum = Number(exitPrice);
@@ -1159,7 +1290,8 @@ const closePosition = async (reason, entryPrice = "N/A") => {
                 db.activePosition?.tp ?? "",
                 db.activePosition?.sl ?? "",
                 statusTag,
-                pnl
+                pnl,
+                trailingActivated
             );
         }
     } catch (err) {
@@ -1167,8 +1299,9 @@ const closePosition = async (reason, entryPrice = "N/A") => {
     } finally {
         db.activePosition = null;
         saveDB();
-        // Reset signal confirmation ketika posisi ditutup
+        // Reset signal confirmation dan trailing stop ketika posisi ditutup
         resetSignalConfirmation();
+        resetTrailingStop();
     }
 };
 
@@ -1188,6 +1321,7 @@ const checkPositionStatus = async () => {
             db.activePosition = null;
             saveDB();
             resetSignalConfirmation();
+            resetTrailingStop();
         }
 
         if (db.activePosition && amtSafe !== 0) {
@@ -1195,12 +1329,26 @@ const checkPositionStatus = async () => {
             const currentPrice = await getPrice();
             if (!currentPrice) return;
 
+            // Update trailing stop terlebih dahulu
+            let currentStopLoss = sl;
+            if (db.trailingStop.enabled) {
+                currentStopLoss = await updateTrailingStop(currentPrice);
+            }
+
             if (side === "buy") {
-                if (currentPrice >= tp) await closePosition("TP hit", entryPrice);
-                else if (currentPrice <= sl) await closePosition("SL hit", entryPrice);
+                if (currentPrice >= tp) {
+                    await closePosition("TP hit", entryPrice);
+                } else if (currentPrice <= currentStopLoss) {
+                    const reason = trailingStop.activated ? "TRAILING STOP hit" : "SL hit";
+                    await closePosition(reason, entryPrice);
+                }
             } else if (side === "sell") {
-                if (currentPrice <= tp) await closePosition("TP hit", entryPrice);
-                else if (currentPrice >= sl) await closePosition("SL hit", entryPrice);
+                if (currentPrice <= tp) {
+                    await closePosition("TP hit", entryPrice);
+                } else if (currentPrice >= currentStopLoss) {
+                    const reason = trailingStop.activated ? "TRAILING STOP hit" : "SL hit";
+                    await closePosition(reason, entryPrice);
+                }
             }
         }
 
@@ -1287,12 +1435,18 @@ const recoverPositionState = async () => {
                 recoveredAt: new Date().toISOString()
             };
 
+            // Initialize trailing stop untuk recovered position
+            if (db.trailingStop.enabled) {
+                initializeTrailingStop(entryPrice, sl, side);
+            }
+
             saveDB();
 
             console.log("✅ Position recovered");
             console.log(`   ${side.toUpperCase()} | Entry: ${formatPrice(entryPrice)}`);
             console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
             console.log(`   RR: ${rrRatio} | Leverage: ${leverage}x`);
+            console.log(`   Trailing Stop: ${db.trailingStop.enabled ? 'Enabled' : 'Disabled'}`);
 
             logSignal(
                 side === "buy" ? "LONG" : "SHORT",
@@ -1319,6 +1473,7 @@ const recoverPositionState = async () => {
             db.activePosition = null;
             saveDB();
             resetSignalConfirmation();
+            resetTrailingStop();
             console.log("✅ Database cleaned");
         }
 
@@ -1331,6 +1486,11 @@ const recoverPositionState = async () => {
 
                 let status = "🟢 NORMAL";
                 let warning = "";
+                let trailingInfo = "";
+
+                if (trailingStop.activated) {
+                    trailingInfo = " | 🎯 TRAILING ACTIVE";
+                }
 
                 if (side === "buy") {
                     if (currentPrice >= tp * 0.998) {
@@ -1353,9 +1513,12 @@ const recoverPositionState = async () => {
                 const pnlEmoji = unrealizedPnl >= 0 ? "💹" : "🔻";
 
                 console.log("\n📊 Position Monitor");
-                console.log(`   ${side.toUpperCase()} | ${status}${warning}`);
+                console.log(`   ${side.toUpperCase()} | ${status}${warning}${trailingInfo}`);
                 console.log(`   Entry: ${formatPrice(entryPrice)} | Current: ${formatPrice(currentPrice)}`);
                 console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
+                if (trailingStop.activated) {
+                    console.log(`   🎯 Trailing SL: ${formatPrice(trailingStop.currentStopLoss)}`);
+                }
                 console.log(`   ${pnlEmoji} PnL: ${formatPrice(unrealizedPnl)} (${pnlPercent}%)`);
             }
         }
@@ -1476,6 +1639,7 @@ setInterval(async () => {
         db.positionSizePercentage = freshDb.positionSizePercentage;
         db.signalConfirmation = freshDb.signalConfirmation;
         db.weekendTrading = freshDb.weekendTrading; // Load weekend trading setting
+        db.trailingStop = freshDb.trailingStop; // Load trailing stop setting
     } catch (error) {
         // Use existing config on error
     }
@@ -1552,6 +1716,11 @@ setInterval(async () => {
             // Display signal confirmation status jika aktif
             if (signalConfirmation.pendingReversal) {
                 console.log(`🔄 Signal Confirmation: ${signalConfirmation.confirmationCount}/${signalConfirmation.requiredConfirmations} for ${signalConfirmation.reversalDirection.toUpperCase()}`);
+            }
+
+            // Display trailing stop status
+            if (trailingStop.enabled && db.activePosition) {
+                console.log(`🎯 Trailing Stop: ${trailingStop.activated ? 'ACTIVE' : 'WAITING'} | Current SL: ${formatPrice(trailingStop.currentStopLoss)}`);
             }
 
             // Tampilkan status weekend trading
