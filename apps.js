@@ -1,17 +1,51 @@
-// signal.js (Advanced Support & Resistance Version - Optimized)
+// signal.js (Advanced Support & Resistance Version - Optimized & Auto-Leverage)
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
-const { SMA, RSI, EMA } = require("technicalindicators");
+const { SMA, RSI, EMA, ATR } = require("technicalindicators");
 
 // -------------------- CONFIG --------------------
 const dbPath = "./db.json";
 const logPath = "./log.csv";
+const performancePath = "./performance.json";
 let isProcessing = false;
 let exchange = null;
 let connectionRetries = 0;
 const MAX_RETRIES = 5;
 const RETRY_DELAY = 10000;
+let dailyPnL = 0;
+let tradeCount = 0;
+
+// -------------------- LOAD PERFORMANCE DATA --------------------
+const loadPerformanceData = () => {
+    try {
+        if (fs.existsSync(performancePath)) {
+            const data = JSON.parse(fs.readFileSync(performancePath));
+            // Reset daily PnL jika hari baru
+            const today = new Date().toDateString();
+            if (data.lastReset !== today) {
+                data.dailyPnL = 0;
+                data.dailyTrades = 0;
+                data.lastReset = today;
+                fs.writeFileSync(performancePath, JSON.stringify(data, null, 2));
+            }
+            return data;
+        }
+    } catch (error) {
+        console.warn("⚠️ Failed to load performance data:", error.message);
+    }
+    
+    return {
+        totalPnL: 0,
+        dailyPnL: 0,
+        totalTrades: 0,
+        dailyTrades: 0,
+        winRate: 0,
+        lastReset: new Date().toDateString()
+    };
+};
+
+let performance = loadPerformanceData();
 
 // -------------------- CONNECTION MANAGEMENT --------------------
 const initializeExchange = async () => {
@@ -57,7 +91,7 @@ const initializeExchange = async () => {
 
 // -------------------- FILE INIT --------------------
 if (!fs.existsSync(logPath)) {
-    fs.writeFileSync(logPath, "timestamp,pair,type,entry,tp,sl,status,pnl\n");
+    fs.writeFileSync(logPath, "timestamp,pair,type,entry,tp,sl,status,pnl,leverage,balance\n");
     console.log("📝 Log file created: log.csv");
 }
 
@@ -74,18 +108,66 @@ const loadDB = () => {
         pair: "XRP/USDT:USDT",
         lastLongEntryTime: 0,
         lastShortEntryTime: 0,
-        leverage: 10,
         marginMode: "ISOLATED",
         activePosition: null,
-        usdtPerTrade: 5.1,
+        usdtPerTrade: 1, // Default 1 USDT untuk trading dengan saldo kecil
         useDynamicPositionSizing: true,
         positionSizePercentage: 90,
+        maxDailyLossPercent: 10, // Maksimal kerugian harian 10%
+        minRRRatio: 1.8, // Minimal Risk:Reward 1:1.8
+        useTrailingStop: true,
+        trailingStopPercent: 0.5, // Trailing stop 0.5%
+        usePyramidEntry: true, // Entry bertahap
+        maxPyramidEntries: 3,
+        pyramidDistancePercent: 0.3, // Jarak entry bertahap 0.3%
+        coolingPeriod: 60000, // 1 menit cooling period setelah loss
+        lastTradeResult: null, // 'win' atau 'loss'
+        lastTradeTime: 0
     };
 };
 
 let db = loadDB();
 
-// -------------------- DYNAMIC POSITION SIZING --------------------
+// -------------------- DYNAMIC LEVERAGE CALCULATION --------------------
+const calculateOptimalLeverage = async (balance) => {
+    try {
+        const totalUSDT = balance.total?.USDT || 0;
+        
+        // Logika leverage berdasarkan balance
+        let leverage;
+        if (totalUSDT <= 10) {
+            leverage = 50; // Untuk balance <= 10 USDT, gunakan leverage tinggi
+        } else if (totalUSDT <= 50) {
+            leverage = 30; // Untuk balance <= 50 USDT
+        } else if (totalUSDT <= 100) {
+            leverage = 20; // Untuk balance <= 100 USDT
+        } else if (totalUSDT <= 500) {
+            leverage = 15; // Untuk balance <= 500 USDT
+        } else if (totalUSDT <= 1000) {
+            leverage = 10; // Untuk balance <= 1000 USDT
+        } else {
+            leverage = 5; // Untuk balance > 1000 USDT
+        }
+        
+        // Ambil info market untuk cek leverage maksimal
+        const market = exchange.markets[db.pair];
+        const maxLeverage = market?.limits?.leverage?.max || 125;
+        
+        // Pastikan leverage tidak melebihi maksimal
+        leverage = Math.min(leverage, maxLeverage);
+        
+        // Pastikan leverage minimal 5x
+        leverage = Math.max(leverage, 5);
+        
+        console.log(`💰 Dynamic Leverage: ${leverage}x (Balance: ${totalUSDT.toFixed(2)} USDT)`);
+        return leverage;
+    } catch (error) {
+        console.error("❌ Failed to calculate optimal leverage, using default 10x:", error.message);
+        return 10;
+    }
+};
+
+// -------------------- DYNAMIC POSITION SIZING DENGAN LEVERAGE --------------------
 const calculateDynamicPositionSize = async () => {
     try {
         if (!db.useDynamicPositionSizing) {
@@ -101,15 +183,35 @@ const calculateDynamicPositionSize = async () => {
             return db.usdtPerTrade;
         }
 
-        const dynamicSize = totalUSDT * (db.positionSizePercentage / 100);
+        // Hitung leverage optimal
+        const leverage = await calculateOptimalLeverage(balance);
         
-        const minTradeSize = 1;
-        const finalSize = Math.max(dynamicSize, minTradeSize);
+        // Hitung size dengan mempertimbangkan leverage dan risk management
+        const riskPercent = Math.min(2, db.positionSizePercentage); // Maksimal risk 2% per trade
+        const baseSize = totalUSDT * (riskPercent / 100);
+        
+        // Adjust dengan leverage (tapi jangan berlebihan)
+        const leveragedSize = baseSize * Math.min(leverage / 10, 3); // Batasi pengaruh leverage
+        
+        const minTradeSize = 1; // Minimal 1 USDT
+        const maxTradeSize = totalUSDT * 0.3; // Maksimal 30% dari balance
+        
+        let finalSize = Math.max(leveragedSize, minTradeSize);
+        finalSize = Math.min(finalSize, maxTradeSize);
+        
+        // Cek daily loss limit
+        const dailyLossLimit = totalUSDT * (db.maxDailyLossPercent / 100);
+        if (performance.dailyPnL < -dailyLossLimit) {
+            console.warn(`⚠️ Daily loss limit reached (${db.maxDailyLossPercent}%), reducing position size`);
+            finalSize = finalSize * 0.5; // Kurangi size menjadi 50%
+        }
         
         console.log(`💰 Dynamic Position Sizing:
    Total Balance: ${totalUSDT.toFixed(2)} USDT
-   Percentage: ${db.positionSizePercentage}%
-   Calculated Size: ${finalSize.toFixed(2)} USDT`);
+   Risk Percentage: ${riskPercent}%
+   Leverage: ${leverage}x
+   Calculated Size: ${finalSize.toFixed(2)} USDT
+   Daily PnL: ${performance.dailyPnL.toFixed(2)} USDT`);
 
         return finalSize;
     } catch (error) {
@@ -120,9 +222,12 @@ const calculateDynamicPositionSize = async () => {
 
 console.log(`⚙️ Bot Configuration:
 - Pair: ${db.pair}
-- Leverage: ${db.leverage}x
 - Margin Mode: ${db.marginMode}
-- Position Sizing: ${db.useDynamicPositionSizing ? `Dynamic (${db.positionSizePercentage}% of balance)` : `Fixed (${db.usdtPerTrade} USDT)`}`);
+- Position Sizing: ${db.useDynamicPositionSizing ? `Dynamic (${db.positionSizePercentage}% of balance with auto-leverage)` : `Fixed (${db.usdtPerTrade} USDT)`}
+- Max Daily Loss: ${db.maxDailyLossPercent}%
+- Min R:R Ratio: ${db.minRRRatio}
+- Trailing Stop: ${db.useTrailingStop ? `Enabled (${db.trailingStopPercent}%)` : 'Disabled'}
+- Pyramid Entry: ${db.usePyramidEntry ? `Enabled (max ${db.maxPyramidEntries} entries)` : 'Disabled'}`);
 
 // -------------------- STABLE API CALLS --------------------
 const safeApiCall = async (apiFunction, ...args) => {
@@ -152,6 +257,14 @@ const saveDB = () => {
         fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
     } catch (error) {
         console.error("❌ Failed to save DB:", error.message);
+    }
+};
+
+const savePerformanceData = () => {
+    try {
+        fs.writeFileSync(performancePath, JSON.stringify(performance, null, 2));
+    } catch (error) {
+        console.error("❌ Failed to save performance data:", error.message);
     }
 };
 
@@ -192,12 +305,18 @@ const displayBalance = async () => {
         const freeUSDT = balance.free?.USDT || 0;
         const usedUSDT = balance.used?.USDT || 0;
         
+        // Hitung leverage optimal
+        const leverage = await calculateOptimalLeverage(balance);
+        
         console.log(`💰 Balance Summary:
    Total: ${totalUSDT.toFixed(2)} USDT
    Free: ${freeUSDT.toFixed(2)} USDT
-   Used: ${usedUSDT.toFixed(2)} USDT`);
+   Used: ${usedUSDT.toFixed(2)} USDT
+   Optimal Leverage: ${leverage}x
+   Daily PnL: ${performance.dailyPnL.toFixed(2)} USDT (${(performance.dailyPnL / totalUSDT * 100).toFixed(2)}%)
+   Win Rate: ${(performance.winRate * 100).toFixed(1)}%`);
         
-        return { totalUSDT, freeUSDT, usedUSDT };
+        return { totalUSDT, freeUSDT, usedUSDT, leverage };
     } catch (error) {
         console.error("❌ Failed to fetch balance:", error.message);
         return null;
@@ -215,10 +334,27 @@ const getPrice = async () => {
     }
 };
 
-const calcQty = async (price) => {
+const calcQty = async (price, leverage = null) => {
     if (!price) return 0;
     
     const currentUsdtPerTrade = await calculateDynamicPositionSize();
+    
+    // Jika leverage diberikan, adjust quantity
+    if (leverage) {
+        const adjustedTradeSize = currentUsdtPerTrade * leverage;
+        let qty = adjustedTradeSize / price;
+        const prec = exchange.markets[db.pair]?.precision?.amount ?? 3;
+        qty = parseFloat(qty.toFixed(prec));
+        
+        // Pastikan tidak melebihi max position size exchange
+        const market = exchange.markets[db.pair];
+        if (market?.limits?.amount?.max && qty > market.limits.amount.max) {
+            qty = market.limits.amount.max;
+        }
+        
+        console.log(`📐 Quantity: ${qty} (${currentUsdtPerTrade.toFixed(2)} USDT × ${leverage}x leverage)`);
+        return qty;
+    }
     
     let qty = currentUsdtPerTrade / price;
     const prec = exchange.markets[db.pair]?.precision?.amount ?? 3;
@@ -227,15 +363,45 @@ const calcQty = async (price) => {
     return qty;
 };
 
-const logSignal = (type, entry, tp, sl, status, pnl = null) => {
+const logSignal = (type, entry, tp, sl, status, pnl = null, leverage = null) => {
     try {
         const entryStr = entry !== undefined && entry !== null ? entry : "";
         const tpStr = tp !== undefined && tp !== null ? tp : "";
         const slStr = sl !== undefined && sl !== null ? sl : "";
         const pnlStr = pnl !== null && isFinite(pnl) ? Number(pnl).toFixed(6) : "";
-        const line = `${new Date().toISOString()},${db.pair},${type},${entryStr},${tpStr},${slStr},${status},${pnlStr}\n`;
+        const leverageStr = leverage !== null && leverage !== undefined ? leverage : "";
+        
+        const balance = performance.totalPnL + 100; // Asumsi starting balance 100
+        const balanceStr = balance.toFixed(2);
+        
+        const line = `${new Date().toISOString()},${db.pair},${type},${entryStr},${tpStr},${slStr},${status},${pnlStr},${leverageStr},${balanceStr}\n`;
         fs.appendFileSync(logPath, line);
         console.log("📝 Signal logged to CSV");
+        
+        // Update performance data jika trade selesai
+        if (status.includes('REALIZED') || status.includes('CLOSED')) {
+            if (pnl !== null && isFinite(pnl)) {
+                performance.totalPnL += pnl;
+                performance.dailyPnL += pnl;
+                performance.totalTrades++;
+                performance.dailyTrades++;
+                
+                if (pnl > 0) {
+                    const wins = performance.winRate * (performance.totalTrades - 1);
+                    performance.winRate = (wins + 1) / performance.totalTrades;
+                } else {
+                    const wins = performance.winRate * (performance.totalTrades - 1);
+                    performance.winRate = wins / performance.totalTrades;
+                }
+                
+                savePerformanceData();
+                
+                // Update last trade result
+                db.lastTradeResult = pnl > 0 ? 'win' : 'loss';
+                db.lastTradeTime = Date.now();
+                saveDB();
+            }
+        }
     } catch (error) {
         console.error("❌ Failed to log signal:", error.message);
     }
@@ -640,32 +806,35 @@ const analyzeEnhancedSignal = async () => {
         const volume = ohlcv.map(c => c[5]);
         const price = close[close.length - 1];
 
-        const maFast = SMA.calculate({
-            values: close.slice(-50),
-            period: 5
-        });
-        const maMedium = SMA.calculate({
-            values: close.slice(-50),
-            period: 13
-        });
-        const maSlow = SMA.calculate({
-            values: close.slice(-50),
-            period: 21
-        });
+        // Multiple timeframe analysis
+        const ohlcv15m = await safeApiCall(exchange.fetchOHLCV, db.pair, "15m", undefined, 100);
+        const close15m = ohlcv15m.map(c => c[4]);
+        
+        const maFast5 = SMA.calculate({ values: close.slice(-50), period: 5 });
+        const maMedium5 = SMA.calculate({ values: close.slice(-50), period: 13 });
+        const maSlow5 = SMA.calculate({ values: close.slice(-50), period: 21 });
+        const maMedium15 = SMA.calculate({ values: close15m.slice(-50), period: 13 });
 
-        const currentMAFast = maFast[maFast.length - 1];
-        const currentMAMedium = maMedium[maMedium.length - 1];
-        const currentMASlow = maSlow[maSlow.length - 1];
+        const currentMAFast = maFast5[maFast5.length - 1];
+        const currentMAMedium = maMedium5[maMedium5.length - 1];
+        const currentMASlow = maSlow5[maSlow5.length - 1];
+        const currentMAMedium15 = maMedium15[maMedium15.length - 1];
 
-        const prevMAFast = maFast[maFast.length - 2];
-        const prevMAMedium = maMedium[maMedium.length - 2];
-        const prevMASlow = maSlow[maSlow.length - 2];
+        const prevMAFast = maFast5[maFast5.length - 2];
+        const prevMAMedium = maMedium5[maMedium5.length - 2];
+        const prevMASlow = maSlow5[maSlow5.length - 2];
 
-        const rsi = RSI.calculate({
-            values: close.slice(-50),
-            period: 14
-        });
+        const rsi = RSI.calculate({ values: close.slice(-50), period: 14 });
         const currentRSI = rsi[rsi.length - 1];
+
+        // Stochastic RSI
+        const stochRSI = (currentRSI - Math.min(...rsi.slice(-14))) / 
+                        (Math.max(...rsi.slice(-14)) - Math.min(...rsi.slice(-14))) * 100;
+
+        // Volume analysis
+        const avgVolume = volume.slice(-20).reduce((a, b) => a + b, 0) / 20;
+        const currentVolume = volume[volume.length - 1];
+        const volumeRatio = currentVolume / avgVolume;
 
         const isUptrend = currentMAFast > currentMAMedium && currentMAMedium > currentMASlow;
         const isDowntrend = currentMAFast < currentMAMedium && currentMAMedium < currentMASlow;
@@ -676,17 +845,32 @@ const analyzeEnhancedSignal = async () => {
         const priceAboveAllMAs = price > currentMAFast && price > currentMAMedium && price > currentMASlow;
         const priceBelowAllMAs = price < currentMAFast && price < currentMAMedium && price < currentMASlow;
 
+        // Higher timeframe confirmation
+        const higherTFBullish = price > currentMAMedium15;
+        const higherTFBearish = price < currentMAMedium15;
+
         let canLong = false;
         let canShort = false;
+        let signalStrength = 0;
 
+        // Long conditions dengan konfirmasi lebih ketat
         if ((isFastCrossAboveMedium || (isUptrend && priceAboveAllMAs)) && 
-            currentRSI > 45 && currentRSI < 75) {
+            currentRSI > 45 && currentRSI < 70 &&
+            stochRSI > 20 && stochRSI < 80 &&
+            volumeRatio > 1.2 && // Volume konfirmasi
+            higherTFBullish) {
             canLong = true;
+            signalStrength = 0.7 + (volumeRatio > 1.5 ? 0.2 : 0) + (stochRSI > 50 ? 0.1 : 0);
         }
 
+        // Short conditions dengan konfirmasi lebih ketat
         if ((isFastCrossBelowMedium || (isDowntrend && priceBelowAllMAs)) && 
-            currentRSI < 55 && currentRSI > 25) {
+            currentRSI < 55 && currentRSI > 30 &&
+            stochRSI > 20 && stochRSI < 80 &&
+            volumeRatio > 1.2 && // Volume konfirmasi
+            higherTFBearish) {
             canShort = true;
+            signalStrength = 0.7 + (volumeRatio > 1.5 ? 0.2 : 0) + (stochRSI < 50 ? 0.1 : 0);
         }
 
         const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
@@ -723,8 +907,11 @@ const analyzeEnhancedSignal = async () => {
             support = recentLow - (currentATR * 0.3);
         }
 
-        const minDistance = currentATR * 0.6;
-        const maxDistance = currentATR * 2.5;
+        // Adjust dengan signal strength
+        const strengthMultiplier = 1 + (signalStrength * 0.3);
+        
+        const minDistance = currentATR * 0.6 * strengthMultiplier;
+        const maxDistance = currentATR * 2.5 * strengthMultiplier;
 
         if (resistance - price < minDistance) {
             resistance = price + minDistance;
@@ -740,24 +927,52 @@ const analyzeEnhancedSignal = async () => {
             support = price - maxDistance;
         }
 
-        const targetLong = resistance;
-        const stopLossLong = Math.min(support, price - (currentATR * 0.8));
-        const targetShort = support;
-        const stopLossShort = Math.max(resistance, price + (currentATR * 0.8));
+        // Hitung Risk:Reward Ratio
+        const riskLong = price - support;
+        const rewardLong = resistance - price;
+        const rrRatioLong = rewardLong / riskLong;
+
+        const riskShort = resistance - price;
+        const rewardShort = price - support;
+        const rrRatioShort = rewardShort / riskShort;
+
+        // Adjust TP/SL untuk memenuhi min RR ratio
+        let targetLong = resistance;
+        let stopLossLong = support;
+        let targetShort = support;
+        let stopLossShort = resistance;
+
+        if (rrRatioLong < db.minRRRatio && canLong) {
+            // Adjust untuk memenuhi RR ratio
+            const requiredReward = riskLong * db.minRRRatio;
+            targetLong = price + requiredReward;
+            console.log(`📊 Adjusted Long TP for better RR: ${formatPrice(targetLong)} (RR: ${db.minRRRatio})`);
+        }
+
+        if (rrRatioShort < db.minRRRatio && canShort) {
+            // Adjust untuk memenuhi RR ratio
+            const requiredReward = riskShort * db.minRRRatio;
+            targetShort = price - requiredReward;
+            console.log(`📊 Adjusted Short TP for better RR: ${formatPrice(targetShort)} (RR: ${db.minRRRatio})`);
+        }
 
         console.log(`\n🎯 ENHANCED Analysis Results ${db.pair}
 ══════════════════════════════════════════════════
-📈 Long Signal: ${canLong ? "✅ VALID" : "❌ INVALID"}
-📉 Short Signal: ${canShort ? "✅ VALID" : "❌ INVALID"}
+📈 Long Signal: ${canLong ? `✅ VALID (Strength: ${signalStrength.toFixed(2)})` : "❌ INVALID"}
+📉 Short Signal: ${canShort ? `✅ VALID (Strength: ${signalStrength.toFixed(2)})` : "❌ INVALID"}
 ══════════════════════════════════════════════════
 💰 Current Price: ${formatPrice(price)}
 📊 RSI: ${currentRSI ? currentRSI.toFixed(2) : "N/A"}
+📊 Stoch RSI: ${stochRSI ? stochRSI.toFixed(2) : "N/A"}
+📊 Volume Ratio: ${volumeRatio ? volumeRatio.toFixed(2) : "N/A"}x
 🎯 Resistance: ${formatPrice(resistance)} (${((resistance - price) / price * 100).toFixed(3)}%)
 🛡️  Support: ${formatPrice(support)} (${((price - support) / price * 100).toFixed(3)}%)
 📈 MA Fast: ${formatPrice(currentMAFast)}
 📈 MA Medium: ${formatPrice(currentMAMedium)}
 📈 MA Slow: ${formatPrice(currentMASlow)}
+📈 MA 15m: ${formatPrice(currentMAMedium15)}
 📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
+📊 RR Ratio Long: ${rrRatioLong.toFixed(2)} | Short: ${rrRatioShort.toFixed(2)}
 ══════════════════════════════════════════════════
 📊 Volume POC: ${formatPrice(enhancedLevels.volumePOC)}
 🔍 Detected R Levels: ${enhancedLevels.allResistance?.length || 0}
@@ -789,7 +1004,11 @@ const analyzeEnhancedSignal = async () => {
             enhancedLevels,
             rsi: currentRSI,
             maFast: currentMAFast,
-            maMedium: currentMAMedium
+            maMedium: currentMAMedium,
+            signalStrength,
+            volumeRatio,
+            rrRatioLong,
+            rrRatioShort
         };
     } catch (error) {
         console.error("❌ Enhanced technical analysis failed:", error.message);
@@ -797,8 +1016,93 @@ const analyzeEnhancedSignal = async () => {
     }
 };
 
+// -------------------- TRAILING STOP MANAGEMENT --------------------
+const updateTrailingStop = async (currentPrice) => {
+    if (!db.activePosition || !db.useTrailingStop) return;
+
+    const { side, entryPrice, sl, tp } = db.activePosition;
+    const trailPercent = db.trailingStopPercent / 100;
+
+    if (side === "buy") {
+        // Untuk long position, naikkan stop loss jika harga naik
+        const newTrailingSL = currentPrice * (1 - trailPercent);
+        if (newTrailingSL > sl && newTrailingSL < currentPrice) {
+            db.activePosition.sl = newTrailingSL;
+            saveDB();
+            console.log(`📈 Trailing SL updated: ${formatPrice(sl)} → ${formatPrice(newTrailingSL)}`);
+        }
+    } else {
+        // Untuk short position, turunkan stop loss jika harga turun
+        const newTrailingSL = currentPrice * (1 + trailPercent);
+        if (newTrailingSL < sl && newTrailingSL > currentPrice) {
+            db.activePosition.sl = newTrailingSL;
+            saveDB();
+            console.log(`📉 Trailing SL updated: ${formatPrice(sl)} → ${formatPrice(newTrailingSL)}`);
+        }
+    }
+};
+
+// -------------------- PYRAMID ENTRY MANAGEMENT --------------------
+const checkPyramidEntry = async (signal) => {
+    if (!db.usePyramidEntry || !db.activePosition) return false;
+
+    const { side, entryPrice, pyramidEntries = 1 } = db.activePosition;
+    const currentPrice = await getPrice();
+    
+    if (!currentPrice) return false;
+
+    // Cek apakah sudah mencapai maksimal entries
+    if (pyramidEntries >= db.maxPyramidEntries) {
+        console.log("⏹️ Maximum pyramid entries reached");
+        return false;
+    }
+
+    // Cek jarak dari entry terakhir
+    const distancePercent = Math.abs(currentPrice - entryPrice) / entryPrice * 100;
+    
+    if (distancePercent >= db.pyramidDistancePercent) {
+        console.log(`🎯 Pyramid entry opportunity: ${distancePercent.toFixed(2)}% from last entry`);
+        
+        // Place additional order
+        const positionSize = await calculateDynamicPositionSize();
+        const adjustedSize = positionSize * 0.5; // Gunakan 50% dari size normal untuk pyramid
+        
+        try {
+            const qty = await calcQty(currentPrice);
+            const adjustedQty = qty * 0.5;
+            
+            await safeApiCall(exchange.createOrder, db.pair, "market", side, adjustedQty);
+            
+            // Update active position
+            const totalQty = (db.activePosition.quantity || qty) + adjustedQty;
+            const avgEntryPrice = ((db.activePosition.entryPrice * (db.activePosition.quantity || qty)) + 
+                                 (currentPrice * adjustedQty)) / totalQty;
+            
+            db.activePosition.entryPrice = avgEntryPrice;
+            db.activePosition.quantity = totalQty;
+            db.activePosition.pyramidEntries = pyramidEntries + 1;
+            saveDB();
+            
+            console.log(`✅ Pyramid entry #${pyramidEntries + 1} placed at ${formatPrice(currentPrice)}`);
+            return true;
+        } catch (error) {
+            console.error("❌ Pyramid entry failed:", error.message);
+            return false;
+        }
+    }
+    
+    return false;
+};
+
 // -------------------- ORDER MANAGEMENT --------------------
 const placeOrder = async (side, tp, sl) => {
+    // Cek cooling period setelah loss
+    if (db.lastTradeResult === 'loss' && Date.now() - db.lastTradeTime < db.coolingPeriod) {
+        const remainingTime = Math.ceil((db.coolingPeriod - (Date.now() - db.lastTradeTime)) / 1000);
+        console.log(`⏳ Cooling period active (${remainingTime}s remaining after loss)`);
+        return;
+    }
+
     console.log("🔍 Checking for active positions...");
     if (db.activePosition) {
         console.log("⚠️ Active position exists, order cancelled");
@@ -822,15 +1126,20 @@ const placeOrder = async (side, tp, sl) => {
         return;
     }
 
-    const qty = await calcQty(price);
+    // Dapatkan leverage optimal
+    const balance = await safeApiCall(exchange.fetchBalance);
+    const leverage = await calculateOptimalLeverage(balance);
+    
+    const qty = await calcQty(price, leverage);
     console.log(`➡️ ENTRY ${side.toUpperCase()}
 - Quantity: ${qty}
 - Entry: ${formatPrice(price)}
 - TP: ${formatPrice(tp)}
-- SL: ${formatPrice(sl)}`);
+- SL: ${formatPrice(sl)}
+- Leverage: ${leverage}x`);
 
     try {
-        await safeApiCall(exchange.setLeverage, db.leverage, db.pair);
+        await safeApiCall(exchange.setLeverage, leverage, db.pair);
         await safeApiCall(exchange.setMarginMode, db.marginMode, db.pair);
         console.log("✅ Leverage and margin mode set");
     } catch (err) {
@@ -847,6 +1156,9 @@ const placeOrder = async (side, tp, sl) => {
             tp: tp,
             sl: sl,
             orderId: order.id,
+            quantity: qty,
+            leverage: leverage,
+            pyramidEntries: 1
         };
         saveDB();
 
@@ -855,7 +1167,9 @@ const placeOrder = async (side, tp, sl) => {
             price,
             tp,
             sl,
-            "ORDER_PLACED"
+            "ORDER_PLACED",
+            null,
+            leverage
         );
     } catch (err) {
         console.error("❌ Order failed:", err.message);
@@ -890,7 +1204,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
             else if (isSL) statusTag = "SL_REALIZED";
 
             if (entryPrice !== "N/A" && db.activePosition) {
-                const { tp, sl, side: entrySide } = db.activePosition;
+                const { tp, sl, side: entrySide, leverage } = db.activePosition;
                 try {
                     const entryNum = Number(entryPrice);
                     const closedQty = amount;
@@ -911,7 +1225,7 @@ const closePosition = async (reason, entryPrice = "N/A") => {
                         const pnlGross = entrySide === "buy" ?
                             (exitNum - entryNum) :
                             (entryNum - exitNum);
-                        pnl = pnlGross * closedQty;
+                        pnl = pnlGross * closedQty * leverage;
                     }
                 } catch (err) {
                     console.warn("⚠️ PNL calculation failed:", err.message);
@@ -924,7 +1238,8 @@ const closePosition = async (reason, entryPrice = "N/A") => {
                 db.activePosition?.tp ?? "",
                 db.activePosition?.sl ?? "",
                 statusTag,
-                pnl
+                pnl,
+                db.activePosition?.leverage
             );
         }
     } catch (err) {
@@ -954,6 +1269,12 @@ const checkPositionStatus = async () => {
             const { tp, sl, side, entryPrice } = db.activePosition;
             const currentPrice = await getPrice();
             if (!currentPrice) return;
+
+            // Update trailing stop
+            await updateTrailingStop(currentPrice);
+
+            // Cek pyramid entry
+            await checkPyramidEntry();
 
             if (side === "buy") {
                 if (currentPrice >= tp) await closePosition("TP hit", entryPrice);
@@ -988,7 +1309,7 @@ const recoverPositionState = async () => {
 
             const side = amtSafe > 0 ? "buy" : "sell";
             const entryPrice = parseFloat(position?.entryPrice || currentPrice);
-            const leverage = position?.leverage || db.leverage;
+            const leverage = position?.leverage || 10;
 
             const signal = await analyzeEnhancedSignal();
             let tp, sl;
@@ -1044,7 +1365,8 @@ const recoverPositionState = async () => {
                 orderId: "RECOVERED_" + Date.now(),
                 recovered: true,
                 rrRatio: parseFloat(rrRatio),
-                recoveredAt: new Date().toISOString()
+                recoveredAt: new Date().toISOString(),
+                leverage: leverage
             };
 
             saveDB();
@@ -1059,7 +1381,9 @@ const recoverPositionState = async () => {
                 entryPrice,
                 tp,
                 sl,
-                "POSITION_RECOVERED"
+                "POSITION_RECOVERED",
+                null,
+                leverage
             );
         }
 
@@ -1073,7 +1397,9 @@ const recoverPositionState = async () => {
                 db.activePosition.entryPrice,
                 db.activePosition.tp,
                 db.activePosition.sl,
-                "CLOSED_EXTERNALLY"
+                "CLOSED_EXTERNALLY",
+                null,
+                db.activePosition.leverage
             );
 
             db.activePosition = null;
@@ -1084,7 +1410,7 @@ const recoverPositionState = async () => {
         if (db.activePosition && Math.abs(amtSafe) > MIN_POSITION_AMOUNT) {
             const currentPrice = await getPrice();
             if (currentPrice) {
-                const { side, entryPrice, tp, sl } = db.activePosition;
+                const { side, entryPrice, tp, sl, leverage } = db.activePosition;
                 const unrealizedPnl = side === "buy" ? currentPrice - entryPrice : entryPrice - currentPrice;
                 const pnlPercent = (unrealizedPnl / entryPrice * 100).toFixed(2);
 
@@ -1115,7 +1441,8 @@ const recoverPositionState = async () => {
                 console.log(`   ${side.toUpperCase()} | ${status}${warning}`);
                 console.log(`   Entry: ${formatPrice(entryPrice)} | Current: ${formatPrice(currentPrice)}`);
                 console.log(`   TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`);
-                console.log(`   ${pnlEmoji} PnL: ${formatPrice(unrealizedPnl)} (${pnlPercent}%)`);
+                console.log(`   ${pnlEmoji} PnL: ${formatPrice(unrealizedPnl * leverage)} (${pnlPercent}%)`);
+                console.log(`   Leverage: ${leverage}x | Unrealized: ${formatPrice(unrealizedPnl)}`);
             }
         }
 
@@ -1161,7 +1488,15 @@ let prevPosAmt = 0;
     const initialPositionSize = await calculateDynamicPositionSize();
     console.log(`📊 Initial Position Size: ${initialPositionSize.toFixed(2)} USDT`);
     
-    console.log("\n🚀 Bot started with ENHANCED S/R detection and DYNAMIC POSITION SIZING");
+    console.log("\n🚀 Bot started with ENHANCED S/R detection, DYNAMIC LEVERAGE & POSITION SIZING");
+    
+    // Tampilkan performance
+    console.log(`\n📈 Performance Summary:
+   Total PnL: ${performance.totalPnL.toFixed(2)} USDT
+   Daily PnL: ${performance.dailyPnL.toFixed(2)} USDT
+   Total Trades: ${performance.totalTrades}
+   Daily Trades: ${performance.dailyTrades}
+   Win Rate: ${(performance.winRate * 100).toFixed(1)}%`);
 })();
 
 setInterval(async () => {
@@ -1175,11 +1510,18 @@ setInterval(async () => {
     try {
         const freshDb = loadDB();
         db.pair = freshDb.pair;
-        db.leverage = freshDb.leverage;
         db.marginMode = freshDb.marginMode;
         db.usdtPerTrade = freshDb.usdtPerTrade;
         db.useDynamicPositionSizing = freshDb.useDynamicPositionSizing;
         db.positionSizePercentage = freshDb.positionSizePercentage;
+        db.maxDailyLossPercent = freshDb.maxDailyLossPercent;
+        db.minRRRatio = freshDb.minRRRatio;
+        db.useTrailingStop = freshDb.useTrailingStop;
+        db.trailingStopPercent = freshDb.trailingStopPercent;
+        db.usePyramidEntry = freshDb.usePyramidEntry;
+        db.maxPyramidEntries = freshDb.maxPyramidEntries;
+        db.pyramidDistancePercent = freshDb.pyramidDistancePercent;
+        db.coolingPeriod = freshDb.coolingPeriod;
     } catch (error) {
         // Use existing config on error
     }
@@ -1209,11 +1551,11 @@ setInterval(async () => {
 
         if (hasBotPosition) {
             const currentSide = db.activePosition.side;
-            if (currentSide === "buy" && signal.canShort) {
-                console.log("⚠️ SHORT signal detected, closing LONG");
+            if (currentSide === "buy" && signal.canShort && signal.signalStrength > 0.8) {
+                console.log("⚠️ STRONG SHORT signal detected, closing LONG");
                 shouldExitCurrentPosition = true;
-            } else if (currentSide === "sell" && signal.canLong) {
-                console.log("⚠️ LONG signal detected, closing SHORT");
+            } else if (currentSide === "sell" && signal.canLong && signal.signalStrength > 0.8) {
+                console.log("⚠️ STRONG LONG signal detected, closing SHORT");
                 shouldExitCurrentPosition = true;
             }
         }
@@ -1228,20 +1570,30 @@ setInterval(async () => {
         const hasActiveBinancePositionAfterClose = isFinite(amt) && Math.abs(amt) > 0;
 
         if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
-            if (signal.canLong) {
+            // Cek daily loss limit
+            const balance = await safeApiCall(exchange.fetchBalance);
+            const totalUSDT = balance.total?.USDT || 0;
+            const dailyLossLimit = totalUSDT * (db.maxDailyLossPercent / 100);
+            
+            if (performance.dailyPnL < -dailyLossLimit) {
+                console.log(`⛔ Daily loss limit reached (${db.maxDailyLossPercent}%), skipping trades`);
+                return;
+            }
+
+            if (signal.canLong && signal.signalStrength > 0.6 && signal.rrRatioLong >= db.minRRRatio) {
                 const isLongBreakout = signal.price > signal.targetLong;
                 if (!isLongBreakout) {
-                    console.log(`🚀 LONG Signal | TP: ${formatPrice(signal.targetLong)} | SL: ${formatPrice(signal.stopLossLong)}`);
+                    console.log(`🚀 LONG Signal | TP: ${formatPrice(signal.targetLong)} | SL: ${formatPrice(signal.stopLossLong)} | RR: ${signal.rrRatioLong.toFixed(2)}`);
                     db.lastLongEntryTime = now;
                     saveDB();
                     await placeOrder("buy", signal.targetLong, signal.stopLossLong);
                 } else {
                     console.log(`⏸️ LONG Signal: Breakout detected, skipping`);
                 }
-            } else if (signal.canShort) {
+            } else if (signal.canShort && signal.signalStrength > 0.6 && signal.rrRatioShort >= db.minRRRatio) {
                 const isShortBreakout = signal.price < signal.targetShort;
                 if (!isShortBreakout) {
-                    console.log(`📉 SHORT Signal | TP: ${formatPrice(signal.targetShort)} | SL: ${formatPrice(signal.stopLossShort)}`);
+                    console.log(`📉 SHORT Signal | TP: ${formatPrice(signal.targetShort)} | SL: ${formatPrice(signal.stopLossShort)} | RR: ${signal.rrRatioShort.toFixed(2)}`);
                     db.lastShortEntryTime = now;
                     saveDB();
                     await placeOrder("sell", signal.targetShort, signal.stopLossShort);
@@ -1255,9 +1607,15 @@ setInterval(async () => {
 
         if (Math.floor(Date.now() / 10000) % 5 === 0) {
             console.log("\n💰 Periodic Balance Update:");
-            await displayBalance();
+            const balanceInfo = await displayBalance();
             const currentPositionSize = await calculateDynamicPositionSize();
             console.log(`📊 Current Position Size: ${currentPositionSize.toFixed(2)} USDT`);
+            
+            // Update performance display
+            console.log(`📈 Performance Update:
+   Daily PnL: ${performance.dailyPnL.toFixed(2)} USDT
+   Daily Trades: ${performance.dailyTrades}
+   Win Rate: ${(performance.winRate * 100).toFixed(1)}%`);
         }
     } catch (err) {
         console.error("⚠️ Main loop error:", err.message);
