@@ -1,4 +1,4 @@
-// signal.js (Advanced Support & Resistance Version - Optimized & Auto-Leverage)
+// signal.js (FAST SIGNAL Version - Optimized for Speed & Frequency)
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
@@ -112,17 +112,18 @@ const loadDB = () => {
         activePosition: null,
         usdtPerTrade: 1, // Default 1 USDT untuk trading dengan saldo kecil
         useDynamicPositionSizing: true,
-        positionSizePercentage: 90,
-        maxDailyLossPercent: 10, // Maksimal kerugian harian 10%
-        minRRRatio: 1.8, // Minimal Risk:Reward 1:1.8
-        useTrailingStop: true,
-        trailingStopPercent: 0.5, // Trailing stop 0.5%
-        usePyramidEntry: true, // Entry bertahap
+        positionSizePercentage: 5, // Naikkan dari 2% ke 5%
+        maxDailyLossPercent: 15,   // Naikkan dari 10% ke 15%
+        minRRRatio: 1.3,           // Turunkan dari 1.8 ke 1.3
+        useTrailingStop: false,    // Nonaktifkan untuk kecepatan
+        trailingStopPercent: 0.5,
+        usePyramidEntry: false,    // Nonaktifkan untuk kecepatan
         maxPyramidEntries: 3,
-        pyramidDistancePercent: 0.3, // Jarak entry bertahap 0.3%
-        coolingPeriod: 60000, // 1 menit cooling period setelah loss
+        pyramidDistancePercent: 0.3,
+        coolingPeriod: 15000,      // Kurangi dari 60000 ke 15000 (15 detik)
         lastTradeResult: null, // 'win' atau 'loss'
-        lastTradeTime: 0
+        lastTradeTime: 0,
+        signalThreshold: 0.4       // Threshold sinyal lebih rendah
     };
 };
 
@@ -133,20 +134,20 @@ const calculateOptimalLeverage = async (balance) => {
     try {
         const totalUSDT = balance.total?.USDT || 0;
         
-        // Logika leverage berdasarkan balance
+        // Logika leverage agresif untuk sinyal cepat
         let leverage;
         if (totalUSDT <= 10) {
-            leverage = 50; // Untuk balance <= 10 USDT, gunakan leverage tinggi
+            leverage = 75; // Lebih agresif untuk balance kecil
         } else if (totalUSDT <= 50) {
-            leverage = 30; // Untuk balance <= 50 USDT
+            leverage = 50;
         } else if (totalUSDT <= 100) {
-            leverage = 20; // Untuk balance <= 100 USDT
+            leverage = 30;
         } else if (totalUSDT <= 500) {
-            leverage = 15; // Untuk balance <= 500 USDT
+            leverage = 20;
         } else if (totalUSDT <= 1000) {
-            leverage = 10; // Untuk balance <= 1000 USDT
+            leverage = 15;
         } else {
-            leverage = 5; // Untuk balance > 1000 USDT
+            leverage = 10;
         }
         
         // Ambil info market untuk cek leverage maksimal
@@ -156,14 +157,14 @@ const calculateOptimalLeverage = async (balance) => {
         // Pastikan leverage tidak melebihi maksimal
         leverage = Math.min(leverage, maxLeverage);
         
-        // Pastikan leverage minimal 5x
-        leverage = Math.max(leverage, 5);
+        // Pastikan leverage minimal 10x untuk kecepatan
+        leverage = Math.max(leverage, 10);
         
         console.log(`💰 Dynamic Leverage: ${leverage}x (Balance: ${totalUSDT.toFixed(2)} USDT)`);
         return leverage;
     } catch (error) {
-        console.error("❌ Failed to calculate optimal leverage, using default 10x:", error.message);
-        return 10;
+        console.error("❌ Failed to calculate optimal leverage, using default 15x:", error.message);
+        return 15;
     }
 };
 
@@ -186,24 +187,24 @@ const calculateDynamicPositionSize = async () => {
         // Hitung leverage optimal
         const leverage = await calculateOptimalLeverage(balance);
         
-        // Hitung size dengan mempertimbangkan leverage dan risk management
-        const riskPercent = Math.min(2, db.positionSizePercentage); // Maksimal risk 2% per trade
+        // Hitung size dengan mempertimbangkan leverage (lebih agresif)
+        const riskPercent = Math.min(5, db.positionSizePercentage); // Maksimal risk 5% per trade
         const baseSize = totalUSDT * (riskPercent / 100);
         
-        // Adjust dengan leverage (tapi jangan berlebihan)
-        const leveragedSize = baseSize * Math.min(leverage / 10, 3); // Batasi pengaruh leverage
+        // Adjust dengan leverage (lebih agresif untuk sinyal cepat)
+        const leveragedSize = baseSize * Math.min(leverage / 8, 4);
         
         const minTradeSize = 1; // Minimal 1 USDT
-        const maxTradeSize = totalUSDT * 0.3; // Maksimal 30% dari balance
+        const maxTradeSize = totalUSDT * 0.5; // Maksimal 50% dari balance (lebih agresif)
         
         let finalSize = Math.max(leveragedSize, minTradeSize);
         finalSize = Math.min(finalSize, maxTradeSize);
         
-        // Cek daily loss limit
+        // Cek daily loss limit (lebih longgar)
         const dailyLossLimit = totalUSDT * (db.maxDailyLossPercent / 100);
         if (performance.dailyPnL < -dailyLossLimit) {
             console.warn(`⚠️ Daily loss limit reached (${db.maxDailyLossPercent}%), reducing position size`);
-            finalSize = finalSize * 0.5; // Kurangi size menjadi 50%
+            finalSize = finalSize * 0.7; // Kurangi size menjadi 70% (bukan 50%)
         }
         
         console.log(`💰 Dynamic Position Sizing:
@@ -227,7 +228,8 @@ console.log(`⚙️ Bot Configuration:
 - Max Daily Loss: ${db.maxDailyLossPercent}%
 - Min R:R Ratio: ${db.minRRRatio}
 - Trailing Stop: ${db.useTrailingStop ? `Enabled (${db.trailingStopPercent}%)` : 'Disabled'}
-- Pyramid Entry: ${db.usePyramidEntry ? `Enabled (max ${db.maxPyramidEntries} entries)` : 'Disabled'}`);
+- Pyramid Entry: ${db.usePyramidEntry ? `Enabled (max ${db.maxPyramidEntries} entries)` : 'Disabled'}
+- Signal Threshold: ${db.signalThreshold}`);
 
 // -------------------- STABLE API CALLS --------------------
 const safeApiCall = async (apiFunction, ...args) => {
@@ -439,6 +441,80 @@ const getPositionFromBalance = async () => {
             balance: null,
             position: null
         };
+    }
+};
+
+// -------------------- FAST SIGNAL DETECTION (1m timeframe) --------------------
+const analyzeFastSignal = async () => {
+    console.log("⚡ FAST signal analysis started...");
+    try {
+        // Gunakan timeframe lebih pendek untuk sinyal cepat
+        const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "1m", undefined, 50);
+        if (!ohlcv || ohlcv.length < 30) {
+            console.warn("⚠️ Insufficient OHLCV data for fast signal");
+            return {};
+        }
+        
+        const close = ohlcv.map(c => c[4]);
+        const high = ohlcv.map(c => c[2]);
+        const low = ohlcv.map(c => c[3]);
+        const price = close[close.length - 1];
+        
+        // EMA cepat untuk sinyal instant
+        const emaFast = EMA.calculate({ values: close.slice(-20), period: 5 });
+        const emaSlow = EMA.calculate({ values: close.slice(-20), period: 10 });
+        
+        if (emaFast.length < 2 || emaSlow.length < 2) {
+            console.warn("⚠️ Insufficient EMA data");
+            return {};
+        }
+        
+        const currentEmaFast = emaFast[emaFast.length - 1];
+        const currentEmaSlow = emaSlow[emaSlow.length - 1];
+        const prevEmaFast = emaFast[emaFast.length - 2];
+        const prevEmaSlow = emaSlow[emaSlow.length - 2];
+        
+        // RSI cepat
+        const rsi = RSI.calculate({ values: close.slice(-20), period: 7 });
+        const currentRSI = rsi[rsi.length - 1];
+        
+        // Sinyal sederhana dan cepat
+        const isBullishCross = currentEmaFast > currentEmaSlow && prevEmaFast <= prevEmaSlow;
+        const isBearishCross = currentEmaFast < currentEmaSlow && prevEmaFast >= prevEmaSlow;
+        
+        const canLong = isBullishCross && currentRSI > 35 && currentRSI < 75;
+        const canShort = isBearishCross && currentRSI < 65 && currentRSI > 25;
+        
+        // Hitung TP/SL sederhana
+        const atr = ATR.calculate({ high, low, close, period: 10 });
+        const currentATR = atr[atr.length - 1] || 0;
+        
+        const targetLong = price + (currentATR * 1.2);
+        const stopLossLong = price - (currentATR * 0.8);
+        const targetShort = price - (currentATR * 1.2);
+        const stopLossShort = price + (currentATR * 0.8);
+        
+        const rrRatioLong = (targetLong - price) / (price - stopLossLong);
+        const rrRatioShort = (price - targetShort) / (stopLossShort - price);
+        
+        console.log(`⚡ FAST Signal: ${canLong ? 'LONG ✅' : ''} ${canShort ? 'SHORT ✅' : ''} | RSI: ${currentRSI?.toFixed(1)}`);
+        
+        return {
+            canLong,
+            canShort,
+            targetLong,
+            stopLossLong,
+            targetShort,
+            stopLossShort,
+            price,
+            rrRatioLong,
+            rrRatioShort,
+            signalStrength: 0.5,
+            isFastSignal: true
+        };
+    } catch (error) {
+        console.error("❌ Fast signal analysis failed:", error.message);
+        return {};
     }
 };
 
@@ -790,12 +866,12 @@ const findEnhancedLevels = (high, low, close, volume, price) => {
     return calculateOptimalLevels();
 };
 
-// -------------------- ENHANCED TECHNICAL ANALYSIS --------------------
+// -------------------- ENHANCED TECHNICAL ANALYSIS (3m timeframe) --------------------
 const analyzeEnhancedSignal = async () => {
     console.log("🧠 Enhanced technical analysis started...");
     try {
-        const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "5m", undefined, 200);
-        if (!ohlcv || ohlcv.length < 100) {
+        const ohlcv = await safeApiCall(exchange.fetchOHLCV, db.pair, "3m", undefined, 100);
+        if (!ohlcv || ohlcv.length < 80) {
             console.warn("⚠️ Insufficient OHLCV data");
             return {};
         }
@@ -806,32 +882,27 @@ const analyzeEnhancedSignal = async () => {
         const volume = ohlcv.map(c => c[5]);
         const price = close[close.length - 1];
 
-        // Multiple timeframe analysis
-        const ohlcv15m = await safeApiCall(exchange.fetchOHLCV, db.pair, "15m", undefined, 100);
-        const close15m = ohlcv15m.map(c => c[4]);
-        
+        // Gunakan periode MA yang lebih pendek untuk respons lebih cepat
         const maFast5 = SMA.calculate({ values: close.slice(-50), period: 5 });
-        const maMedium5 = SMA.calculate({ values: close.slice(-50), period: 13 });
-        const maSlow5 = SMA.calculate({ values: close.slice(-50), period: 21 });
-        const maMedium15 = SMA.calculate({ values: close15m.slice(-50), period: 13 });
+        const maMedium5 = SMA.calculate({ values: close.slice(-50), period: 10 });
+        const maSlow5 = SMA.calculate({ values: close.slice(-50), period: 15 });
 
         const currentMAFast = maFast5[maFast5.length - 1];
         const currentMAMedium = maMedium5[maMedium5.length - 1];
         const currentMASlow = maSlow5[maSlow5.length - 1];
-        const currentMAMedium15 = maMedium15[maMedium15.length - 1];
 
         const prevMAFast = maFast5[maFast5.length - 2];
         const prevMAMedium = maMedium5[maMedium5.length - 2];
         const prevMASlow = maSlow5[maSlow5.length - 2];
 
-        const rsi = RSI.calculate({ values: close.slice(-50), period: 14 });
+        const rsi = RSI.calculate({ values: close.slice(-50), period: 10 });
         const currentRSI = rsi[rsi.length - 1];
 
         // Stochastic RSI
         const stochRSI = (currentRSI - Math.min(...rsi.slice(-14))) / 
                         (Math.max(...rsi.slice(-14)) - Math.min(...rsi.slice(-14))) * 100;
 
-        // Volume analysis
+        // Volume analysis - simplified
         const avgVolume = volume.slice(-20).reduce((a, b) => a + b, 0) / 20;
         const currentVolume = volume[volume.length - 1];
         const volumeRatio = currentVolume / avgVolume;
@@ -845,32 +916,26 @@ const analyzeEnhancedSignal = async () => {
         const priceAboveAllMAs = price > currentMAFast && price > currentMAMedium && price > currentMASlow;
         const priceBelowAllMAs = price < currentMAFast && price < currentMAMedium && price < currentMASlow;
 
-        // Higher timeframe confirmation
-        const higherTFBullish = price > currentMAMedium15;
-        const higherTFBearish = price < currentMAMedium15;
-
         let canLong = false;
         let canShort = false;
         let signalStrength = 0;
 
-        // Long conditions dengan konfirmasi lebih ketat
+        // Long conditions dengan konfirmasi lebih longgar
         if ((isFastCrossAboveMedium || (isUptrend && priceAboveAllMAs)) && 
-            currentRSI > 45 && currentRSI < 70 &&
+            currentRSI > 30 && currentRSI < 80 && // Lebih longgar dari 45-70
             stochRSI > 20 && stochRSI < 80 &&
-            volumeRatio > 1.2 && // Volume konfirmasi
-            higherTFBullish) {
+            volumeRatio > 1.0) { // Volume ratio lebih longgar
             canLong = true;
-            signalStrength = 0.7 + (volumeRatio > 1.5 ? 0.2 : 0) + (stochRSI > 50 ? 0.1 : 0);
+            signalStrength = 0.5 + (volumeRatio > 1.5 ? 0.2 : 0) + (stochRSI > 50 ? 0.1 : 0);
         }
 
-        // Short conditions dengan konfirmasi lebih ketat
+        // Short conditions dengan konfirmasi lebih longgar
         if ((isFastCrossBelowMedium || (isDowntrend && priceBelowAllMAs)) && 
-            currentRSI < 55 && currentRSI > 30 &&
+            currentRSI < 70 && currentRSI > 20 && // Lebih longgar dari 55-30
             stochRSI > 20 && stochRSI < 80 &&
-            volumeRatio > 1.2 && // Volume konfirmasi
-            higherTFBearish) {
+            volumeRatio > 1.0) {
             canShort = true;
-            signalStrength = 0.7 + (volumeRatio > 1.5 ? 0.2 : 0) + (stochRSI < 50 ? 0.1 : 0);
+            signalStrength = 0.5 + (volumeRatio > 1.5 ? 0.2 : 0) + (stochRSI < 50 ? 0.1 : 0);
         }
 
         const calculateATR = (highArr, lowArr, closeArr, period = 14) => {
@@ -903,15 +968,15 @@ const analyzeEnhancedSignal = async () => {
             const recentHigh = Math.max(...high.slice(-50));
             const recentLow = Math.min(...low.slice(-50));
             
-            resistance = recentHigh + (currentATR * 0.3);
-            support = recentLow - (currentATR * 0.3);
+            resistance = recentHigh + (currentATR * 0.2); // Lebih kecil dari sebelumnya
+            support = recentLow - (currentATR * 0.2);
         }
 
         // Adjust dengan signal strength
         const strengthMultiplier = 1 + (signalStrength * 0.3);
         
-        const minDistance = currentATR * 0.6 * strengthMultiplier;
-        const maxDistance = currentATR * 2.5 * strengthMultiplier;
+        const minDistance = currentATR * 0.4 * strengthMultiplier; // Lebih kecil
+        const maxDistance = currentATR * 2.0 * strengthMultiplier; // Lebih kecil
 
         if (resistance - price < minDistance) {
             resistance = price + minDistance;
@@ -956,7 +1021,7 @@ const analyzeEnhancedSignal = async () => {
             console.log(`📊 Adjusted Short TP for better RR: ${formatPrice(targetShort)} (RR: ${db.minRRRatio})`);
         }
 
-        console.log(`\n🎯 ENHANCED Analysis Results ${db.pair}
+        console.log(`\n🎯 ENHANCED Analysis Results ${db.pair} (3m)
 ══════════════════════════════════════════════════
 📈 Long Signal: ${canLong ? `✅ VALID (Strength: ${signalStrength.toFixed(2)})` : "❌ INVALID"}
 📉 Short Signal: ${canShort ? `✅ VALID (Strength: ${signalStrength.toFixed(2)})` : "❌ INVALID"}
@@ -970,28 +1035,9 @@ const analyzeEnhancedSignal = async () => {
 📈 MA Fast: ${formatPrice(currentMAFast)}
 📈 MA Medium: ${formatPrice(currentMAMedium)}
 📈 MA Slow: ${formatPrice(currentMASlow)}
-📈 MA 15m: ${formatPrice(currentMAMedium15)}
 📊 ATR: ${formatPrice(currentATR)} (${(currentATR/price*100).toFixed(3)}%)
 📊 RR Ratio Long: ${rrRatioLong.toFixed(2)} | Short: ${rrRatioShort.toFixed(2)}
-══════════════════════════════════════════════════
-📊 Volume POC: ${formatPrice(enhancedLevels.volumePOC)}
-🔍 Detected R Levels: ${enhancedLevels.allResistance?.length || 0}
-🔍 Detected S Levels: ${enhancedLevels.allSupport?.length || 0}
 ══════════════════════════════════════════════════`);
-
-        if (enhancedLevels.allResistance && enhancedLevels.allResistance.length > 0) {
-            console.log("📈 Top Resistance Levels:");
-            enhancedLevels.allResistance.slice(0, 3).forEach(level => {
-                console.log(`   - ${formatPrice(level.price)} (conf: ${level.confidence.toFixed(2)})`);
-            });
-        }
-
-        if (enhancedLevels.allSupport && enhancedLevels.allSupport.length > 0) {
-            console.log("📉 Top Support Levels:");
-            enhancedLevels.allSupport.slice(0, 3).forEach(level => {
-                console.log(`   - ${formatPrice(level.price)} (conf: ${level.confidence.toFixed(2)})`);
-            });
-        }
 
         return {
             canLong,
@@ -1096,9 +1142,9 @@ const checkPyramidEntry = async (signal) => {
 
 // -------------------- ORDER MANAGEMENT --------------------
 const placeOrder = async (side, tp, sl) => {
-    // Cek cooling period setelah loss
-    if (db.lastTradeResult === 'loss' && Date.now() - db.lastTradeTime < db.coolingPeriod) {
-        const remainingTime = Math.ceil((db.coolingPeriod - (Date.now() - db.lastTradeTime)) / 1000);
+    // Cek cooling period setelah loss - lebih singkat
+    if (db.lastTradeResult === 'loss' && Date.now() - db.lastTradeTime < 10000) {
+        const remainingTime = Math.ceil((10000 - (Date.now() - db.lastTradeTime)) / 1000);
         console.log(`⏳ Cooling period active (${remainingTime}s remaining after loss)`);
         return;
     }
@@ -1131,12 +1177,13 @@ const placeOrder = async (side, tp, sl) => {
     const leverage = await calculateOptimalLeverage(balance);
     
     const qty = await calcQty(price, leverage);
-    console.log(`➡️ ENTRY ${side.toUpperCase()}
+    console.log(`➡️ ENTRY ${side.toUpperCase()} - FAST SIGNAL
 - Quantity: ${qty}
 - Entry: ${formatPrice(price)}
 - TP: ${formatPrice(tp)}
 - SL: ${formatPrice(sl)}
-- Leverage: ${leverage}x`);
+- Leverage: ${leverage}x
+- RR Ratio: ${((tp - price) / (price - sl)).toFixed(2)}`);
 
     try {
         await safeApiCall(exchange.setLeverage, leverage, db.pair);
@@ -1311,25 +1358,27 @@ const recoverPositionState = async () => {
             const entryPrice = parseFloat(position?.entryPrice || currentPrice);
             const leverage = position?.leverage || 10;
 
-            const signal = await analyzeEnhancedSignal();
+            const fastSignal = await analyzeFastSignal();
+            const enhancedSignal = await analyzeEnhancedSignal();
+            
             let tp, sl;
 
-            if (!signal || !signal.price) {
+            if (!fastSignal && !enhancedSignal) {
                 console.log("⚠️ Using fallback TP/SL");
                 if (side === "buy") {
-                    tp = entryPrice * 1.015;
-                    sl = entryPrice * 0.995;
+                    tp = entryPrice * 1.012; // Lebih kecil dari sebelumnya
+                    sl = entryPrice * 0.988; // Lebih ketat dari sebelumnya
                 } else {
-                    tp = entryPrice * 0.985;
-                    sl = entryPrice * 1.005;
+                    tp = entryPrice * 0.988;
+                    sl = entryPrice * 1.012;
                 }
             } else {
                 if (side === "buy") {
-                    tp = signal.targetLong || (entryPrice * 1.015);
-                    sl = signal.stopLossLong || (entryPrice * 0.995);
+                    tp = fastSignal.targetLong || enhancedSignal.targetLong || (entryPrice * 1.012);
+                    sl = fastSignal.stopLossLong || enhancedSignal.stopLossLong || (entryPrice * 0.988);
                 } else {
-                    tp = signal.targetShort || (entryPrice * 0.985);
-                    sl = signal.stopLossShort || (entryPrice * 1.005);
+                    tp = fastSignal.targetShort || enhancedSignal.targetShort || (entryPrice * 0.988);
+                    sl = fastSignal.stopLossShort || enhancedSignal.stopLossShort || (entryPrice * 1.012);
                 }
             }
 
@@ -1343,11 +1392,11 @@ const recoverPositionState = async () => {
             }
 
             if (side === "buy") {
-                if (tp <= entryPrice) tp = entryPrice * 1.015;
-                if (sl >= entryPrice) sl = entryPrice * 0.995;
+                if (tp <= entryPrice) tp = entryPrice * 1.012;
+                if (sl >= entryPrice) sl = entryPrice * 0.988;
             } else {
-                if (tp >= entryPrice) tp = entryPrice * 0.985;
-                if (sl <= entryPrice) sl = entryPrice * 1.005;
+                if (tp >= entryPrice) tp = entryPrice * 0.988;
+                if (sl <= entryPrice) sl = entryPrice * 1.012;
             }
 
             let rrRatio;
@@ -1488,7 +1537,8 @@ let prevPosAmt = 0;
     const initialPositionSize = await calculateDynamicPositionSize();
     console.log(`📊 Initial Position Size: ${initialPositionSize.toFixed(2)} USDT`);
     
-    console.log("\n🚀 Bot started with ENHANCED S/R detection, DYNAMIC LEVERAGE & POSITION SIZING");
+    console.log("\n🚀 Bot started with FAST SIGNAL detection (1m + 3m timeframes)");
+    console.log("⚡ Configuration: Aggressive Mode - Signals every 5 seconds");
     
     // Tampilkan performance
     console.log(`\n📈 Performance Summary:
@@ -1522,6 +1572,7 @@ setInterval(async () => {
         db.maxPyramidEntries = freshDb.maxPyramidEntries;
         db.pyramidDistancePercent = freshDb.pyramidDistancePercent;
         db.coolingPeriod = freshDb.coolingPeriod;
+        db.signalThreshold = freshDb.signalThreshold || 0.4;
     } catch (error) {
         // Use existing config on error
     }
@@ -1538,9 +1589,28 @@ setInterval(async () => {
         await recoverPositionState();
         await checkPositionStatus();
 
-        console.log("🔍 Checking for new signals...");
+        console.log("🔍 Checking for new FAST signals...");
 
-        const signal = await analyzeEnhancedSignal();
+        // Analisis sinyal cepat (1m) dan enhanced (3m)
+        const fastSignal = await analyzeFastSignal();
+        const enhancedSignal = await analyzeEnhancedSignal();
+
+        // Gabungkan sinyal
+        const signal = {
+            ...enhancedSignal,
+            // Prioritaskan sinyal cepat jika valid
+            canLong: fastSignal.canLong || enhancedSignal.canLong,
+            canShort: fastSignal.canShort || enhancedSignal.canShort,
+            targetLong: fastSignal.targetLong || enhancedSignal.targetLong,
+            stopLossLong: fastSignal.stopLossLong || enhancedSignal.stopLossLong,
+            targetShort: fastSignal.targetShort || enhancedSignal.targetShort,
+            stopLossShort: fastSignal.stopLossShort || enhancedSignal.stopLossShort,
+            rrRatioLong: Math.min(fastSignal.rrRatioLong || 99, enhancedSignal.rrRatioLong || 99),
+            rrRatioShort: Math.min(fastSignal.rrRatioShort || 99, enhancedSignal.rrRatioShort || 99),
+            price: enhancedSignal.price || fastSignal.price,
+            signalStrength: Math.max(enhancedSignal.signalStrength || 0, fastSignal.signalStrength || 0)
+        };
+
         if (!signal.price) {
             console.log("⚠️ Invalid signal, waiting...");
             return;
@@ -1551,10 +1621,10 @@ setInterval(async () => {
 
         if (hasBotPosition) {
             const currentSide = db.activePosition.side;
-            if (currentSide === "buy" && signal.canShort && signal.signalStrength > 0.8) {
+            if (currentSide === "buy" && signal.canShort && signal.signalStrength > 0.7) {
                 console.log("⚠️ STRONG SHORT signal detected, closing LONG");
                 shouldExitCurrentPosition = true;
-            } else if (currentSide === "sell" && signal.canLong && signal.signalStrength > 0.8) {
+            } else if (currentSide === "sell" && signal.canLong && signal.signalStrength > 0.7) {
                 console.log("⚠️ STRONG LONG signal detected, closing SHORT");
                 shouldExitCurrentPosition = true;
             }
@@ -1562,7 +1632,7 @@ setInterval(async () => {
 
         if (shouldExitCurrentPosition) {
             await closePosition("Signal reversal", db.activePosition.entryPrice);
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Delay lebih singkat
         }
 
         const { position } = await getPositionFromBalance();
@@ -1570,30 +1640,33 @@ setInterval(async () => {
         const hasActiveBinancePositionAfterClose = isFinite(amt) && Math.abs(amt) > 0;
 
         if (db.activePosition === null && !hasActiveBinancePositionAfterClose) {
-            // Cek daily loss limit
+            // Cek daily loss limit (lebih longgar)
             const balance = await safeApiCall(exchange.fetchBalance);
             const totalUSDT = balance.total?.USDT || 0;
             const dailyLossLimit = totalUSDT * (db.maxDailyLossPercent / 100);
             
-            if (performance.dailyPnL < -dailyLossLimit) {
+            if (performance.dailyPnL < -dailyLossLimit * 1.5) { // 1.5x lebih longgar
                 console.log(`⛔ Daily loss limit reached (${db.maxDailyLossPercent}%), skipping trades`);
                 return;
             }
 
-            if (signal.canLong && signal.signalStrength > 0.6 && signal.rrRatioLong >= db.minRRRatio) {
+            // Gunakan threshold yang lebih rendah
+            const signalThreshold = db.signalThreshold || 0.4;
+            
+            if (signal.canLong && signal.signalStrength > signalThreshold && signal.rrRatioLong >= db.minRRRatio) {
                 const isLongBreakout = signal.price > signal.targetLong;
                 if (!isLongBreakout) {
-                    console.log(`🚀 LONG Signal | TP: ${formatPrice(signal.targetLong)} | SL: ${formatPrice(signal.stopLossLong)} | RR: ${signal.rrRatioLong.toFixed(2)}`);
+                    console.log(`🚀 LONG Signal (FAST) | TP: ${formatPrice(signal.targetLong)} | SL: ${formatPrice(signal.stopLossLong)} | RR: ${signal.rrRatioLong.toFixed(2)}`);
                     db.lastLongEntryTime = now;
                     saveDB();
                     await placeOrder("buy", signal.targetLong, signal.stopLossLong);
                 } else {
                     console.log(`⏸️ LONG Signal: Breakout detected, skipping`);
                 }
-            } else if (signal.canShort && signal.signalStrength > 0.6 && signal.rrRatioShort >= db.minRRRatio) {
+            } else if (signal.canShort && signal.signalStrength > signalThreshold && signal.rrRatioShort >= db.minRRRatio) {
                 const isShortBreakout = signal.price < signal.targetShort;
                 if (!isShortBreakout) {
-                    console.log(`📉 SHORT Signal | TP: ${formatPrice(signal.targetShort)} | SL: ${formatPrice(signal.stopLossShort)} | RR: ${signal.rrRatioShort.toFixed(2)}`);
+                    console.log(`📉 SHORT Signal (FAST) | TP: ${formatPrice(signal.targetShort)} | SL: ${formatPrice(signal.stopLossShort)} | RR: ${signal.rrRatioShort.toFixed(2)}`);
                     db.lastShortEntryTime = now;
                     saveDB();
                     await placeOrder("sell", signal.targetShort, signal.stopLossShort);
@@ -1605,7 +1678,8 @@ setInterval(async () => {
             }
         }
 
-        if (Math.floor(Date.now() / 10000) % 5 === 0) {
+        // Update balance setiap 3 siklus (15 detik)
+        if (Math.floor(Date.now() / 5000) % 3 === 0) {
             console.log("\n💰 Periodic Balance Update:");
             const balanceInfo = await displayBalance();
             const currentPositionSize = await calculateDynamicPositionSize();
@@ -1622,4 +1696,4 @@ setInterval(async () => {
     } finally {
         isProcessing = false;
     }
-}, 10000);
+}, 5000); // Interval 5 detik (bukan 10 detik)
