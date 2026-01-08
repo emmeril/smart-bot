@@ -1,11 +1,11 @@
 {
-  "pair": "XRP/USDT:USDT",
-  "usdtPerTrade": 5,
-  "leverage": 15,
-  "targetProfitPercent": 0.3,
-  "maxDailyLossPercent": 10,
-  "coolingPeriod": 3000,
-  "signalThreshold": 0.4,
+  "pair": "DOGE/USDT:USDT",
+  "usdtPerTrade": 0.25,
+  "leverage": 50,
+  "targetProfitPercent": 1.5,
+  "maxDailyLossPercent": 30,
+  "coolingPeriod": 2000,
+  "signalThreshold": 0.3,
   "activePosition": null,
   "dailyPnL": 0,
   "dailyTrades": 0
