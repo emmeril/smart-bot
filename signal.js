@@ -26,7 +26,7 @@ const loadDB = () => {
         pair: "DOGE/USDT:USDT",
         usdtPerTrade: 5,
         leverage: 75,
-        targetProfitPercent: 1,
+        targetProfitUSDT: 0.01,  
         maxDailyLossPercent: 10,
         coolingPeriod: 3000,
         activePosition: null,
@@ -96,7 +96,6 @@ const analyzeSignal = async () => {
         console.log(`📈 Data points: ${close.length} candles`);
 
         // EMA 5 & 10 untuk sinyal cepat
-        // Pastikan ada cukup data untuk EMA 10 (perlu minimal 10+ data)
         const ema5 = EMA.calculate({ values: close, period: 5 });
         const ema10 = EMA.calculate({ values: close, period: 10 });
 
@@ -120,11 +119,6 @@ const analyzeSignal = async () => {
         const bullishCross = currentEma5 > currentEma10 && prevEma5 <= prevEma10;
         const bearishCross = currentEma5 < currentEma10 && prevEma5 >= prevEma10;
 
-        // Target profit kecil
-        const targetProfit = db.targetProfitPercent / 100;
-        const targetLong = currentPrice * (1 + targetProfit);
-        const targetShort = currentPrice * (1 - targetProfit);
-
         // Tampilkan detail indikator setiap kali
         console.log("\n" + "=".repeat(50));
         console.log("📈 INDICATOR VALUES:");
@@ -143,21 +137,12 @@ const analyzeSignal = async () => {
         console.log("🚦 FINAL SIGNAL:");
         console.log(`   LONG Signal: ${canLong ? "✅ READY" : "❌ NOT READY"}`);
         console.log(`   SHORT Signal: ${canShort ? "✅ READY" : "❌ NOT READY"}`);
-        
-        if (canLong) {
-            console.log(`   🎯 LONG Target: ${targetLong.toFixed(6)} (+${db.targetProfitPercent}%)`);
-        }
-        if (canShort) {
-            console.log(`   🎯 SHORT Target: ${targetShort.toFixed(6)} (-${db.targetProfitPercent}%)`);
-        }
         console.log("=".repeat(50));
 
         return {
             canLong,
             canShort,
             price: currentPrice,
-            targetLong,
-            targetShort,
             rsi: currentRSI,
             ema5: currentEma5,
             ema10: currentEma10,
@@ -170,7 +155,7 @@ const analyzeSignal = async () => {
 };
 
 // -------------------- SIMPLE ORDER MANAGEMENT --------------------
-const placeOrder = async (side, targetPrice) => {
+const placeOrder = async (side, signalPrice) => {
     try {
         // Cek apakah sudah ada posisi aktif
         if (db.activePosition) {
@@ -188,18 +173,33 @@ const placeOrder = async (side, targetPrice) => {
         
         // 3. Dapatkan harga terkini untuk perhitungan
         const ticker = await exchange.fetchTicker(db.pair);
-        const signalPrice = ticker.last;
+        const entryPrice = ticker.last;
         
         // Hitung quantity
-        const qty = (db.usdtPerTrade * db.leverage) / signalPrice;
+        const qty = (db.usdtPerTrade * db.leverage) / entryPrice;
         const market = exchange.markets[db.pair];
         const precision = market?.precision?.amount || 3;
         const adjustedQty = parseFloat(qty.toFixed(precision));
 
+        // Hitung target price berdasarkan profit USDT (0.01 atau 0.02)
+        const targetProfitUSDT = db.targetProfitUSDT;
+        let targetPrice;
+        if (side === "buy") {
+            targetPrice = entryPrice + (targetProfitUSDT / adjustedQty);
+        } else {
+            targetPrice = entryPrice - (targetProfitUSDT / adjustedQty);
+        }
+        
+        // Bulatkan target price sesuai precision market
+        const pricePrecision = market?.precision?.price || 8;
+        targetPrice = parseFloat(targetPrice.toFixed(pricePrecision));
+
         console.log(`   📊 Order Details:`);
         console.log(`   - Amount: ${db.usdtPerTrade} USDT × ${db.leverage}x = ${(db.usdtPerTrade * db.leverage).toFixed(2)} USDT`);
         console.log(`   - Quantity: ${adjustedQty} ${db.pair.split('/')[0]}`);
-        console.log(`   - Entry Price: ${signalPrice}`);
+        console.log(`   - Entry Price: ${entryPrice}`);
+        console.log(`   - Target Profit: ${targetProfitUSDT} USDT`);
+        console.log(`   - Target Price: ${targetPrice}`);
 
         // 4. Place order dengan params untuk isolated margin
         const order = await exchange.createOrder(db.pair, "market", side, adjustedQty, undefined, {
@@ -209,21 +209,22 @@ const placeOrder = async (side, targetPrice) => {
         // Simpan posisi aktif
         db.activePosition = {
             side: side,
-            entryPrice: signalPrice,
+            entryPrice: entryPrice,
             targetPrice: targetPrice,
             orderId: order.id,
             quantity: adjustedQty,
             entryTime: Date.now(),
-            marginMode: "isolated"
+            marginMode: "isolated",
+            targetProfitUSDT: targetProfitUSDT
         };
 
         saveDB();
-        logTrade(side, signalPrice, targetPrice, "OPEN");
+        logTrade(side, entryPrice, targetPrice, "OPEN");
 
         console.log(`\n✅ ORDER PLACED:`);
         console.log(`   Type: ${side.toUpperCase()}`);
-        console.log(`   Entry: ${signalPrice}`);
-        console.log(`   Target: ${targetPrice} (+${db.targetProfitPercent}%)`);
+        console.log(`   Entry: ${entryPrice}`);
+        console.log(`   Target: ${targetPrice} (+${targetProfitUSDT} USDT)`);
         console.log(`   Order ID: ${order.id}`);
         console.log(`   Margin Mode: ISOLATED`);
         console.log(`   Time: ${new Date().toLocaleTimeString()}`);
@@ -241,36 +242,39 @@ const checkAndClosePosition = async () => {
         const currentPrice = await getPrice();
         if (!currentPrice) return;
 
-        const { side, entryPrice, targetPrice } = db.activePosition;
+        const { side, entryPrice, targetPrice, quantity, targetProfitUSDT } = db.activePosition;
+        
+        // Hitung profit dalam USDT
+        const profitUSDT = side === "buy" 
+            ? (currentPrice - entryPrice) * quantity
+            : (entryPrice - currentPrice) * quantity;
+        
+        // Hitung profit persentase (untuk display saja)
         const profitPercent = side === "buy" 
             ? ((currentPrice - entryPrice) / entryPrice * 100)
             : ((entryPrice - currentPrice) / entryPrice * 100);
 
-        // TUTUP JIKA PROFIT TARGET TERCAPAI
-        if ((side === "buy" && currentPrice >= targetPrice) ||
-            (side === "sell" && currentPrice <= targetPrice)) {
-            
+        // TUTUP JIKA PROFIT TARGET TERCAPAI (0.01 atau 0.02 USDT)
+        const profitTargetReached = profitUSDT >= targetProfitUSDT;
+        
+        if (profitTargetReached) {
             console.log(`\n🎯 TARGET HIT! Closing position...`);
             console.log(`   Current Price: ${currentPrice}`);
             console.log(`   Target Price: ${targetPrice}`);
-            console.log(`   Profit: ${profitPercent.toFixed(2)}%`);
+            console.log(`   Profit: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
             
-            await closePosition("PROFIT_TARGET", profitPercent);
-        }
-        // TUTUP JIKAN SUDAH LEWAT 1 MENIT (safety)
-        else if (Date.now() - db.activePosition.entryTime > 60000) {
-            console.log(`\n⏰ TIMEOUT! Closing position after 1 minute...`);
-            await closePosition("TIMEOUT", profitPercent);
+            await closePosition("PROFIT_TARGET", profitUSDT, profitPercent);
         }
         // TAMPILKAN STATUS
         else {
-            const status = profitPercent >= 0 ? "🟢" : "🔴";
+            const status = profitUSDT >= 0 ? "🟢" : "🔴";
             const timeElapsed = Math.floor((Date.now() - db.activePosition.entryTime) / 1000);
             console.log(`\n📊 POSITION STATUS:`);
-            console.log(`   ${status} Profit: ${profitPercent.toFixed(2)}% (Target: ${db.targetProfitPercent}%)`);
+            console.log(`   ${status} Profit: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
+            console.log(`   Target: ${targetProfitUSDT} USDT`);
             console.log(`   Entry: ${entryPrice} | Current: ${currentPrice}`);
             console.log(`   Time in trade: ${timeElapsed}s`);
-            console.log(`   Need: ${side === "buy" ? (targetPrice - currentPrice).toFixed(6) : (currentPrice - targetPrice).toFixed(6)} to target`);
+            console.log(`   Need: ${(targetProfitUSDT - profitUSDT).toFixed(4)} USDT more to target`);
         }
 
     } catch (error) {
@@ -278,7 +282,7 @@ const checkAndClosePosition = async () => {
     }
 };
 
-const closePosition = async (reason, profitPercent) => {
+const closePosition = async (reason, profitUSDT, profitPercent) => {
     try {
         const { side, quantity, entryPrice } = db.activePosition;
         const closeSide = side === "buy" ? "sell" : "buy";
@@ -290,25 +294,19 @@ const closePosition = async (reason, profitPercent) => {
             marginMode: "isolated"
         });
 
-        // Hitung PnL
-        const currentPrice = await getPrice();
-        const pnl = side === "buy" 
-            ? (currentPrice - entryPrice) * quantity
-            : (entryPrice - currentPrice) * quantity;
-
         // Update daily PnL
-        db.dailyPnL += pnl;
+        db.dailyPnL += profitUSDT;
         db.dailyTrades++;
         
         // Log trade
-        logTrade(side === "buy" ? "LONG" : "SHORT", entryPrice, currentPrice, "CLOSE", pnl);
+        logTrade(side === "buy" ? "LONG" : "SHORT", entryPrice, await getPrice(), "CLOSE", profitUSDT);
         
         console.log(`\n✅ POSITION CLOSED:`);
         console.log(`   Reason: ${reason}`);
-        console.log(`   PnL: ${pnl.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
+        console.log(`   PnL: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
         console.log(`   Daily PnL: ${db.dailyPnL.toFixed(2)} USDT`);
         console.log(`   Daily Trades: ${db.dailyTrades}`);
-        console.log(`   Exit Price: ${currentPrice}`);
+        console.log(`   Exit Price: ${await getPrice()}`);
         console.log(`   Time: ${new Date().toLocaleTimeString()}`);
 
         // Reset posisi aktif
@@ -367,11 +365,11 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         const totalUSDT = balance.total?.USDT || 0;
         
         console.log("\n" + "=".repeat(60));
-        console.log("🚀 SIMPLE SCALPING BOT STARTED (ISOLATED MARGIN)");
+        console.log("🚀 SIMPLE SCALPING BOT STARTED ");
         console.log("=".repeat(60));
         console.log(`💰 Balance: ${totalUSDT.toFixed(2)} USDT`);
         console.log(`📊 Pair: ${db.pair}`);
-        console.log(`🎯 Target Profit: ${db.targetProfitPercent}% per trade`);
+        console.log(`🎯 Target Profit: ${db.targetProfitUSDT} USDT per trade`);
         console.log(`⚡ Leverage: ${db.leverage}x`);
         console.log(`🛡️ Margin Mode: ISOLATED`);
         console.log(`📈 Strategy: Quick scalping, NO STOP LOSS`);
@@ -431,14 +429,14 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
                         console.log(`   Price: ${signal.price}`);
                         console.log(`   RSI: ${signal.rsi.toFixed(2)}`);
                         console.log(`   EMA5 > EMA10: ${signal.ema5.toFixed(6)} > ${signal.ema10.toFixed(6)}`);
-                        await placeOrder("buy", signal.targetLong);
+                        await placeOrder("buy", signal.price);
                     } 
                     else if (signal.canShort) {
                         console.log(`\n🎯 SHORT SIGNAL CONFIRMED!`);
                         console.log(`   Price: ${signal.price}`);
                         console.log(`   RSI: ${signal.rsi.toFixed(2)}`);
                         console.log(`   EMA5 < EMA10: ${signal.ema5.toFixed(6)} < ${signal.ema10.toFixed(6)}`);
-                        await placeOrder("sell", signal.targetShort);
+                        await placeOrder("sell", signal.price);
                     }
                 }
 
