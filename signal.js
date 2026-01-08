@@ -1,8 +1,8 @@
-// signal.js (Real-time Scalping Version) - ISOLATED MARGIN
+// signal.js (Real-time Scalping Version) - ISOLATED MARGIN - BREAKOUT STRATEGY
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
-const { EMA, RSI } = require("technicalindicators");
+const { RSI } = require("technicalindicators");
 
 // -------------------- CONFIG --------------------
 const dbPath = "./db.json";
@@ -35,7 +35,9 @@ const loadDB = () => {
         dailyTrades: 0,
         marginMode: "isolated",
         monitoringInterval: 500,
-        stopLossPercent: 50 
+        stopLossPercent: 50,
+        breakoutPeriod: 20, // Periode untuk menentukan high/low breakout
+        minBreakoutStrength: 0.001 // Minimum pergerakan 0.1% untuk konfirmasi breakout
     };
 };
 
@@ -140,7 +142,7 @@ const startPnLMonitoring = async () => {
     }, db.monitoringInterval);
 };
 
-// -------------------- SIGNAL DETECTION --------------------
+// -------------------- BREAKOUT SIGNAL DETECTION --------------------
 const analyzeSignal = async () => {
     try {
         signalCount++;
@@ -148,62 +150,71 @@ const analyzeSignal = async () => {
         
         // Log only every 5 seconds to reduce spam
         if (now - lastLogTime > 5000) {
-            console.log(`\n📊 [SIGNAL #${signalCount}] Analyzing market...`);
+            console.log(`\n📊 [SIGNAL #${signalCount}] Analyzing market for BREAKOUT...`);
             lastLogTime = now;
         }
         
         // Use 1m timeframe for fast scalping
-        const ohlcv = await exchange.fetchOHLCV(db.pair, "1m", undefined, 50);
+        const ohlcv = await exchange.fetchOHLCV(db.pair, "1m", undefined, db.breakoutPeriod + 10);
         
-        if (ohlcv.length < 20) {
+        if (ohlcv.length < db.breakoutPeriod) {
             console.log(`⚠️ Not enough OHLCV data: ${ohlcv.length} candles`);
             return {};
         }
 
         const close = ohlcv.map(c => c[4]);
-        const currentPrice = close[close.length - 1];
+        const high = ohlcv.map(c => c[2]);
+        const low = ohlcv.map(c => c[3]);
         
-        // EMA 5 & 10 for fast signals
-        const ema5 = EMA.calculate({ values: close, period: 5 });
-        const ema10 = EMA.calculate({ values: close, period: 10 });
-
-        if (ema5.length < 2 || ema10.length < 2) {
-            console.log(`⚠️ Not enough EMA data for comparison`);
-            return {};
-        }
-
-        const currentEma5 = ema5[ema5.length - 1];
-        const currentEma10 = ema10[ema10.length - 1];
-        const prevEma5 = ema5[ema5.length - 2];
-        const prevEma10 = ema10[ema10.length - 2];
-
+        const currentPrice = close[close.length - 1];
+        const currentHigh = high[high.length - 1];
+        const currentLow = low[low.length - 1];
+        
+        // Calculate breakout levels
+        const lookbackPeriod = db.breakoutPeriod;
+        
+        // Get previous period highs and lows (excluding current candle)
+        const previousHighs = high.slice(-lookbackPeriod - 1, -1);
+        const previousLows = low.slice(-lookbackPeriod - 1, -1);
+        
+        const resistance = Math.max(...previousHighs);
+        const support = Math.min(...previousLows);
+        
+        const range = resistance - support;
+        const breakoutThreshold = range * db.minBreakoutStrength;
+        
         // RSI 7 for confirmation
         const rsi = RSI.calculate({ values: close, period: 7 });
         const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1] : 50;
-
-        // Signal detection
-        const bullishCross = currentEma5 > currentEma10 && prevEma5 <= prevEma10;
-        const bearishCross = currentEma5 < currentEma10 && prevEma5 >= prevEma10;
-
-        // Display indicator values
+        
+        // Breakout detection
+        const bullishBreakout = currentHigh > resistance + breakoutThreshold;
+        const bearishBreakout = currentLow < support - breakoutThreshold;
+        
+        // Display breakout values
         console.log("\n" + "=".repeat(50));
-        console.log("📈 INDICATOR VALUES:");
+        console.log("📈 BREAKOUT LEVELS:");
         console.log(`   Current Price: ${currentPrice}`);
-        console.log(`   EMA 5: ${currentEma5.toFixed(6)} (prev: ${prevEma5.toFixed(6)})`);
-        console.log(`   EMA 10: ${currentEma10.toFixed(6)} (prev: ${prevEma10.toFixed(6)})`);
+        console.log(`   Current High: ${currentHigh}`);
+        console.log(`   Current Low: ${currentLow}`);
+        console.log(`   Resistance: ${resistance.toFixed(6)}`);
+        console.log(`   Support: ${support.toFixed(6)}`);
+        console.log(`   Range: ${range.toFixed(6)}`);
+        console.log(`   Breakout Threshold: ±${breakoutThreshold.toFixed(6)}`);
         console.log(`   RSI 7: ${currentRSI.toFixed(2)}`);
         console.log("");
-        console.log("🎯 SIGNAL CONDITIONS:");
-        console.log(`   EMA Crossover: ${bullishCross ? "BULLISH ↗️" : bearishCross ? "BEARISH ↘️" : "NO CROSS"}`);
+        console.log("🎯 BREAKOUT CONDITIONS:");
+        console.log(`   Bullish Breakout: ${bullishBreakout ? "✅ ABOVE RESISTANCE" : "❌ NOT BROKEN"}`);
+        console.log(`   Bearish Breakout: ${bearishBreakout ? "✅ BELOW SUPPORT" : "❌ NOT BROKEN"}`);
         
-        // Signal conditions
-        const canLong = bullishCross && currentRSI > 40 && currentRSI < 75;
-        const canShort = bearishCross && currentRSI < 60 && currentRSI > 25;
+        // Signal conditions with RSI filter
+        const canLong = bullishBreakout && currentRSI > 40 && currentRSI < 75;
+        const canShort = bearishBreakout && currentRSI < 60 && currentRSI > 25;
         
         console.log("");
         console.log("🚦 FINAL SIGNAL:");
-        console.log(`   LONG Signal: ${canLong ? "✅ READY" : "❌ NOT READY"}`);
-        console.log(`   SHORT Signal: ${canShort ? "✅ READY" : "❌ NOT READY"}`);
+        console.log(`   LONG Signal: ${canLong ? "✅ BREAKOUT CONFIRMED" : "❌ NOT CONFIRMED"}`);
+        console.log(`   SHORT Signal: ${canShort ? "✅ BREAKOUT CONFIRMED" : "❌ NOT CONFIRMED"}`);
         console.log("=".repeat(50));
 
         return {
@@ -211,12 +222,12 @@ const analyzeSignal = async () => {
             canShort,
             price: currentPrice,
             rsi: currentRSI,
-            ema5: currentEma5,
-            ema10: currentEma10,
-            hasSignal: bullishCross || bearishCross
+            resistance,
+            support,
+            hasSignal: bullishBreakout || bearishBreakout
         };
     } catch (error) {
-        console.error("❌ Signal analysis failed:", error.message);
+        console.error("❌ Breakout analysis failed:", error.message);
         return {};
     }
 };
@@ -380,10 +391,10 @@ const saveDB = () => {
 const logTrade = (side, entry, exit, status, pnl = 0) => {
     try {
         const timestamp = new Date().toISOString();
-        const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},ISOLATED,${db.stopLossPercent}\n`;
+        const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},ISOLATED,${db.stopLossPercent},BREAKOUT\n`;
         
         if (!fs.existsSync(logPath)) {
-            fs.writeFileSync(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent\n");
+            fs.writeFileSync(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy\n");
         }
         
         fs.appendFileSync(logPath, line);
@@ -407,17 +418,17 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         const totalUSDT = balance.total?.USDT || 0;
         
         console.log("\n" + "=".repeat(70));
-        console.log("🚀 REAL-TIME SCALPING BOT STARTED");
+        console.log("🚀 REAL-TIME BREAKOUT SCALPING BOT STARTED");
         console.log("=".repeat(70));
         console.log(`💰 Balance: ${totalUSDT.toFixed(2)} USDT`);
         console.log(`📊 Pair: ${db.pair}`);
+        console.log(`🎯 Strategy: BREAKOUT (${db.breakoutPeriod} period)`);
         console.log(`🎯 Target Profit: ${db.targetProfitUSDT} USDT per trade`);
         console.log(`⚡ Leverage: ${db.leverage}x`);
         console.log(`🛡️ Margin Mode: ISOLATED`);
         console.log(`🛑 Stop Loss: ${db.stopLossPercent}% of trade amount (${(db.usdtPerTrade * db.stopLossPercent / 100).toFixed(2)} USDT)`);
         console.log(`📈 P&L Monitoring: ${db.monitoringInterval}ms interval`);
         console.log(`🔄 Signal Analysis: 2000ms interval`);
-        console.log(`📊 Data Points: 50 candles (1m timeframe)`);
         console.log("=".repeat(70) + "\n");
 
         console.log("🔄 Initializing... Waiting for data...");
@@ -465,7 +476,7 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
                     }
                 }
 
-                // Analyze signal
+                // Analyze breakout signal
                 const signal = await analyzeSignal();
                 
                 if (!signal.price) {
@@ -475,17 +486,17 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
 
                 // Entry logic
                 if (signal.canLong) {
-                    console.log(`\n🎯 LONG SIGNAL CONFIRMED!`);
-                    console.log(`   Price: ${signal.price}`);
+                    console.log(`\n🎯 BULLISH BREAKOUT CONFIRMED!`);
+                    console.log(`   Price: ${signal.price} > Resistance: ${signal.resistance}`);
                     console.log(`   RSI: ${signal.rsi.toFixed(2)}`);
-                    console.log(`   EMA5 > EMA10: ${signal.ema5.toFixed(6)} > ${signal.ema10.toFixed(6)}`);
+                    console.log(`   Breakout Strength: ${((signal.price - signal.resistance) / signal.resistance * 100).toFixed(2)}%`);
                     await placeOrder("buy", signal.price);
                 } 
                 else if (signal.canShort) {
-                    console.log(`\n🎯 SHORT SIGNAL CONFIRMED!`);
-                    console.log(`   Price: ${signal.price}`);
+                    console.log(`\n🎯 BEARISH BREAKOUT CONFIRMED!`);
+                    console.log(`   Price: ${signal.price} < Support: ${signal.support}`);
                     console.log(`   RSI: ${signal.rsi.toFixed(2)}`);
-                    console.log(`   EMA5 < EMA10: ${signal.ema5.toFixed(6)} < ${signal.ema10.toFixed(6)}`);
+                    console.log(`   Breakout Strength: ${((signal.support - signal.price) / signal.support * 100).toFixed(2)}%`);
                     await placeOrder("sell", signal.price);
                 }
 
