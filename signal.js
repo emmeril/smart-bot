@@ -36,8 +36,8 @@ const loadDB = () => {
         marginMode: "isolated",
         monitoringInterval: 500,
         stopLossPercent: 50,
-        breakoutPeriod: 20, // Periode untuk menentukan high/low breakout
-        minBreakoutStrength: 0.001 // Minimum pergerakan 0.1% untuk konfirmasi breakout
+        breakoutPeriod: 20,
+        minBreakoutStrength: 0.001
     };
 };
 
@@ -79,13 +79,15 @@ const startPnLMonitoring = async () => {
     console.log("📈 Starting real-time P&L monitoring...");
     
     setInterval(async () => {
-        if (!db.activePosition) return;
-        
         try {
+            // Create local copy to avoid race condition
+            const activePosition = db.activePosition;
+            if (!activePosition) return;
+            
             const currentPrice = await getPrice();
             if (!currentPrice) return;
 
-            const { side, entryPrice, quantity, targetProfitUSDT } = db.activePosition;
+            const { side, entryPrice, quantity, targetProfitUSDT, entryTime } = activePosition;
             
             // Calculate real-time profit
             const profitUSDT = side === "buy" 
@@ -120,7 +122,7 @@ const startPnLMonitoring = async () => {
             // Display P&L status every 3 seconds
             const now = Date.now();
             if (now - lastPnlLog > 3000) {
-                const timeInTrade = Math.floor((now - db.activePosition.entryTime) / 1000);
+                const timeInTrade = Math.floor((now - entryTime) / 1000);
                 const status = profitUSDT >= 0 ? "🟢" : "🔴";
                 
                 // Calculate distance to stop loss
@@ -330,6 +332,12 @@ const placeOrder = async (side, signalPrice) => {
 // -------------------- CLOSE POSITION --------------------
 const closePosition = async (reason, profitUSDT, profitPercent) => {
     try {
+        // Check if position still exists
+        if (!db.activePosition) {
+            console.log("⚠️ No active position to close");
+            return;
+        }
+
         const { side, quantity, entryPrice } = db.activePosition;
         const closeSide = side === "buy" ? "sell" : "buy";
         
