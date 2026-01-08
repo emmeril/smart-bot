@@ -26,8 +26,7 @@ const loadDB = () => {
         leverage: 15,              
         targetProfitPercent: 0.3,  
         maxDailyLossPercent: 10,   
-        coolingPeriod: 3000,       
-        signalThreshold: 0.4,      
+        coolingPeriod: 3000,            
         activePosition: null,      
         dailyPnL: 0,              
         dailyTrades: 0             
