@@ -34,8 +34,8 @@ const loadDB = () => {
         dailyPnL: 0,
         dailyTrades: 0,
         marginMode: "isolated",
-        // Real-time monitoring interval (ms)
-        monitoringInterval: 500
+        monitoringInterval: 500,
+        stopLossPercent: 50 
     };
 };
 
@@ -104,17 +104,32 @@ const startPnLMonitoring = async () => {
                 return;
             }
             
+            // STOP LOSS: 50% dari usdtPerTrade
+            const stopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
+            if (profitUSDT <= stopLossUSDT) {
+                console.log(`\n🚨 STOP LOSS HIT! Closing immediately...`);
+                console.log(`   Loss: ${profitUSDT.toFixed(4)} USDT (Stop Loss: ${stopLossUSDT} USDT)`);
+                console.log(`   Price moved from ${entryPrice} to ${currentPrice}`);
+                console.log(`   Loss Percentage: ${(profitUSDT / db.usdtPerTrade * 100).toFixed(2)}%`);
+                await closePosition("STOP_LOSS", profitUSDT, profitPercent);
+                return;
+            }
+            
             // Display P&L status every 3 seconds
             const now = Date.now();
             if (now - lastPnlLog > 3000) {
                 const timeInTrade = Math.floor((now - db.activePosition.entryTime) / 1000);
                 const status = profitUSDT >= 0 ? "🟢" : "🔴";
                 
+                // Calculate distance to stop loss
+                const distanceToStopLoss = stopLossUSDT - profitUSDT;
+                
                 console.log(`\n📊 REAL-TIME POSITION:`);
                 console.log(`   ${status} P&L: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
                 console.log(`   Entry: ${entryPrice} | Current: ${currentPrice}`);
-                console.log(`   Time: ${timeInTrade}s | Target: ${targetProfitUSDT} USDT`);
-                console.log(`   Need: ${(targetProfitUSDT - profitUSDT).toFixed(4)} USDT more`);
+                console.log(`   Time: ${timeInTrade}s | Target: +${targetProfitUSDT} USDT`);
+                console.log(`   Stop Loss: ${stopLossUSDT.toFixed(4)} USDT (${db.stopLossPercent}% of trade amount)`);
+                console.log(`   Distance to Stop Loss: ${distanceToStopLoss.toFixed(4)} USDT`);
                 
                 lastPnlLog = now;
             }
@@ -246,12 +261,24 @@ const placeOrder = async (side, signalPrice) => {
         const pricePrecision = market?.precision?.price || 8;
         targetPrice = parseFloat(targetPrice.toFixed(pricePrecision));
 
+        // Calculate stop loss price
+        const stopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
+        let stopLossPrice;
+        if (side === "buy") {
+            stopLossPrice = entryPrice + (stopLossUSDT / adjustedQty);
+        } else {
+            stopLossPrice = entryPrice - (stopLossUSDT / adjustedQty);
+        }
+        stopLossPrice = parseFloat(stopLossPrice.toFixed(pricePrecision));
+
         console.log(`   📊 Order Details:`);
         console.log(`   - Amount: ${db.usdtPerTrade} USDT × ${db.leverage}x = ${(db.usdtPerTrade * db.leverage).toFixed(2)} USDT`);
         console.log(`   - Quantity: ${adjustedQty} ${db.pair.split('/')[0]}`);
         console.log(`   - Entry Price: ${entryPrice}`);
         console.log(`   - Target Profit: ${targetProfitUSDT} USDT`);
         console.log(`   - Target Price: ${targetPrice}`);
+        console.log(`   - Stop Loss: ${stopLossUSDT} USDT (${db.stopLossPercent}%)`);
+        console.log(`   - Stop Loss Price: ${stopLossPrice}`);
 
         // 4. Place order with isolated margin params
         const order = await exchange.createOrder(db.pair, "market", side, adjustedQty, undefined, {
@@ -263,6 +290,8 @@ const placeOrder = async (side, signalPrice) => {
             side: side,
             entryPrice: entryPrice,
             targetPrice: targetPrice,
+            stopLossPrice: stopLossPrice,
+            stopLossUSDT: stopLossUSDT,
             orderId: order.id,
             quantity: adjustedQty,
             entryTime: Date.now(),
@@ -271,12 +300,13 @@ const placeOrder = async (side, signalPrice) => {
         };
 
         saveDB();
-        logTrade(side, entryPrice, targetPrice, "OPEN");
+        logTrade(side, entryPrice, null, "OPEN");
 
         console.log(`\n✅ ORDER PLACED:`);
         console.log(`   Type: ${side.toUpperCase()}`);
         console.log(`   Entry: ${entryPrice}`);
         console.log(`   Target: ${targetPrice} (+${targetProfitUSDT} USDT)`);
+        console.log(`   Stop Loss: ${stopLossPrice} (${stopLossUSDT} USDT)`);
         console.log(`   Order ID: ${order.id}`);
         console.log(`   Margin Mode: ISOLATED`);
         console.log(`   Time: ${new Date().toLocaleTimeString()}`);
@@ -350,10 +380,10 @@ const saveDB = () => {
 const logTrade = (side, entry, exit, status, pnl = 0) => {
     try {
         const timestamp = new Date().toISOString();
-        const line = `${timestamp},${db.pair},${side},${entry},${exit},${status},${pnl.toFixed(4)},${db.leverage},ISOLATED\n`;
+        const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},ISOLATED,${db.stopLossPercent}\n`;
         
         if (!fs.existsSync(logPath)) {
-            fs.writeFileSync(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode\n");
+            fs.writeFileSync(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent\n");
         }
         
         fs.appendFileSync(logPath, line);
@@ -384,6 +414,7 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         console.log(`🎯 Target Profit: ${db.targetProfitUSDT} USDT per trade`);
         console.log(`⚡ Leverage: ${db.leverage}x`);
         console.log(`🛡️ Margin Mode: ISOLATED`);
+        console.log(`🛑 Stop Loss: ${db.stopLossPercent}% of trade amount (${(db.usdtPerTrade * db.stopLossPercent / 100).toFixed(2)} USDT)`);
         console.log(`📈 P&L Monitoring: ${db.monitoringInterval}ms interval`);
         console.log(`🔄 Signal Analysis: 2000ms interval`);
         console.log(`📊 Data Points: 50 candles (1m timeframe)`);
