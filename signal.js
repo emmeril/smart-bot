@@ -2,14 +2,15 @@
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
-const { SMA, RSI } = require("technicalindicators");
+const { EMA, RSI } = require("technicalindicators"); // Ganti SMA dengan EMA
 
 // -------------------- CONFIG SEDERHANA --------------------
 const dbPath = "./db.json";
 const logPath = "./log.csv";
 let isProcessing = false;
 let exchange = null;
-let signalCount = 0; // Counter untuk sinyal
+let signalCount = 0;
+let lastLogTime = Date.now();
 
 // -------------------- LOAD CONFIG --------------------
 const loadDB = () => {
@@ -72,85 +73,121 @@ const setMarginMode = async () => {
 const analyzeSignal = async () => {
     try {
         signalCount++;
-        console.log(`\n📊 [SIGNAL #${signalCount}] Analyzing market...`);
+        const now = Date.now();
         
-        // Gunakan timeframe 1m untuk scalping cepat
-        const ohlcv = await exchange.fetchOHLCV(db.pair, "1m", undefined, 20);
+        // Log hanya setiap 5 detik untuk mengurangi spam
+        if (now - lastLogTime > 5000) {
+            console.log(`\n📊 [SIGNAL #${signalCount}] Analyzing market...`);
+            lastLogTime = now;
+        }
         
-        if (ohlcv.length < 15) {
-            console.log("⚠️ Not enough OHLCV data");
+        // Gunakan timeframe 1m untuk scalping cepat, ambil 50 candle untuk data yang cukup
+        const ohlcv = await exchange.fetchOHLCV(db.pair, "1m", undefined, 50);
+        
+        if (ohlcv.length < 20) {
+            if (now - lastLogTime > 5000) {
+                console.log(`⚠️ Not enough OHLCV data: ${ohlcv.length} candles (need at least 20)`);
+            }
             return {};
         }
 
         const close = ohlcv.map(c => c[4]);
         const currentPrice = close[close.length - 1];
         
-        console.log(`💰 Current Price: ${currentPrice} USDT`);
+        if (now - lastLogTime > 5000) {
+            console.log(`💰 Current Price: ${currentPrice} USDT`);
+            console.log(`📈 Data points: ${close.length} candles available`);
+        }
 
         // EMA 5 & 10 untuk sinyal cepat
-        const ema5 = SMA.calculate({ values: close.slice(-10), period: 5 });
-        const ema10 = SMA.calculate({ values: close.slice(-10), period: 10 });
+        // Untuk EMA 10, kita butuh minimal 11 data untuk mendapatkan 2 titik perbandingan
+        // Ambil data yang cukup untuk perhitungan
+        const valuesForEMA = close.slice(-30); // Ambil 30 data terakhir untuk perhitungan
+        
+        try {
+            const ema5 = EMA.calculate({ values: valuesForEMA, period: 5 });
+            const ema10 = EMA.calculate({ values: valuesForEMA, period: 10 });
 
-        if (ema5.length < 2 || ema10.length < 2) {
-            console.log("⚠️ EMA calculation failed");
+            if (ema5.length < 2 || ema10.length < 2) {
+                if (now - lastLogTime > 5000) {
+                    console.log(`⚠️ EMA calculation failed: EMA5=${ema5.length}, EMA10=${ema10.length} (need at least 2 each)`);
+                    console.log(`   Using ${valuesForEMA.length} data points`);
+                }
+                return {};
+            }
+
+            const currentEma5 = ema5[ema5.length - 1];
+            const currentEma10 = ema10[ema10.length - 1];
+            const prevEma5 = ema5[ema5.length - 2];
+            const prevEma10 = ema10[ema10.length - 2];
+
+            // RSI 7 untuk konfirmasi - butuh minimal 8 data untuk 2 titik
+            const valuesForRSI = close.slice(-25); // Ambil lebih banyak untuk RSI
+            const rsi = RSI.calculate({ values: valuesForRSI, period: 7 });
+            const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1] : 50;
+
+            // Sinyal sederhana
+            const bullishCross = currentEma5 > currentEma10 && prevEma5 <= prevEma10;
+            const bearishCross = currentEma5 < currentEma10 && prevEma5 >= prevEma10;
+
+            // Target profit kecil (0.3%)
+            const targetProfit = db.targetProfitPercent / 100;
+            const targetLong = currentPrice * (1 + targetProfit);
+            const targetShort = currentPrice * (1 - targetProfit);
+
+            // LOG DETAILED ANALYSIS (hanya tampilkan jika ada perubahan signifikan atau setiap 5 detik)
+            const hasSignal = bullishCross || bearishCross;
+            
+            if (hasSignal || now - lastLogTime > 5000) {
+                console.log("\n" + "=".repeat(50));
+                console.log("📈 INDICATOR VALUES:");
+                console.log(`   Current Price: ${currentPrice}`);
+                console.log(`   EMA 5: ${currentEma5.toFixed(6)} (prev: ${prevEma5.toFixed(6)})`);
+                console.log(`   EMA 10: ${currentEma10.toFixed(6)} (prev: ${prevEma10.toFixed(6)})`);
+                console.log(`   RSI 7: ${currentRSI.toFixed(2)}`);
+                console.log("");
+                console.log("🎯 SIGNAL CONDITIONS:");
+                console.log(`   EMA Crossover: ${bullishCross ? "BULLISH ↗️" : bearishCross ? "BEARISH ↘️" : "NO CROSS"}`);
+                
+                if (bullishCross) {
+                    console.log(`   RSI for LONG: ${currentRSI > 40 && currentRSI < 75 ? "✅ OK" : "❌ NOT OK (RSI: " + currentRSI.toFixed(2) + ")"}`);
+                }
+                if (bearishCross) {
+                    console.log(`   RSI for SHORT: ${currentRSI < 60 && currentRSI > 25 ? "✅ OK" : "❌ NOT OK (RSI: " + currentRSI.toFixed(2) + ")"}`);
+                }
+                console.log("");
+                
+                const canLong = bullishCross && currentRSI > 40 && currentRSI < 75;
+                const canShort = bearishCross && currentRSI < 60 && currentRSI > 25;
+                
+                console.log("🚦 FINAL SIGNAL:");
+                console.log(`   LONG Signal: ${canLong ? "✅ READY" : "❌ NOT READY"}`);
+                console.log(`   SHORT Signal: ${canShort ? "✅ READY" : "❌ NOT READY"}`);
+                
+                if (canLong) {
+                    console.log(`   🎯 LONG Target: ${targetLong.toFixed(6)} (+${db.targetProfitPercent}%)`);
+                }
+                if (canShort) {
+                    console.log(`   🎯 SHORT Target: ${targetShort.toFixed(6)} (-${db.targetProfitPercent}%)`);
+                }
+                console.log("=".repeat(50));
+            }
+
+            return {
+                canLong: bullishCross && currentRSI > 40 && currentRSI < 75,
+                canShort: bearishCross && currentRSI < 60 && currentRSI > 25,
+                price: currentPrice,
+                targetLong,
+                targetShort,
+                rsi: currentRSI,
+                ema5: currentEma5,
+                ema10: currentEma10,
+                hasSignal: bullishCross || bearishCross
+            };
+        } catch (emaError) {
+            console.error(`❌ EMA calculation error:`, emaError.message);
             return {};
         }
-
-        const currentEma5 = ema5[ema5.length - 1];
-        const currentEma10 = ema10[ema10.length - 1];
-        const prevEma5 = ema5[ema5.length - 2];
-        const prevEma10 = ema10[ema10.length - 2];
-
-        // RSI 7 untuk konfirmasi
-        const rsi = RSI.calculate({ values: close.slice(-15), period: 7 });
-        const currentRSI = rsi[rsi.length - 1] || 50;
-
-        // Sinyal sederhana
-        const bullishCross = currentEma5 > currentEma10 && prevEma5 <= prevEma10;
-        const bearishCross = currentEma5 < currentEma10 && prevEma5 >= prevEma10;
-
-        // Target profit kecil (0.3%)
-        const targetProfit = db.targetProfitPercent / 100;
-        const targetLong = currentPrice * (1 + targetProfit);
-        const targetShort = currentPrice * (1 - targetProfit);
-
-        // LOG DETAILED ANALYSIS
-        console.log("=".repeat(40));
-        console.log("📈 INDICATOR VALUES:");
-        console.log(`   EMA 5: ${currentEma5.toFixed(6)} (prev: ${prevEma5.toFixed(6)})`);
-        console.log(`   EMA 10: ${currentEma10.toFixed(6)} (prev: ${prevEma10.toFixed(6)})`);
-        console.log(`   RSI 7: ${currentRSI.toFixed(2)}`);
-        console.log("");
-        console.log("🎯 SIGNAL CONDITIONS:");
-        console.log(`   EMA Crossover: ${bullishCross ? "BULLISH ↗️" : bearishCross ? "BEARISH ↘️" : "NO CROSS"}`);
-        console.log(`   RSI Condition: ${currentRSI > 40 && currentRSI < 75 ? "OK for LONG" : currentRSI < 60 && currentRSI > 25 ? "OK for SHORT" : "NEUTRAL"}`);
-        console.log("");
-        
-        const canLong = bullishCross && currentRSI > 40 && currentRSI < 75;
-        const canShort = bearishCross && currentRSI < 60 && currentRSI > 25;
-        
-        console.log("🚦 FINAL SIGNAL:");
-        console.log(`   LONG Signal: ${canLong ? "✅ READY" : "❌ NOT READY"}`);
-        console.log(`   SHORT Signal: ${canShort ? "✅ READY" : "❌ NOT READY"}`);
-        
-        if (canLong) {
-            console.log(`   🎯 LONG Target: ${targetLong.toFixed(6)} (+${db.targetProfitPercent}%)`);
-        }
-        if (canShort) {
-            console.log(`   🎯 SHORT Target: ${targetShort.toFixed(6)} (-${db.targetProfitPercent}%)`);
-        }
-        console.log("=".repeat(40));
-
-        return {
-            canLong,
-            canShort,
-            price: currentPrice,
-            targetLong,
-            targetShort,
-            rsi: currentRSI,
-            ema5: currentEma5,
-            ema10: currentEma10
-        };
     } catch (error) {
         console.error("❌ Signal analysis failed:", error.message);
         return {};
@@ -174,8 +211,9 @@ const placeOrder = async (side, targetPrice) => {
         // 2. Set leverage
         await exchange.setLeverage(db.leverage, db.pair);
         
-        // 3. Hitung quantity
-        const qty = (db.usdtPerTrade * db.leverage) / db.activePosition.price;
+        // 3. Hitung quantity - PERBAIKI: gunakan price dari signal, bukan dari db.activePosition
+        const signalPrice = await getPrice();
+        const qty = (db.usdtPerTrade * db.leverage) / signalPrice;
         const market = exchange.markets[db.pair];
         const precision = market?.precision?.amount || 3;
         const adjustedQty = parseFloat(qty.toFixed(precision));
@@ -183,7 +221,7 @@ const placeOrder = async (side, targetPrice) => {
         console.log(`   📊 Order Details:`);
         console.log(`   - Amount: ${db.usdtPerTrade} USDT × ${db.leverage}x = ${(db.usdtPerTrade * db.leverage).toFixed(2)} USDT`);
         console.log(`   - Quantity: ${adjustedQty} ${db.pair.split('/')[0]}`);
-        console.log(`   - Entry Price: ${db.activePosition.price}`);
+        console.log(`   - Entry Price: ${signalPrice}`);
 
         // 4. Place order dengan params untuk isolated margin
         const order = await exchange.createOrder(db.pair, "market", side, adjustedQty, undefined, {
@@ -193,7 +231,7 @@ const placeOrder = async (side, targetPrice) => {
         // Simpan posisi aktif
         db.activePosition = {
             side: side,
-            entryPrice: db.activePosition.price,
+            entryPrice: signalPrice,
             targetPrice: targetPrice,
             orderId: order.id,
             quantity: adjustedQty,
@@ -202,11 +240,11 @@ const placeOrder = async (side, targetPrice) => {
         };
 
         saveDB();
-        logTrade(side, db.activePosition.price, targetPrice, "OPEN");
+        logTrade(side, signalPrice, targetPrice, "OPEN");
 
         console.log(`\n✅ ORDER PLACED:`);
         console.log(`   Type: ${side.toUpperCase()}`);
-        console.log(`   Entry: ${db.activePosition.price}`);
+        console.log(`   Entry: ${signalPrice}`);
         console.log(`   Target: ${targetPrice} (+${db.targetProfitPercent}%)`);
         console.log(`   Order ID: ${order.id}`);
         console.log(`   Margin Mode: ISOLATED`);
@@ -246,15 +284,17 @@ const checkAndClosePosition = async () => {
             console.log(`\n⏰ TIMEOUT! Closing position after 1 minute...`);
             await closePosition("TIMEOUT", profitPercent);
         }
-        // TAMPILKAN STATUS
+        // TAMPILKAN STATUS setiap 10 detik
         else {
-            const status = profitPercent >= 0 ? "🟢" : "🔴";
             const timeElapsed = Math.floor((Date.now() - db.activePosition.entryTime) / 1000);
-            console.log(`\n📊 POSITION STATUS:`);
-            console.log(`   ${status} Profit: ${profitPercent.toFixed(2)}% (Target: ${db.targetProfitPercent}%)`);
-            console.log(`   Entry: ${entryPrice} | Current: ${currentPrice}`);
-            console.log(`   Time in trade: ${timeElapsed}s`);
-            console.log(`   Need: ${side === "buy" ? (targetPrice - currentPrice).toFixed(6) : (currentPrice - targetPrice).toFixed(6)} to target`);
+            if (timeElapsed % 10 === 0) { // Log hanya setiap 10 detik
+                const status = profitPercent >= 0 ? "🟢" : "🔴";
+                console.log(`\n📊 POSITION STATUS:`);
+                console.log(`   ${status} Profit: ${profitPercent.toFixed(2)}% (Target: ${db.targetProfitPercent}%)`);
+                console.log(`   Entry: ${entryPrice} | Current: ${currentPrice}`);
+                console.log(`   Time in trade: ${timeElapsed}s`);
+                console.log(`   Need: ${side === "buy" ? (targetPrice - currentPrice).toFixed(6) : (currentPrice - targetPrice).toFixed(6)} to target`);
+            }
         }
 
     } catch (error) {
@@ -350,9 +390,9 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         const balance = await exchange.fetchBalance();
         const totalUSDT = balance.total?.USDT || 0;
         
-        console.log("\n" + "=".repeat(50));
+        console.log("\n" + "=".repeat(60));
         console.log("🚀 SIMPLE SCALPING BOT STARTED (ISOLATED MARGIN)");
-        console.log("=".repeat(50));
+        console.log("=".repeat(60));
         console.log(`💰 Balance: ${totalUSDT.toFixed(2)} USDT`);
         console.log(`📊 Pair: ${db.pair}`);
         console.log(`🎯 Target Profit: ${db.targetProfitPercent}% per trade`);
@@ -360,19 +400,17 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         console.log(`🛡️ Margin Mode: ISOLATED`);
         console.log(`📈 Strategy: Quick scalping, NO STOP LOSS`);
         console.log(`🔍 Signal Check: Every 2 seconds`);
-        console.log("=".repeat(50) + "\n");
+        console.log(`📊 Data Points: 50 candles (1m timeframe)`);
+        console.log("=".repeat(60) + "\n");
 
         // Main loop setiap 2 detik
         setInterval(async () => {
             if (isProcessing) {
-                console.log("⏳ Still processing previous request...");
                 return;
             }
             isProcessing = true;
 
             try {
-                console.log(`\n🔄 [${new Date().toLocaleTimeString()}] Checking market...`);
-
                 // 1. Cek & tutup posisi jika profit target tercapai
                 await checkAndClosePosition();
 
@@ -391,18 +429,19 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
                 if (db.activePosition) {
                     const timeSinceEntry = Date.now() - db.activePosition.entryTime;
                     if (timeSinceEntry < db.coolingPeriod) {
-                        console.log(`⏳ Cooling period: ${Math.floor((db.coolingPeriod - timeSinceEntry)/1000)}s remaining`);
+                        const remaining = Math.floor((db.coolingPeriod - timeSinceEntry)/1000);
+                        if (remaining % 5 === 0) { // Log setiap 5 detik
+                            console.log(`⏳ Cooling period: ${remaining}s remaining`);
+                        }
                         isProcessing = false;
                         return;
                     }
                 }
 
                 // 4. Analisis sinyal baru
-                console.log(`🔍 Analyzing for new signals...`);
                 const signal = await analyzeSignal();
                 
                 if (!signal.price) {
-                    console.log("⚠️ No valid signal data returned");
                     isProcessing = false;
                     return;
                 }
@@ -423,21 +462,10 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
                         console.log(`   EMA5 < EMA10: ${signal.ema5.toFixed(6)} < ${signal.ema10.toFixed(6)}`);
                         await placeOrder("sell", signal.targetShort);
                     }
-                    else {
-                        console.log(`📊 No entry signal at this time`);
-                        console.log(`   Waiting for EMA crossover with RSI confirmation...`);
-                    }
                 }
-
-                console.log(`\n📈 SUMMARY:`);
-                console.log(`   Active Position: ${db.activePosition ? "YES" : "NO"}`);
-                console.log(`   Daily PnL: ${db.dailyPnL.toFixed(2)} USDT`);
-                console.log(`   Daily Trades: ${db.dailyTrades}`);
-                console.log(`   Next check in 2 seconds...`);
 
             } catch (error) {
                 console.error(`\n⚠️ Loop error:`, error.message);
-                console.error(`   Stack:`, error.stack);
             } finally {
                 isProcessing = false;
             }
