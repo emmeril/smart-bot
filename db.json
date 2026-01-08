@@ -10,5 +10,7 @@
   "dailyTrades": 0,
   "marginMode": "isolated",
   "monitoringInterval": 500,
-  "stopLossPercent": 50 
+  "stopLossPercent": 50 ,
+  "breakoutPeriod": 20, 
+  "minBreakoutStrength": 0.001 
 }
