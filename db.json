@@ -1,7 +1,7 @@
 {
   "pair": "DOGE/USDT:USDT",
-  "usdtPerTrade": 0.10,
-  "leverage": 75,
+  "usdtPerTrade": 0.20,
+  "leverage": 50,
   "targetProfitUSDT": 0.01, 
   "maxDailyLossPercent": 40,
   "coolingPeriod": 2000,
