@@ -7,5 +7,6 @@
   "coolingPeriod": 2000,
   "activePosition": null,
   "dailyPnL": 0,
-  "dailyTrades": 0
+  "dailyTrades": 0,
+  "marginMode": "isolated"
 }

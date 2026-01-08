@@ -1,4 +1,4 @@
-// signal.js (Simple Scalping Version - Profit Kecil, Tanpa Stop Loss)
+// signal.js (Simple Scalping Version - Profit Kecil, Tanpa Stop Loss) - ISOLATED MARGIN
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
@@ -22,14 +22,15 @@ const loadDB = () => {
 
     return {
         pair: "XRP/USDT:USDT",
-        usdtPerTrade: 5,           
-        leverage: 15,              
-        targetProfitPercent: 0.3,  
-        maxDailyLossPercent: 10,   
-        coolingPeriod: 3000,            
-        activePosition: null,      
-        dailyPnL: 0,              
-        dailyTrades: 0             
+        usdtPerTrade: 5,
+        leverage: 15,
+        targetProfitPercent: 0.3,
+        maxDailyLossPercent: 10,
+        coolingPeriod: 3000,
+        activePosition: null,
+        dailyPnL: 0,
+        dailyTrades: 0,
+        marginMode: "isolated" 
     };
 };
 
@@ -51,6 +52,20 @@ const initializeExchange = async () => {
     } catch (error) {
         console.error("❌ Exchange connection failed:", error.message);
         throw error;
+    }
+};
+
+// -------------------- SET ISOLATED MARGIN MODE --------------------
+const setMarginMode = async () => {
+    try {
+        // Set margin mode ke ISOLATED
+        await exchange.setMarginMode("isolated", db.pair);
+        console.log("✅ Margin mode set to: ISOLATED");
+    } catch (error) {
+        // Jika sudah di-set sebelumnya, abaikan error
+        if (!error.message.includes("No need to change margin mode")) {
+            console.warn("⚠️ Margin mode setting warning:", error.message);
+        }
     }
 };
 
@@ -111,17 +126,22 @@ const placeOrder = async (side, targetPrice) => {
             return;
         }
 
-        // Set leverage
+        // 1. Set margin mode ke ISOLATED
+        await setMarginMode();
+        
+        // 2. Set leverage
         await exchange.setLeverage(db.leverage, db.pair);
         
-        // Hitung quantity
+        // 3. Hitung quantity
         const qty = (db.usdtPerTrade * db.leverage) / db.activePosition.price;
         const market = exchange.markets[db.pair];
         const precision = market?.precision?.amount || 3;
         const adjustedQty = parseFloat(qty.toFixed(precision));
 
-        // Place order
-        const order = await exchange.createOrder(db.pair, "market", side, adjustedQty);
+        // 4. Place order dengan params untuk isolated margin
+        const order = await exchange.createOrder(db.pair, "market", side, adjustedQty, undefined, {
+            marginMode: "isolated" // Tambah parameter margin mode
+        });
         
         // Simpan posisi aktif
         db.activePosition = {
@@ -130,7 +150,8 @@ const placeOrder = async (side, targetPrice) => {
             targetPrice: targetPrice,
             orderId: order.id,
             quantity: adjustedQty,
-            entryTime: Date.now()
+            entryTime: Date.now(),
+            marginMode: "isolated" // Simpan mode margin
         };
 
         saveDB();
@@ -138,6 +159,7 @@ const placeOrder = async (side, targetPrice) => {
 
         console.log(`✅ ${side.toUpperCase()} order placed at ${db.activePosition.price}`);
         console.log(`🎯 Target: ${targetPrice} (${db.targetProfitPercent}% profit)`);
+        console.log(`🛡️ Margin Mode: ISOLATED`);
 
     } catch (error) {
         console.error("❌ Order failed:", error.message);
@@ -184,7 +206,8 @@ const closePosition = async (reason, profitPercent) => {
         const closeSide = side === "buy" ? "sell" : "buy";
         
         await exchange.createOrder(db.pair, "market", closeSide, quantity, undefined, {
-            reduceOnly: true
+            reduceOnly: true,
+            marginMode: "isolated" // Pastikan close dengan mode yang sama
         });
 
         // Hitung PnL
@@ -235,10 +258,10 @@ const saveDB = () => {
 const logTrade = (side, entry, exit, status, pnl = 0) => {
     try {
         const timestamp = new Date().toISOString();
-        const line = `${timestamp},${db.pair},${side},${entry},${exit},${status},${pnl.toFixed(4)},${db.leverage}\n`;
+        const line = `${timestamp},${db.pair},${side},${entry},${exit},${status},${pnl.toFixed(4)},${db.leverage},ISOLATED\n`;
         
         if (!fs.existsSync(logPath)) {
-            fs.writeFileSync(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage\n");
+            fs.writeFileSync(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode\n");
         }
         
         fs.appendFileSync(logPath, line);
@@ -253,16 +276,20 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         // Initialize
         await initializeExchange();
         
+        // Set margin mode awal ke ISOLATED
+        await setMarginMode();
+        
         const balance = await exchange.fetchBalance();
         const totalUSDT = balance.total?.USDT || 0;
         
         console.log("\n" + "=".repeat(50));
-        console.log("🚀 SIMPLE SCALPING BOT STARTED");
+        console.log("🚀 SIMPLE SCALPING BOT STARTED (ISOLATED MARGIN)");
         console.log("=".repeat(50));
         console.log(`💰 Balance: ${totalUSDT.toFixed(2)} USDT`);
         console.log(`📊 Pair: ${db.pair}`);
         console.log(`🎯 Target Profit: ${db.targetProfitPercent}% per trade`);
         console.log(`⚡ Leverage: ${db.leverage}x`);
+        console.log(`🛡️ Margin Mode: ISOLATED`);
         console.log(`📈 Strategy: Quick scalping, NO STOP LOSS`);
         console.log("=".repeat(50) + "\n");
 
