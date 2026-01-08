@@ -140,7 +140,7 @@ const placeOrder = async (side, targetPrice) => {
 
         // 4. Place order dengan params untuk isolated margin
         const order = await exchange.createOrder(db.pair, "market", side, adjustedQty, undefined, {
-            marginMode: "isolated" // Tambah parameter margin mode
+            marginMode: "isolated" 
         });
         
         // Simpan posisi aktif
@@ -151,7 +151,7 @@ const placeOrder = async (side, targetPrice) => {
             orderId: order.id,
             quantity: adjustedQty,
             entryTime: Date.now(),
-            marginMode: "isolated" // Simpan mode margin
+            marginMode: "isolated" 
         };
 
         saveDB();
@@ -207,7 +207,7 @@ const closePosition = async (reason, profitPercent) => {
         
         await exchange.createOrder(db.pair, "market", closeSide, quantity, undefined, {
             reduceOnly: true,
-            marginMode: "isolated" // Pastikan close dengan mode yang sama
+            marginMode: "isolated" 
         });
 
         // Hitung PnL
@@ -283,7 +283,7 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         const totalUSDT = balance.total?.USDT || 0;
         
         console.log("\n" + "=".repeat(50));
-        console.log("🚀 SIMPLE SCALPING BOT STARTED (ISOLATED MARGIN)");
+        console.log("🚀 SIMPLE SCALPING BOT STARTED ");
         console.log("=".repeat(50));
         console.log(`💰 Balance: ${totalUSDT.toFixed(2)} USDT`);
         console.log(`📊 Pair: ${db.pair}`);
