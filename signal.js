@@ -1,5 +1,6 @@
 require("dotenv").config();
 const fs = require("fs");
+const path = require("path");
 const ccxt = require("ccxt");
 const { RSI } = require("technicalindicators");
 
@@ -13,27 +14,31 @@ let lastLogTime = Date.now();
 let lastPnlLog = Date.now();
 let lastConfigReload = Date.now();
 
-// -------------------- LOAD CONFIG --------------------
-const loadDB = () => {
+// -------------------- ENSURE FILE EXISTS --------------------
+const ensureFileExists = (filePath, defaultContent = "{}") => {
     try {
-        if (fs.existsSync(dbPath)) {
-            const data = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-            // Preserve active position during reload if it exists in memory
-            if (db && db.activePosition && !data.activePosition) {
-                data.activePosition = db.activePosition;
-            }
-            return data;
+        const dir = path.dirname(filePath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        
+        if (!fs.existsSync(filePath)) {
+            fs.writeFileSync(filePath, defaultContent, 'utf8');
+            console.log(`✅ Created ${path.basename(filePath)} file`);
         }
     } catch (error) {
-        console.warn("⚠️ Failed to load DB, using default config");
+        console.error(`❌ Failed to create ${path.basename(filePath)}:`, error.message);
     }
+};
 
+// -------------------- DEFAULT CONFIG --------------------
+const getDefaultConfig = () => {
     return {
         pair: "DOGE/USDT:USDT",
-        usdtPerTrade: 0.2,
-        leverage: 50,
+        usdtPerTrade: 5,
+        leverage: 75,
         targetProfitUSDT: 0.01,
-        maxDailyLossPercent: 50,
+        maxDailyLossPercent: 10,
         coolingPeriod: 3000,
         activePosition: null,
         dailyPnL: 0,
@@ -42,11 +47,64 @@ const loadDB = () => {
         monitoringInterval: 500,
         stopLossPercent: 50,
         breakoutPeriod: 20,
-        minBreakoutStrength: 0.001
+        minBreakoutStrength: 0.001,
+        lastUpdated: Date.now()
     };
 };
 
-let db = loadDB();
+// -------------------- LOAD CONFIG --------------------
+const loadDB = () => {
+    try {
+        ensureFileExists(dbPath, JSON.stringify(getDefaultConfig(), null, 2));
+        
+        if (fs.existsSync(dbPath)) {
+            const data = fs.readFileSync(dbPath, 'utf8');
+            
+            if (!data || data.trim() === '') {
+                console.log("📝 DB file is empty, creating default config...");
+                const defaultConfig = getDefaultConfig();
+                fs.writeFileSync(dbPath, JSON.stringify(defaultConfig, null, 2));
+                return defaultConfig;
+            }
+            
+            const parsedData = JSON.parse(data);
+            
+            // Validate required fields
+            const defaultConfig = getDefaultConfig();
+            const validatedConfig = { ...defaultConfig, ...parsedData };
+            
+            // Ensure all required fields exist
+            Object.keys(defaultConfig).forEach(key => {
+                if (!(key in validatedConfig) || validatedConfig[key] === undefined) {
+                    validatedConfig[key] = defaultConfig[key];
+                }
+            });
+            
+            return validatedConfig;
+        }
+    } catch (error) {
+        console.error("❌ Error loading DB:", error.message);
+        
+        // Create backup of corrupted file
+        if (fs.existsSync(dbPath)) {
+            try {
+                const backupPath = `${dbPath}.backup.${Date.now()}`;
+                fs.copyFileSync(dbPath, backupPath);
+                console.log(`📦 Created backup of corrupted file: ${backupPath}`);
+            } catch (backupError) {
+                console.error("❌ Failed to create backup:", backupError.message);
+            }
+        }
+        
+        // Create fresh config
+        const defaultConfig = getDefaultConfig();
+        fs.writeFileSync(dbPath, JSON.stringify(defaultConfig, null, 2));
+        console.log("✅ Created fresh config with default values");
+        return defaultConfig;
+    }
+    
+    return getDefaultConfig();
+};
 
 // -------------------- RELOAD CONFIG --------------------
 const reloadConfig = () => {
@@ -64,8 +122,8 @@ const reloadConfig = () => {
             freshConfig.dailyTrades = db.dailyTrades;
         }
         
-        const oldConfig = JSON.stringify(db);
-        const newConfig = JSON.stringify(freshConfig);
+        const oldConfig = JSON.stringify({ ...db, activePosition: null, lastUpdated: null });
+        const newConfig = JSON.stringify({ ...freshConfig, activePosition: null, lastUpdated: null });
         
         db = freshConfig;
         
@@ -429,6 +487,12 @@ const getPrice = async () => {
 
 const saveDB = () => {
     try {
+        // Ensure file exists before writing
+        ensureFileExists(dbPath, JSON.stringify(getDefaultConfig(), null, 2));
+        
+        // Add timestamp to track updates
+        db.lastUpdated = Date.now();
+        
         fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
     } catch (error) {
         console.error("❌ Failed to save DB:", error.message);
@@ -437,12 +501,11 @@ const saveDB = () => {
 
 const logTrade = (side, entry, exit, status, pnl = 0) => {
     try {
+        // Ensure log file exists
+        ensureFileExists(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy\n");
+        
         const timestamp = new Date().toISOString();
         const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},ISOLATED,${db.stopLossPercent},BREAKOUT\n`;
-        
-        if (!fs.existsSync(logPath)) {
-            fs.writeFileSync(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy\n");
-        }
         
         fs.appendFileSync(logPath, line);
     } catch (error) {
@@ -477,6 +540,7 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         console.log(`📈 P&L Monitoring: ${db.monitoringInterval}ms interval`);
         console.log(`🔄 Signal Analysis: 2000ms interval`);
         console.log(`🔄 Auto-reload Config: Enabled (every 2 seconds)`);
+        console.log(`📁 Config File: ${dbPath} (auto-created if missing)`);
         console.log("=".repeat(70) + "\n");
 
         console.log("🔄 Initializing... Waiting for data...");
