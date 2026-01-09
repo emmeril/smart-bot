@@ -14,6 +14,9 @@ let lastLogTime = Date.now();
 let lastPnlLog = Date.now();
 let lastConfigReload = Date.now();
 
+// Variabel db dideklarasikan tanpa inisialisasi langsung
+let db = null;
+
 // -------------------- ENSURE FILE EXISTS --------------------
 const ensureFileExists = (filePath, defaultContent = "{}") => {
     try {
@@ -25,9 +28,12 @@ const ensureFileExists = (filePath, defaultContent = "{}") => {
         if (!fs.existsSync(filePath)) {
             fs.writeFileSync(filePath, defaultContent, 'utf8');
             console.log(`✅ Created ${path.basename(filePath)} file`);
+            return true;
         }
+        return true;
     } catch (error) {
         console.error(`❌ Failed to create ${path.basename(filePath)}:`, error.message);
+        return false;
     }
 };
 
@@ -52,8 +58,8 @@ const getDefaultConfig = () => {
     };
 };
 
-// -------------------- LOAD CONFIG --------------------
-const loadDB = () => {
+// -------------------- INITIALIZE DB --------------------
+const initializeDB = () => {
     try {
         ensureFileExists(dbPath, JSON.stringify(getDefaultConfig(), null, 2));
         
@@ -64,7 +70,8 @@ const loadDB = () => {
                 console.log("📝 DB file is empty, creating default config...");
                 const defaultConfig = getDefaultConfig();
                 fs.writeFileSync(dbPath, JSON.stringify(defaultConfig, null, 2));
-                return defaultConfig;
+                db = defaultConfig;
+                return true;
             }
             
             const parsedData = JSON.parse(data);
@@ -80,10 +87,18 @@ const loadDB = () => {
                 }
             });
             
-            return validatedConfig;
+            db = validatedConfig;
+            console.log("✅ DB initialized successfully");
+            return true;
+        } else {
+            console.log("📝 Creating new DB file...");
+            const defaultConfig = getDefaultConfig();
+            fs.writeFileSync(dbPath, JSON.stringify(defaultConfig, null, 2));
+            db = defaultConfig;
+            return true;
         }
     } catch (error) {
-        console.error("❌ Error loading DB:", error.message);
+        console.error("❌ Error initializing DB:", error.message);
         
         // Create backup of corrupted file
         if (fs.existsSync(dbPath)) {
@@ -99,17 +114,32 @@ const loadDB = () => {
         // Create fresh config
         const defaultConfig = getDefaultConfig();
         fs.writeFileSync(dbPath, JSON.stringify(defaultConfig, null, 2));
+        db = defaultConfig;
         console.log("✅ Created fresh config with default values");
-        return defaultConfig;
+        return true;
     }
-    
-    return getDefaultConfig();
 };
 
 // -------------------- RELOAD CONFIG --------------------
 const reloadConfig = () => {
     try {
-        const freshConfig = loadDB();
+        if (!db) {
+            console.error("❌ Cannot reload config: db not initialized");
+            return false;
+        }
+        
+        if (!fs.existsSync(dbPath)) {
+            console.error("❌ DB file not found during reload");
+            return false;
+        }
+        
+        const data = fs.readFileSync(dbPath, 'utf8');
+        if (!data || data.trim() === '') {
+            console.error("❌ DB file is empty");
+            return false;
+        }
+        
+        const freshConfig = JSON.parse(data);
         
         // Preserve active position if it exists
         if (db.activePosition && !freshConfig.activePosition) {
@@ -125,9 +155,12 @@ const reloadConfig = () => {
         const oldConfig = JSON.stringify({ ...db, activePosition: null, lastUpdated: null });
         const newConfig = JSON.stringify({ ...freshConfig, activePosition: null, lastUpdated: null });
         
-        db = freshConfig;
+        // Update db object
+        Object.keys(freshConfig).forEach(key => {
+            db[key] = freshConfig[key];
+        });
         
-        // Log only if significant change detected (not just timestamp updates)
+        // Log only if significant change detected
         if (oldConfig !== newConfig && Date.now() - lastConfigReload > 5000) {
             console.log("🔄 Configuration reloaded from file");
             lastConfigReload = Date.now();
@@ -162,25 +195,37 @@ const initializeExchange = async () => {
 // -------------------- SET ISOLATED MARGIN MODE --------------------
 const setMarginMode = async () => {
     try {
+        if (!db) {
+            console.error("❌ Cannot set margin mode: db not initialized");
+            return false;
+        }
+        
         await exchange.setMarginMode("isolated", db.pair);
         console.log("✅ Margin mode set to: ISOLATED");
+        return true;
     } catch (error) {
         if (!error.message.includes("No need to change margin mode")) {
             console.warn("⚠️ Margin mode setting warning:", error.message);
         }
+        return false;
     }
 };
 
 // -------------------- REAL-TIME PNL MONITORING --------------------
 const startPnLMonitoring = async () => {
+    if (!db) {
+        console.error("❌ Cannot start P&L monitoring: db not initialized");
+        return;
+    }
+    
     console.log("📈 Starting real-time P&L monitoring...");
     
     setInterval(async () => {
         try {
             // Create local copy to avoid race condition
-            const activePosition = db.activePosition;
-            if (!activePosition) return;
+            if (!db || !db.activePosition) return;
             
+            const activePosition = db.activePosition;
             const currentPrice = await getPrice();
             if (!currentPrice) return;
 
@@ -244,6 +289,11 @@ const startPnLMonitoring = async () => {
 // -------------------- BREAKOUT SIGNAL DETECTION --------------------
 const analyzeSignal = async () => {
     try {
+        if (!db) {
+            console.error("❌ Cannot analyze signal: db not initialized");
+            return {};
+        }
+        
         signalCount++;
         const now = Date.now();
         
@@ -334,6 +384,11 @@ const analyzeSignal = async () => {
 // -------------------- ORDER MANAGEMENT --------------------
 const placeOrder = async (side, signalPrice) => {
     try {
+        if (!db) {
+            console.error("❌ Cannot place order: db not initialized");
+            return;
+        }
+
         // Check if active position exists
         if (db.activePosition) {
             console.log("⚠️ Active position exists, skipping");
@@ -429,6 +484,11 @@ const placeOrder = async (side, signalPrice) => {
 // -------------------- CLOSE POSITION --------------------
 const closePosition = async (reason, profitUSDT, profitPercent) => {
     try {
+        if (!db) {
+            console.error("❌ Cannot close position: db not initialized");
+            return;
+        }
+
         // Check if position still exists
         if (!db.activePosition) {
             console.log("⚠️ No active position to close");
@@ -477,6 +537,11 @@ const closePosition = async (reason, profitUSDT, profitPercent) => {
 // -------------------- UTILITY FUNCTIONS --------------------
 const getPrice = async () => {
     try {
+        if (!db) {
+            console.error("❌ Cannot get price: db not initialized");
+            return null;
+        }
+        
         const ticker = await exchange.fetchTicker(db.pair);
         return ticker.last;
     } catch (error) {
@@ -487,6 +552,11 @@ const getPrice = async () => {
 
 const saveDB = () => {
     try {
+        if (!db) {
+            console.error("❌ Cannot save DB: db not initialized");
+            return;
+        }
+        
         // Ensure file exists before writing
         ensureFileExists(dbPath, JSON.stringify(getDefaultConfig(), null, 2));
         
@@ -501,6 +571,11 @@ const saveDB = () => {
 
 const logTrade = (side, entry, exit, status, pnl = 0) => {
     try {
+        if (!db) {
+            console.error("❌ Cannot log trade: db not initialized");
+            return;
+        }
+        
         // Ensure log file exists
         ensureFileExists(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy\n");
         
@@ -516,12 +591,24 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
 // -------------------- MAIN LOOP --------------------
 (async () => {
     try {
-        // Initialize exchange
+        // Step 1: Initialize DB first
+        console.log("🔄 Initializing configuration...");
+        if (!initializeDB()) {
+            console.error("❌ Failed to initialize DB, exiting...");
+            process.exit(1);
+        }
+        
+        // Step 2: Initialize exchange
+        console.log("🔄 Connecting to exchange...");
         await initializeExchange();
+        
+        // Step 3: Set margin mode
+        console.log("🔄 Setting margin mode...");
         await setMarginMode();
         
-        // Start real-time P&L monitoring
-        startPnLMonitoring();
+        // Step 4: Start real-time P&L monitoring
+        console.log("🔄 Starting monitoring...");
+        await startPnLMonitoring();
         
         // Get account balance
         const balance = await exchange.fetchBalance();
@@ -540,7 +627,7 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         console.log(`📈 P&L Monitoring: ${db.monitoringInterval}ms interval`);
         console.log(`🔄 Signal Analysis: 2000ms interval`);
         console.log(`🔄 Auto-reload Config: Enabled (every 2 seconds)`);
-        console.log(`📁 Config File: ${dbPath} (auto-created if missing)`);
+        console.log(`📁 Config File: ${dbPath}`);
         console.log("=".repeat(70) + "\n");
 
         console.log("🔄 Initializing... Waiting for data...");
