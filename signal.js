@@ -1,4 +1,3 @@
-// signal.js (Real-time Scalping Version) - ISOLATED MARGIN - BREAKOUT STRATEGY
 require("dotenv").config();
 const fs = require("fs");
 const ccxt = require("ccxt");
@@ -12,12 +11,18 @@ let exchange = null;
 let signalCount = 0;
 let lastLogTime = Date.now();
 let lastPnlLog = Date.now();
+let lastConfigReload = Date.now();
 
 // -------------------- LOAD CONFIG --------------------
 const loadDB = () => {
     try {
         if (fs.existsSync(dbPath)) {
-            return JSON.parse(fs.readFileSync(dbPath));
+            const data = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+            // Preserve active position during reload if it exists in memory
+            if (db && db.activePosition && !data.activePosition) {
+                data.activePosition = db.activePosition;
+            }
+            return data;
         }
     } catch (error) {
         console.warn("⚠️ Failed to load DB, using default config");
@@ -25,10 +30,10 @@ const loadDB = () => {
 
     return {
         pair: "DOGE/USDT:USDT",
-        usdtPerTrade: 5,
-        leverage: 75,
+        usdtPerTrade: 0.2,
+        leverage: 50,
         targetProfitUSDT: 0.01,
-        maxDailyLossPercent: 10,
+        maxDailyLossPercent: 50,
         coolingPeriod: 3000,
         activePosition: null,
         dailyPnL: 0,
@@ -42,6 +47,40 @@ const loadDB = () => {
 };
 
 let db = loadDB();
+
+// -------------------- RELOAD CONFIG --------------------
+const reloadConfig = () => {
+    try {
+        const freshConfig = loadDB();
+        
+        // Preserve active position if it exists
+        if (db.activePosition && !freshConfig.activePosition) {
+            freshConfig.activePosition = db.activePosition;
+        }
+        
+        // Preserve daily P&L if not reset
+        if (db.dailyTrades > freshConfig.dailyTrades) {
+            freshConfig.dailyPnL = db.dailyPnL;
+            freshConfig.dailyTrades = db.dailyTrades;
+        }
+        
+        const oldConfig = JSON.stringify(db);
+        const newConfig = JSON.stringify(freshConfig);
+        
+        db = freshConfig;
+        
+        // Log only if significant change detected (not just timestamp updates)
+        if (oldConfig !== newConfig && Date.now() - lastConfigReload > 5000) {
+            console.log("🔄 Configuration reloaded from file");
+            lastConfigReload = Date.now();
+        }
+        
+        return true;
+    } catch (error) {
+        console.error("❌ Failed to reload config:", error.message);
+        return false;
+    }
+};
 
 // -------------------- INIT EXCHANGE --------------------
 const initializeExchange = async () => {
@@ -437,6 +476,7 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         console.log(`🛑 Stop Loss: ${db.stopLossPercent}% of trade amount (${(db.usdtPerTrade * db.stopLossPercent / 100).toFixed(2)} USDT)`);
         console.log(`📈 P&L Monitoring: ${db.monitoringInterval}ms interval`);
         console.log(`🔄 Signal Analysis: 2000ms interval`);
+        console.log(`🔄 Auto-reload Config: Enabled (every 2 seconds)`);
         console.log("=".repeat(70) + "\n");
 
         console.log("🔄 Initializing... Waiting for data...");
@@ -451,6 +491,9 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
             isProcessing = true;
 
             try {
+                // 🔄 RELOAD CONFIGURATION EVERY 2 SECONDS
+                reloadConfig();
+
                 // Skip if there's an active position (P&L monitoring handles closing)
                 if (db.activePosition) {
                     const timeInTrade = Math.floor((Date.now() - db.activePosition.entryTime) / 1000);
