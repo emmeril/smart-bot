@@ -184,39 +184,56 @@ const syncPositionWithExchange = async () => {
         console.log(`🔄 Sync: Checking positions for ${db.pair}...`);
 
         try {
-            // Method 1: Gunakan fetchPositions - ini memberikan data paling lengkap
-            const positions = await exchange.fetchPositions([db.pair]);
+            // Dapatkan semua posisi
+            const positions = await exchange.fetchPositions();
             
             if (positions.length === 0) {
                 console.log("📊 No positions found via fetchPositions");
             } else {
-                console.log(`📊 Total positions found via fetchPositions: ${positions.length}`);
+                console.log(`📊 Total positions found: ${positions.length}`);
+                
+                // Log semua posisi untuk debugging
+                positions.forEach((pos, index) => {
+                    const contracts = parseFloat(pos.contracts || 0);
+                    console.log(`   [${index}] ${pos.symbol}: ${contracts} contracts, side: ${pos.side}`);
+                });
             }
             
-            // Cari posisi yang aktif
+            // Cari posisi yang aktif untuk pair kita
             let openPosition = null;
             
+            // Normalisasi pair untuk matching
+            const normalizeSymbol = (symbol) => {
+                // Hilangkan spasi dan ubah ke uppercase untuk konsistensi
+                return symbol.toUpperCase().trim();
+            };
+            
+            const dbPairNormalized = normalizeSymbol(db.pair);
+            console.log(`🔍 Looking for position matching: ${dbPairNormalized}`);
+            
             for (const position of positions) {
-                // Normalisasi simbol untuk matching
-                const normalizedPair = db.pair.replace(":USDT", ""); // Hilangkan :USDT
-                const normalizedPositionSymbol = position.symbol;
-                const normalizedDbSymbol = normalizedPair;
+                const positionSymbol = normalizeSymbol(position.symbol);
+                console.log(`   Checking: ${positionSymbol} vs ${dbPairNormalized}`);
                 
-                if (normalizedPositionSymbol === normalizedDbSymbol) {
+                if (positionSymbol === dbPairNormalized) {
                     // Cek apakah ada kontrak aktif
                     const contracts = parseFloat(position.contracts || 0);
                     
                     if (Math.abs(contracts) > 0) {
                         openPosition = position;
-                        console.log(`✅ Found active position: ${position.side} ${Math.abs(contracts)} contracts`);
+                        console.log(`✅ Found matching position: ${positionSymbol}, contracts: ${contracts}`);
                         break;
+                    } else {
+                        console.log(`   Position has 0 contracts: ${contracts}`);
                     }
+                } else {
+                    console.log(`   Symbol mismatch: ${positionSymbol} !== ${dbPairNormalized}`);
                 }
             }
 
             // ANALISIS HASIL
             if (!openPosition) {
-                console.log("ℹ️ No open position found on exchange");
+                console.log("ℹ️ No open position found on exchange for this pair");
                 
                 // Jika tidak ada posisi di exchange tapi di db ada
                 if (db.activePosition) {
@@ -232,7 +249,7 @@ const syncPositionWithExchange = async () => {
                 
                 // Tentukan sisi posisi
                 let side = openPosition.side;
-                if (!side || side === 'both') {
+                if (!side || side === 'both' || side === '') {
                     // Jika side tidak jelas, tentukan dari tanda kontrak
                     side = contracts > 0 ? 'long' : 'short';
                 }
@@ -486,34 +503,36 @@ const analyzeSignal = async () => {
         const bearishBreakout = currentLow < support - breakoutThreshold;
         
         // Display breakout values
-        console.log("\n" + "=".repeat(50));
-        console.log("📈 BREAKOUT LEVELS:");
-        console.log(`   Current Price: ${currentPrice}`);
-        console.log(`   Current High: ${currentHigh}`);
-        console.log(`   Current Low: ${currentLow}`);
-        console.log(`   Resistance: ${resistance.toFixed(6)}`);
-        console.log(`   Support: ${support.toFixed(6)}`);
-        console.log(`   Range: ${range.toFixed(6)}`);
-        console.log(`   Breakout Threshold: ±${breakoutThreshold.toFixed(6)}`);
-        console.log(`   RSI 7: ${currentRSI.toFixed(2)}`);
-        console.log("");
-        console.log("🎯 BREAKOUT CONDITIONS:");
-        console.log(`   Bullish Breakout: ${bullishBreakout ? "✅ ABOVE RESISTANCE" : "❌ NOT BROKEN"}`);
-        console.log(`   Bearish Breakout: ${bearishBreakout ? "✅ BELOW SUPPORT" : "❌ NOT BROKEN"}`);
-        
-        // Signal conditions with RSI filter
-        const canLong = bullishBreakout && currentRSI > 40 && currentRSI < 75;
-        const canShort = bearishBreakout && currentRSI < 60 && currentRSI > 25;
-        
-        console.log("");
-        console.log("🚦 FINAL SIGNAL:");
-        console.log(`   LONG Signal: ${canLong ? "✅ BREAKOUT CONFIRMED" : "❌ NOT CONFIRMED"}`);
-        console.log(`   SHORT Signal: ${canShort ? "✅ BREAKOUT CONFIRMED" : "❌ NOT CONFIRMED"}`);
-        console.log("=".repeat(50));
+        if (Date.now() - lastLogTime > 4500) { // Tampilkan hanya jika akan ada log baru
+            console.log("\n" + "=".repeat(50));
+            console.log("📈 BREAKOUT LEVELS:");
+            console.log(`   Current Price: ${currentPrice}`);
+            console.log(`   Current High: ${currentHigh}`);
+            console.log(`   Current Low: ${currentLow}`);
+            console.log(`   Resistance: ${resistance.toFixed(6)}`);
+            console.log(`   Support: ${support.toFixed(6)}`);
+            console.log(`   Range: ${range.toFixed(6)}`);
+            console.log(`   Breakout Threshold: ±${breakoutThreshold.toFixed(6)}`);
+            console.log(`   RSI 7: ${currentRSI.toFixed(2)}`);
+            console.log("");
+            console.log("🎯 BREAKOUT CONDITIONS:");
+            console.log(`   Bullish Breakout: ${bullishBreakout ? "✅ ABOVE RESISTANCE" : "❌ NOT BROKEN"}`);
+            console.log(`   Bearish Breakout: ${bearishBreakout ? "✅ BELOW SUPPORT" : "❌ NOT BROKEN"}`);
+            
+            // Signal conditions with RSI filter
+            const canLong = bullishBreakout && currentRSI > 40 && currentRSI < 75;
+            const canShort = bearishBreakout && currentRSI < 60 && currentRSI > 25;
+            
+            console.log("");
+            console.log("🚦 FINAL SIGNAL:");
+            console.log(`   LONG Signal: ${canLong ? "✅ BREAKOUT CONFIRMED" : "❌ NOT CONFIRMED"}`);
+            console.log(`   SHORT Signal: ${canShort ? "✅ BREAKOUT CONFIRMED" : "❌ NOT CONFIRMED"}`);
+            console.log("=".repeat(50));
+        }
 
         return {
-            canLong,
-            canShort,
+            canLong: bullishBreakout && currentRSI > 40 && currentRSI < 75,
+            canShort: bearishBreakout && currentRSI < 60 && currentRSI > 25,
             price: currentPrice,
             rsi: currentRSI,
             resistance,
@@ -786,6 +805,7 @@ const manualSync = async () => {
         console.log(`🔄 Auto-reload Config: Enabled (every 2 seconds)`);
         console.log(`📁 Config File: ${dbPath}`);
         console.log(`🔄 Type 'sync' in console for manual position sync`);
+        console.log(`📝 Type 'status' for current status`);
         console.log("=".repeat(70) + "\n");
 
         console.log("🔄 Initializing... Waiting for data...");
