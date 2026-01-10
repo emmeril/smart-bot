@@ -1,6 +1,6 @@
-// signal.js (Real-time Scalping Version) - ISOLATED MARGIN - BREAKOUT STRATEGY
 require("dotenv").config();
 const fs = require("fs");
+const path = require("path");
 const ccxt = require("ccxt");
 const { RSI } = require("technicalindicators");
 
@@ -12,17 +12,33 @@ let exchange = null;
 let signalCount = 0;
 let lastLogTime = Date.now();
 let lastPnlLog = Date.now();
+let lastConfigReload = Date.now();
 
-// -------------------- LOAD CONFIG --------------------
-const loadDB = () => {
+// Variabel db dideklarasikan tanpa inisialisasi langsung
+let db = null;
+
+// -------------------- ENSURE FILE EXISTS --------------------
+const ensureFileExists = (filePath, defaultContent = "{}") => {
     try {
-        if (fs.existsSync(dbPath)) {
-            return JSON.parse(fs.readFileSync(dbPath));
+        const dir = path.dirname(filePath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
         }
+        
+        if (!fs.existsSync(filePath)) {
+            fs.writeFileSync(filePath, defaultContent, 'utf8');
+            console.log(`✅ Created ${path.basename(filePath)} file`);
+            return true;
+        }
+        return true;
     } catch (error) {
-        console.warn("⚠️ Failed to load DB, using default config");
+        console.error(`❌ Failed to create ${path.basename(filePath)}:`, error.message);
+        return false;
     }
+};
 
+// -------------------- DEFAULT CONFIG --------------------
+const getDefaultConfig = () => {
     return {
         pair: "DOGE/USDT:USDT",
         usdtPerTrade: 5,
@@ -37,11 +53,193 @@ const loadDB = () => {
         monitoringInterval: 500,
         stopLossPercent: 50,
         breakoutPeriod: 20,
-        minBreakoutStrength: 0.001
+        minBreakoutStrength: 0.001,
+        lastUpdated: Date.now()
     };
 };
 
-let db = loadDB();
+// -------------------- INITIALIZE DB --------------------
+const initializeDB = () => {
+    try {
+        ensureFileExists(dbPath, JSON.stringify(getDefaultConfig(), null, 2));
+        
+        if (fs.existsSync(dbPath)) {
+            const data = fs.readFileSync(dbPath, 'utf8');
+            
+            if (!data || data.trim() === '') {
+                console.log("📝 DB file is empty, creating default config...");
+                const defaultConfig = getDefaultConfig();
+                fs.writeFileSync(dbPath, JSON.stringify(defaultConfig, null, 2));
+                db = defaultConfig;
+                return true;
+            }
+            
+            const parsedData = JSON.parse(data);
+            
+            // Validate required fields
+            const defaultConfig = getDefaultConfig();
+            const validatedConfig = { ...defaultConfig, ...parsedData };
+            
+            // Ensure all required fields exist
+            Object.keys(defaultConfig).forEach(key => {
+                if (!(key in validatedConfig) || validatedConfig[key] === undefined) {
+                    validatedConfig[key] = defaultConfig[key];
+                }
+            });
+            
+            db = validatedConfig;
+            console.log("✅ DB initialized successfully");
+            return true;
+        } else {
+            console.log("📝 Creating new DB file...");
+            const defaultConfig = getDefaultConfig();
+            fs.writeFileSync(dbPath, JSON.stringify(defaultConfig, null, 2));
+            db = defaultConfig;
+            return true;
+        }
+    } catch (error) {
+        console.error("❌ Error initializing DB:", error.message);
+        
+        // Create backup of corrupted file
+        if (fs.existsSync(dbPath)) {
+            try {
+                const backupPath = `${dbPath}.backup.${Date.now()}`;
+                fs.copyFileSync(dbPath, backupPath);
+                console.log(`📦 Created backup of corrupted file: ${backupPath}`);
+            } catch (backupError) {
+                console.error("❌ Failed to create backup:", backupError.message);
+            }
+        }
+        
+        // Create fresh config
+        const defaultConfig = getDefaultConfig();
+        fs.writeFileSync(dbPath, JSON.stringify(defaultConfig, null, 2));
+        db = defaultConfig;
+        console.log("✅ Created fresh config with default values");
+        return true;
+    }
+};
+
+// -------------------- RELOAD CONFIG --------------------
+const reloadConfig = () => {
+    try {
+        if (!db) {
+            console.error("❌ Cannot reload config: db not initialized");
+            return false;
+        }
+        
+        if (!fs.existsSync(dbPath)) {
+            console.error("❌ DB file not found during reload");
+            return false;
+        }
+        
+        const data = fs.readFileSync(dbPath, 'utf8');
+        if (!data || data.trim() === '') {
+            console.error("❌ DB file is empty");
+            return false;
+        }
+        
+        const freshConfig = JSON.parse(data);
+        
+        // Preserve active position if it exists
+        if (db.activePosition && !freshConfig.activePosition) {
+            freshConfig.activePosition = db.activePosition;
+        }
+        
+        // Preserve daily P&L if not reset
+        if (db.dailyTrades > freshConfig.dailyTrades) {
+            freshConfig.dailyPnL = db.dailyPnL;
+            freshConfig.dailyTrades = db.dailyTrades;
+        }
+        
+        const oldConfig = JSON.stringify({ ...db, activePosition: null, lastUpdated: null });
+        const newConfig = JSON.stringify({ ...freshConfig, activePosition: null, lastUpdated: null });
+        
+        // Update db object
+        Object.keys(freshConfig).forEach(key => {
+            db[key] = freshConfig[key];
+        });
+        
+        // Log only if significant change detected
+        if (oldConfig !== newConfig && Date.now() - lastConfigReload > 5000) {
+            console.log("🔄 Configuration reloaded from file");
+            lastConfigReload = Date.now();
+        }
+        
+        return true;
+    } catch (error) {
+        console.error("❌ Failed to reload config:", error.message);
+        return false;
+    }
+};
+
+// -------------------- SYNC POSITION WITH EXCHANGE --------------------
+const syncPositionWithExchange = async () => {
+    try {
+        if (!db || !exchange) {
+            console.error("❌ Cannot sync position: db or exchange not initialized");
+            return;
+        }
+
+        // Ambil posisi terbuka dari Binance
+        const positions = await exchange.fetchPositions([db.pair]);
+        const openPosition = positions.find(p => 
+            p.symbol === db.pair.split(':')[0] && // Hilangkan :USDT di akhir
+            p.contracts && 
+            p.contracts > 0
+        );
+
+        // Jika tidak ada posisi terbuka di Binance, tapi di db ada activePosition
+        if (!openPosition && db.activePosition) {
+            console.log("🔄 Sync: No open position on exchange, resetting activePosition in db");
+            db.activePosition = null;
+            saveDB();
+            return;
+        }
+
+        // Jika ada posisi terbuka di Binance, tapi di db tidak ada activePosition
+        if (openPosition && !db.activePosition) {
+            console.log("🔄 Sync: Found open position on exchange, but not in db. Creating activePosition...");
+            
+            const side = openPosition.side === 'long' ? 'buy' : 'sell';
+            const quantity = openPosition.contracts;
+            const entryPrice = openPosition.entryPrice;
+            
+            // Buat activePosition dari data exchange
+            db.activePosition = {
+                side: side,
+                entryPrice: entryPrice,
+                targetPrice: null, // Tidak diketahui dari exchange
+                stopLossPrice: null, // Tidak diketahui dari exchange
+                stopLossUSDT: db.usdtPerTrade * (db.stopLossPercent / 100),
+                orderId: null, // Tidak diketahui dari exchange
+                quantity: quantity,
+                entryTime: Date.now() - 60000, // Perkiraan 1 menit yang lalu
+                marginMode: "isolated",
+                targetProfitUSDT: db.targetProfitUSDT
+            };
+            
+            saveDB();
+            console.log("✅ Sync: Created activePosition from exchange data");
+        }
+
+        // Jika ada posisi di kedua tempat, verifikasi konsistensi
+        if (openPosition && db.activePosition) {
+            const exchangeSide = openPosition.side === 'long' ? 'buy' : 'sell';
+            const dbSide = db.activePosition.side;
+            
+            if (exchangeSide !== dbSide) {
+                console.warn("⚠️ Sync: Position side mismatch! Exchange:", exchangeSide, "DB:", dbSide);
+                console.warn("⚠️ Resetting activePosition and letting PnL monitoring handle...");
+                db.activePosition = null;
+                saveDB();
+            }
+        }
+        
+    } catch (error) {
+        console.error("❌ Sync position failed:", error.message);
+    }
+};
 
 // -------------------- INIT EXCHANGE --------------------
 const initializeExchange = async () => {
@@ -65,25 +263,37 @@ const initializeExchange = async () => {
 // -------------------- SET ISOLATED MARGIN MODE --------------------
 const setMarginMode = async () => {
     try {
+        if (!db) {
+            console.error("❌ Cannot set margin mode: db not initialized");
+            return false;
+        }
+        
         await exchange.setMarginMode("isolated", db.pair);
         console.log("✅ Margin mode set to: ISOLATED");
+        return true;
     } catch (error) {
         if (!error.message.includes("No need to change margin mode")) {
             console.warn("⚠️ Margin mode setting warning:", error.message);
         }
+        return false;
     }
 };
 
 // -------------------- REAL-TIME PNL MONITORING --------------------
 const startPnLMonitoring = async () => {
+    if (!db) {
+        console.error("❌ Cannot start P&L monitoring: db not initialized");
+        return;
+    }
+    
     console.log("📈 Starting real-time P&L monitoring...");
     
     setInterval(async () => {
         try {
             // Create local copy to avoid race condition
-            const activePosition = db.activePosition;
-            if (!activePosition) return;
+            if (!db || !db.activePosition) return;
             
+            const activePosition = db.activePosition;
             const currentPrice = await getPrice();
             if (!currentPrice) return;
 
@@ -147,6 +357,11 @@ const startPnLMonitoring = async () => {
 // -------------------- BREAKOUT SIGNAL DETECTION --------------------
 const analyzeSignal = async () => {
     try {
+        if (!db) {
+            console.error("❌ Cannot analyze signal: db not initialized");
+            return {};
+        }
+        
         signalCount++;
         const now = Date.now();
         
@@ -237,6 +452,11 @@ const analyzeSignal = async () => {
 // -------------------- ORDER MANAGEMENT --------------------
 const placeOrder = async (side, signalPrice) => {
     try {
+        if (!db) {
+            console.error("❌ Cannot place order: db not initialized");
+            return;
+        }
+
         // Check if active position exists
         if (db.activePosition) {
             console.log("⚠️ Active position exists, skipping");
@@ -332,6 +552,11 @@ const placeOrder = async (side, signalPrice) => {
 // -------------------- CLOSE POSITION --------------------
 const closePosition = async (reason, profitUSDT, profitPercent) => {
     try {
+        if (!db) {
+            console.error("❌ Cannot close position: db not initialized");
+            return;
+        }
+
         // Check if position still exists
         if (!db.activePosition) {
             console.log("⚠️ No active position to close");
@@ -380,6 +605,11 @@ const closePosition = async (reason, profitUSDT, profitPercent) => {
 // -------------------- UTILITY FUNCTIONS --------------------
 const getPrice = async () => {
     try {
+        if (!db) {
+            console.error("❌ Cannot get price: db not initialized");
+            return null;
+        }
+        
         const ticker = await exchange.fetchTicker(db.pair);
         return ticker.last;
     } catch (error) {
@@ -390,6 +620,17 @@ const getPrice = async () => {
 
 const saveDB = () => {
     try {
+        if (!db) {
+            console.error("❌ Cannot save DB: db not initialized");
+            return;
+        }
+        
+        // Ensure file exists before writing
+        ensureFileExists(dbPath, JSON.stringify(getDefaultConfig(), null, 2));
+        
+        // Add timestamp to track updates
+        db.lastUpdated = Date.now();
+        
         fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
     } catch (error) {
         console.error("❌ Failed to save DB:", error.message);
@@ -398,12 +639,16 @@ const saveDB = () => {
 
 const logTrade = (side, entry, exit, status, pnl = 0) => {
     try {
+        if (!db) {
+            console.error("❌ Cannot log trade: db not initialized");
+            return;
+        }
+        
+        // Ensure log file exists
+        ensureFileExists(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy\n");
+        
         const timestamp = new Date().toISOString();
         const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},ISOLATED,${db.stopLossPercent},BREAKOUT\n`;
-        
-        if (!fs.existsSync(logPath)) {
-            fs.writeFileSync(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy\n");
-        }
         
         fs.appendFileSync(logPath, line);
     } catch (error) {
@@ -414,12 +659,28 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
 // -------------------- MAIN LOOP --------------------
 (async () => {
     try {
-        // Initialize exchange
+        // Step 1: Initialize DB first
+        console.log("🔄 Initializing configuration...");
+        if (!initializeDB()) {
+            console.error("❌ Failed to initialize DB, exiting...");
+            process.exit(1);
+        }
+        
+        // Step 2: Initialize exchange
+        console.log("🔄 Connecting to exchange...");
         await initializeExchange();
+        
+        // Step 3: Set margin mode
+        console.log("🔄 Setting margin mode...");
         await setMarginMode();
         
-        // Start real-time P&L monitoring
-        startPnLMonitoring();
+        // Step 4: Sync position dengan exchange saat start
+        console.log("🔄 Syncing position with exchange...");
+        await syncPositionWithExchange();
+        
+        // Step 5: Start real-time P&L monitoring
+        console.log("🔄 Starting monitoring...");
+        await startPnLMonitoring();
         
         // Get account balance
         const balance = await exchange.fetchBalance();
@@ -437,6 +698,9 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         console.log(`🛑 Stop Loss: ${db.stopLossPercent}% of trade amount (${(db.usdtPerTrade * db.stopLossPercent / 100).toFixed(2)} USDT)`);
         console.log(`📈 P&L Monitoring: ${db.monitoringInterval}ms interval`);
         console.log(`🔄 Signal Analysis: 2000ms interval`);
+        console.log(`🔄 Auto-sync Position: 30000ms interval`);
+        console.log(`🔄 Auto-reload Config: Enabled (every 2 seconds)`);
+        console.log(`📁 Config File: ${dbPath}`);
         console.log("=".repeat(70) + "\n");
 
         console.log("🔄 Initializing... Waiting for data...");
@@ -451,6 +715,9 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
             isProcessing = true;
 
             try {
+                // 🔄 RELOAD CONFIGURATION EVERY 2 SECONDS
+                reloadConfig();
+
                 // Skip if there's an active position (P&L monitoring handles closing)
                 if (db.activePosition) {
                     const timeInTrade = Math.floor((Date.now() - db.activePosition.entryTime) / 1000);
@@ -514,6 +781,15 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
                 isProcessing = false;
             }
         }, 2000); // Signal analysis every 2 seconds
+
+        // Auto-sync position dengan exchange setiap 30 detik
+        setInterval(async () => {
+            try {
+                await syncPositionWithExchange();
+            } catch (error) {
+                console.error("❌ Auto-sync failed:", error.message);
+            }
+        }, 30000); // Sync setiap 30 detik
 
     } catch (error) {
         console.error("❌ Bot startup failed:", error.message);
