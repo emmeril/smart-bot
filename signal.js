@@ -181,74 +181,35 @@ const syncPositionWithExchange = async () => {
             return;
         }
 
-        // Normalize pair format untuk Binance
-        const normalizePair = (pair) => {
-            // Ubah "DOGE/USDT:USDT" menjadi "DOGE/USDT"
-            return pair.replace(":USDT", "").replace("/", "");
-        };
-
-        const normalizedPair = normalizePair(db.pair);
-        console.log(`🔄 Sync: Checking positions for ${normalizedPair}...`);
+        console.log(`🔄 Sync: Checking positions for ${db.pair}...`);
 
         try {
-            // Method 1: Coba ambil posisi spesifik
+            // Method 1: Gunakan fetchPositions - ini memberikan data paling lengkap
+            const positions = await exchange.fetchPositions([db.pair]);
+            
+            if (positions.length === 0) {
+                console.log("📊 No positions found via fetchPositions");
+            } else {
+                console.log(`📊 Total positions found via fetchPositions: ${positions.length}`);
+            }
+            
+            // Cari posisi yang aktif
             let openPosition = null;
             
-            try {
-                // Coba dengan fetchPosition (beberapa exchange support)
-                const position = await exchange.fetchPosition(normalizedPair);
-                console.log("📊 Position data:", JSON.stringify(position, null, 2));
+            for (const position of positions) {
+                // Normalisasi simbol untuk matching
+                const normalizedPair = db.pair.replace(":USDT", ""); // Hilangkan :USDT
+                const normalizedPositionSymbol = position.symbol;
+                const normalizedDbSymbol = normalizedPair;
                 
-                // Cek apakah ada posisi aktif
-                if (position && position.contracts && Math.abs(position.contracts) > 0) {
-                    openPosition = position;
-                    console.log(`✅ Found active position via fetchPosition: ${position.side} ${Math.abs(position.contracts)} contracts`);
-                }
-            } catch (fetchPosError) {
-                console.log("ℹ️ fetchPosition not available, trying fetchPositions...");
-            }
-
-            // Method 2: Jika fetchPosition gagal, coba fetchPositions
-            if (!openPosition) {
-                const positions = await exchange.fetchPositions();
-                console.log(`📊 Total positions found: ${positions.length}`);
-                
-                // Log semua posisi untuk debugging
-                positions.forEach((p, i) => {
-                    console.log(`   [${i}] ${p.symbol}: ${p.contracts} contracts, side: ${p.side}`);
-                });
-                
-                openPosition = positions.find(p => {
-                    const symbolMatch = p.symbol === normalizedPair || 
-                                       p.symbol === db.pair.replace(":USDT", "") ||
-                                       p.symbol === normalizedPair.replace("/", "");
+                if (normalizedPositionSymbol === normalizedDbSymbol) {
+                    // Cek apakah ada kontrak aktif
+                    const contracts = parseFloat(position.contracts || 0);
                     
-                    const hasPosition = p.contracts && Math.abs(p.contracts) > 0;
-                    
-                    if (symbolMatch && hasPosition) {
-                        console.log(`✅ Found match: ${p.symbol}, contracts: ${p.contracts}, side: ${p.side}`);
-                    }
-                    
-                    return symbolMatch && hasPosition;
-                });
-            }
-
-            // Method 3: Coba dengan fetchBalance untuk melihat posisi
-            if (!openPosition) {
-                const balance = await exchange.fetchBalance();
-                console.log("📊 Balance info:", JSON.stringify(balance.info.positions || [], null, 2));
-                
-                if (balance.info && balance.info.positions) {
-                    const positions = balance.info.positions;
-                    openPosition = positions.find(p => {
-                        const symbolMatch = p.symbol === normalizedPair || 
-                                           p.symbol === normalizedPair.replace("/", "");
-                        const hasPosition = p.positionAmt && Math.abs(parseFloat(p.positionAmt)) > 0;
-                        return symbolMatch && hasPosition;
-                    });
-                    
-                    if (openPosition) {
-                        console.log(`✅ Found in balance positions: ${openPosition.symbol}, amount: ${openPosition.positionAmt}`);
+                    if (Math.abs(contracts) > 0) {
+                        openPosition = position;
+                        console.log(`✅ Found active position: ${position.side} ${Math.abs(contracts)} contracts`);
+                        break;
                     }
                 }
             }
@@ -262,59 +223,94 @@ const syncPositionWithExchange = async () => {
                     console.log("⚠️ DB has activePosition but exchange doesn't. Resetting...");
                     db.activePosition = null;
                     saveDB();
+                    return;
                 }
             } else {
+                // Ekstrak informasi dari posisi
+                const contracts = parseFloat(openPosition.contracts || 0);
+                const positionAmount = Math.abs(contracts);
+                
+                // Tentukan sisi posisi
+                let side = openPosition.side;
+                if (!side || side === 'both') {
+                    // Jika side tidak jelas, tentukan dari tanda kontrak
+                    side = contracts > 0 ? 'long' : 'short';
+                }
+                
+                const tradeSide = side === 'long' ? 'buy' : 'sell';
+                
+                // Dapatkan entry price
+                let entryPrice = parseFloat(openPosition.entryPrice || 0);
+                
+                if (!entryPrice || entryPrice === 0) {
+                    // Jika entryPrice tidak ada, coba gunakan notional
+                    const notional = parseFloat(openPosition.notional || 0);
+                    if (notional !== 0 && positionAmount > 0) {
+                        entryPrice = Math.abs(notional) / positionAmount;
+                        console.log(`📊 Calculated entry price from notional: ${entryPrice}`);
+                    } else {
+                        // Fallback: gunakan harga saat ini
+                        const ticker = await exchange.fetchTicker(db.pair);
+                        entryPrice = ticker.last;
+                        console.log(`📊 Using current price as entry price: ${entryPrice}`);
+                    }
+                }
+                
                 console.log(`🎯 Open position detected on exchange:`);
                 console.log(`   Symbol: ${openPosition.symbol}`);
-                console.log(`   Side: ${openPosition.side}`);
-                console.log(`   Contracts: ${openPosition.contracts || openPosition.positionAmt}`);
-                console.log(`   Entry Price: ${openPosition.entryPrice}`);
-                console.log(`   Unrealized PnL: ${openPosition.unrealizedPnl}`);
+                console.log(`   Side: ${tradeSide} (${side})`);
+                console.log(`   Contracts: ${contracts}`);
+                console.log(`   Position Amount: ${positionAmount}`);
+                console.log(`   Entry Price: ${entryPrice}`);
+                console.log(`   Unrealized PnL: ${openPosition.unrealizedPnl || 'N/A'}`);
+                console.log(`   Notional: ${openPosition.notional || 'N/A'}`);
                 
-                // Konversi data exchange ke format db
-                const contracts = openPosition.contracts || openPosition.positionAmt;
-                const positionAmount = Math.abs(parseFloat(contracts));
-                
-                if (positionAmount > 0) {
-                    const side = openPosition.side === 'long' ? 'buy' : 'sell';
+                // Jika db tidak punya activePosition, buat dari exchange data
+                if (!db.activePosition) {
+                    console.log("🔄 Creating activePosition from exchange data...");
                     
-                    // Jika db tidak punya activePosition, buat dari exchange data
-                    if (!db.activePosition) {
-                        console.log("🔄 Creating activePosition from exchange data...");
-                        
-                        db.activePosition = {
-                            side: side,
-                            entryPrice: parseFloat(openPosition.entryPrice),
-                            targetPrice: null,
-                            stopLossPrice: null,
-                            stopLossUSDT: db.usdtPerTrade * (db.stopLossPercent / 100),
-                            orderId: `SYNC_${Date.now()}`,
-                            quantity: positionAmount,
-                            entryTime: Date.now() - 300000, // 5 menit yang lalu (estimasi)
-                            marginMode: "isolated",
-                            targetProfitUSDT: db.targetProfitUSDT
-                        };
-                        
+                    db.activePosition = {
+                        side: tradeSide,
+                        entryPrice: entryPrice,
+                        targetPrice: null,
+                        stopLossPrice: null,
+                        stopLossUSDT: db.usdtPerTrade * (db.stopLossPercent / 100),
+                        orderId: `SYNC_${Date.now()}`,
+                        quantity: positionAmount,
+                        entryTime: Date.now() - 300000, // 5 menit yang lalu (estimasi)
+                        marginMode: "isolated",
+                        targetProfitUSDT: db.targetProfitUSDT
+                    };
+                    
+                    saveDB();
+                    console.log("✅ Created activePosition from exchange data");
+                    
+                    // Tampilkan konfirmasi
+                    console.log(`\n📋 SYNC SUCCESSFUL:`);
+                    console.log(`   Position detected: ${tradeSide.toUpperCase()} ${positionAmount} ${db.pair.split('/')[0]}`);
+                    console.log(`   Entry Price: ${entryPrice}`);
+                    console.log(`   Quantity: ${positionAmount}`);
+                    console.log(`   Unrealized P&L: ${openPosition.unrealizedPnl || 'N/A'}`);
+                    
+                } else {
+                    // Verifikasi konsistensi
+                    const dbSide = db.activePosition.side;
+                    if (dbSide !== tradeSide) {
+                        console.warn(`⚠️ Side mismatch! DB: ${dbSide}, Exchange: ${tradeSide}`);
+                        console.warn("⚠️ Updating db to match exchange...");
+                        db.activePosition.side = tradeSide;
+                        db.activePosition.quantity = positionAmount;
+                        db.activePosition.entryPrice = entryPrice;
                         saveDB();
-                        console.log("✅ Created activePosition from exchange data");
+                        console.log("✅ Updated activePosition to match exchange");
                     } else {
-                        // Verifikasi konsistensi
-                        const dbSide = db.activePosition.side;
-                        if (dbSide !== side) {
-                            console.warn(`⚠️ Side mismatch! DB: ${dbSide}, Exchange: ${side}`);
-                            console.warn("⚠️ Updating db to match exchange...");
-                            db.activePosition.side = side;
-                            db.activePosition.quantity = positionAmount;
-                            db.activePosition.entryPrice = parseFloat(openPosition.entryPrice);
-                            saveDB();
-                        }
+                        console.log("✅ DB activePosition matches exchange position");
                     }
                 }
             }
             
         } catch (error) {
             console.error("❌ Error during position sync:", error.message);
-            console.error("Stack:", error.stack);
         }
         
     } catch (error) {
@@ -371,11 +367,6 @@ const startPnLMonitoring = async () => {
     
     setInterval(async () => {
         try {
-            // Lakukan sync dulu sebelum monitoring
-            if (Math.random() < 0.1) { // 10% chance untuk sync
-                await syncPositionWithExchange();
-            }
-            
             // Create local copy to avoid race condition
             if (!db || !db.activePosition) return;
             
@@ -791,7 +782,7 @@ const manualSync = async () => {
         console.log(`🛑 Stop Loss: ${db.stopLossPercent}% of trade amount (${(db.usdtPerTrade * db.stopLossPercent / 100).toFixed(2)} USDT)`);
         console.log(`📈 P&L Monitoring: ${db.monitoringInterval}ms interval`);
         console.log(`🔄 Signal Analysis: 2000ms interval`);
-        console.log(`🔄 Auto-sync Position: 15000ms interval`);
+        console.log(`🔄 Auto-sync Position: 10000ms interval`);
         console.log(`🔄 Auto-reload Config: Enabled (every 2 seconds)`);
         console.log(`📁 Config File: ${dbPath}`);
         console.log(`🔄 Type 'sync' in console for manual position sync`);
@@ -876,7 +867,7 @@ const manualSync = async () => {
             }
         }, 2000); // Signal analysis every 2 seconds
 
-        // Auto-sync position dengan exchange setiap 15 detik
+        // Auto-sync position dengan exchange setiap 10 detik
         setInterval(async () => {
             try {
                 console.log("🔄 Auto-syncing position with exchange...");
@@ -884,7 +875,7 @@ const manualSync = async () => {
             } catch (error) {
                 console.error("❌ Auto-sync failed:", error.message);
             }
-        }, 15000); // Sync setiap 15 detik
+        }, 10000); // Sync setiap 10 detik
 
         // Handle manual sync via console input
         if (process.stdin.isTTY) {
@@ -902,6 +893,7 @@ const manualSync = async () => {
                         console.log(`   Position Side: ${db.activePosition.side}`);
                         console.log(`   Entry Price: ${db.activePosition.entryPrice}`);
                         console.log(`   Quantity: ${db.activePosition.quantity}`);
+                        console.log(`   Time in Position: ${Math.floor((Date.now() - db.activePosition.entryTime) / 1000)}s`);
                     }
                     console.log("");
                 }
