@@ -173,6 +173,155 @@ const reloadConfig = () => {
     }
 };
 
+// -------------------- SYNC POSITION WITH EXCHANGE --------------------
+const syncPositionWithExchange = async () => {
+    try {
+        if (!db || !exchange) {
+            console.error("❌ Cannot sync position: db or exchange not initialized");
+            return;
+        }
+
+        // Normalize pair format untuk Binance
+        const normalizePair = (pair) => {
+            // Ubah "DOGE/USDT:USDT" menjadi "DOGE/USDT"
+            return pair.replace(":USDT", "").replace("/", "");
+        };
+
+        const normalizedPair = normalizePair(db.pair);
+        console.log(`🔄 Sync: Checking positions for ${normalizedPair}...`);
+
+        try {
+            // Method 1: Coba ambil posisi spesifik
+            let openPosition = null;
+            
+            try {
+                // Coba dengan fetchPosition (beberapa exchange support)
+                const position = await exchange.fetchPosition(normalizedPair);
+                console.log("📊 Position data:", JSON.stringify(position, null, 2));
+                
+                // Cek apakah ada posisi aktif
+                if (position && position.contracts && Math.abs(position.contracts) > 0) {
+                    openPosition = position;
+                    console.log(`✅ Found active position via fetchPosition: ${position.side} ${Math.abs(position.contracts)} contracts`);
+                }
+            } catch (fetchPosError) {
+                console.log("ℹ️ fetchPosition not available, trying fetchPositions...");
+            }
+
+            // Method 2: Jika fetchPosition gagal, coba fetchPositions
+            if (!openPosition) {
+                const positions = await exchange.fetchPositions();
+                console.log(`📊 Total positions found: ${positions.length}`);
+                
+                // Log semua posisi untuk debugging
+                positions.forEach((p, i) => {
+                    console.log(`   [${i}] ${p.symbol}: ${p.contracts} contracts, side: ${p.side}`);
+                });
+                
+                openPosition = positions.find(p => {
+                    const symbolMatch = p.symbol === normalizedPair || 
+                                       p.symbol === db.pair.replace(":USDT", "") ||
+                                       p.symbol === normalizedPair.replace("/", "");
+                    
+                    const hasPosition = p.contracts && Math.abs(p.contracts) > 0;
+                    
+                    if (symbolMatch && hasPosition) {
+                        console.log(`✅ Found match: ${p.symbol}, contracts: ${p.contracts}, side: ${p.side}`);
+                    }
+                    
+                    return symbolMatch && hasPosition;
+                });
+            }
+
+            // Method 3: Coba dengan fetchBalance untuk melihat posisi
+            if (!openPosition) {
+                const balance = await exchange.fetchBalance();
+                console.log("📊 Balance info:", JSON.stringify(balance.info.positions || [], null, 2));
+                
+                if (balance.info && balance.info.positions) {
+                    const positions = balance.info.positions;
+                    openPosition = positions.find(p => {
+                        const symbolMatch = p.symbol === normalizedPair || 
+                                           p.symbol === normalizedPair.replace("/", "");
+                        const hasPosition = p.positionAmt && Math.abs(parseFloat(p.positionAmt)) > 0;
+                        return symbolMatch && hasPosition;
+                    });
+                    
+                    if (openPosition) {
+                        console.log(`✅ Found in balance positions: ${openPosition.symbol}, amount: ${openPosition.positionAmt}`);
+                    }
+                }
+            }
+
+            // ANALISIS HASIL
+            if (!openPosition) {
+                console.log("ℹ️ No open position found on exchange");
+                
+                // Jika tidak ada posisi di exchange tapi di db ada
+                if (db.activePosition) {
+                    console.log("⚠️ DB has activePosition but exchange doesn't. Resetting...");
+                    db.activePosition = null;
+                    saveDB();
+                }
+            } else {
+                console.log(`🎯 Open position detected on exchange:`);
+                console.log(`   Symbol: ${openPosition.symbol}`);
+                console.log(`   Side: ${openPosition.side}`);
+                console.log(`   Contracts: ${openPosition.contracts || openPosition.positionAmt}`);
+                console.log(`   Entry Price: ${openPosition.entryPrice}`);
+                console.log(`   Unrealized PnL: ${openPosition.unrealizedPnl}`);
+                
+                // Konversi data exchange ke format db
+                const contracts = openPosition.contracts || openPosition.positionAmt;
+                const positionAmount = Math.abs(parseFloat(contracts));
+                
+                if (positionAmount > 0) {
+                    const side = openPosition.side === 'long' ? 'buy' : 'sell';
+                    
+                    // Jika db tidak punya activePosition, buat dari exchange data
+                    if (!db.activePosition) {
+                        console.log("🔄 Creating activePosition from exchange data...");
+                        
+                        db.activePosition = {
+                            side: side,
+                            entryPrice: parseFloat(openPosition.entryPrice),
+                            targetPrice: null,
+                            stopLossPrice: null,
+                            stopLossUSDT: db.usdtPerTrade * (db.stopLossPercent / 100),
+                            orderId: `SYNC_${Date.now()}`,
+                            quantity: positionAmount,
+                            entryTime: Date.now() - 300000, // 5 menit yang lalu (estimasi)
+                            marginMode: "isolated",
+                            targetProfitUSDT: db.targetProfitUSDT
+                        };
+                        
+                        saveDB();
+                        console.log("✅ Created activePosition from exchange data");
+                    } else {
+                        // Verifikasi konsistensi
+                        const dbSide = db.activePosition.side;
+                        if (dbSide !== side) {
+                            console.warn(`⚠️ Side mismatch! DB: ${dbSide}, Exchange: ${side}`);
+                            console.warn("⚠️ Updating db to match exchange...");
+                            db.activePosition.side = side;
+                            db.activePosition.quantity = positionAmount;
+                            db.activePosition.entryPrice = parseFloat(openPosition.entryPrice);
+                            saveDB();
+                        }
+                    }
+                }
+            }
+            
+        } catch (error) {
+            console.error("❌ Error during position sync:", error.message);
+            console.error("Stack:", error.stack);
+        }
+        
+    } catch (error) {
+        console.error("❌ Sync position failed:", error.message);
+    }
+};
+
 // -------------------- INIT EXCHANGE --------------------
 const initializeExchange = async () => {
     try {
@@ -222,6 +371,11 @@ const startPnLMonitoring = async () => {
     
     setInterval(async () => {
         try {
+            // Lakukan sync dulu sebelum monitoring
+            if (Math.random() < 0.1) { // 10% chance untuk sync
+                await syncPositionWithExchange();
+            }
+            
             // Create local copy to avoid race condition
             if (!db || !db.activePosition) return;
             
@@ -588,6 +742,13 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
     }
 };
 
+// -------------------- MANUAL SYNC TRIGGER --------------------
+const manualSync = async () => {
+    console.log("\n🔄 MANUAL SYNC REQUESTED");
+    await syncPositionWithExchange();
+    console.log("✅ Manual sync completed\n");
+};
+
 // -------------------- MAIN LOOP --------------------
 (async () => {
     try {
@@ -606,7 +767,11 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         console.log("🔄 Setting margin mode...");
         await setMarginMode();
         
-        // Step 4: Start real-time P&L monitoring
+        // Step 4: Initial sync position dengan exchange
+        console.log("🔄 Performing initial position sync...");
+        await syncPositionWithExchange();
+        
+        // Step 5: Start real-time P&L monitoring
         console.log("🔄 Starting monitoring...");
         await startPnLMonitoring();
         
@@ -626,8 +791,10 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         console.log(`🛑 Stop Loss: ${db.stopLossPercent}% of trade amount (${(db.usdtPerTrade * db.stopLossPercent / 100).toFixed(2)} USDT)`);
         console.log(`📈 P&L Monitoring: ${db.monitoringInterval}ms interval`);
         console.log(`🔄 Signal Analysis: 2000ms interval`);
+        console.log(`🔄 Auto-sync Position: 15000ms interval`);
         console.log(`🔄 Auto-reload Config: Enabled (every 2 seconds)`);
         console.log(`📁 Config File: ${dbPath}`);
+        console.log(`🔄 Type 'sync' in console for manual position sync`);
         console.log("=".repeat(70) + "\n");
 
         console.log("🔄 Initializing... Waiting for data...");
@@ -708,6 +875,38 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
                 isProcessing = false;
             }
         }, 2000); // Signal analysis every 2 seconds
+
+        // Auto-sync position dengan exchange setiap 15 detik
+        setInterval(async () => {
+            try {
+                console.log("🔄 Auto-syncing position with exchange...");
+                await syncPositionWithExchange();
+            } catch (error) {
+                console.error("❌ Auto-sync failed:", error.message);
+            }
+        }, 15000); // Sync setiap 15 detik
+
+        // Handle manual sync via console input
+        if (process.stdin.isTTY) {
+            process.stdin.setEncoding('utf8');
+            process.stdin.on('data', (input) => {
+                const cmd = input.toString().trim().toLowerCase();
+                if (cmd === 'sync') {
+                    manualSync();
+                } else if (cmd === 'status') {
+                    console.log("\n📊 CURRENT STATUS:");
+                    console.log(`   Active Position: ${db.activePosition ? 'YES' : 'NO'}`);
+                    console.log(`   Daily P&L: ${db.dailyPnL.toFixed(2)} USDT`);
+                    console.log(`   Daily Trades: ${db.dailyTrades}`);
+                    if (db.activePosition) {
+                        console.log(`   Position Side: ${db.activePosition.side}`);
+                        console.log(`   Entry Price: ${db.activePosition.entryPrice}`);
+                        console.log(`   Quantity: ${db.activePosition.quantity}`);
+                    }
+                    console.log("");
+                }
+            });
+        }
 
     } catch (error) {
         console.error("❌ Bot startup failed:", error.message);
