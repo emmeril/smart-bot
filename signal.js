@@ -173,74 +173,6 @@ const reloadConfig = () => {
     }
 };
 
-// -------------------- SYNC POSITION WITH EXCHANGE --------------------
-const syncPositionWithExchange = async () => {
-    try {
-        if (!db || !exchange) {
-            console.error("❌ Cannot sync position: db or exchange not initialized");
-            return;
-        }
-
-        // Ambil posisi terbuka dari Binance
-        const positions = await exchange.fetchPositions([db.pair]);
-        const openPosition = positions.find(p => 
-            p.symbol === db.pair.split(':')[0] && // Hilangkan :USDT di akhir
-            p.contracts && 
-            p.contracts > 0
-        );
-
-        // Jika tidak ada posisi terbuka di Binance, tapi di db ada activePosition
-        if (!openPosition && db.activePosition) {
-            console.log("🔄 Sync: No open position on exchange, resetting activePosition in db");
-            db.activePosition = null;
-            saveDB();
-            return;
-        }
-
-        // Jika ada posisi terbuka di Binance, tapi di db tidak ada activePosition
-        if (openPosition && !db.activePosition) {
-            console.log("🔄 Sync: Found open position on exchange, but not in db. Creating activePosition...");
-            
-            const side = openPosition.side === 'long' ? 'buy' : 'sell';
-            const quantity = openPosition.contracts;
-            const entryPrice = openPosition.entryPrice;
-            
-            // Buat activePosition dari data exchange
-            db.activePosition = {
-                side: side,
-                entryPrice: entryPrice,
-                targetPrice: null, // Tidak diketahui dari exchange
-                stopLossPrice: null, // Tidak diketahui dari exchange
-                stopLossUSDT: db.usdtPerTrade * (db.stopLossPercent / 100),
-                orderId: null, // Tidak diketahui dari exchange
-                quantity: quantity,
-                entryTime: Date.now() - 60000, // Perkiraan 1 menit yang lalu
-                marginMode: "isolated",
-                targetProfitUSDT: db.targetProfitUSDT
-            };
-            
-            saveDB();
-            console.log("✅ Sync: Created activePosition from exchange data");
-        }
-
-        // Jika ada posisi di kedua tempat, verifikasi konsistensi
-        if (openPosition && db.activePosition) {
-            const exchangeSide = openPosition.side === 'long' ? 'buy' : 'sell';
-            const dbSide = db.activePosition.side;
-            
-            if (exchangeSide !== dbSide) {
-                console.warn("⚠️ Sync: Position side mismatch! Exchange:", exchangeSide, "DB:", dbSide);
-                console.warn("⚠️ Resetting activePosition and letting PnL monitoring handle...");
-                db.activePosition = null;
-                saveDB();
-            }
-        }
-        
-    } catch (error) {
-        console.error("❌ Sync position failed:", error.message);
-    }
-};
-
 // -------------------- INIT EXCHANGE --------------------
 const initializeExchange = async () => {
     try {
@@ -674,11 +606,7 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         console.log("🔄 Setting margin mode...");
         await setMarginMode();
         
-        // Step 4: Sync position dengan exchange saat start
-        console.log("🔄 Syncing position with exchange...");
-        await syncPositionWithExchange();
-        
-        // Step 5: Start real-time P&L monitoring
+        // Step 4: Start real-time P&L monitoring
         console.log("🔄 Starting monitoring...");
         await startPnLMonitoring();
         
@@ -698,7 +626,6 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         console.log(`🛑 Stop Loss: ${db.stopLossPercent}% of trade amount (${(db.usdtPerTrade * db.stopLossPercent / 100).toFixed(2)} USDT)`);
         console.log(`📈 P&L Monitoring: ${db.monitoringInterval}ms interval`);
         console.log(`🔄 Signal Analysis: 2000ms interval`);
-        console.log(`🔄 Auto-sync Position: 30000ms interval`);
         console.log(`🔄 Auto-reload Config: Enabled (every 2 seconds)`);
         console.log(`📁 Config File: ${dbPath}`);
         console.log("=".repeat(70) + "\n");
@@ -781,15 +708,6 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
                 isProcessing = false;
             }
         }, 2000); // Signal analysis every 2 seconds
-
-        // Auto-sync position dengan exchange setiap 30 detik
-        setInterval(async () => {
-            try {
-                await syncPositionWithExchange();
-            } catch (error) {
-                console.error("❌ Auto-sync failed:", error.message);
-            }
-        }, 30000); // Sync setiap 30 detik
 
     } catch (error) {
         console.error("❌ Bot startup failed:", error.message);
