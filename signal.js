@@ -503,7 +503,6 @@ const analyzeSignal = async () => {
         const bearishBreakout = currentLow < support - breakoutThreshold;
         
         // Display breakout values
-        if (Date.now() - lastLogTime > 4500) { // Tampilkan hanya jika akan ada log baru
             console.log("\n" + "=".repeat(50));
             console.log("📈 BREAKOUT LEVELS:");
             console.log(`   Current Price: ${currentPrice}`);
@@ -528,7 +527,7 @@ const analyzeSignal = async () => {
             console.log(`   LONG Signal: ${canLong ? "✅ BREAKOUT CONFIRMED" : "❌ NOT CONFIRMED"}`);
             console.log(`   SHORT Signal: ${canShort ? "✅ BREAKOUT CONFIRMED" : "❌ NOT CONFIRMED"}`);
             console.log("=".repeat(50));
-        }
+        
 
         return {
             canLong: bullishBreakout && currentRSI > 40 && currentRSI < 75,
