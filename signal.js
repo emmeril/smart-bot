@@ -16,17 +16,17 @@ const Config = sequelize.define('Config', {
     pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
     usdtPerTrade: { type: DataTypes.FLOAT, defaultValue: 10 },
     leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
-    targetProfitUSDT: { type: DataTypes.FLOAT, defaultValue: 1.0 },
-    targetDailyProfit: { type: DataTypes.FLOAT, defaultValue: 2.0 },
+    targetProfitUSDT: { type: DataTypes.FLOAT, defaultValue: 0.5 },        // diubah
+    targetDailyProfit: { type: DataTypes.FLOAT, defaultValue: 1.0 },        // diubah
     maxDailyLossPercent: { type: DataTypes.FLOAT, defaultValue: 10 },
-    maxTradesPerDay: { type: DataTypes.INTEGER, defaultValue: 2 },
+    maxTradesPerDay: { type: DataTypes.INTEGER, defaultValue: 3 },          // diubah
     coolingPeriod: { type: DataTypes.INTEGER, defaultValue: 3000 },
     activePosition: { type: DataTypes.TEXT, defaultValue: null },
     dailyPnL: { type: DataTypes.FLOAT, defaultValue: 0 },
     dailyTrades: { type: DataTypes.INTEGER, defaultValue: 0 },
     marginMode: { type: DataTypes.STRING, defaultValue: "isolated" },
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: 500 },
-    stopLossPercent: { type: DataTypes.FLOAT, defaultValue: 10 },
+    stopLossPercent: { type: DataTypes.FLOAT, defaultValue: 5 },            // diubah
     breakoutPeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
     breakoutTimeframe: { type: DataTypes.STRING, defaultValue: "5m" },
     minBreakoutStrength: { type: DataTypes.FLOAT, defaultValue: 0.003 },
@@ -73,17 +73,17 @@ const getDefaultConfig = () => ({
     pair: "DOGE/USDT:USDT",
     usdtPerTrade: 10,
     leverage: 10,
-    targetProfitUSDT: 1.0,
-    targetDailyProfit: 2.0,
+    targetProfitUSDT: 0.5,          // diubah
+    targetDailyProfit: 1.0,          // diubah
     maxDailyLossPercent: 10,
-    maxTradesPerDay: 2,
+    maxTradesPerDay: 3,              // diubah
     coolingPeriod: 3000,
     activePosition: null,
     dailyPnL: 0,
     dailyTrades: 0,
     marginMode: "isolated",
     monitoringInterval: 500,
-    stopLossPercent: 10,
+    stopLossPercent: 5,              // diubah
     breakoutPeriod: 20,
     breakoutTimeframe: "5m",
     minBreakoutStrength: 0.003,
