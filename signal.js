@@ -2,7 +2,7 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const ccxt = require("ccxt");
-const { RSI } = require("technicalindicators");
+const { RSI, EMA } = require("technicalindicators");
 
 // -------------------- CONFIG --------------------
 const dbPath = "./db.json";
@@ -13,22 +13,19 @@ let signalCount = 0;
 let lastLogTime = Date.now();
 let lastPnlLog = Date.now();
 let lastConfigReload = Date.now();
-
-// Variabel db dideklarasikan tanpa inisialisasi langsung
 let db = null;
+
+// Trend data
+let trendData = { ema: null, lastUpdate: 0, timeframe: "1h", period: 200 };
 
 // -------------------- ENSURE FILE EXISTS --------------------
 const ensureFileExists = (filePath, defaultContent = "{}") => {
     try {
         const dir = path.dirname(filePath);
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-        
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         if (!fs.existsSync(filePath)) {
             fs.writeFileSync(filePath, defaultContent, 'utf8');
             console.log(`✅ Created ${path.basename(filePath)} file`);
-            return true;
         }
         return true;
     } catch (error) {
@@ -41,19 +38,28 @@ const ensureFileExists = (filePath, defaultContent = "{}") => {
 const getDefaultConfig = () => {
     return {
         pair: "DOGE/USDT:USDT",
-        usdtPerTrade: 5,
-        leverage: 75,
-        targetProfitUSDT: 0.01,
+        usdtPerTrade: 10,
+        leverage: 10,
+        targetProfitUSDT: 1.0,
+        targetDailyProfit: 2.0,
         maxDailyLossPercent: 10,
+        maxTradesPerDay: 2,
         coolingPeriod: 3000,
         activePosition: null,
         dailyPnL: 0,
         dailyTrades: 0,
         marginMode: "isolated",
         monitoringInterval: 500,
-        stopLossPercent: 50,
-        breakoutPeriod: 20,
-        minBreakoutStrength: 0.001,
+        stopLossPercent: 10,
+        breakoutPeriod: 20,               // periode untuk mencari resistance/support (jumlah candle)
+        breakoutTimeframe: "5m",            // TIMEFRAME 5 MENIT
+        minBreakoutStrength: 0.003,         // DIPERBESAR (0.3% dari range)
+        volumePeriod: 20,
+        minVolumeRatio: 2.0,                // DIPERBESAR (2x rata-rata)
+        trendEnabled: true,
+        trendTimeframe: "1h",
+        trendPeriod: 200,
+        lastDailyReset: Date.now(),
         lastUpdated: Date.now()
     };
 };
@@ -62,60 +68,35 @@ const getDefaultConfig = () => {
 const initializeDB = () => {
     try {
         ensureFileExists(dbPath, JSON.stringify(getDefaultConfig(), null, 2));
-        
         if (fs.existsSync(dbPath)) {
             const data = fs.readFileSync(dbPath, 'utf8');
-            
-            if (!data || data.trim() === '') {
-                console.log("📝 DB file is empty, creating default config...");
-                const defaultConfig = getDefaultConfig();
-                fs.writeFileSync(dbPath, JSON.stringify(defaultConfig, null, 2));
-                db = defaultConfig;
-                return true;
-            }
-            
+            if (!data || data.trim() === '') throw new Error("Empty DB");
             const parsedData = JSON.parse(data);
-            
-            // Validate required fields
             const defaultConfig = getDefaultConfig();
             const validatedConfig = { ...defaultConfig, ...parsedData };
-            
-            // Ensure all required fields exist
             Object.keys(defaultConfig).forEach(key => {
                 if (!(key in validatedConfig) || validatedConfig[key] === undefined) {
                     validatedConfig[key] = defaultConfig[key];
                 }
             });
-            
             db = validatedConfig;
             console.log("✅ DB initialized successfully");
-            return true;
         } else {
             console.log("📝 Creating new DB file...");
-            const defaultConfig = getDefaultConfig();
-            fs.writeFileSync(dbPath, JSON.stringify(defaultConfig, null, 2));
-            db = defaultConfig;
-            return true;
+            db = getDefaultConfig();
+            fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
         }
+        return true;
     } catch (error) {
         console.error("❌ Error initializing DB:", error.message);
-        
-        // Create backup of corrupted file
         if (fs.existsSync(dbPath)) {
-            try {
-                const backupPath = `${dbPath}.backup.${Date.now()}`;
-                fs.copyFileSync(dbPath, backupPath);
-                console.log(`📦 Created backup of corrupted file: ${backupPath}`);
-            } catch (backupError) {
-                console.error("❌ Failed to create backup:", backupError.message);
-            }
+            const backupPath = `${dbPath}.backup.${Date.now()}`;
+            fs.copyFileSync(dbPath, backupPath);
+            console.log(`📦 Backup corrupted file: ${backupPath}`);
         }
-        
-        // Create fresh config
-        const defaultConfig = getDefaultConfig();
-        fs.writeFileSync(dbPath, JSON.stringify(defaultConfig, null, 2));
-        db = defaultConfig;
-        console.log("✅ Created fresh config with default values");
+        db = getDefaultConfig();
+        fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+        console.log("✅ Created fresh config");
         return true;
     }
 };
@@ -123,49 +104,18 @@ const initializeDB = () => {
 // -------------------- RELOAD CONFIG --------------------
 const reloadConfig = () => {
     try {
-        if (!db) {
-            console.error("❌ Cannot reload config: db not initialized");
-            return false;
-        }
-        
-        if (!fs.existsSync(dbPath)) {
-            console.error("❌ DB file not found during reload");
-            return false;
-        }
-        
+        if (!db || !fs.existsSync(dbPath)) return false;
         const data = fs.readFileSync(dbPath, 'utf8');
-        if (!data || data.trim() === '') {
-            console.error("❌ DB file is empty");
-            return false;
-        }
-        
+        if (!data) return false;
         const freshConfig = JSON.parse(data);
-        
-        // Preserve active position if it exists
         if (db.activePosition && !freshConfig.activePosition) {
             freshConfig.activePosition = db.activePosition;
         }
-        
-        // Preserve daily P&L if not reset
         if (db.dailyTrades > freshConfig.dailyTrades) {
             freshConfig.dailyPnL = db.dailyPnL;
             freshConfig.dailyTrades = db.dailyTrades;
         }
-        
-        const oldConfig = JSON.stringify({ ...db, activePosition: null, lastUpdated: null });
-        const newConfig = JSON.stringify({ ...freshConfig, activePosition: null, lastUpdated: null });
-        
-        // Update db object
-        Object.keys(freshConfig).forEach(key => {
-            db[key] = freshConfig[key];
-        });
-        
-        // Log only if significant change detected
-        if (oldConfig !== newConfig && Date.now() - lastConfigReload > 5000) {
-            console.log("🔄 Configuration reloaded from file");
-            lastConfigReload = Date.now();
-        }
-        
+        Object.keys(freshConfig).forEach(key => db[key] = freshConfig[key]);
         return true;
     } catch (error) {
         console.error("❌ Failed to reload config:", error.message);
@@ -176,160 +126,53 @@ const reloadConfig = () => {
 // -------------------- SYNC POSITION WITH EXCHANGE --------------------
 const syncPositionWithExchange = async () => {
     try {
-        if (!db || !exchange) {
-            console.error("❌ Cannot sync position: db or exchange not initialized");
+        if (!db || !exchange) return;
+        console.log(`🔄 Sync: Checking positions for ${db.pair}...`);
+        const positions = await exchange.fetchPositions();
+        let openPosition = null;
+        const normalizeSymbol = (symbol) => symbol.toUpperCase().trim();
+        const dbPairNormalized = normalizeSymbol(db.pair);
+        for (const position of positions) {
+            if (normalizeSymbol(position.symbol) === dbPairNormalized && Math.abs(parseFloat(position.contracts || 0)) > 0) {
+                openPosition = position;
+                break;
+            }
+        }
+        if (!openPosition) {
+            if (db.activePosition) {
+                console.log("⚠️ DB has activePosition but exchange doesn't. Resetting...");
+                db.activePosition = null;
+                saveDB();
+            }
             return;
         }
-
-        console.log(`🔄 Sync: Checking positions for ${db.pair}...`);
-
-        try {
-            // Dapatkan semua posisi
-            const positions = await exchange.fetchPositions();
-            
-            if (positions.length === 0) {
-                console.log("📊 No positions found via fetchPositions");
-            } else {
-                console.log(`📊 Total positions found: ${positions.length}`);
-                
-                // Log semua posisi untuk debugging
-                positions.forEach((pos, index) => {
-                    const contracts = parseFloat(pos.contracts || 0);
-                    console.log(`   [${index}] ${pos.symbol}: ${contracts} contracts, side: ${pos.side}`);
-                });
-            }
-            
-            // Cari posisi yang aktif untuk pair kita
-            let openPosition = null;
-            
-            // Normalisasi pair untuk matching
-            const normalizeSymbol = (symbol) => {
-                // Hilangkan spasi dan ubah ke uppercase untuk konsistensi
-                return symbol.toUpperCase().trim();
+        const contracts = parseFloat(openPosition.contracts || 0);
+        const side = openPosition.side === 'long' ? 'buy' : 'sell';
+        const entryPrice = parseFloat(openPosition.entryPrice || 0) || (await getPrice());
+        if (!db.activePosition) {
+            db.activePosition = {
+                side: side,
+                entryPrice: entryPrice,
+                targetPrice: null,
+                stopLossPrice: null,
+                stopLossUSDT: db.usdtPerTrade * (db.stopLossPercent / 100),
+                orderId: `SYNC_${Date.now()}`,
+                quantity: Math.abs(contracts),
+                entryTime: Date.now() - 300000,
+                marginMode: "isolated",
+                targetProfitUSDT: db.targetProfitUSDT
             };
-            
-            const dbPairNormalized = normalizeSymbol(db.pair);
-            console.log(`🔍 Looking for position matching: ${dbPairNormalized}`);
-            
-            for (const position of positions) {
-                const positionSymbol = normalizeSymbol(position.symbol);
-                console.log(`   Checking: ${positionSymbol} vs ${dbPairNormalized}`);
-                
-                if (positionSymbol === dbPairNormalized) {
-                    // Cek apakah ada kontrak aktif
-                    const contracts = parseFloat(position.contracts || 0);
-                    
-                    if (Math.abs(contracts) > 0) {
-                        openPosition = position;
-                        console.log(`✅ Found matching position: ${positionSymbol}, contracts: ${contracts}`);
-                        break;
-                    } else {
-                        console.log(`   Position has 0 contracts: ${contracts}`);
-                    }
-                } else {
-                    console.log(`   Symbol mismatch: ${positionSymbol} !== ${dbPairNormalized}`);
-                }
+            saveDB();
+            console.log("✅ Created activePosition from exchange data");
+        } else {
+            if (db.activePosition.side !== side || Math.abs(db.activePosition.quantity - Math.abs(contracts)) > 0.001) {
+                db.activePosition.side = side;
+                db.activePosition.quantity = Math.abs(contracts);
+                db.activePosition.entryPrice = entryPrice;
+                saveDB();
+                console.log("✅ Updated activePosition to match exchange");
             }
-
-            // ANALISIS HASIL
-            if (!openPosition) {
-                console.log("ℹ️ No open position found on exchange for this pair");
-                
-                // Jika tidak ada posisi di exchange tapi di db ada
-                if (db.activePosition) {
-                    console.log("⚠️ DB has activePosition but exchange doesn't. Resetting...");
-                    db.activePosition = null;
-                    saveDB();
-                    return;
-                }
-            } else {
-                // Ekstrak informasi dari posisi
-                const contracts = parseFloat(openPosition.contracts || 0);
-                const positionAmount = Math.abs(contracts);
-                
-                // Tentukan sisi posisi
-                let side = openPosition.side;
-                if (!side || side === 'both' || side === '') {
-                    // Jika side tidak jelas, tentukan dari tanda kontrak
-                    side = contracts > 0 ? 'long' : 'short';
-                }
-                
-                const tradeSide = side === 'long' ? 'buy' : 'sell';
-                
-                // Dapatkan entry price
-                let entryPrice = parseFloat(openPosition.entryPrice || 0);
-                
-                if (!entryPrice || entryPrice === 0) {
-                    // Jika entryPrice tidak ada, coba gunakan notional
-                    const notional = parseFloat(openPosition.notional || 0);
-                    if (notional !== 0 && positionAmount > 0) {
-                        entryPrice = Math.abs(notional) / positionAmount;
-                        console.log(`📊 Calculated entry price from notional: ${entryPrice}`);
-                    } else {
-                        // Fallback: gunakan harga saat ini
-                        const ticker = await exchange.fetchTicker(db.pair);
-                        entryPrice = ticker.last;
-                        console.log(`📊 Using current price as entry price: ${entryPrice}`);
-                    }
-                }
-                
-                console.log(`🎯 Open position detected on exchange:`);
-                console.log(`   Symbol: ${openPosition.symbol}`);
-                console.log(`   Side: ${tradeSide} (${side})`);
-                console.log(`   Contracts: ${contracts}`);
-                console.log(`   Position Amount: ${positionAmount}`);
-                console.log(`   Entry Price: ${entryPrice}`);
-                console.log(`   Unrealized PnL: ${openPosition.unrealizedPnl || 'N/A'}`);
-                console.log(`   Notional: ${openPosition.notional || 'N/A'}`);
-                
-                // Jika db tidak punya activePosition, buat dari exchange data
-                if (!db.activePosition) {
-                    console.log("🔄 Creating activePosition from exchange data...");
-                    
-                    db.activePosition = {
-                        side: tradeSide,
-                        entryPrice: entryPrice,
-                        targetPrice: null,
-                        stopLossPrice: null,
-                        stopLossUSDT: db.usdtPerTrade * (db.stopLossPercent / 100),
-                        orderId: `SYNC_${Date.now()}`,
-                        quantity: positionAmount,
-                        entryTime: Date.now() - 300000, // 5 menit yang lalu (estimasi)
-                        marginMode: "isolated",
-                        targetProfitUSDT: db.targetProfitUSDT
-                    };
-                    
-                    saveDB();
-                    console.log("✅ Created activePosition from exchange data");
-                    
-                    // Tampilkan konfirmasi
-                    console.log(`\n📋 SYNC SUCCESSFUL:`);
-                    console.log(`   Position detected: ${tradeSide.toUpperCase()} ${positionAmount} ${db.pair.split('/')[0]}`);
-                    console.log(`   Entry Price: ${entryPrice}`);
-                    console.log(`   Quantity: ${positionAmount}`);
-                    console.log(`   Unrealized P&L: ${openPosition.unrealizedPnl || 'N/A'}`);
-                    
-                } else {
-                    // Verifikasi konsistensi
-                    const dbSide = db.activePosition.side;
-                    if (dbSide !== tradeSide) {
-                        console.warn(`⚠️ Side mismatch! DB: ${dbSide}, Exchange: ${tradeSide}`);
-                        console.warn("⚠️ Updating db to match exchange...");
-                        db.activePosition.side = tradeSide;
-                        db.activePosition.quantity = positionAmount;
-                        db.activePosition.entryPrice = entryPrice;
-                        saveDB();
-                        console.log("✅ Updated activePosition to match exchange");
-                    } else {
-                        console.log("✅ DB activePosition matches exchange position");
-                    }
-                }
-            }
-            
-        } catch (error) {
-            console.error("❌ Error during position sync:", error.message);
         }
-        
     } catch (error) {
         console.error("❌ Sync position failed:", error.message);
     }
@@ -344,7 +187,6 @@ const initializeExchange = async () => {
             options: { defaultType: "future" },
             enableRateLimit: true,
         });
-
         await exchange.loadMarkets();
         console.log("✅ Exchange connected");
         return exchange;
@@ -354,121 +196,58 @@ const initializeExchange = async () => {
     }
 };
 
-// -------------------- SET ISOLATED MARGIN MODE --------------------
+// -------------------- SET MARGIN MODE --------------------
 const setMarginMode = async () => {
     try {
-        if (!db) {
-            console.error("❌ Cannot set margin mode: db not initialized");
-            return false;
-        }
-        
+        if (!db) return false;
         await exchange.setMarginMode("isolated", db.pair);
         console.log("✅ Margin mode set to: ISOLATED");
         return true;
     } catch (error) {
         if (!error.message.includes("No need to change margin mode")) {
-            console.warn("⚠️ Margin mode setting warning:", error.message);
+            console.warn("⚠️ Margin mode warning:", error.message);
         }
         return false;
     }
 };
 
-// -------------------- REAL-TIME PNL MONITORING --------------------
-const startPnLMonitoring = async () => {
-    if (!db) {
-        console.error("❌ Cannot start P&L monitoring: db not initialized");
-        return;
-    }
-    
-    console.log("📈 Starting real-time P&L monitoring...");
-    
-    setInterval(async () => {
-        try {
-            // Create local copy to avoid race condition
-            if (!db || !db.activePosition) return;
-            
-            const activePosition = db.activePosition;
-            const currentPrice = await getPrice();
-            if (!currentPrice) return;
-
-            const { side, entryPrice, quantity, targetProfitUSDT, entryTime } = activePosition;
-            
-            // Calculate real-time profit
-            const profitUSDT = side === "buy" 
-                ? (currentPrice - entryPrice) * quantity
-                : (entryPrice - currentPrice) * quantity;
-            
-            // Calculate profit percentage
-            const profitPercent = side === "buy" 
-                ? ((currentPrice - entryPrice) / entryPrice * 100)
-                : ((entryPrice - currentPrice) / entryPrice * 100);
-
-            // Check profit target - CLOSE IMMEDIATELY if reached
-            if (profitUSDT >= targetProfitUSDT) {
-                console.log(`\n🚨 PROFIT TARGET HIT! Closing immediately...`);
-                console.log(`   Profit: ${profitUSDT.toFixed(4)} USDT (Target: ${targetProfitUSDT} USDT)`);
-                console.log(`   Price moved from ${entryPrice} to ${currentPrice}`);
-                await closePosition("PROFIT_TARGET", profitUSDT, profitPercent);
-                return;
-            }
-            
-            // STOP LOSS: 50% dari usdtPerTrade
-            const stopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
-            if (profitUSDT <= stopLossUSDT) {
-                console.log(`\n🚨 STOP LOSS HIT! Closing immediately...`);
-                console.log(`   Loss: ${profitUSDT.toFixed(4)} USDT (Stop Loss: ${stopLossUSDT} USDT)`);
-                console.log(`   Price moved from ${entryPrice} to ${currentPrice}`);
-                console.log(`   Loss Percentage: ${(profitUSDT / db.usdtPerTrade * 100).toFixed(2)}%`);
-                await closePosition("STOP_LOSS", profitUSDT, profitPercent);
-                return;
-            }
-            
-            // Display P&L status every 3 seconds
-            const now = Date.now();
-            if (now - lastPnlLog > 3000) {
-                const timeInTrade = Math.floor((now - entryTime) / 1000);
-                const status = profitUSDT >= 0 ? "🟢" : "🔴";
-                
-                // Calculate distance to stop loss
-                const distanceToStopLoss = stopLossUSDT - profitUSDT;
-                
-                console.log(`\n📊 REAL-TIME POSITION:`);
-                console.log(`   ${status} P&L: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
-                console.log(`   Entry: ${entryPrice} | Current: ${currentPrice}`);
-                console.log(`   Time: ${timeInTrade}s | Target: +${targetProfitUSDT} USDT`);
-                console.log(`   Stop Loss: ${stopLossUSDT.toFixed(4)} USDT (${db.stopLossPercent}% of trade amount)`);
-                console.log(`   Distance to Stop Loss: ${distanceToStopLoss.toFixed(4)} USDT`);
-                
-                lastPnlLog = now;
-            }
-            
-        } catch (error) {
-            console.error("❌ P&L monitoring error:", error.message);
+// -------------------- UPDATE TREND EMA --------------------
+const updateTrend = async () => {
+    try {
+        if (!exchange || !db) return;
+        const timeframe = db.trendTimeframe || "1h";
+        const period = db.trendPeriod || 200;
+        const ohlcv = await exchange.fetchOHLCV(db.pair, timeframe, undefined, period + 10);
+        if (ohlcv.length < period) {
+            console.log(`⚠️ Not enough data for trend EMA (${ohlcv.length} < ${period})`);
+            return;
         }
-    }, db.monitoringInterval);
+        const closes = ohlcv.map(c => c[4]);
+        const ema = EMA.calculate({ values: closes, period });
+        if (ema.length > 0) {
+            trendData.ema = ema[ema.length - 1];
+            trendData.lastUpdate = Date.now();
+            console.log(`📈 Trend EMA${period} (${timeframe}): ${trendData.ema}`);
+        }
+    } catch (error) {
+        console.error("❌ Failed to update trend:", error.message);
+    }
 };
 
-// -------------------- BREAKOUT SIGNAL DETECTION --------------------
+// -------------------- BREAKOUT SIGNAL DETECTION (timeframe 5m, volume 2x, RSI diperketat) --------------------
 const analyzeSignal = async () => {
     try {
-        if (!db) {
-            console.error("❌ Cannot analyze signal: db not initialized");
-            return {};
-        }
-        
+        if (!db) return {};
         signalCount++;
         const now = Date.now();
-        
-        // Log only every 5 seconds to reduce spam
         if (now - lastLogTime > 5000) {
-            console.log(`\n📊 [SIGNAL #${signalCount}] Analyzing market for BREAKOUT...`);
+            console.log(`\n📊 [SIGNAL #${signalCount}] Analyzing market for BREAKOUT (${db.breakoutTimeframe})...`);
             lastLogTime = now;
         }
-        
-        // Use 1m timeframe for fast scalping
-        const ohlcv = await exchange.fetchOHLCV(db.pair, "1m", undefined, db.breakoutPeriod + 10);
-        
-        if (ohlcv.length < db.breakoutPeriod) {
+
+        // Ambil OHLCV sesuai timeframe (5m)
+        const ohlcv = await exchange.fetchOHLCV(db.pair, db.breakoutTimeframe, undefined, db.breakoutPeriod + 10 + db.volumePeriod);
+        if (ohlcv.length < db.breakoutPeriod + 5) {
             console.log(`⚠️ Not enough OHLCV data: ${ohlcv.length} candles`);
             return {};
         }
@@ -476,62 +255,74 @@ const analyzeSignal = async () => {
         const close = ohlcv.map(c => c[4]);
         const high = ohlcv.map(c => c[2]);
         const low = ohlcv.map(c => c[3]);
-        
+        const volume = ohlcv.map(c => c[5]);
+
         const currentPrice = close[close.length - 1];
         const currentHigh = high[high.length - 1];
         const currentLow = low[low.length - 1];
-        
-        // Calculate breakout levels
+        const currentVolume = volume[volume.length - 1];
+
+        // Rata-rata volume periode sebelumnya (tanpa candle terakhir)
+        const volumePeriod = db.volumePeriod;
+        const avgVolume = volume.slice(-volumePeriod - 1, -1).reduce((a, b) => a + b, 0) / volumePeriod;
+
+        // Resistance & support dari breakoutPeriod candle sebelumnya (tanpa candle terakhir)
         const lookbackPeriod = db.breakoutPeriod;
-        
-        // Get previous period highs and lows (excluding current candle)
         const previousHighs = high.slice(-lookbackPeriod - 1, -1);
         const previousLows = low.slice(-lookbackPeriod - 1, -1);
-        
         const resistance = Math.max(...previousHighs);
         const support = Math.min(...previousLows);
-        
         const range = resistance - support;
         const breakoutThreshold = range * db.minBreakoutStrength;
-        
-        // RSI 7 for confirmation
+
+        // RSI 7
         const rsi = RSI.calculate({ values: close, period: 7 });
         const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1] : 50;
-        
+
         // Breakout detection
         const bullishBreakout = currentHigh > resistance + breakoutThreshold;
         const bearishBreakout = currentLow < support - breakoutThreshold;
-        
-        // Display breakout values
-            console.log("\n" + "=".repeat(50));
-            console.log("📈 BREAKOUT LEVELS:");
-            console.log(`   Current Price: ${currentPrice}`);
-            console.log(`   Current High: ${currentHigh}`);
-            console.log(`   Current Low: ${currentLow}`);
-            console.log(`   Resistance: ${resistance.toFixed(6)}`);
-            console.log(`   Support: ${support.toFixed(6)}`);
-            console.log(`   Range: ${range.toFixed(6)}`);
-            console.log(`   Breakout Threshold: ±${breakoutThreshold.toFixed(6)}`);
-            console.log(`   RSI 7: ${currentRSI.toFixed(2)}`);
-            console.log("");
-            console.log("🎯 BREAKOUT CONDITIONS:");
-            console.log(`   Bullish Breakout: ${bullishBreakout ? "✅ ABOVE RESISTANCE" : "❌ NOT BROKEN"}`);
-            console.log(`   Bearish Breakout: ${bearishBreakout ? "✅ BELOW SUPPORT" : "❌ NOT BROKEN"}`);
-            
-            // Signal conditions with RSI filter
-            const canLong = bullishBreakout && currentRSI > 40 && currentRSI < 75;
-            const canShort = bearishBreakout && currentRSI < 60 && currentRSI > 25;
-            
-            console.log("");
-            console.log("🚦 FINAL SIGNAL:");
-            console.log(`   LONG Signal: ${canLong ? "✅ BREAKOUT CONFIRMED" : "❌ NOT CONFIRMED"}`);
-            console.log(`   SHORT Signal: ${canShort ? "✅ BREAKOUT CONFIRMED" : "❌ NOT CONFIRMED"}`);
-            console.log("=".repeat(50));
-        
+
+        // Filter volume (min 2x)
+        const volumeOk = currentVolume > avgVolume * db.minVolumeRatio;
+
+        console.log("\n" + "=".repeat(50));
+        console.log("📈 BREAKOUT LEVELS (5m):");
+        console.log(`   Current Price: ${currentPrice}`);
+        console.log(`   Current Volume: ${currentVolume.toFixed(2)}`);
+        console.log(`   Avg Volume (${volumePeriod}): ${avgVolume.toFixed(2)}`);
+        console.log(`   Volume Ratio: ${(currentVolume / avgVolume).toFixed(2)}x (min ${db.minVolumeRatio}x)`);
+        console.log(`   Resistance: ${resistance.toFixed(6)}`);
+        console.log(`   Support: ${support.toFixed(6)}`);
+        console.log(`   Range: ${range.toFixed(6)}`);
+        console.log(`   Breakout Threshold: ±${breakoutThreshold.toFixed(6)} (${db.minBreakoutStrength*100}% of range)`);
+        console.log(`   RSI 7: ${currentRSI.toFixed(2)}`);
+        console.log("");
+        console.log("🎯 BREAKOUT CONDITIONS:");
+        console.log(`   Bullish Breakout: ${bullishBreakout ? "✅ ABOVE RESISTANCE" : "❌ NOT BROKEN"}`);
+        console.log(`   Bearish Breakout: ${bearishBreakout ? "✅ BELOW SUPPORT" : "❌ NOT BROKEN"}`);
+        console.log(`   Volume OK: ${volumeOk ? "✅" : "❌"}`);
+
+        // RSI DIPERSEMPIT
+        let canLong = bullishBreakout && currentRSI > 50 && currentRSI < 75 && volumeOk;
+        let canShort = bearishBreakout && currentRSI > 25 && currentRSI < 50 && volumeOk;
+
+        // Filter trend
+        if (db.trendEnabled && trendData.ema) {
+            if (currentPrice <= trendData.ema) canLong = false;
+            if (currentPrice >= trendData.ema) canShort = false;
+            console.log(`   Trend EMA: ${trendData.ema} → Long allowed: ${canLong}, Short allowed: ${canShort}`);
+        }
+
+        console.log("");
+        console.log("🚦 FINAL SIGNAL:");
+        console.log(`   LONG Signal: ${canLong ? "✅ CONFIRMED" : "❌ NOT CONFIRMED"}`);
+        console.log(`   SHORT Signal: ${canShort ? "✅ CONFIRMED" : "❌ NOT CONFIRMED"}`);
+        console.log("=".repeat(50));
 
         return {
-            canLong: bullishBreakout && currentRSI > 40 && currentRSI < 75,
-            canShort: bearishBreakout && currentRSI < 60 && currentRSI > 25,
+            canLong,
+            canShort,
             price: currentPrice,
             rsi: currentRSI,
             resistance,
@@ -544,39 +335,22 @@ const analyzeSignal = async () => {
     }
 };
 
-// -------------------- ORDER MANAGEMENT --------------------
+// -------------------- PLACE ORDER --------------------
 const placeOrder = async (side, signalPrice) => {
     try {
-        if (!db) {
-            console.error("❌ Cannot place order: db not initialized");
-            return;
-        }
-
-        // Check if active position exists
-        if (db.activePosition) {
-            console.log("⚠️ Active position exists, skipping");
-            return;
-        }
+        if (!db || db.activePosition) return;
 
         console.log(`\n🔄 [ORDER] Attempting to place ${side.toUpperCase()} order...`);
-        
-        // 1. Set margin mode to ISOLATED
         await setMarginMode();
-        
-        // 2. Set leverage
         await exchange.setLeverage(db.leverage, db.pair);
-        
-        // 3. Get current price for calculation
+
         const ticker = await exchange.fetchTicker(db.pair);
         const entryPrice = ticker.last;
-        
-        // Calculate quantity
         const qty = (db.usdtPerTrade * db.leverage) / entryPrice;
         const market = exchange.markets[db.pair];
         const precision = market?.precision?.amount || 3;
         const adjustedQty = parseFloat(qty.toFixed(precision));
 
-        // Calculate target price based on profit USDT
         const targetProfitUSDT = db.targetProfitUSDT;
         let targetPrice;
         if (side === "buy") {
@@ -584,12 +358,9 @@ const placeOrder = async (side, signalPrice) => {
         } else {
             targetPrice = entryPrice - (targetProfitUSDT / adjustedQty);
         }
-        
-        // Round target price according to market precision
         const pricePrecision = market?.precision?.price || 8;
         targetPrice = parseFloat(targetPrice.toFixed(pricePrecision));
 
-        // Calculate stop loss price
         const stopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
         let stopLossPrice;
         if (side === "buy") {
@@ -603,17 +374,15 @@ const placeOrder = async (side, signalPrice) => {
         console.log(`   - Amount: ${db.usdtPerTrade} USDT × ${db.leverage}x = ${(db.usdtPerTrade * db.leverage).toFixed(2)} USDT`);
         console.log(`   - Quantity: ${adjustedQty} ${db.pair.split('/')[0]}`);
         console.log(`   - Entry Price: ${entryPrice}`);
-        console.log(`   - Target Profit: ${targetProfitUSDT} USDT`);
+        console.log(`   - Target Profit: ${targetProfitUSDT} USDT (1:1 risk-reward)`);
         console.log(`   - Target Price: ${targetPrice}`);
         console.log(`   - Stop Loss: ${stopLossUSDT} USDT (${db.stopLossPercent}%)`);
         console.log(`   - Stop Loss Price: ${stopLossPrice}`);
 
-        // 4. Place order with isolated margin params
         const order = await exchange.createOrder(db.pair, "market", side, adjustedQty, undefined, {
             marginMode: "isolated"
         });
-        
-        // Save active position
+
         db.activePosition = {
             side: side,
             entryPrice: entryPrice,
@@ -630,15 +399,7 @@ const placeOrder = async (side, signalPrice) => {
         saveDB();
         logTrade(side, entryPrice, null, "OPEN");
 
-        console.log(`\n✅ ORDER PLACED:`);
-        console.log(`   Type: ${side.toUpperCase()}`);
-        console.log(`   Entry: ${entryPrice}`);
-        console.log(`   Target: ${targetPrice} (+${targetProfitUSDT} USDT)`);
-        console.log(`   Stop Loss: ${stopLossPrice} (${stopLossUSDT} USDT)`);
-        console.log(`   Order ID: ${order.id}`);
-        console.log(`   Margin Mode: ISOLATED`);
-        console.log(`   Time: ${new Date().toLocaleTimeString()}`);
-
+        console.log(`\n✅ ORDER PLACED: ${side.toUpperCase()} at ${entryPrice}`);
     } catch (error) {
         console.error("❌ Order failed:", error.message);
     }
@@ -647,51 +408,28 @@ const placeOrder = async (side, signalPrice) => {
 // -------------------- CLOSE POSITION --------------------
 const closePosition = async (reason, profitUSDT, profitPercent) => {
     try {
-        if (!db) {
-            console.error("❌ Cannot close position: db not initialized");
-            return;
-        }
-
-        // Check if position still exists
-        if (!db.activePosition) {
-            console.log("⚠️ No active position to close");
-            return;
-        }
-
+        if (!db || !db.activePosition) return;
         const { side, quantity, entryPrice } = db.activePosition;
         const closeSide = side === "buy" ? "sell" : "buy";
         
-        console.log(`\n🔄 Closing position: ${side.toUpperCase()} -> ${closeSide.toUpperCase()}`);
-        
+        console.log(`\n🔄 Closing position...`);
         await exchange.createOrder(db.pair, "market", closeSide, quantity, undefined, {
             reduceOnly: true,
             marginMode: "isolated"
         });
 
-        // Update daily PnL
         db.dailyPnL += profitUSDT;
         db.dailyTrades++;
         
-        // Get exit price
         const exitPrice = await getPrice();
-        
-        // Log trade
         logTrade(side === "buy" ? "LONG" : "SHORT", entryPrice, exitPrice, "CLOSE", profitUSDT);
         
-        console.log(`\n✅ POSITION CLOSED:`);
-        console.log(`   Reason: ${reason}`);
-        console.log(`   Side: ${side.toUpperCase()}`);
-        console.log(`   Entry Price: ${entryPrice}`);
-        console.log(`   Exit Price: ${exitPrice}`);
+        console.log(`\n✅ POSITION CLOSED: ${reason}`);
         console.log(`   P&L: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
-        console.log(`   Daily P&L: ${db.dailyPnL.toFixed(2)} USDT`);
-        console.log(`   Daily Trades: ${db.dailyTrades}`);
-        console.log(`   Time: ${new Date().toLocaleTimeString()}`);
+        console.log(`   Daily P&L: ${db.dailyPnL.toFixed(2)} USDT / ${db.dailyTrades} trades`);
 
-        // Reset active position
         db.activePosition = null;
         saveDB();
-
     } catch (error) {
         console.error("❌ Close position failed:", error.message);
     }
@@ -700,11 +438,6 @@ const closePosition = async (reason, profitUSDT, profitPercent) => {
 // -------------------- UTILITY FUNCTIONS --------------------
 const getPrice = async () => {
     try {
-        if (!db) {
-            console.error("❌ Cannot get price: db not initialized");
-            return null;
-        }
-        
         const ticker = await exchange.fetchTicker(db.pair);
         return ticker.last;
     } catch (error) {
@@ -715,17 +448,9 @@ const getPrice = async () => {
 
 const saveDB = () => {
     try {
-        if (!db) {
-            console.error("❌ Cannot save DB: db not initialized");
-            return;
-        }
-        
-        // Ensure file exists before writing
+        if (!db) return;
         ensureFileExists(dbPath, JSON.stringify(getDefaultConfig(), null, 2));
-        
-        // Add timestamp to track updates
         db.lastUpdated = Date.now();
-        
         fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
     } catch (error) {
         console.error("❌ Failed to save DB:", error.message);
@@ -734,187 +459,156 @@ const saveDB = () => {
 
 const logTrade = (side, entry, exit, status, pnl = 0) => {
     try {
-        if (!db) {
-            console.error("❌ Cannot log trade: db not initialized");
-            return;
-        }
-        
-        // Ensure log file exists
         ensureFileExists(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy\n");
-        
         const timestamp = new Date().toISOString();
-        const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},ISOLATED,${db.stopLossPercent},BREAKOUT\n`;
-        
+        const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},ISOLATED,${db.stopLossPercent},BREAKOUT_5M\n`;
         fs.appendFileSync(logPath, line);
     } catch (error) {
         console.error("❌ Failed to log trade:", error.message);
     }
 };
 
-// -------------------- MANUAL SYNC TRIGGER --------------------
-const manualSync = async () => {
-    console.log("\n🔄 MANUAL SYNC REQUESTED");
-    await syncPositionWithExchange();
-    console.log("✅ Manual sync completed\n");
+// -------------------- REAL-TIME PNL MONITORING --------------------
+const startPnLMonitoring = () => {
+    console.log("📈 Starting real-time P&L monitoring...");
+    setInterval(async () => {
+        if (!db || !db.activePosition) return;
+        const currentPrice = await getPrice();
+        if (!currentPrice) return;
+
+        const { side, entryPrice, quantity, targetProfitUSDT, entryTime } = db.activePosition;
+        const profitUSDT = side === "buy" 
+            ? (currentPrice - entryPrice) * quantity
+            : (entryPrice - currentPrice) * quantity;
+        const profitPercent = side === "buy" 
+            ? ((currentPrice - entryPrice) / entryPrice * 100)
+            : ((entryPrice - currentPrice) / entryPrice * 100);
+
+        if (profitUSDT >= targetProfitUSDT) {
+            console.log(`\n🚨 PROFIT TARGET HIT (+${targetProfitUSDT} USDT)! Closing...`);
+            await closePosition("PROFIT_TARGET", profitUSDT, profitPercent);
+            return;
+        }
+
+        const stopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
+        if (profitUSDT <= stopLossUSDT) {
+            console.log(`\n🚨 STOP LOSS HIT (${stopLossUSDT} USDT)! Closing...`);
+            await closePosition("STOP_LOSS", profitUSDT, profitPercent);
+            return;
+        }
+
+        if (Date.now() - lastPnlLog > 3000) {
+            console.log(`\n📊 REAL-TIME P&L: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
+            lastPnlLog = Date.now();
+        }
+    }, db.monitoringInterval);
 };
 
 // -------------------- MAIN LOOP --------------------
 (async () => {
     try {
-        // Step 1: Initialize DB first
-        console.log("🔄 Initializing configuration...");
-        if (!initializeDB()) {
-            console.error("❌ Failed to initialize DB, exiting...");
-            process.exit(1);
-        }
-        
-        // Step 2: Initialize exchange
-        console.log("🔄 Connecting to exchange...");
+        if (!initializeDB()) process.exit(1);
         await initializeExchange();
-        
-        // Step 3: Set margin mode
-        console.log("🔄 Setting margin mode...");
         await setMarginMode();
-        
-        // Step 4: Initial sync position dengan exchange
-        console.log("🔄 Performing initial position sync...");
         await syncPositionWithExchange();
-        
-        // Step 5: Start real-time P&L monitoring
-        console.log("🔄 Starting monitoring...");
-        await startPnLMonitoring();
-        
-        // Get account balance
+        await updateTrend();
+        setInterval(updateTrend, 15 * 60 * 1000);
+
+        startPnLMonitoring();
+
         const balance = await exchange.fetchBalance();
         const totalUSDT = balance.total?.USDT || 0;
-        
+
         console.log("\n" + "=".repeat(70));
-        console.log("🚀 REAL-TIME BREAKOUT SCALPING BOT STARTED");
+        console.log("🚀 BREAKOUT SCALPING BOT (5m, Volume 2x, RSI Ketat)");
         console.log("=".repeat(70));
-        console.log(`💰 Balance: ${totalUSDT.toFixed(2)} USDT`);
+        console.log(`💰 Balance: $${totalUSDT.toFixed(2)}`);
         console.log(`📊 Pair: ${db.pair}`);
-        console.log(`🎯 Strategy: BREAKOUT (${db.breakoutPeriod} period)`);
-        console.log(`🎯 Target Profit: ${db.targetProfitUSDT} USDT per trade`);
+        console.log(`🎯 Strategy: ${db.breakoutTimeframe} breakout (${db.breakoutPeriod}c) + Volume ${db.minVolumeRatio}x + RSI`);
+        console.log(`🎯 Target per trade: $${db.targetProfitUSDT} | Stop loss: $${db.usdtPerTrade * db.stopLossPercent/100}`);
+        console.log(`📈 Risk:Reward = 1:1`);
         console.log(`⚡ Leverage: ${db.leverage}x`);
-        console.log(`🛡️ Margin Mode: ISOLATED`);
-        console.log(`🛑 Stop Loss: ${db.stopLossPercent}% of trade amount (${(db.usdtPerTrade * db.stopLossPercent / 100).toFixed(2)} USDT)`);
-        console.log(`📈 P&L Monitoring: ${db.monitoringInterval}ms interval`);
-        console.log(`🔄 Signal Analysis: 2000ms interval`);
-        console.log(`🔄 Auto-sync Position: 10000ms interval`);
-        console.log(`🔄 Auto-reload Config: Enabled (every 2 seconds)`);
-        console.log(`📁 Config File: ${dbPath}`);
-        console.log(`🔄 Type 'sync' in console for manual position sync`);
-        console.log(`📝 Type 'status' for current status`);
+        console.log(`📅 Daily target: $${db.targetDailyProfit} (max ${db.maxTradesPerDay} trades)`);
         console.log("=".repeat(70) + "\n");
+        console.log("⏳ Bot akan berjalan minimal 30-50 trade tanpa perubahan setting untuk mengukur winrate asli.\n");
 
-        console.log("🔄 Initializing... Waiting for data...");
-        await new Promise(resolve => setTimeout(resolve, 5000));
-
-        // Main loop for signal analysis (every 2 seconds)
+        // Main loop setiap 2 detik
         setInterval(async () => {
-            if (isProcessing) {
-                console.log("⏳ Still processing previous request...");
-                return;
-            }
+            if (isProcessing) return;
             isProcessing = true;
 
             try {
-                // 🔄 RELOAD CONFIGURATION EVERY 2 SECONDS
                 reloadConfig();
 
-                // Skip if there's an active position (P&L monitoring handles closing)
-                if (db.activePosition) {
-                    const timeInTrade = Math.floor((Date.now() - db.activePosition.entryTime) / 1000);
-                    console.log(`⏳ Position active for ${timeInTrade}s, skipping new signals...`);
-                    isProcessing = false;
-                    return;
+                // Daily reset
+                const now = Date.now();
+                if (new Date(now).toDateString() !== new Date(db.lastDailyReset || 0).toDateString()) {
+                    console.log("📅 Daily reset");
+                    db.dailyPnL = 0;
+                    db.dailyTrades = 0;
+                    db.lastDailyReset = now;
+                    saveDB();
                 }
 
-                // Check daily loss limit
+                // Cek target/loss harian
+                const balance = await exchange.fetchBalance();
+                const totalUSDT = balance.total?.USDT || 0;
                 const maxDailyLoss = totalUSDT * db.maxDailyLossPercent / 100;
-                if (db.dailyPnL < -maxDailyLoss) {
-                    console.log(`\n⛔ DAILY LOSS LIMIT REACHED!`);
-                    console.log(`   Daily P&L: ${db.dailyPnL.toFixed(2)} USDT`);
-                    console.log(`   Max Allowed: -${maxDailyLoss.toFixed(2)} USDT`);
-                    console.log(`   Trading paused for today`);
+
+                if (db.dailyPnL >= db.targetDailyProfit) {
+                    console.log(`🎯 Daily target reached: $${db.dailyPnL.toFixed(2)}. Trading paused.`);
+                    isProcessing = false;
+                    return;
+                }
+                if (db.dailyPnL <= -maxDailyLoss) {
+                    console.log(`⛔ Daily loss limit reached: $${db.dailyPnL.toFixed(2)}. Trading paused.`);
+                    isProcessing = false;
+                    return;
+                }
+                if (db.dailyTrades >= db.maxTradesPerDay) {
+                    console.log(`⏳ Max trades per day (${db.maxTradesPerDay}) reached.`);
                     isProcessing = false;
                     return;
                 }
 
-                // Check cooling period after last trade
+                if (db.activePosition) {
+                    isProcessing = false;
+                    return;
+                }
+
+                // Cek cooling period
                 if (db.dailyTrades > 0) {
-                    const lastTradeTime = fs.existsSync(logPath) ? 
-                        fs.statSync(logPath).mtimeMs : 0;
-                    const timeSinceLastTrade = Date.now() - lastTradeTime;
-                    
-                    if (timeSinceLastTrade < db.coolingPeriod) {
-                        const remaining = Math.floor((db.coolingPeriod - timeSinceLastTrade) / 1000);
-                        console.log(`⏳ Cooling period: ${remaining}s remaining`);
+                    const lastTradeTime = fs.existsSync(logPath) ? fs.statSync(logPath).mtimeMs : 0;
+                    if (Date.now() - lastTradeTime < db.coolingPeriod) {
                         isProcessing = false;
                         return;
                     }
                 }
 
-                // Analyze breakout signal
                 const signal = await analyzeSignal();
-                
-                if (!signal.price) {
-                    isProcessing = false;
-                    return;
-                }
-
-                // Entry logic
-                if (signal.canLong) {
-                    console.log(`\n🎯 BULLISH BREAKOUT CONFIRMED!`);
-                    console.log(`   Price: ${signal.price} > Resistance: ${signal.resistance}`);
-                    console.log(`   RSI: ${signal.rsi.toFixed(2)}`);
-                    console.log(`   Breakout Strength: ${((signal.price - signal.resistance) / signal.resistance * 100).toFixed(2)}%`);
-                    await placeOrder("buy", signal.price);
-                } 
-                else if (signal.canShort) {
-                    console.log(`\n🎯 BEARISH BREAKOUT CONFIRMED!`);
-                    console.log(`   Price: ${signal.price} < Support: ${signal.support}`);
-                    console.log(`   RSI: ${signal.rsi.toFixed(2)}`);
-                    console.log(`   Breakout Strength: ${((signal.support - signal.price) / signal.support * 100).toFixed(2)}%`);
-                    await placeOrder("sell", signal.price);
-                }
+                if (signal.canLong) await placeOrder("buy", signal.price);
+                else if (signal.canShort) await placeOrder("sell", signal.price);
 
             } catch (error) {
-                console.error(`\n⚠️ Loop error:`, error.message);
+                console.error("Loop error:", error.message);
             } finally {
                 isProcessing = false;
             }
-        }, 2000); // Signal analysis every 2 seconds
+        }, 2000);
 
-        // Auto-sync position dengan exchange setiap 10 detik
+        // Sync posisi setiap 10 detik
         setInterval(async () => {
-            try {
-                console.log("🔄 Auto-syncing position with exchange...");
-                await syncPositionWithExchange();
-            } catch (error) {
-                console.error("❌ Auto-sync failed:", error.message);
-            }
-        }, 10000); // Sync setiap 10 detik
+            await syncPositionWithExchange();
+        }, 10000);
 
-        // Handle manual sync via console input
+        // Input manual
         if (process.stdin.isTTY) {
             process.stdin.setEncoding('utf8');
             process.stdin.on('data', (input) => {
                 const cmd = input.toString().trim().toLowerCase();
-                if (cmd === 'sync') {
-                    manualSync();
-                } else if (cmd === 'status') {
-                    console.log("\n📊 CURRENT STATUS:");
-                    console.log(`   Active Position: ${db.activePosition ? 'YES' : 'NO'}`);
-                    console.log(`   Daily P&L: ${db.dailyPnL.toFixed(2)} USDT`);
-                    console.log(`   Daily Trades: ${db.dailyTrades}`);
-                    if (db.activePosition) {
-                        console.log(`   Position Side: ${db.activePosition.side}`);
-                        console.log(`   Entry Price: ${db.activePosition.entryPrice}`);
-                        console.log(`   Quantity: ${db.activePosition.quantity}`);
-                        console.log(`   Time in Position: ${Math.floor((Date.now() - db.activePosition.entryTime) / 1000)}s`);
-                    }
-                    console.log("");
+                if (cmd === 'sync') syncPositionWithExchange();
+                else if (cmd === 'status') {
+                    console.log(`\n📊 Status: Active=${!!db.activePosition}, Daily P&L=${db.dailyPnL.toFixed(2)} USDT, Trades=${db.dailyTrades}`);
                 }
             });
         }
