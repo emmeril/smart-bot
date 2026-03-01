@@ -3,22 +3,59 @@ const fs = require("fs");
 const path = require("path");
 const ccxt = require("ccxt");
 const { RSI, EMA } = require("technicalindicators");
+const { Sequelize, DataTypes } = require('sequelize'); // <-- Tambahkan
 
-// -------------------- CONFIG --------------------
-const dbPath = "./db.json";
-const logPath = "./log.csv";
+// -------------------- DATABASE SETUP --------------------
+const sequelize = new Sequelize({
+    dialect: 'sqlite',
+    storage: path.join(__dirname, 'database.sqlite'),
+    logging: false
+});
+
+// Definisikan model Config (satu baris)
+const Config = sequelize.define('Config', {
+    // Semua field dari getDefaultConfig()
+    pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
+    usdtPerTrade: { type: DataTypes.FLOAT, defaultValue: 10 },
+    leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
+    targetProfitUSDT: { type: DataTypes.FLOAT, defaultValue: 1.0 },
+    targetDailyProfit: { type: DataTypes.FLOAT, defaultValue: 2.0 },
+    maxDailyLossPercent: { type: DataTypes.FLOAT, defaultValue: 10 },
+    maxTradesPerDay: { type: DataTypes.INTEGER, defaultValue: 2 },
+    coolingPeriod: { type: DataTypes.INTEGER, defaultValue: 3000 },
+    activePosition: { type: DataTypes.TEXT, defaultValue: null }, // JSON string
+    dailyPnL: { type: DataTypes.FLOAT, defaultValue: 0 },
+    dailyTrades: { type: DataTypes.INTEGER, defaultValue: 0 },
+    marginMode: { type: DataTypes.STRING, defaultValue: "isolated" },
+    monitoringInterval: { type: DataTypes.INTEGER, defaultValue: 500 },
+    stopLossPercent: { type: DataTypes.FLOAT, defaultValue: 10 },
+    breakoutPeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
+    breakoutTimeframe: { type: DataTypes.STRING, defaultValue: "5m" },
+    minBreakoutStrength: { type: DataTypes.FLOAT, defaultValue: 0.003 },
+    volumePeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
+    minVolumeRatio: { type: DataTypes.FLOAT, defaultValue: 2.0 },
+    trendEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
+    trendTimeframe: { type: DataTypes.STRING, defaultValue: "1h" },
+    trendPeriod: { type: DataTypes.INTEGER, defaultValue: 200 },
+    lastDailyReset: { type: DataTypes.BIGINT, defaultValue: Date.now() },
+    lastUpdated: { type: DataTypes.BIGINT, defaultValue: Date.now() }
+}, {
+    timestamps: false // Tidak perlu createdAt/updatedAt
+});
+
+// -------------------- GLOBAL VARIABLES --------------------
 let isProcessing = false;
 let exchange = null;
 let signalCount = 0;
 let lastLogTime = Date.now();
 let lastPnlLog = Date.now();
 let lastConfigReload = Date.now();
-let db = null;
+let db = null; // Tetap objek di memory
 
 // Trend data
 let trendData = { ema: null, lastUpdate: 0, timeframe: "1h", period: 200 };
 
-// -------------------- ENSURE FILE EXISTS --------------------
+// -------------------- ENSURE LOG FILE EXISTS --------------------
 const ensureFileExists = (filePath, defaultContent = "{}") => {
     try {
         const dir = path.dirname(filePath);
@@ -51,11 +88,11 @@ const getDefaultConfig = () => {
         marginMode: "isolated",
         monitoringInterval: 500,
         stopLossPercent: 10,
-        breakoutPeriod: 20,               // periode untuk mencari resistance/support (jumlah candle)
-        breakoutTimeframe: "5m",            // TIMEFRAME 5 MENIT
-        minBreakoutStrength: 0.003,         // DIPERBESAR (0.3% dari range)
+        breakoutPeriod: 20,
+        breakoutTimeframe: "5m",
+        minBreakoutStrength: 0.003,
         volumePeriod: 20,
-        minVolumeRatio: 2.0,                // DIPERBESAR (2x rata-rata)
+        minVolumeRatio: 2.0,
         trendEnabled: true,
         trendTimeframe: "1h",
         trendPeriod: 200,
@@ -64,50 +101,54 @@ const getDefaultConfig = () => {
     };
 };
 
-// -------------------- INITIALIZE DB --------------------
-const initializeDB = () => {
+// -------------------- INITIALIZE DATABASE --------------------
+const initializeDB = async () => {
     try {
-        ensureFileExists(dbPath, JSON.stringify(getDefaultConfig(), null, 2));
-        if (fs.existsSync(dbPath)) {
-            const data = fs.readFileSync(dbPath, 'utf8');
-            if (!data || data.trim() === '') throw new Error("Empty DB");
-            const parsedData = JSON.parse(data);
-            const defaultConfig = getDefaultConfig();
-            const validatedConfig = { ...defaultConfig, ...parsedData };
-            Object.keys(defaultConfig).forEach(key => {
-                if (!(key in validatedConfig) || validatedConfig[key] === undefined) {
-                    validatedConfig[key] = defaultConfig[key];
-                }
-            });
-            db = validatedConfig;
-            console.log("✅ DB initialized successfully");
-        } else {
-            console.log("📝 Creating new DB file...");
-            db = getDefaultConfig();
-            fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+        // Sinkronisasi model (buat tabel jika belum ada)
+        await sequelize.sync();
+        console.log("✅ Database synced");
+
+        // Cari atau buat baris konfigurasi (hanya satu baris)
+        let configRow = await Config.findOne();
+        if (!configRow) {
+            // Buat dengan default
+            configRow = await Config.create(getDefaultConfig());
+            console.log("📝 Created new config row");
         }
+
+        // Baca dari DB ke objek db (dengan parsing activePosition)
+        db = configRow.toJSON();
+        if (db.activePosition) {
+            db.activePosition = JSON.parse(db.activePosition);
+        } else {
+            db.activePosition = null;
+        }
+
+        console.log("✅ DB initialized successfully");
         return true;
     } catch (error) {
         console.error("❌ Error initializing DB:", error.message);
-        if (fs.existsSync(dbPath)) {
-            const backupPath = `${dbPath}.backup.${Date.now()}`;
-            fs.copyFileSync(dbPath, backupPath);
-            console.log(`📦 Backup corrupted file: ${backupPath}`);
-        }
+        // Fallback ke objek memory saja (tanpa database)
         db = getDefaultConfig();
-        fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
-        console.log("✅ Created fresh config");
         return true;
     }
 };
 
-// -------------------- RELOAD CONFIG --------------------
-const reloadConfig = () => {
+// -------------------- RELOAD CONFIG FROM DB --------------------
+const reloadConfig = async () => {
     try {
-        if (!db || !fs.existsSync(dbPath)) return false;
-        const data = fs.readFileSync(dbPath, 'utf8');
-        if (!data) return false;
-        const freshConfig = JSON.parse(data);
+        if (!db) return false;
+        const configRow = await Config.findOne();
+        if (!configRow) return false;
+
+        const freshConfig = configRow.toJSON();
+        if (freshConfig.activePosition) {
+            freshConfig.activePosition = JSON.parse(freshConfig.activePosition);
+        } else {
+            freshConfig.activePosition = null;
+        }
+
+        // Pertahankan activePosition jika sedang open (untuk jaga-jaga)
         if (db.activePosition && !freshConfig.activePosition) {
             freshConfig.activePosition = db.activePosition;
         }
@@ -115,11 +156,31 @@ const reloadConfig = () => {
             freshConfig.dailyPnL = db.dailyPnL;
             freshConfig.dailyTrades = db.dailyTrades;
         }
+
+        // Salin semua field ke db
         Object.keys(freshConfig).forEach(key => db[key] = freshConfig[key]);
         return true;
     } catch (error) {
         console.error("❌ Failed to reload config:", error.message);
         return false;
+    }
+};
+
+// -------------------- SAVE DB TO DATABASE --------------------
+const saveDB = async () => {
+    try {
+        if (!db) return;
+        // Siapkan objek untuk disimpan (activePosition harus di-stringify)
+        const toSave = { ...db };
+        if (toSave.activePosition) {
+            toSave.activePosition = JSON.stringify(toSave.activePosition);
+        }
+        toSave.lastUpdated = Date.now();
+
+        // Update baris (hanya satu)
+        await Config.update(toSave, { where: {} });
+    } catch (error) {
+        console.error("❌ Failed to save DB:", error.message);
     }
 };
 
@@ -142,7 +203,7 @@ const syncPositionWithExchange = async () => {
             if (db.activePosition) {
                 console.log("⚠️ DB has activePosition but exchange doesn't. Resetting...");
                 db.activePosition = null;
-                saveDB();
+                await saveDB();
             }
             return;
         }
@@ -162,14 +223,14 @@ const syncPositionWithExchange = async () => {
                 marginMode: "isolated",
                 targetProfitUSDT: db.targetProfitUSDT
             };
-            saveDB();
+            await saveDB();
             console.log("✅ Created activePosition from exchange data");
         } else {
             if (db.activePosition.side !== side || Math.abs(db.activePosition.quantity - Math.abs(contracts)) > 0.001) {
                 db.activePosition.side = side;
                 db.activePosition.quantity = Math.abs(contracts);
                 db.activePosition.entryPrice = entryPrice;
-                saveDB();
+                await saveDB();
                 console.log("✅ Updated activePosition to match exchange");
             }
         }
@@ -234,7 +295,7 @@ const updateTrend = async () => {
     }
 };
 
-// -------------------- BREAKOUT SIGNAL DETECTION (timeframe 5m, volume 2x, RSI diperketat) --------------------
+// -------------------- BREAKOUT SIGNAL DETECTION --------------------
 const analyzeSignal = async () => {
     try {
         if (!db) return {};
@@ -245,7 +306,6 @@ const analyzeSignal = async () => {
             lastLogTime = now;
         }
 
-        // Ambil OHLCV sesuai timeframe (5m)
         const ohlcv = await exchange.fetchOHLCV(db.pair, db.breakoutTimeframe, undefined, db.breakoutPeriod + 10 + db.volumePeriod);
         if (ohlcv.length < db.breakoutPeriod + 5) {
             console.log(`⚠️ Not enough OHLCV data: ${ohlcv.length} candles`);
@@ -262,11 +322,9 @@ const analyzeSignal = async () => {
         const currentLow = low[low.length - 1];
         const currentVolume = volume[volume.length - 1];
 
-        // Rata-rata volume periode sebelumnya (tanpa candle terakhir)
         const volumePeriod = db.volumePeriod;
         const avgVolume = volume.slice(-volumePeriod - 1, -1).reduce((a, b) => a + b, 0) / volumePeriod;
 
-        // Resistance & support dari breakoutPeriod candle sebelumnya (tanpa candle terakhir)
         const lookbackPeriod = db.breakoutPeriod;
         const previousHighs = high.slice(-lookbackPeriod - 1, -1);
         const previousLows = low.slice(-lookbackPeriod - 1, -1);
@@ -275,15 +333,11 @@ const analyzeSignal = async () => {
         const range = resistance - support;
         const breakoutThreshold = range * db.minBreakoutStrength;
 
-        // RSI 7
         const rsi = RSI.calculate({ values: close, period: 7 });
         const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1] : 50;
 
-        // Breakout detection
         const bullishBreakout = currentHigh > resistance + breakoutThreshold;
         const bearishBreakout = currentLow < support - breakoutThreshold;
-
-        // Filter volume (min 2x)
         const volumeOk = currentVolume > avgVolume * db.minVolumeRatio;
 
         console.log("\n" + "=".repeat(50));
@@ -303,11 +357,9 @@ const analyzeSignal = async () => {
         console.log(`   Bearish Breakout: ${bearishBreakout ? "✅ BELOW SUPPORT" : "❌ NOT BROKEN"}`);
         console.log(`   Volume OK: ${volumeOk ? "✅" : "❌"}`);
 
-        // RSI DIPERSEMPIT
         let canLong = bullishBreakout && currentRSI > 50 && currentRSI < 75 && volumeOk;
         let canShort = bearishBreakout && currentRSI > 25 && currentRSI < 50 && volumeOk;
 
-        // Filter trend
         if (db.trendEnabled && trendData.ema) {
             if (currentPrice <= trendData.ema) canLong = false;
             if (currentPrice >= trendData.ema) canShort = false;
@@ -396,7 +448,7 @@ const placeOrder = async (side, signalPrice) => {
             targetProfitUSDT: targetProfitUSDT
         };
 
-        saveDB();
+        await saveDB();
         logTrade(side, entryPrice, null, "OPEN");
 
         console.log(`\n✅ ORDER PLACED: ${side.toUpperCase()} at ${entryPrice}`);
@@ -429,7 +481,7 @@ const closePosition = async (reason, profitUSDT, profitPercent) => {
         console.log(`   Daily P&L: ${db.dailyPnL.toFixed(2)} USDT / ${db.dailyTrades} trades`);
 
         db.activePosition = null;
-        saveDB();
+        await saveDB();
     } catch (error) {
         console.error("❌ Close position failed:", error.message);
     }
@@ -443,17 +495,6 @@ const getPrice = async () => {
     } catch (error) {
         console.error("❌ Failed to get price:", error.message);
         return null;
-    }
-};
-
-const saveDB = () => {
-    try {
-        if (!db) return;
-        ensureFileExists(dbPath, JSON.stringify(getDefaultConfig(), null, 2));
-        db.lastUpdated = Date.now();
-        fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
-    } catch (error) {
-        console.error("❌ Failed to save DB:", error.message);
     }
 };
 
@@ -507,7 +548,8 @@ const startPnLMonitoring = () => {
 // -------------------- MAIN LOOP --------------------
 (async () => {
     try {
-        if (!initializeDB()) process.exit(1);
+        if (!(await initializeDB())) process.exit(1); // <-- await
+
         await initializeExchange();
         await setMarginMode();
         await syncPositionWithExchange();
@@ -538,7 +580,7 @@ const startPnLMonitoring = () => {
             isProcessing = true;
 
             try {
-                reloadConfig();
+                await reloadConfig(); // <-- await
 
                 // Daily reset
                 const now = Date.now();
@@ -547,7 +589,7 @@ const startPnLMonitoring = () => {
                     db.dailyPnL = 0;
                     db.dailyTrades = 0;
                     db.lastDailyReset = now;
-                    saveDB();
+                    await saveDB();
                 }
 
                 // Cek target/loss harian
