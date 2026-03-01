@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const ccxt = require("ccxt");
 const { RSI, EMA } = require("technicalindicators");
-const { Sequelize, DataTypes } = require('sequelize'); // <-- Tambahkan
+const { Sequelize, DataTypes } = require('sequelize');
 
 // -------------------- DATABASE SETUP --------------------
 const sequelize = new Sequelize({
@@ -12,9 +12,7 @@ const sequelize = new Sequelize({
     logging: false
 });
 
-// Definisikan model Config (satu baris)
 const Config = sequelize.define('Config', {
-    // Semua field dari getDefaultConfig()
     pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
     usdtPerTrade: { type: DataTypes.FLOAT, defaultValue: 10 },
     leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
@@ -23,7 +21,7 @@ const Config = sequelize.define('Config', {
     maxDailyLossPercent: { type: DataTypes.FLOAT, defaultValue: 10 },
     maxTradesPerDay: { type: DataTypes.INTEGER, defaultValue: 2 },
     coolingPeriod: { type: DataTypes.INTEGER, defaultValue: 3000 },
-    activePosition: { type: DataTypes.TEXT, defaultValue: null }, // JSON string
+    activePosition: { type: DataTypes.TEXT, defaultValue: null },
     dailyPnL: { type: DataTypes.FLOAT, defaultValue: 0 },
     dailyTrades: { type: DataTypes.INTEGER, defaultValue: 0 },
     marginMode: { type: DataTypes.STRING, defaultValue: "isolated" },
@@ -39,9 +37,7 @@ const Config = sequelize.define('Config', {
     trendPeriod: { type: DataTypes.INTEGER, defaultValue: 200 },
     lastDailyReset: { type: DataTypes.BIGINT, defaultValue: Date.now() },
     lastUpdated: { type: DataTypes.BIGINT, defaultValue: Date.now() }
-}, {
-    timestamps: false // Tidak perlu createdAt/updatedAt
-});
+}, { timestamps: false });
 
 // -------------------- GLOBAL VARIABLES --------------------
 let isProcessing = false;
@@ -50,7 +46,8 @@ let signalCount = 0;
 let lastLogTime = Date.now();
 let lastPnlLog = Date.now();
 let lastConfigReload = Date.now();
-let db = null; // Tetap objek di memory
+const logPath = path.join(__dirname, 'trades.csv');
+let db = null;
 
 // Trend data
 let trendData = { ema: null, lastUpdate: 0, timeframe: "1h", period: 200 };
@@ -72,63 +69,52 @@ const ensureFileExists = (filePath, defaultContent = "{}") => {
 };
 
 // -------------------- DEFAULT CONFIG --------------------
-const getDefaultConfig = () => {
-    return {
-        pair: "DOGE/USDT:USDT",
-        usdtPerTrade: 10,
-        leverage: 10,
-        targetProfitUSDT: 1.0,
-        targetDailyProfit: 2.0,
-        maxDailyLossPercent: 10,
-        maxTradesPerDay: 2,
-        coolingPeriod: 3000,
-        activePosition: null,
-        dailyPnL: 0,
-        dailyTrades: 0,
-        marginMode: "isolated",
-        monitoringInterval: 500,
-        stopLossPercent: 10,
-        breakoutPeriod: 20,
-        breakoutTimeframe: "5m",
-        minBreakoutStrength: 0.003,
-        volumePeriod: 20,
-        minVolumeRatio: 2.0,
-        trendEnabled: true,
-        trendTimeframe: "1h",
-        trendPeriod: 200,
-        lastDailyReset: Date.now(),
-        lastUpdated: Date.now()
-    };
-};
+const getDefaultConfig = () => ({
+    pair: "DOGE/USDT:USDT",
+    usdtPerTrade: 10,
+    leverage: 10,
+    targetProfitUSDT: 1.0,
+    targetDailyProfit: 2.0,
+    maxDailyLossPercent: 10,
+    maxTradesPerDay: 2,
+    coolingPeriod: 3000,
+    activePosition: null,
+    dailyPnL: 0,
+    dailyTrades: 0,
+    marginMode: "isolated",
+    monitoringInterval: 500,
+    stopLossPercent: 10,
+    breakoutPeriod: 20,
+    breakoutTimeframe: "5m",
+    minBreakoutStrength: 0.003,
+    volumePeriod: 20,
+    minVolumeRatio: 2.0,
+    trendEnabled: true,
+    trendTimeframe: "1h",
+    trendPeriod: 200,
+    lastDailyReset: Date.now(),
+    lastUpdated: Date.now()
+});
 
 // -------------------- INITIALIZE DATABASE --------------------
 const initializeDB = async () => {
     try {
-        // Sinkronisasi model (buat tabel jika belum ada)
         await sequelize.sync();
         console.log("✅ Database synced");
 
-        // Cari atau buat baris konfigurasi (hanya satu baris)
         let configRow = await Config.findOne();
         if (!configRow) {
-            // Buat dengan default
             configRow = await Config.create(getDefaultConfig());
             console.log("📝 Created new config row");
         }
 
-        // Baca dari DB ke objek db (dengan parsing activePosition)
         db = configRow.toJSON();
-        if (db.activePosition) {
-            db.activePosition = JSON.parse(db.activePosition);
-        } else {
-            db.activePosition = null;
-        }
+        db.activePosition = db.activePosition ? JSON.parse(db.activePosition) : null;
 
         console.log("✅ DB initialized successfully");
         return true;
     } catch (error) {
         console.error("❌ Error initializing DB:", error.message);
-        // Fallback ke objek memory saja (tanpa database)
         db = getDefaultConfig();
         return true;
     }
@@ -142,13 +128,8 @@ const reloadConfig = async () => {
         if (!configRow) return false;
 
         const freshConfig = configRow.toJSON();
-        if (freshConfig.activePosition) {
-            freshConfig.activePosition = JSON.parse(freshConfig.activePosition);
-        } else {
-            freshConfig.activePosition = null;
-        }
+        freshConfig.activePosition = freshConfig.activePosition ? JSON.parse(freshConfig.activePosition) : null;
 
-        // Pertahankan activePosition jika sedang open (untuk jaga-jaga)
         if (db.activePosition && !freshConfig.activePosition) {
             freshConfig.activePosition = db.activePosition;
         }
@@ -157,7 +138,6 @@ const reloadConfig = async () => {
             freshConfig.dailyTrades = db.dailyTrades;
         }
 
-        // Salin semua field ke db
         Object.keys(freshConfig).forEach(key => db[key] = freshConfig[key]);
         return true;
     } catch (error) {
@@ -170,14 +150,10 @@ const reloadConfig = async () => {
 const saveDB = async () => {
     try {
         if (!db) return;
-        // Siapkan objek untuk disimpan (activePosition harus di-stringify)
         const toSave = { ...db };
-        if (toSave.activePosition) {
-            toSave.activePosition = JSON.stringify(toSave.activePosition);
-        }
+        toSave.activePosition = toSave.activePosition ? JSON.stringify(toSave.activePosition) : null;
         toSave.lastUpdated = Date.now();
 
-        // Update baris (hanya satu)
         await Config.update(toSave, { where: {} });
     } catch (error) {
         console.error("❌ Failed to save DB:", error.message);
@@ -193,12 +169,14 @@ const syncPositionWithExchange = async () => {
         let openPosition = null;
         const normalizeSymbol = (symbol) => symbol.toUpperCase().trim();
         const dbPairNormalized = normalizeSymbol(db.pair);
+
         for (const position of positions) {
             if (normalizeSymbol(position.symbol) === dbPairNormalized && Math.abs(parseFloat(position.contracts || 0)) > 0) {
                 openPosition = position;
                 break;
             }
         }
+
         if (!openPosition) {
             if (db.activePosition) {
                 console.log("⚠️ DB has activePosition but exchange doesn't. Resetting...");
@@ -207,9 +185,11 @@ const syncPositionWithExchange = async () => {
             }
             return;
         }
+
         const contracts = parseFloat(openPosition.contracts || 0);
         const side = openPosition.side === 'long' ? 'buy' : 'sell';
         const entryPrice = parseFloat(openPosition.entryPrice || 0) || (await getPrice());
+
         if (!db.activePosition) {
             db.activePosition = {
                 side: side,
@@ -372,15 +352,7 @@ const analyzeSignal = async () => {
         console.log(`   SHORT Signal: ${canShort ? "✅ CONFIRMED" : "❌ NOT CONFIRMED"}`);
         console.log("=".repeat(50));
 
-        return {
-            canLong,
-            canShort,
-            price: currentPrice,
-            rsi: currentRSI,
-            resistance,
-            support,
-            hasSignal: bullishBreakout || bearishBreakout
-        };
+        return { canLong, canShort, price: currentPrice, rsi: currentRSI, resistance, support, hasSignal: bullishBreakout || bearishBreakout };
     } catch (error) {
         console.error("❌ Breakout analysis failed:", error.message);
         return {};
@@ -463,7 +435,7 @@ const closePosition = async (reason, profitUSDT, profitPercent) => {
         if (!db || !db.activePosition) return;
         const { side, quantity, entryPrice } = db.activePosition;
         const closeSide = side === "buy" ? "sell" : "buy";
-        
+
         console.log(`\n🔄 Closing position...`);
         await exchange.createOrder(db.pair, "market", closeSide, quantity, undefined, {
             reduceOnly: true,
@@ -472,10 +444,10 @@ const closePosition = async (reason, profitUSDT, profitPercent) => {
 
         db.dailyPnL += profitUSDT;
         db.dailyTrades++;
-        
+
         const exitPrice = await getPrice();
         logTrade(side === "buy" ? "LONG" : "SHORT", entryPrice, exitPrice, "CLOSE", profitUSDT);
-        
+
         console.log(`\n✅ POSITION CLOSED: ${reason}`);
         console.log(`   P&L: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
         console.log(`   Daily P&L: ${db.dailyPnL.toFixed(2)} USDT / ${db.dailyTrades} trades`);
@@ -518,10 +490,10 @@ const startPnLMonitoring = () => {
         if (!currentPrice) return;
 
         const { side, entryPrice, quantity, targetProfitUSDT, entryTime } = db.activePosition;
-        const profitUSDT = side === "buy" 
+        const profitUSDT = side === "buy"
             ? (currentPrice - entryPrice) * quantity
             : (entryPrice - currentPrice) * quantity;
-        const profitPercent = side === "buy" 
+        const profitPercent = side === "buy"
             ? ((currentPrice - entryPrice) / entryPrice * 100)
             : ((entryPrice - currentPrice) / entryPrice * 100);
 
@@ -548,7 +520,7 @@ const startPnLMonitoring = () => {
 // -------------------- MAIN LOOP --------------------
 (async () => {
     try {
-        if (!(await initializeDB())) process.exit(1); // <-- await
+        if (!(await initializeDB())) process.exit(1);
 
         await initializeExchange();
         await setMarginMode();
@@ -574,15 +546,13 @@ const startPnLMonitoring = () => {
         console.log("=".repeat(70) + "\n");
         console.log("⏳ Bot akan berjalan minimal 30-50 trade tanpa perubahan setting untuk mengukur winrate asli.\n");
 
-        // Main loop setiap 2 detik
         setInterval(async () => {
             if (isProcessing) return;
             isProcessing = true;
 
             try {
-                await reloadConfig(); // <-- await
+                await reloadConfig();
 
-                // Daily reset
                 const now = Date.now();
                 if (new Date(now).toDateString() !== new Date(db.lastDailyReset || 0).toDateString()) {
                     console.log("📅 Daily reset");
@@ -592,7 +562,6 @@ const startPnLMonitoring = () => {
                     await saveDB();
                 }
 
-                // Cek target/loss harian
                 const balance = await exchange.fetchBalance();
                 const totalUSDT = balance.total?.USDT || 0;
                 const maxDailyLoss = totalUSDT * db.maxDailyLossPercent / 100;
@@ -618,7 +587,6 @@ const startPnLMonitoring = () => {
                     return;
                 }
 
-                // Cek cooling period
                 if (db.dailyTrades > 0) {
                     const lastTradeTime = fs.existsSync(logPath) ? fs.statSync(logPath).mtimeMs : 0;
                     if (Date.now() - lastTradeTime < db.coolingPeriod) {
@@ -638,12 +606,10 @@ const startPnLMonitoring = () => {
             }
         }, 2000);
 
-        // Sync posisi setiap 10 detik
         setInterval(async () => {
             await syncPositionWithExchange();
         }, 10000);
 
-        // Input manual
         if (process.stdin.isTTY) {
             process.stdin.setEncoding('utf8');
             process.stdin.on('data', (input) => {
