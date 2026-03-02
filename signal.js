@@ -45,7 +45,6 @@ let exchange = null;
 let signalCount = 0;
 let lastLogTime = Date.now();
 let lastPnlLog = Date.now();
-let lastConfigReload = Date.now();
 const logPath = path.join(__dirname, 'trades.csv');
 let db = null;
 
@@ -65,6 +64,15 @@ const ensureFileExists = (filePath, defaultContent = "{}") => {
     } catch (error) {
         console.error(`❌ Failed to create ${path.basename(filePath)}:`, error.message);
         return false;
+    }
+};
+
+const safeParseJSON = (value, fallback = null) => {
+    if (!value) return fallback;
+    try {
+        return JSON.parse(value);
+    } catch {
+        return fallback;
     }
 };
 
@@ -109,7 +117,7 @@ const initializeDB = async () => {
         }
 
         db = configRow.toJSON();
-        db.activePosition = db.activePosition ? JSON.parse(db.activePosition) : null;
+        db.activePosition = safeParseJSON(db.activePosition, null);
 
         console.log("✅ DB initialized successfully");
         return true;
@@ -128,7 +136,7 @@ const reloadConfig = async () => {
         if (!configRow) return false;
 
         const freshConfig = configRow.toJSON();
-        freshConfig.activePosition = freshConfig.activePosition ? JSON.parse(freshConfig.activePosition) : null;
+        freshConfig.activePosition = safeParseJSON(freshConfig.activePosition, null);
 
         if (db.activePosition && !freshConfig.activePosition) {
             freshConfig.activePosition = db.activePosition;
@@ -154,7 +162,8 @@ const saveDB = async () => {
         toSave.activePosition = toSave.activePosition ? JSON.stringify(toSave.activePosition) : null;
         toSave.lastUpdated = Date.now();
 
-        await Config.update(toSave, { where: {} });
+        const whereClause = db.id ? { id: db.id } : {};
+        await Config.update(toSave, { where: whereClause });
     } catch (error) {
         console.error("❌ Failed to save DB:", error.message);
     }
@@ -304,6 +313,7 @@ const analyzeSignal = async () => {
 
         const volumePeriod = db.volumePeriod;
         const avgVolume = volume.slice(-volumePeriod - 1, -1).reduce((a, b) => a + b, 0) / volumePeriod;
+        const safeAvgVolume = avgVolume > 0 ? avgVolume : Number.EPSILON;
 
         const lookbackPeriod = db.breakoutPeriod;
         const previousHighs = high.slice(-lookbackPeriod - 1, -1);
@@ -318,14 +328,14 @@ const analyzeSignal = async () => {
 
         const bullishBreakout = currentHigh > resistance + breakoutThreshold;
         const bearishBreakout = currentLow < support - breakoutThreshold;
-        const volumeOk = currentVolume > avgVolume * db.minVolumeRatio;
+        const volumeOk = currentVolume > safeAvgVolume * db.minVolumeRatio;
 
         console.log("\n" + "=".repeat(50));
         console.log("📈 BREAKOUT LEVELS (5m):");
         console.log(`   Current Price: ${currentPrice}`);
         console.log(`   Current Volume: ${currentVolume.toFixed(2)}`);
         console.log(`   Avg Volume (${volumePeriod}): ${avgVolume.toFixed(2)}`);
-        console.log(`   Volume Ratio: ${(currentVolume / avgVolume).toFixed(2)}x (min ${db.minVolumeRatio}x)`);
+        console.log(`   Volume Ratio: ${(currentVolume / safeAvgVolume).toFixed(2)}x (min ${db.minVolumeRatio}x)`);
         console.log(`   Resistance: ${resistance.toFixed(6)}`);
         console.log(`   Support: ${support.toFixed(6)}`);
         console.log(`   Range: ${range.toFixed(6)}`);
@@ -369,11 +379,15 @@ const placeOrder = async (side, signalPrice) => {
         await exchange.setLeverage(db.leverage, db.pair);
 
         const ticker = await exchange.fetchTicker(db.pair);
-        const entryPrice = ticker.last;
+        const entryPrice = Number(signalPrice) > 0 ? signalPrice : ticker.last;
         const qty = (db.usdtPerTrade * db.leverage) / entryPrice;
         const market = exchange.markets[db.pair];
         const precision = market?.precision?.amount || 3;
         const adjustedQty = parseFloat(qty.toFixed(precision));
+        if (!Number.isFinite(adjustedQty) || adjustedQty <= 0) {
+            console.error("❌ Invalid order quantity after precision adjustment.");
+            return;
+        }
 
         const targetProfitUSDT = db.targetProfitUSDT;
         let targetPrice;
@@ -489,7 +503,7 @@ const startPnLMonitoring = () => {
         const currentPrice = await getPrice();
         if (!currentPrice) return;
 
-        const { side, entryPrice, quantity, targetProfitUSDT, entryTime } = db.activePosition;
+        const { side, entryPrice, quantity, targetProfitUSDT } = db.activePosition;
         const profitUSDT = side === "buy"
             ? (currentPrice - entryPrice) * quantity
             : (entryPrice - currentPrice) * quantity;
