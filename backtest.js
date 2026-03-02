@@ -33,11 +33,21 @@ const options = {
   symbol: getArg("symbol", DEFAULTS.symbol).toUpperCase(),
   interval: getArg("interval", DEFAULTS.interval),
   days: Number(getArg("days", DEFAULTS.days)),
+  mode: String(getArg("mode", "single")).toLowerCase(),
 };
 
 const toNum = (v, d = 0) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
+};
+
+const toNumList = (value, fallback) => {
+  if (!value) return fallback;
+  const list = String(value)
+    .split(",")
+    .map((v) => toNum(v.trim(), NaN))
+    .filter((n) => Number.isFinite(n));
+  return list.length ? list : fallback;
 };
 
 const formatDateKey = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -290,36 +300,119 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
   };
 };
 
+const runGridSearch = (candles) => {
+  const minVolumeRatios = toNumList(getArg("minVolumeRatios", ""), [1.2, 1.3, 1.4, 1.5, 1.6]);
+  const breakoutPeriods = toNumList(getArg("breakoutPeriods", ""), [16, 20, 24, 28, 32]).map((v) => Math.trunc(v));
+  const trendPeriods = toNumList(getArg("trendPeriods", ""), [80, 100, 120, 150]).map((v) => Math.trunc(v));
+  const targetProfits = toNumList(getArg("targetProfits", ""), [0.5, 0.6, 0.7, 0.8, 1.0]);
+
+  const results = [];
+  for (const minVolumeRatio of minVolumeRatios) {
+    for (const breakoutPeriod of breakoutPeriods) {
+      for (const trendPeriod of trendPeriods) {
+        for (const targetProfitUSDT of targetProfits) {
+          const cfg = {
+            ...DEFAULTS.config,
+            minVolumeRatio,
+            breakoutPeriod,
+            trendPeriod,
+            targetProfitUSDT,
+          };
+          const r = backtest(candles, cfg, DEFAULTS.feeRate, DEFAULTS.slippageRate);
+          const score = r.netPnlUSDT - Math.abs(r.maxDrawdownUSDT) * 0.3 + r.winRate * 0.02;
+          results.push({
+            minVolumeRatio,
+            breakoutPeriod,
+            trendPeriod,
+            targetProfitUSDT,
+            trades: r.trades,
+            winRate: r.winRate,
+            netPnlUSDT: r.netPnlUSDT,
+            maxDrawdownUSDT: r.maxDrawdownUSDT,
+            score,
+          });
+        }
+      }
+    }
+  }
+
+  const filtered = results
+    .filter((r) => r.trades >= 20)
+    .sort((a, b) => b.score - a.score || b.netPnlUSDT - a.netPnlUSDT);
+  const top = filtered.slice(0, 10);
+  return { tested: results.length, qualified: filtered.length, top };
+};
+
 (async () => {
   try {
     console.log(`[BACKTEST] Fetching ${options.days}d ${options.interval} data for ${options.symbol}...`);
     const candles = await fetchAllKlines(options);
     if (!candles.length) throw new Error("No candles fetched");
 
-    const result = backtest(candles, DEFAULTS.config, DEFAULTS.feeRate, DEFAULTS.slippageRate);
-    const profitableDays = result.daily.filter((d) => d.pnl > 0).length;
-    const losingDays = result.daily.filter((d) => d.pnl < 0).length;
+    if (options.mode === "grid") {
+      console.log("[BACKTEST] Running grid search...");
+      const grid = runGridSearch(candles);
+      console.log("\n=== Grid Summary ===");
+      console.log(`Tested combos : ${grid.tested}`);
+      console.log(`Qualified     : ${grid.qualified} (trades >= 20)`);
+      if (!grid.top.length) {
+        console.log("No qualified result. Try wider ranges or longer days.");
+        return;
+      }
+      console.table(
+        grid.top.map((r, i) => ({
+          rank: i + 1,
+          minVolumeRatio: r.minVolumeRatio.toFixed(2),
+          breakoutPeriod: r.breakoutPeriod,
+          trendPeriod: r.trendPeriod,
+          targetProfitUSDT: r.targetProfitUSDT.toFixed(2),
+          trades: r.trades,
+          winRate: `${r.winRate.toFixed(2)}%`,
+          netPnlUSDT: r.netPnlUSDT.toFixed(4),
+          maxDD: r.maxDrawdownUSDT.toFixed(4),
+          score: r.score.toFixed(4),
+        }))
+      );
+      const best = grid.top[0];
+      console.log("\nBest config candidate:");
+      console.log(
+        JSON.stringify(
+          {
+            minVolumeRatio: best.minVolumeRatio,
+            breakoutPeriod: best.breakoutPeriod,
+            trendPeriod: best.trendPeriod,
+            targetProfitUSDT: best.targetProfitUSDT,
+          },
+          null,
+          2
+        )
+      );
+    } else {
+      const result = backtest(candles, DEFAULTS.config, DEFAULTS.feeRate, DEFAULTS.slippageRate);
+      const profitableDays = result.daily.filter((d) => d.pnl > 0).length;
+      const losingDays = result.daily.filter((d) => d.pnl < 0).length;
 
-    console.log("\n=== Backtest Summary ===");
-    console.log(`Candles        : ${result.candles}`);
-    console.log(`Trades         : ${result.trades}`);
-    console.log(`Win rate       : ${result.winRate.toFixed(2)}%`);
-    console.log(`Net PnL        : ${result.netPnlUSDT.toFixed(4)} USDT`);
-    console.log(`Avg / trade    : ${result.avgPnlUSDT.toFixed(4)} USDT`);
-    console.log(`Max drawdown   : ${result.maxDrawdownUSDT.toFixed(4)} USDT`);
-    console.log(`Days + / -     : ${profitableDays} / ${losingDays}`);
-    console.log("\nSample trades:");
-    console.table(
-      result.sampleTrades.map((t) => ({
-        side: t.side,
-        entry: t.entry.toFixed(6),
-        exit: t.exit.toFixed(6),
-        pnl: t.pnl.toFixed(4),
-        reason: t.reason,
-        entryTs: new Date(t.entryTs).toISOString(),
-        exitTs: new Date(t.exitTs).toISOString(),
-      }))
-    );
+      console.log("\n=== Backtest Summary ===");
+      console.log(`Candles        : ${result.candles}`);
+      console.log(`Trades         : ${result.trades}`);
+      console.log(`Win rate       : ${result.winRate.toFixed(2)}%`);
+      console.log(`Net PnL        : ${result.netPnlUSDT.toFixed(4)} USDT`);
+      console.log(`Avg / trade    : ${result.avgPnlUSDT.toFixed(4)} USDT`);
+      console.log(`Max drawdown   : ${result.maxDrawdownUSDT.toFixed(4)} USDT`);
+      console.log(`Days + / -     : ${profitableDays} / ${losingDays}`);
+      console.log("\nSample trades:");
+      console.table(
+        result.sampleTrades.map((t) => ({
+          side: t.side,
+          entry: t.entry.toFixed(6),
+          exit: t.exit.toFixed(6),
+          pnl: t.pnl.toFixed(4),
+          reason: t.reason,
+          entryTs: new Date(t.entryTs).toISOString(),
+          exitTs: new Date(t.exitTs).toISOString(),
+        }))
+      );
+    }
   } catch (error) {
     console.error("[BACKTEST_ERROR]", error.message);
     process.exit(1);
