@@ -219,7 +219,14 @@ const normalizeConfig = (config) => {
     };
 
     Object.entries(numericRules).forEach(([key, rule]) => {
-        const value = Number(normalized[key]);
+        const rawValue = normalized[key];
+        const hasValue = rawValue !== undefined && rawValue !== null && rawValue !== "";
+        if (!hasValue) {
+            normalized[key] = defaults[key];
+            return;
+        }
+
+        const value = Number(rawValue);
         const invalidNumber = !Number.isFinite(value);
         const invalidZero = !rule.allowZero && value === 0;
         const belowMin = value < rule.min;
