@@ -31,10 +31,11 @@ const Config = sequelize.define('Config', {
     breakoutTimeframe: { type: DataTypes.STRING, defaultValue: "5m" },
     minBreakoutStrength: { type: DataTypes.FLOAT, defaultValue: 0.003 },
     volumePeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
-    minVolumeRatio: { type: DataTypes.FLOAT, defaultValue: 2.0 },
+    minVolumeRatio: { type: DataTypes.FLOAT, defaultValue: 1.4 },
     trendEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
     trendTimeframe: { type: DataTypes.STRING, defaultValue: "1h" },
-    trendPeriod: { type: DataTypes.INTEGER, defaultValue: 200 },
+    trendPeriod: { type: DataTypes.INTEGER, defaultValue: 120 },
+    adaptiveEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
     lastDailyReset: { type: DataTypes.BIGINT, defaultValue: Date.now() },
     lastUpdated: { type: DataTypes.BIGINT, defaultValue: Date.now() }
 }, { timestamps: false });
@@ -60,9 +61,11 @@ let isSyncingPosition = false;
 let trendTimer = null;
 let mainLoopTimer = null;
 let metricsTimer = null;
+let adaptiveTuneTimer = null;
 let lastSignalDetailLogAt = 0;
 let lastSyncLogAt = 0;
 let isShuttingDown = false;
+let isAdaptiveTuning = false;
 const logPath = path.join(__dirname, 'trades.csv');
 let db = null;
 const BALANCE_CACHE_TTL = 15000;
@@ -71,6 +74,14 @@ const OHLCV_CACHE_TTL = 1500;
 const SYNC_LOG_TTL = 15000;
 const SIGNAL_DETAIL_LOG_TTL = 10000;
 const METRICS_LOG_INTERVAL = 60000;
+const ADAPTIVE_TUNE_INTERVAL = 60 * 60 * 1000;
+const ADAPTIVE_LOOKBACK_CANDLES = 288; // ~24h on 5m timeframe
+const ADAPTIVE_MIN_VOLUME_RATIO_MIN = 1.2;
+const ADAPTIVE_MIN_VOLUME_RATIO_MAX = 1.8;
+const ADAPTIVE_MIN_VOLUME_RATIO_STEP = 0.1;
+const ADAPTIVE_BREAKOUT_PERIOD_MIN = 16;
+const ADAPTIVE_BREAKOUT_PERIOD_MAX = 36;
+const ADAPTIVE_BREAKOUT_PERIOD_STEP = 2;
 
 let metrics = {
     windowStart: Date.now(),
@@ -127,6 +138,15 @@ const safeParseJSON = (value, fallback = null) => {
 const toFiniteNumber = (value, fallback = 0) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const quantile = (sortedValues, p) => {
+    if (!Array.isArray(sortedValues) || sortedValues.length === 0) return 0;
+    const clampedP = clamp(p, 0, 1);
+    const idx = Math.floor((sortedValues.length - 1) * clampedP);
+    return toFiniteNumber(sortedValues[idx], 0);
 };
 
 const resetMetricWindow = () => {
@@ -186,11 +206,12 @@ const getDefaultConfig = () => ({
     breakoutTimeframe: "5m",
     minBreakoutStrength: 0.003,
     volumePeriod: 20,
-    minVolumeRatio: 2.0,
+    minVolumeRatio: 1.4,
     maxPriceDeviationPercent: 0.5,
     trendEnabled: true,
     trendTimeframe: "1h",
-    trendPeriod: 200,
+    trendPeriod: 120,
+    adaptiveEnabled: true,
     lastDailyReset: Date.now(),
     lastUpdated: Date.now()
 });
@@ -256,20 +277,45 @@ const normalizeConfig = (config) => {
         ? normalized.trendTimeframe.trim()
         : defaults.trendTimeframe;
 
-    if (typeof normalized.trendEnabled !== "boolean") {
-        if (typeof normalized.trendEnabled === "string") {
-            const parsed = normalized.trendEnabled.trim().toLowerCase();
-            if (parsed === "true" || parsed === "1") normalized.trendEnabled = true;
-            else if (parsed === "false" || parsed === "0") normalized.trendEnabled = false;
-            else normalized.trendEnabled = defaults.trendEnabled;
-        } else if (typeof normalized.trendEnabled === "number") {
-            normalized.trendEnabled = normalized.trendEnabled === 1;
+    const normalizeBoolean = (key) => {
+        if (typeof normalized[key] === "boolean") return;
+        if (typeof normalized[key] === "string") {
+            const parsed = normalized[key].trim().toLowerCase();
+            if (parsed === "true" || parsed === "1") normalized[key] = true;
+            else if (parsed === "false" || parsed === "0") normalized[key] = false;
+            else normalized[key] = defaults[key];
+        } else if (typeof normalized[key] === "number") {
+            normalized[key] = normalized[key] === 1;
         } else {
-            normalized.trendEnabled = defaults.trendEnabled;
+            normalized[key] = defaults[key];
         }
-    }
+    };
+
+    normalizeBoolean("trendEnabled");
+    normalizeBoolean("adaptiveEnabled");
 
     return normalized;
+};
+
+const applyDataDrivenConfigTuning = (config) => {
+    if (!config || typeof config !== "object") return false;
+    let changed = false;
+
+    // Data-backed relaxation:
+    // - 7-day DOGE 5m volume ratio p75~1.17, p90~1.98
+    // - 2.0x volume filter is too restrictive for daily consistency
+    if (Number(config.minVolumeRatio) === 2) {
+        config.minVolumeRatio = 1.4;
+        changed = true;
+    }
+
+    // Long trend period can over-filter entries on intraday breakout strategy.
+    if (Number(config.trendPeriod) === 200) {
+        config.trendPeriod = 120;
+        changed = true;
+    }
+
+    return changed;
 };
 
 // -------------------- INITIALIZE DATABASE --------------------
@@ -287,6 +333,10 @@ const initializeDB = async () => {
         db = configRow.toJSON();
         db.activePosition = safeParseJSON(db.activePosition, null);
         db = normalizeConfig(db);
+        if (applyDataDrivenConfigTuning(db)) {
+            await saveDB();
+            console.log("[TUNE] Applied data-driven config relaxation (volume/trend).");
+        }
 
         console.log("[OK] DB initialized successfully");
         return true;
@@ -317,6 +367,10 @@ const reloadConfig = async () => {
         }
 
         Object.keys(normalizedConfig).forEach(key => db[key] = normalizedConfig[key]);
+        if (applyDataDrivenConfigTuning(db)) {
+            await saveDB();
+            console.log("[TUNE] Applied data-driven config relaxation (volume/trend).");
+        }
         return true;
     } catch (error) {
         console.error("[ERROR] Failed to reload config:", error.message);
@@ -763,6 +817,108 @@ const getBreakoutOHLCV = async (forceRefresh = false) => {
     return ohlcv;
 };
 
+const runAdaptiveConfigTuning = async () => {
+    if (!db || !exchange || isAdaptiveTuning) return;
+    if (!db.trendEnabled && !db.breakoutTimeframe) return;
+    isAdaptiveTuning = true;
+    try {
+        const timeframe = db.breakoutTimeframe || "5m";
+        const limit = Math.max(
+            ADAPTIVE_LOOKBACK_CANDLES,
+            (db.breakoutPeriod || 20) + (db.volumePeriod || 20) + 30
+        );
+        const ohlcv = await exchange.fetchOHLCV(db.pair, timeframe, undefined, limit);
+        metrics.api.breakoutOhlcv++;
+        if (!Array.isArray(ohlcv) || ohlcv.length < Math.max(80, (db.volumePeriod || 20) + 10)) {
+            return;
+        }
+
+        const highs = ohlcv.map(c => toFiniteNumber(c[2], 0));
+        const lows = ohlcv.map(c => toFiniteNumber(c[3], 0));
+        const volumes = ohlcv.map(c => toFiniteNumber(c[5], 0));
+        const period = Math.max(2, Math.trunc(db.breakoutPeriod || 20));
+        const volumePeriod = Math.max(2, Math.trunc(db.volumePeriod || 20));
+        const minStrength = toFiniteNumber(db.minBreakoutStrength, 0.003);
+        const start = Math.max(period, volumePeriod);
+
+        const volRatios = [];
+        let breakoutCount = 0;
+        let tested = 0;
+        for (let i = start; i < ohlcv.length; i++) {
+            const resistance = Math.max(...highs.slice(i - period, i));
+            const support = Math.min(...lows.slice(i - period, i));
+            const range = resistance - support;
+            if (!Number.isFinite(range) || range <= 0) continue;
+
+            tested++;
+            const threshold = range * minStrength;
+            if (highs[i] > resistance + threshold || lows[i] < support - threshold) {
+                breakoutCount++;
+            }
+
+            const avgVol = volumes.slice(i - volumePeriod, i).reduce((a, b) => a + b, 0) / volumePeriod;
+            if (avgVol > 0) volRatios.push(volumes[i] / avgVol);
+        }
+
+        if (tested < 30 || volRatios.length < 30) return;
+        const sortedRatios = [...volRatios].sort((a, b) => a - b);
+        const p75 = quantile(sortedRatios, 0.75);
+        const breakoutRatePct = (breakoutCount / tested) * 100;
+
+        const oldVolumeRatio = toFiniteNumber(db.minVolumeRatio, 1.4);
+        const oldBreakoutPeriod = period;
+
+        const targetVolumeRatio = clamp(
+            Number((p75 * 1.05).toFixed(2)),
+            ADAPTIVE_MIN_VOLUME_RATIO_MIN,
+            ADAPTIVE_MIN_VOLUME_RATIO_MAX
+        );
+        const volumeDelta = clamp(
+            targetVolumeRatio - oldVolumeRatio,
+            -ADAPTIVE_MIN_VOLUME_RATIO_STEP,
+            ADAPTIVE_MIN_VOLUME_RATIO_STEP
+        );
+        const newVolumeRatio = Number(
+            clamp(oldVolumeRatio + volumeDelta, ADAPTIVE_MIN_VOLUME_RATIO_MIN, ADAPTIVE_MIN_VOLUME_RATIO_MAX).toFixed(2)
+        );
+
+        let breakoutPeriodDelta = 0;
+        if (breakoutRatePct > 22) breakoutPeriodDelta = ADAPTIVE_BREAKOUT_PERIOD_STEP;
+        else if (breakoutRatePct < 10) breakoutPeriodDelta = -ADAPTIVE_BREAKOUT_PERIOD_STEP;
+
+        const newBreakoutPeriod = clamp(
+            oldBreakoutPeriod + breakoutPeriodDelta,
+            ADAPTIVE_BREAKOUT_PERIOD_MIN,
+            ADAPTIVE_BREAKOUT_PERIOD_MAX
+        );
+
+        let changed = false;
+        if (Math.abs(newVolumeRatio - oldVolumeRatio) >= 0.01) {
+            db.minVolumeRatio = newVolumeRatio;
+            changed = true;
+        }
+        if (newBreakoutPeriod !== oldBreakoutPeriod) {
+            db.breakoutPeriod = newBreakoutPeriod;
+            changed = true;
+        }
+
+        if (changed) {
+            await saveDB();
+            console.log(
+                `[ADAPTIVE] Updated config from market stats (${timeframe}, ${ohlcv.length} candles): minVolumeRatio ${oldVolumeRatio} -> ${db.minVolumeRatio}, breakoutPeriod ${oldBreakoutPeriod} -> ${db.breakoutPeriod}, breakoutRate=${breakoutRatePct.toFixed(2)}%, volP75=${p75.toFixed(2)}`
+            );
+        } else {
+            console.log(
+                `[ADAPTIVE] No config change (${timeframe}): breakoutRate=${breakoutRatePct.toFixed(2)}%, volP75=${p75.toFixed(2)}, minVolumeRatio=${oldVolumeRatio}, breakoutPeriod=${oldBreakoutPeriod}`
+            );
+        }
+    } catch (error) {
+        console.error("[ERROR] Adaptive tuning failed:", error.message);
+    } finally {
+        isAdaptiveTuning = false;
+    }
+};
+
 const logTrade = (side, entry, exit, status, pnl = 0) => {
     try {
         ensureFileExists(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy\n");
@@ -897,6 +1053,23 @@ const startPositionSync = () => {
     }, desiredInterval);
 };
 
+const startAdaptiveTuning = () => {
+    if (!db?.adaptiveEnabled) {
+        if (adaptiveTuneTimer) {
+            clearInterval(adaptiveTuneTimer);
+            adaptiveTuneTimer = null;
+            console.log("[ADAPTIVE] Dynamic config tuning disabled.");
+        }
+        return;
+    }
+    if (adaptiveTuneTimer) return;
+    runAdaptiveConfigTuning();
+    adaptiveTuneTimer = setInterval(async () => {
+        await runAdaptiveConfigTuning();
+    }, ADAPTIVE_TUNE_INTERVAL);
+    console.log(`[ADAPTIVE] Dynamic config tuning active (${Math.round(ADAPTIVE_TUNE_INTERVAL / 60000)}m interval).`);
+};
+
 const shutdown = async (signal = "EXIT") => {
     if (isShuttingDown) return;
     isShuttingDown = true;
@@ -907,6 +1080,7 @@ const shutdown = async (signal = "EXIT") => {
     if (trendTimer) clearInterval(trendTimer);
     if (mainLoopTimer) clearInterval(mainLoopTimer);
     if (metricsTimer) clearInterval(metricsTimer);
+    if (adaptiveTuneTimer) clearInterval(adaptiveTuneTimer);
 
     try {
         await saveDB();
@@ -938,6 +1112,7 @@ const shutdown = async (signal = "EXIT") => {
         startPnLMonitoring();
         startPositionSync();
         startMetricsReporting();
+        startAdaptiveTuning();
         process.once("SIGINT", () => { shutdown("SIGINT"); });
         process.once("SIGTERM", () => { shutdown("SIGTERM"); });
 
@@ -952,6 +1127,7 @@ const shutdown = async (signal = "EXIT") => {
         console.log(`Target per trade: $${db.targetProfitUSDT} | Stop loss: $${(db.usdtPerTrade * db.stopLossPercent/100).toFixed(2)}`);
         console.log(`Risk:Reward = 1:1`);
         console.log(`Leverage: ${db.leverage}x`);
+        console.log(`Adaptive tuning: ${db.adaptiveEnabled ? "ON" : "OFF"}`);
         console.log(`Daily target: $${db.targetDailyProfit} (max ${db.maxTradesPerDay} trades)`);
         console.log("=".repeat(70) + "\n");
 
@@ -965,6 +1141,7 @@ const shutdown = async (signal = "EXIT") => {
                 await reloadConfig();
                 startPnLMonitoring();
                 startPositionSync();
+                startAdaptiveTuning();
                 if (isPlacingOrder || isClosingPosition) {
                     isProcessing = false;
                     return;
@@ -1032,7 +1209,7 @@ const shutdown = async (signal = "EXIT") => {
                 const cmd = input.toString().trim().toLowerCase();
                 if (cmd === 'sync') syncPositionWithExchange();
                 else if (cmd === 'status') {
-                    console.log(`\n[STATUS] Active=${!!db.activePosition}, Daily P&L=${db.dailyPnL.toFixed(2)} USDT, Trades=${db.dailyTrades}`);
+                    console.log(`\n[STATUS] Active=${!!db.activePosition}, Daily P&L=${db.dailyPnL.toFixed(2)} USDT, Trades=${db.dailyTrades}, Adaptive=${db.adaptiveEnabled ? "ON" : "OFF"}`);
                 }
             });
         }
