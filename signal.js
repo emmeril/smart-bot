@@ -558,7 +558,7 @@ const startPnLMonitoring = () => {
         console.log(`⚡ Leverage: ${db.leverage}x`);
         console.log(`📅 Daily target: $${db.targetDailyProfit} (max ${db.maxTradesPerDay} trades)`);
         console.log("=".repeat(70) + "\n");
-        console.log("⏳ Bot akan berjalan minimal 30-50 trade tanpa perubahan setting untuk mengukur winrate asli.\n");
+        
 
         setInterval(async () => {
             if (isProcessing) return;
