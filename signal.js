@@ -1,4 +1,4 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const ccxt = require("ccxt");
@@ -16,17 +16,17 @@ const Config = sequelize.define('Config', {
     pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
     usdtPerTrade: { type: DataTypes.FLOAT, defaultValue: 10 },
     leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
-    targetProfitUSDT: { type: DataTypes.FLOAT, defaultValue: 0.5 },        // diubah
-    targetDailyProfit: { type: DataTypes.FLOAT, defaultValue: 1.0 },        // diubah
+    targetProfitUSDT: { type: DataTypes.FLOAT, defaultValue: 0.5 },
+    targetDailyProfit: { type: DataTypes.FLOAT, defaultValue: 1.0 },
     maxDailyLossPercent: { type: DataTypes.FLOAT, defaultValue: 10 },
-    maxTradesPerDay: { type: DataTypes.INTEGER, defaultValue: 3 },          // diubah
+    maxTradesPerDay: { type: DataTypes.INTEGER, defaultValue: 3 },
     coolingPeriod: { type: DataTypes.INTEGER, defaultValue: 3000 },
     activePosition: { type: DataTypes.TEXT, defaultValue: null },
     dailyPnL: { type: DataTypes.FLOAT, defaultValue: 0 },
     dailyTrades: { type: DataTypes.INTEGER, defaultValue: 0 },
     marginMode: { type: DataTypes.STRING, defaultValue: "isolated" },
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: 500 },
-    stopLossPercent: { type: DataTypes.FLOAT, defaultValue: 5 },            // diubah
+    stopLossPercent: { type: DataTypes.FLOAT, defaultValue: 5 },
     breakoutPeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
     breakoutTimeframe: { type: DataTypes.STRING, defaultValue: "5m" },
     minBreakoutStrength: { type: DataTypes.FLOAT, defaultValue: 0.003 },
@@ -41,12 +41,60 @@ const Config = sequelize.define('Config', {
 
 // -------------------- GLOBAL VARIABLES --------------------
 let isProcessing = false;
+let isPlacingOrder = false;
+let isClosingPosition = false;
 let exchange = null;
 let signalCount = 0;
 let lastLogTime = Date.now();
 let lastPnlLog = Date.now();
+let lastTradeAt = 0;
+let balanceCache = { totalUSDT: 0, lastUpdate: 0 };
+let tickerCache = { price: null, lastUpdate: 0 };
+let breakoutOhlcvCache = { key: "", data: null, lastUpdate: 0 };
+let pnlMonitorTimer = null;
+let currentPnLMonitoringInterval = 0;
+let isMonitoringPnL = false;
+let positionSyncTimer = null;
+let currentPositionSyncInterval = 0;
+let isSyncingPosition = false;
+let trendTimer = null;
+let mainLoopTimer = null;
+let metricsTimer = null;
+let lastSignalDetailLogAt = 0;
+let lastSyncLogAt = 0;
+let isShuttingDown = false;
 const logPath = path.join(__dirname, 'trades.csv');
 let db = null;
+const BALANCE_CACHE_TTL = 15000;
+const TICKER_CACHE_TTL = 800;
+const OHLCV_CACHE_TTL = 1500;
+const SYNC_LOG_TTL = 15000;
+const SIGNAL_DETAIL_LOG_TTL = 10000;
+const METRICS_LOG_INTERVAL = 60000;
+
+let metrics = {
+    windowStart: Date.now(),
+    api: {
+        ticker: 0,
+        breakoutOhlcv: 0,
+        trendOhlcv: 0,
+        balance: 0,
+        positions: 0,
+        orders: 0
+    },
+    signals: {
+        analyzed: 0,
+        breakoutDetected: 0,
+        longConfirmed: 0,
+        shortConfirmed: 0
+    },
+    trades: {
+        opened: 0,
+        closed: 0,
+        wins: 0,
+        losses: 0
+    }
+};
 
 // Trend data
 let trendData = { ema: null, lastUpdate: 0, timeframe: "1h", period: 200 };
@@ -58,11 +106,11 @@ const ensureFileExists = (filePath, defaultContent = "{}") => {
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         if (!fs.existsSync(filePath)) {
             fs.writeFileSync(filePath, defaultContent, 'utf8');
-            console.log(`✅ Created ${path.basename(filePath)} file`);
+            console.log(`[OK] Created ${path.basename(filePath)} file`);
         }
         return true;
     } catch (error) {
-        console.error(`❌ Failed to create ${path.basename(filePath)}:`, error.message);
+        console.error(`[ERROR] Failed to create ${path.basename(filePath)}:`, error.message);
         return false;
     }
 };
@@ -76,27 +124,70 @@ const safeParseJSON = (value, fallback = null) => {
     }
 };
 
+const toFiniteNumber = (value, fallback = 0) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const resetMetricWindow = () => {
+    metrics.windowStart = Date.now();
+    metrics.api.ticker = 0;
+    metrics.api.breakoutOhlcv = 0;
+    metrics.api.trendOhlcv = 0;
+    metrics.api.balance = 0;
+    metrics.api.positions = 0;
+    metrics.api.orders = 0;
+    metrics.signals.analyzed = 0;
+    metrics.signals.breakoutDetected = 0;
+    metrics.signals.longConfirmed = 0;
+    metrics.signals.shortConfirmed = 0;
+};
+
+const startMetricsReporting = () => {
+    if (metricsTimer) return;
+    metricsTimer = setInterval(() => {
+        const elapsedSec = Math.max(1, Math.round((Date.now() - metrics.windowStart) / 1000));
+        const apiTotal =
+            metrics.api.ticker +
+            metrics.api.breakoutOhlcv +
+            metrics.api.trendOhlcv +
+            metrics.api.balance +
+            metrics.api.positions +
+            metrics.api.orders;
+        const winRate = metrics.trades.closed > 0
+            ? ((metrics.trades.wins / metrics.trades.closed) * 100).toFixed(1)
+            : "0.0";
+
+        console.log(
+            `[METRICS] ${elapsedSec}s | API=${apiTotal} (ticker:${metrics.api.ticker}, breakout:${metrics.api.breakoutOhlcv}, trend:${metrics.api.trendOhlcv}, bal:${metrics.api.balance}, pos:${metrics.api.positions}, order:${metrics.api.orders}) | Signals=${metrics.signals.analyzed} (breakout:${metrics.signals.breakoutDetected}, long:${metrics.signals.longConfirmed}, short:${metrics.signals.shortConfirmed}) | Trades today O/C/W/L=${metrics.trades.opened}/${metrics.trades.closed}/${metrics.trades.wins}/${metrics.trades.losses} (WR ${winRate}%)`
+        );
+
+        resetMetricWindow();
+    }, METRICS_LOG_INTERVAL);
+};
+
 // -------------------- DEFAULT CONFIG --------------------
 const getDefaultConfig = () => ({
     pair: "DOGE/USDT:USDT",
     usdtPerTrade: 10,
     leverage: 10,
-    targetProfitUSDT: 0.5,          // diubah
-    targetDailyProfit: 1.0,          // diubah
+    targetProfitUSDT: 0.5,
+    targetDailyProfit: 1.0,
     maxDailyLossPercent: 10,
-    maxTradesPerDay: 3,              // diubah
+    maxTradesPerDay: 3,
     coolingPeriod: 3000,
     activePosition: null,
     dailyPnL: 0,
     dailyTrades: 0,
     marginMode: "isolated",
     monitoringInterval: 500,
-    stopLossPercent: 5,              // diubah
+    stopLossPercent: 5,
     breakoutPeriod: 20,
     breakoutTimeframe: "5m",
     minBreakoutStrength: 0.003,
     volumePeriod: 20,
     minVolumeRatio: 2.0,
+    maxPriceDeviationPercent: 0.5,
     trendEnabled: true,
     trendTimeframe: "1h",
     trendPeriod: 200,
@@ -104,25 +195,96 @@ const getDefaultConfig = () => ({
     lastUpdated: Date.now()
 });
 
+const normalizeConfig = (config) => {
+    const defaults = getDefaultConfig();
+    if (!config || typeof config !== "object") return { ...defaults };
+
+    const normalized = { ...config };
+    const numericRules = {
+        usdtPerTrade: { min: 0, allowZero: false },
+        leverage: { min: 0, allowZero: false, integer: true },
+        targetProfitUSDT: { min: 0, allowZero: false },
+        targetDailyProfit: { min: 0, allowZero: false },
+        maxDailyLossPercent: { min: 0, allowZero: false },
+        maxTradesPerDay: { min: 0, allowZero: false, integer: true },
+        coolingPeriod: { min: 0, allowZero: true, integer: true },
+        monitoringInterval: { min: 200, allowZero: false, integer: true },
+        stopLossPercent: { min: 0, allowZero: false },
+        breakoutPeriod: { min: 2, allowZero: false, integer: true },
+        minBreakoutStrength: { min: 0, allowZero: false },
+        volumePeriod: { min: 2, allowZero: false, integer: true },
+        minVolumeRatio: { min: 1, allowZero: false },
+        maxPriceDeviationPercent: { min: 0, allowZero: true },
+        trendPeriod: { min: 2, allowZero: false, integer: true }
+    };
+
+    Object.entries(numericRules).forEach(([key, rule]) => {
+        const value = Number(normalized[key]);
+        const invalidNumber = !Number.isFinite(value);
+        const invalidZero = !rule.allowZero && value === 0;
+        const belowMin = value < rule.min;
+
+        if (invalidNumber || invalidZero || belowMin) {
+            console.warn(`[WARN] Invalid config '${key}' (${normalized[key]}). Using default ${defaults[key]}.`);
+            normalized[key] = defaults[key];
+            return;
+        }
+
+        normalized[key] = rule.integer ? Math.trunc(value) : value;
+    });
+
+    const isValidTimeframe = (value) => typeof value === "string" && /^[1-9]\d*[mhdwM]$/.test(value.trim());
+    const rawPair = typeof normalized.pair === "string" ? normalized.pair.trim() : "";
+    normalized.pair = rawPair || defaults.pair;
+
+    const rawMarginMode = typeof normalized.marginMode === "string" ? normalized.marginMode.trim().toLowerCase() : "";
+    normalized.marginMode = rawMarginMode === "isolated" || rawMarginMode === "cross"
+        ? rawMarginMode
+        : defaults.marginMode;
+
+    normalized.breakoutTimeframe = isValidTimeframe(normalized.breakoutTimeframe)
+        ? normalized.breakoutTimeframe.trim()
+        : defaults.breakoutTimeframe;
+    normalized.trendTimeframe = isValidTimeframe(normalized.trendTimeframe)
+        ? normalized.trendTimeframe.trim()
+        : defaults.trendTimeframe;
+
+    if (typeof normalized.trendEnabled !== "boolean") {
+        if (typeof normalized.trendEnabled === "string") {
+            const parsed = normalized.trendEnabled.trim().toLowerCase();
+            if (parsed === "true" || parsed === "1") normalized.trendEnabled = true;
+            else if (parsed === "false" || parsed === "0") normalized.trendEnabled = false;
+            else normalized.trendEnabled = defaults.trendEnabled;
+        } else if (typeof normalized.trendEnabled === "number") {
+            normalized.trendEnabled = normalized.trendEnabled === 1;
+        } else {
+            normalized.trendEnabled = defaults.trendEnabled;
+        }
+    }
+
+    return normalized;
+};
+
 // -------------------- INITIALIZE DATABASE --------------------
 const initializeDB = async () => {
     try {
         await sequelize.sync();
-        console.log("✅ Database synced");
+        console.log("[OK] Database synced");
 
         let configRow = await Config.findOne();
         if (!configRow) {
             configRow = await Config.create(getDefaultConfig());
-            console.log("📝 Created new config row");
+            console.log("[INFO] Created new config row");
         }
 
         db = configRow.toJSON();
         db.activePosition = safeParseJSON(db.activePosition, null);
+        db = normalizeConfig(db);
 
-        console.log("✅ DB initialized successfully");
+        console.log("[OK] DB initialized successfully");
         return true;
     } catch (error) {
-        console.error("❌ Error initializing DB:", error.message);
+        console.error("[ERROR] Error initializing DB:", error.message);
         db = getDefaultConfig();
         return true;
     }
@@ -137,19 +299,20 @@ const reloadConfig = async () => {
 
         const freshConfig = configRow.toJSON();
         freshConfig.activePosition = safeParseJSON(freshConfig.activePosition, null);
+        const normalizedConfig = normalizeConfig(freshConfig);
 
-        if (db.activePosition && !freshConfig.activePosition) {
-            freshConfig.activePosition = db.activePosition;
+        if (db.activePosition && !normalizedConfig.activePosition) {
+            normalizedConfig.activePosition = db.activePosition;
         }
-        if (db.dailyTrades > freshConfig.dailyTrades) {
-            freshConfig.dailyPnL = db.dailyPnL;
-            freshConfig.dailyTrades = db.dailyTrades;
+        if (db.dailyTrades > normalizedConfig.dailyTrades) {
+            normalizedConfig.dailyPnL = db.dailyPnL;
+            normalizedConfig.dailyTrades = db.dailyTrades;
         }
 
-        Object.keys(freshConfig).forEach(key => db[key] = freshConfig[key]);
+        Object.keys(normalizedConfig).forEach(key => db[key] = normalizedConfig[key]);
         return true;
     } catch (error) {
-        console.error("❌ Failed to reload config:", error.message);
+        console.error("[ERROR] Failed to reload config:", error.message);
         return false;
     }
 };
@@ -162,18 +325,37 @@ const saveDB = async () => {
         toSave.activePosition = toSave.activePosition ? JSON.stringify(toSave.activePosition) : null;
         toSave.lastUpdated = Date.now();
 
-        const whereClause = db.id ? { id: db.id } : {};
-        await Config.update(toSave, { where: whereClause });
+        if (db.id) {
+            await Config.update(toSave, { where: { id: db.id } });
+            return;
+        }
+
+        const firstRow = await Config.findOne();
+        if (firstRow) {
+            db.id = firstRow.id;
+            await Config.update(toSave, { where: { id: firstRow.id } });
+            return;
+        }
+
+        const created = await Config.create(toSave);
+        db.id = created.id;
     } catch (error) {
-        console.error("❌ Failed to save DB:", error.message);
+        console.error("[ERROR] Failed to save DB:", error.message);
     }
 };
 
 // -------------------- SYNC POSITION WITH EXCHANGE --------------------
 const syncPositionWithExchange = async () => {
+    if (isSyncingPosition) return;
+    isSyncingPosition = true;
     try {
         if (!db || !exchange) return;
-        console.log(`🔄 Sync: Checking positions for ${db.pair}...`);
+        const now = Date.now();
+        if (now - lastSyncLogAt >= SYNC_LOG_TTL) {
+            console.log(`[SYNC] Checking positions for ${db.pair}...`);
+            lastSyncLogAt = now;
+        }
+        metrics.api.positions++;
         const positions = await exchange.fetchPositions();
         let openPosition = null;
         const normalizeSymbol = (symbol) => symbol.toUpperCase().trim();
@@ -188,7 +370,7 @@ const syncPositionWithExchange = async () => {
 
         if (!openPosition) {
             if (db.activePosition) {
-                console.log("⚠️ DB has activePosition but exchange doesn't. Resetting...");
+                console.log("[WARN] DB has activePosition but exchange doesn't. Resetting...");
                 db.activePosition = null;
                 await saveDB();
             }
@@ -209,22 +391,24 @@ const syncPositionWithExchange = async () => {
                 orderId: `SYNC_${Date.now()}`,
                 quantity: Math.abs(contracts),
                 entryTime: Date.now() - 300000,
-                marginMode: "isolated",
+                marginMode: (db.marginMode || "isolated").toLowerCase(),
                 targetProfitUSDT: db.targetProfitUSDT
             };
             await saveDB();
-            console.log("✅ Created activePosition from exchange data");
+            console.log("[OK] Created activePosition from exchange data");
         } else {
             if (db.activePosition.side !== side || Math.abs(db.activePosition.quantity - Math.abs(contracts)) > 0.001) {
                 db.activePosition.side = side;
                 db.activePosition.quantity = Math.abs(contracts);
                 db.activePosition.entryPrice = entryPrice;
                 await saveDB();
-                console.log("✅ Updated activePosition to match exchange");
+                console.log("[OK] Updated activePosition to match exchange");
             }
         }
     } catch (error) {
-        console.error("❌ Sync position failed:", error.message);
+        console.error("[ERROR] Sync position failed:", error.message);
+    } finally {
+        isSyncingPosition = false;
     }
 };
 
@@ -238,10 +422,10 @@ const initializeExchange = async () => {
             enableRateLimit: true,
         });
         await exchange.loadMarkets();
-        console.log("✅ Exchange connected");
+        console.log("[OK] Exchange connected");
         return exchange;
     } catch (error) {
-        console.error("❌ Exchange connection failed:", error.message);
+        console.error("[ERROR] Exchange connection failed:", error.message);
         throw error;
     }
 };
@@ -250,12 +434,13 @@ const initializeExchange = async () => {
 const setMarginMode = async () => {
     try {
         if (!db) return false;
-        await exchange.setMarginMode("isolated", db.pair);
-        console.log("✅ Margin mode set to: ISOLATED");
+        const marginMode = (db.marginMode || "isolated").toLowerCase();
+        await exchange.setMarginMode(marginMode, db.pair);
+        console.log(`[OK] Margin mode set to: ${marginMode.toUpperCase()}`);
         return true;
     } catch (error) {
         if (!error.message.includes("No need to change margin mode")) {
-            console.warn("⚠️ Margin mode warning:", error.message);
+            console.warn("[WARN] Margin mode warning:", error.message);
         }
         return false;
     }
@@ -267,9 +452,10 @@ const updateTrend = async () => {
         if (!exchange || !db) return;
         const timeframe = db.trendTimeframe || "1h";
         const period = db.trendPeriod || 200;
+        metrics.api.trendOhlcv++;
         const ohlcv = await exchange.fetchOHLCV(db.pair, timeframe, undefined, period + 10);
         if (ohlcv.length < period) {
-            console.log(`⚠️ Not enough data for trend EMA (${ohlcv.length} < ${period})`);
+            console.log(`[WARN] Not enough data for trend EMA (${ohlcv.length} < ${period})`);
             return;
         }
         const closes = ohlcv.map(c => c[4]);
@@ -277,10 +463,10 @@ const updateTrend = async () => {
         if (ema.length > 0) {
             trendData.ema = ema[ema.length - 1];
             trendData.lastUpdate = Date.now();
-            console.log(`📈 Trend EMA${period} (${timeframe}): ${trendData.ema}`);
+            console.log(`[TREND] EMA${period} (${timeframe}): ${trendData.ema}`);
         }
     } catch (error) {
-        console.error("❌ Failed to update trend:", error.message);
+        console.error("[ERROR] Failed to update trend:", error.message);
     }
 };
 
@@ -289,15 +475,17 @@ const analyzeSignal = async () => {
     try {
         if (!db) return {};
         signalCount++;
+        metrics.signals.analyzed++;
         const now = Date.now();
         if (now - lastLogTime > 5000) {
-            console.log(`\n📊 [SIGNAL #${signalCount}] Analyzing market for BREAKOUT (${db.breakoutTimeframe})...`);
+            console.log(`\n[SIGNAL #${signalCount}] Analyzing market for BREAKOUT (${db.breakoutTimeframe})...`);
             lastLogTime = now;
         }
 
-        const ohlcv = await exchange.fetchOHLCV(db.pair, db.breakoutTimeframe, undefined, db.breakoutPeriod + 10 + db.volumePeriod);
-        if (ohlcv.length < db.breakoutPeriod + 5) {
-            console.log(`⚠️ Not enough OHLCV data: ${ohlcv.length} candles`);
+        const ohlcv = await getBreakoutOHLCV();
+        const minCandles = Math.max(db.breakoutPeriod + 1, db.volumePeriod + 1, 8);
+        if (ohlcv.length < minCandles) {
+            console.log(`[WARN] Not enough OHLCV data: ${ohlcv.length} candles`);
             return {};
         }
 
@@ -321,6 +509,10 @@ const analyzeSignal = async () => {
         const resistance = Math.max(...previousHighs);
         const support = Math.min(...previousLows);
         const range = resistance - support;
+        if (!Number.isFinite(resistance) || !Number.isFinite(support) || !Number.isFinite(range) || range <= 0) {
+            console.log("[WARN] Invalid breakout range data. Signal skipped.");
+            return {};
+        }
         const breakoutThreshold = range * db.minBreakoutStrength;
 
         const rsi = RSI.calculate({ values: close, period: 7 });
@@ -329,23 +521,9 @@ const analyzeSignal = async () => {
         const bullishBreakout = currentHigh > resistance + breakoutThreshold;
         const bearishBreakout = currentLow < support - breakoutThreshold;
         const volumeOk = currentVolume > safeAvgVolume * db.minVolumeRatio;
-
-        console.log("\n" + "=".repeat(50));
-        console.log("📈 BREAKOUT LEVELS (5m):");
-        console.log(`   Current Price: ${currentPrice}`);
-        console.log(`   Current Volume: ${currentVolume.toFixed(2)}`);
-        console.log(`   Avg Volume (${volumePeriod}): ${avgVolume.toFixed(2)}`);
-        console.log(`   Volume Ratio: ${(currentVolume / safeAvgVolume).toFixed(2)}x (min ${db.minVolumeRatio}x)`);
-        console.log(`   Resistance: ${resistance.toFixed(6)}`);
-        console.log(`   Support: ${support.toFixed(6)}`);
-        console.log(`   Range: ${range.toFixed(6)}`);
-        console.log(`   Breakout Threshold: ±${breakoutThreshold.toFixed(6)} (${db.minBreakoutStrength*100}% of range)`);
-        console.log(`   RSI 7: ${currentRSI.toFixed(2)}`);
-        console.log("");
-        console.log("🎯 BREAKOUT CONDITIONS:");
-        console.log(`   Bullish Breakout: ${bullishBreakout ? "✅ ABOVE RESISTANCE" : "❌ NOT BROKEN"}`);
-        console.log(`   Bearish Breakout: ${bearishBreakout ? "✅ BELOW SUPPORT" : "❌ NOT BROKEN"}`);
-        console.log(`   Volume OK: ${volumeOk ? "✅" : "❌"}`);
+        const hasBreakout = bullishBreakout || bearishBreakout;
+        if (hasBreakout) metrics.signals.breakoutDetected++;
+        const shouldDetailLog = hasBreakout || (Date.now() - lastSignalDetailLogAt >= SIGNAL_DETAIL_LOG_TTL);
 
         let canLong = bullishBreakout && currentRSI > 50 && currentRSI < 75 && volumeOk;
         let canShort = bearishBreakout && currentRSI > 25 && currentRSI < 50 && volumeOk;
@@ -353,18 +531,41 @@ const analyzeSignal = async () => {
         if (db.trendEnabled && trendData.ema) {
             if (currentPrice <= trendData.ema) canLong = false;
             if (currentPrice >= trendData.ema) canShort = false;
-            console.log(`   Trend EMA: ${trendData.ema} → Long allowed: ${canLong}, Short allowed: ${canShort}`);
+        }
+        if (canLong) metrics.signals.longConfirmed++;
+        if (canShort) metrics.signals.shortConfirmed++;
+
+        if (shouldDetailLog) {
+            console.log("\n" + "=".repeat(50));
+            console.log(`BREAKOUT LEVELS (${db.breakoutTimeframe}):`);
+            console.log(`   Current Price: ${currentPrice}`);
+            console.log(`   Current Volume: ${currentVolume.toFixed(2)}`);
+            console.log(`   Avg Volume (${volumePeriod}): ${avgVolume.toFixed(2)}`);
+            console.log(`   Volume Ratio: ${(currentVolume / safeAvgVolume).toFixed(2)}x (min ${db.minVolumeRatio}x)`);
+            console.log(`   Resistance: ${resistance.toFixed(6)}`);
+            console.log(`   Support: ${support.toFixed(6)}`);
+            console.log(`   Range: ${range.toFixed(6)}`);
+            console.log(`   Breakout Threshold: ±${breakoutThreshold.toFixed(6)} (${db.minBreakoutStrength*100}% of range)`);
+            console.log(`   RSI 7: ${currentRSI.toFixed(2)}`);
+            console.log("");
+            console.log("BREAKOUT CONDITIONS:");
+            console.log(`   Bullish Breakout: ${bullishBreakout ? "[OK] ABOVE RESISTANCE" : "[NO] NOT BROKEN"}`);
+            console.log(`   Bearish Breakout: ${bearishBreakout ? "[OK] BELOW SUPPORT" : "[NO] NOT BROKEN"}`);
+            console.log(`   Volume OK: ${volumeOk ? "[OK]" : "[NO]"}`);
+            if (db.trendEnabled && trendData.ema) {
+                console.log(`   Trend EMA: ${trendData.ema} → Long allowed: ${canLong}, Short allowed: ${canShort}`);
+            }
+            console.log("");
+            console.log("FINAL SIGNAL:");
+            console.log(`   LONG Signal: ${canLong ? "[OK] CONFIRMED" : "[NO] NOT CONFIRMED"}`);
+            console.log(`   SHORT Signal: ${canShort ? "[OK] CONFIRMED" : "[NO] NOT CONFIRMED"}`);
+            console.log("=".repeat(50));
+            lastSignalDetailLogAt = Date.now();
         }
 
-        console.log("");
-        console.log("🚦 FINAL SIGNAL:");
-        console.log(`   LONG Signal: ${canLong ? "✅ CONFIRMED" : "❌ NOT CONFIRMED"}`);
-        console.log(`   SHORT Signal: ${canShort ? "✅ CONFIRMED" : "❌ NOT CONFIRMED"}`);
-        console.log("=".repeat(50));
-
-        return { canLong, canShort, price: currentPrice, rsi: currentRSI, resistance, support, hasSignal: bullishBreakout || bearishBreakout };
+        return { canLong, canShort, price: currentPrice, rsi: currentRSI, resistance, support, hasSignal: hasBreakout };
     } catch (error) {
-        console.error("❌ Breakout analysis failed:", error.message);
+        console.error("[ERROR] Breakout analysis failed:", error.message);
         return {};
     }
 };
@@ -372,20 +573,42 @@ const analyzeSignal = async () => {
 // -------------------- PLACE ORDER --------------------
 const placeOrder = async (side, signalPrice) => {
     try {
-        if (!db || db.activePosition) return;
+        if (!db || db.activePosition || isPlacingOrder || isClosingPosition) return;
+        isPlacingOrder = true;
 
-        console.log(`\n🔄 [ORDER] Attempting to place ${side.toUpperCase()} order...`);
+        console.log(`\n[ORDER] Attempting to place ${side.toUpperCase()} order...`);
         await setMarginMode();
         await exchange.setLeverage(db.leverage, db.pair);
 
-        const ticker = await exchange.fetchTicker(db.pair);
-        const entryPrice = Number(signalPrice) > 0 ? signalPrice : ticker.last;
+        const tickerPrice = await getPrice(true);
+        if (!Number.isFinite(tickerPrice) || tickerPrice <= 0) {
+            console.error("[ERROR] Invalid ticker price. Order skipped.");
+            return;
+        }
+
+        const hasSignalPrice = Number(signalPrice) > 0;
+        const entryPrice = hasSignalPrice ? Number(signalPrice) : tickerPrice;
+        const maxDeviationPercent = Number(db.maxPriceDeviationPercent ?? 0.5);
+        if (hasSignalPrice && maxDeviationPercent > 0) {
+            const deviationPercent = Math.abs((entryPrice - tickerPrice) / tickerPrice) * 100;
+            if (deviationPercent > maxDeviationPercent) {
+                console.warn(
+                    `[WARN] Price deviation too high (${deviationPercent.toFixed(3)}% > ${maxDeviationPercent}%). Order skipped.`
+                );
+                return;
+            }
+        }
         const qty = (db.usdtPerTrade * db.leverage) / entryPrice;
         const market = exchange.markets[db.pair];
         const precision = market?.precision?.amount || 3;
         const adjustedQty = parseFloat(qty.toFixed(precision));
         if (!Number.isFinite(adjustedQty) || adjustedQty <= 0) {
-            console.error("❌ Invalid order quantity after precision adjustment.");
+            console.error("[ERROR] Invalid order quantity after precision adjustment.");
+            return;
+        }
+        const minAmount = Number(market?.limits?.amount?.min);
+        if (Number.isFinite(minAmount) && adjustedQty < minAmount) {
+            console.error(`[ERROR] Quantity ${adjustedQty} is below exchange minimum ${minAmount}. Order skipped.`);
             return;
         }
 
@@ -408,7 +631,7 @@ const placeOrder = async (side, signalPrice) => {
         }
         stopLossPrice = parseFloat(stopLossPrice.toFixed(pricePrecision));
 
-        console.log(`   📊 Order Details:`);
+        console.log(`   Order Details:`);
         console.log(`   - Amount: ${db.usdtPerTrade} USDT × ${db.leverage}x = ${(db.usdtPerTrade * db.leverage).toFixed(2)} USDT`);
         console.log(`   - Quantity: ${adjustedQty} ${db.pair.split('/')[0]}`);
         console.log(`   - Entry Price: ${entryPrice}`);
@@ -418,8 +641,9 @@ const placeOrder = async (side, signalPrice) => {
         console.log(`   - Stop Loss Price: ${stopLossPrice}`);
 
         const order = await exchange.createOrder(db.pair, "market", side, adjustedQty, undefined, {
-            marginMode: "isolated"
+            marginMode: (db.marginMode || "isolated").toLowerCase()
         });
+        metrics.api.orders++;
 
         db.activePosition = {
             side: side,
@@ -430,80 +654,188 @@ const placeOrder = async (side, signalPrice) => {
             orderId: order.id,
             quantity: adjustedQty,
             entryTime: Date.now(),
-            marginMode: "isolated",
+            marginMode: (db.marginMode || "isolated").toLowerCase(),
             targetProfitUSDT: targetProfitUSDT
         };
 
         await saveDB();
         logTrade(side, entryPrice, null, "OPEN");
+        metrics.trades.opened++;
 
-        console.log(`\n✅ ORDER PLACED: ${side.toUpperCase()} at ${entryPrice}`);
+        console.log(`\n[OK] ORDER PLACED: ${side.toUpperCase()} at ${entryPrice}`);
     } catch (error) {
-        console.error("❌ Order failed:", error.message);
+        console.error("[ERROR] Order failed:", error.message);
+    } finally {
+        isPlacingOrder = false;
     }
 };
 
 // -------------------- CLOSE POSITION --------------------
 const closePosition = async (reason, profitUSDT, profitPercent) => {
     try {
-        if (!db || !db.activePosition) return;
+        if (!db || !db.activePosition || isClosingPosition) return;
+        isClosingPosition = true;
         const { side, quantity, entryPrice } = db.activePosition;
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+            console.error("[ERROR] Invalid position quantity. Resetting activePosition.");
+            db.activePosition = null;
+            await saveDB();
+            return;
+        }
         const closeSide = side === "buy" ? "sell" : "buy";
 
-        console.log(`\n🔄 Closing position...`);
+        console.log(`\n[CLOSE] Closing position...`);
         await exchange.createOrder(db.pair, "market", closeSide, quantity, undefined, {
             reduceOnly: true,
-            marginMode: "isolated"
+            marginMode: (db.marginMode || "isolated").toLowerCase()
         });
+        metrics.api.orders++;
 
         db.dailyPnL += profitUSDT;
         db.dailyTrades++;
 
-        const exitPrice = await getPrice();
+        const exitPrice = await getPrice(true);
         logTrade(side === "buy" ? "LONG" : "SHORT", entryPrice, exitPrice, "CLOSE", profitUSDT);
 
-        console.log(`\n✅ POSITION CLOSED: ${reason}`);
+        console.log(`\n[OK] POSITION CLOSED: ${reason}`);
         console.log(`   P&L: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
         console.log(`   Daily P&L: ${db.dailyPnL.toFixed(2)} USDT / ${db.dailyTrades} trades`);
 
         db.activePosition = null;
         await saveDB();
+        metrics.trades.closed++;
+        if (profitUSDT > 0) metrics.trades.wins++;
+        else if (profitUSDT < 0) metrics.trades.losses++;
     } catch (error) {
-        console.error("❌ Close position failed:", error.message);
+        console.error("[ERROR] Close position failed:", error.message);
+    } finally {
+        isClosingPosition = false;
     }
 };
 
 // -------------------- UTILITY FUNCTIONS --------------------
-const getPrice = async () => {
+const getPrice = async (forceRefresh = false) => {
     try {
+        const now = Date.now();
+        if (!forceRefresh && now - tickerCache.lastUpdate < TICKER_CACHE_TTL) {
+            return tickerCache.price;
+        }
+
         const ticker = await exchange.fetchTicker(db.pair);
-        return ticker.last;
+        metrics.api.ticker++;
+        const latestPrice = toFiniteNumber(ticker?.last, null);
+        if (latestPrice) {
+            tickerCache.price = latestPrice;
+            tickerCache.lastUpdate = now;
+        }
+        return latestPrice;
     } catch (error) {
-        console.error("❌ Failed to get price:", error.message);
-        return null;
+        console.error("[ERROR] Failed to get price:", error.message);
+        return tickerCache.price;
     }
+};
+
+const getBreakoutOHLCV = async (forceRefresh = false) => {
+    const timeframe = db?.breakoutTimeframe || "5m";
+    const limit = (db?.breakoutPeriod || 20) + 10 + (db?.volumePeriod || 20);
+    const cacheKey = `${db?.pair || ""}:${timeframe}:${limit}`;
+    const now = Date.now();
+
+    if (
+        !forceRefresh &&
+        breakoutOhlcvCache.key === cacheKey &&
+        now - breakoutOhlcvCache.lastUpdate < OHLCV_CACHE_TTL &&
+        Array.isArray(breakoutOhlcvCache.data)
+    ) {
+        return breakoutOhlcvCache.data;
+    }
+
+    const ohlcv = await exchange.fetchOHLCV(db.pair, timeframe, undefined, limit);
+    metrics.api.breakoutOhlcv++;
+    breakoutOhlcvCache = { key: cacheKey, data: ohlcv, lastUpdate: now };
+    return ohlcv;
 };
 
 const logTrade = (side, entry, exit, status, pnl = 0) => {
     try {
         ensureFileExists(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy\n");
         const timestamp = new Date().toISOString();
-        const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},ISOLATED,${db.stopLossPercent},BREAKOUT_5M\n`;
+        const parsedTime = Date.parse(timestamp);
+        lastTradeAt = Number.isFinite(parsedTime) ? parsedTime : Date.now();
+        const marginMode = (db.marginMode || "isolated").toUpperCase();
+        const strategy = `BREAKOUT_${String(db.breakoutTimeframe || "5m").toUpperCase()}`;
+        const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},${marginMode},${db.stopLossPercent},${strategy}\n`;
         fs.appendFileSync(logPath, line);
     } catch (error) {
-        console.error("❌ Failed to log trade:", error.message);
+        console.error("[ERROR] Failed to log trade:", error.message);
+    }
+};
+
+const getTotalUSDTBalance = async (forceRefresh = false) => {
+    try {
+        const now = Date.now();
+        if (!forceRefresh && now - balanceCache.lastUpdate < BALANCE_CACHE_TTL) {
+            return balanceCache.totalUSDT;
+        }
+
+        const balance = await exchange.fetchBalance();
+        metrics.api.balance++;
+        const totalUSDT = Number(balance?.total?.USDT || 0);
+        balanceCache.totalUSDT = Number.isFinite(totalUSDT) ? totalUSDT : 0;
+        balanceCache.lastUpdate = now;
+        return balanceCache.totalUSDT;
+    } catch (error) {
+        console.error("[ERROR] Failed to fetch balance:", error.message);
+        return balanceCache.totalUSDT || 0;
+    }
+};
+
+const getLastTradeTimestampFromLog = () => {
+    try {
+        if (!fs.existsSync(logPath)) return 0;
+        const content = fs.readFileSync(logPath, "utf8");
+        if (!content) return 0;
+
+        const lines = content.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        if (lines.length <= 1) return 0;
+
+        const lastLine = lines[lines.length - 1];
+        const timestamp = lastLine.split(",")[0];
+        const parsed = Date.parse(timestamp);
+        return Number.isFinite(parsed) ? parsed : 0;
+    } catch (error) {
+        console.error("[ERROR] Failed to read last trade timestamp:", error.message);
+        return 0;
     }
 };
 
 // -------------------- REAL-TIME PNL MONITORING --------------------
 const startPnLMonitoring = () => {
-    console.log("📈 Starting real-time P&L monitoring...");
-    setInterval(async () => {
-        if (!db || !db.activePosition) return;
+    if (!db) return;
+    const desiredInterval = Math.max(200, Math.trunc(toFiniteNumber(db.monitoringInterval, 500)));
+    if (pnlMonitorTimer && currentPnLMonitoringInterval === desiredInterval) return;
+
+    if (pnlMonitorTimer) {
+        clearInterval(pnlMonitorTimer);
+        pnlMonitorTimer = null;
+    }
+
+    currentPnLMonitoringInterval = desiredInterval;
+    console.log(`[MONITOR] Real-time P&L monitoring interval: ${desiredInterval}ms`);
+
+    const monitorTick = async () => {
+        if (isMonitoringPnL) return;
+        isMonitoringPnL = true;
+        try {
+        if (!db || !db.activePosition || isClosingPosition) return;
         const currentPrice = await getPrice();
         if (!currentPrice) return;
 
         const { side, entryPrice, quantity, targetProfitUSDT } = db.activePosition;
+        if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
+            console.error("[ERROR] Invalid active position data for P&L monitoring.");
+            return;
+        }
         const profitUSDT = side === "buy"
             ? (currentPrice - entryPrice) * quantity
             : (entryPrice - currentPrice) * quantity;
@@ -512,23 +844,77 @@ const startPnLMonitoring = () => {
             : ((entryPrice - currentPrice) / entryPrice * 100);
 
         if (profitUSDT >= targetProfitUSDT) {
-            console.log(`\n🚨 PROFIT TARGET HIT (+${targetProfitUSDT} USDT)! Closing...`);
+            console.log(`\n[PROFIT] Target hit (+${targetProfitUSDT} USDT)! Closing...`);
             await closePosition("PROFIT_TARGET", profitUSDT, profitPercent);
             return;
         }
 
         const stopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
         if (profitUSDT <= stopLossUSDT) {
-            console.log(`\n🚨 STOP LOSS HIT (${stopLossUSDT} USDT)! Closing...`);
+            console.log(`\n[STOP] Stop loss hit (${stopLossUSDT} USDT)! Closing...`);
             await closePosition("STOP_LOSS", profitUSDT, profitPercent);
             return;
         }
 
-        if (Date.now() - lastPnlLog > 3000) {
-            console.log(`\n📊 REAL-TIME P&L: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
+        const nearExit =
+            profitUSDT >= (targetProfitUSDT * 0.7) ||
+            profitUSDT <= (stopLossUSDT * 0.7);
+        const pnlLogInterval = nearExit ? 2000 : 5000;
+        if (Date.now() - lastPnlLog > pnlLogInterval) {
+            console.log(`\n[PNL] Real-time P&L: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
             lastPnlLog = Date.now();
         }
-    }, db.monitoringInterval);
+        } finally {
+            isMonitoringPnL = false;
+        }
+    };
+
+    pnlMonitorTimer = setInterval(monitorTick, desiredInterval);
+};
+
+const startPositionSync = () => {
+    if (!db) return;
+    const desiredInterval = db.activePosition ? 5000 : 15000;
+    if (positionSyncTimer && currentPositionSyncInterval === desiredInterval) return;
+
+    if (positionSyncTimer) {
+        clearInterval(positionSyncTimer);
+        positionSyncTimer = null;
+    }
+
+    currentPositionSyncInterval = desiredInterval;
+    console.log(`[SYNC] Position sync interval: ${desiredInterval}ms`);
+
+    positionSyncTimer = setInterval(async () => {
+        await syncPositionWithExchange();
+    }, desiredInterval);
+};
+
+const shutdown = async (signal = "EXIT") => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    console.log(`\n[SHUTDOWN] Received ${signal}. Stopping bot...`);
+    if (pnlMonitorTimer) clearInterval(pnlMonitorTimer);
+    if (positionSyncTimer) clearInterval(positionSyncTimer);
+    if (trendTimer) clearInterval(trendTimer);
+    if (mainLoopTimer) clearInterval(mainLoopTimer);
+    if (metricsTimer) clearInterval(metricsTimer);
+
+    try {
+        await saveDB();
+    } catch (error) {
+        console.error("[ERROR] Failed to save DB during shutdown:", error.message);
+    }
+
+    try {
+        await sequelize.close();
+    } catch (error) {
+        console.error("[ERROR] Failed to close DB connection:", error.message);
+    }
+
+    console.log("[SHUTDOWN] Bot stopped.");
+    process.exit(0);
 };
 
 // -------------------- MAIN LOOP --------------------
@@ -540,58 +926,71 @@ const startPnLMonitoring = () => {
         await setMarginMode();
         await syncPositionWithExchange();
         await updateTrend();
-        setInterval(updateTrend, 15 * 60 * 1000);
+        trendTimer = setInterval(updateTrend, 15 * 60 * 1000);
 
         startPnLMonitoring();
+        startPositionSync();
+        startMetricsReporting();
+        process.once("SIGINT", () => { shutdown("SIGINT"); });
+        process.once("SIGTERM", () => { shutdown("SIGTERM"); });
 
-        const balance = await exchange.fetchBalance();
-        const totalUSDT = balance.total?.USDT || 0;
+        const totalUSDT = await getTotalUSDTBalance(true);
 
         console.log("\n" + "=".repeat(70));
-        console.log("🚀 BREAKOUT SCALPING BOT (5m, Volume 2x, RSI Ketat)");
+        console.log("BREAKOUT SCALPING BOT (5m, Volume 2x, RSI Ketat)");
         console.log("=".repeat(70));
-        console.log(`💰 Balance: $${totalUSDT.toFixed(2)}`);
-        console.log(`📊 Pair: ${db.pair}`);
-        console.log(`🎯 Strategy: ${db.breakoutTimeframe} breakout (${db.breakoutPeriod}c) + Volume ${db.minVolumeRatio}x + RSI`);
-        console.log(`🎯 Target per trade: $${db.targetProfitUSDT} | Stop loss: $${db.usdtPerTrade * db.stopLossPercent/100}`);
-        console.log(`📈 Risk:Reward = 1:1`);
-        console.log(`⚡ Leverage: ${db.leverage}x`);
-        console.log(`📅 Daily target: $${db.targetDailyProfit} (max ${db.maxTradesPerDay} trades)`);
+        console.log(`Balance: $${totalUSDT.toFixed(2)}`);
+        console.log(`Pair: ${db.pair}`);
+        console.log(`Strategy: ${db.breakoutTimeframe} breakout (${db.breakoutPeriod}c) + Volume ${db.minVolumeRatio}x + RSI`);
+        console.log(`Target per trade: $${db.targetProfitUSDT} | Stop loss: $${(db.usdtPerTrade * db.stopLossPercent/100).toFixed(2)}`);
+        console.log(`Risk:Reward = 1:1`);
+        console.log(`Leverage: ${db.leverage}x`);
+        console.log(`Daily target: $${db.targetDailyProfit} (max ${db.maxTradesPerDay} trades)`);
         console.log("=".repeat(70) + "\n");
-        
 
-        setInterval(async () => {
+        lastTradeAt = getLastTradeTimestampFromLog();
+
+        mainLoopTimer = setInterval(async () => {
             if (isProcessing) return;
             isProcessing = true;
 
             try {
                 await reloadConfig();
+                startPnLMonitoring();
+                startPositionSync();
+                if (isPlacingOrder || isClosingPosition) {
+                    isProcessing = false;
+                    return;
+                }
 
                 const now = Date.now();
                 if (new Date(now).toDateString() !== new Date(db.lastDailyReset || 0).toDateString()) {
-                    console.log("📅 Daily reset");
+                    console.log("[DAILY] Daily reset");
                     db.dailyPnL = 0;
                     db.dailyTrades = 0;
                     db.lastDailyReset = now;
+                    metrics.trades.opened = 0;
+                    metrics.trades.closed = 0;
+                    metrics.trades.wins = 0;
+                    metrics.trades.losses = 0;
                     await saveDB();
                 }
 
-                const balance = await exchange.fetchBalance();
-                const totalUSDT = balance.total?.USDT || 0;
+                const totalUSDT = await getTotalUSDTBalance();
                 const maxDailyLoss = totalUSDT * db.maxDailyLossPercent / 100;
 
                 if (db.dailyPnL >= db.targetDailyProfit) {
-                    console.log(`🎯 Daily target reached: $${db.dailyPnL.toFixed(2)}. Trading paused.`);
+                    console.log(`[PAUSE] Daily target reached: $${db.dailyPnL.toFixed(2)}. Trading paused.`);
                     isProcessing = false;
                     return;
                 }
                 if (db.dailyPnL <= -maxDailyLoss) {
-                    console.log(`⛔ Daily loss limit reached: $${db.dailyPnL.toFixed(2)}. Trading paused.`);
+                    console.log(`[PAUSE] Daily loss limit reached: $${db.dailyPnL.toFixed(2)}. Trading paused.`);
                     isProcessing = false;
                     return;
                 }
                 if (db.dailyTrades >= db.maxTradesPerDay) {
-                    console.log(`⏳ Max trades per day (${db.maxTradesPerDay}) reached.`);
+                    console.log(`[PAUSE] Max trades per day (${db.maxTradesPerDay}) reached.`);
                     isProcessing = false;
                     return;
                 }
@@ -602,8 +1001,8 @@ const startPnLMonitoring = () => {
                 }
 
                 if (db.dailyTrades > 0) {
-                    const lastTradeTime = fs.existsSync(logPath) ? fs.statSync(logPath).mtimeMs : 0;
-                    if (Date.now() - lastTradeTime < db.coolingPeriod) {
+                    const tradeTimestamp = lastTradeAt || getLastTradeTimestampFromLog();
+                    if (tradeTimestamp > 0 && Date.now() - tradeTimestamp < db.coolingPeriod) {
                         isProcessing = false;
                         return;
                     }
@@ -614,15 +1013,11 @@ const startPnLMonitoring = () => {
                 else if (signal.canShort) await placeOrder("sell", signal.price);
 
             } catch (error) {
-                console.error("Loop error:", error.message);
+                console.error("[ERROR] Loop error:", error.message);
             } finally {
                 isProcessing = false;
             }
         }, 2000);
-
-        setInterval(async () => {
-            await syncPositionWithExchange();
-        }, 10000);
 
         if (process.stdin.isTTY) {
             process.stdin.setEncoding('utf8');
@@ -630,13 +1025,13 @@ const startPnLMonitoring = () => {
                 const cmd = input.toString().trim().toLowerCase();
                 if (cmd === 'sync') syncPositionWithExchange();
                 else if (cmd === 'status') {
-                    console.log(`\n📊 Status: Active=${!!db.activePosition}, Daily P&L=${db.dailyPnL.toFixed(2)} USDT, Trades=${db.dailyTrades}`);
+                    console.log(`\n[STATUS] Active=${!!db.activePosition}, Daily P&L=${db.dailyPnL.toFixed(2)} USDT, Trades=${db.dailyTrades}`);
                 }
             });
         }
 
     } catch (error) {
-        console.error("❌ Bot startup failed:", error.message);
+        console.error("[ERROR] Bot startup failed:", error.message);
         process.exit(1);
     }
 })();
