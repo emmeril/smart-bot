@@ -248,6 +248,26 @@ const toFiniteNumber = (value, fallback = 0) => {
     return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const formatAmountToMarketPrecision = (symbol, amount) => {
+    const numericAmount = Number(amount);
+    if (!exchange || !symbol || !Number.isFinite(numericAmount)) return NaN;
+    try {
+        return Number.parseFloat(exchange.amountToPrecision(symbol, numericAmount));
+    } catch {
+        return numericAmount;
+    }
+};
+
+const formatPriceToMarketPrecision = (symbol, price) => {
+    const numericPrice = Number(price);
+    if (!exchange || !symbol || !Number.isFinite(numericPrice)) return NaN;
+    try {
+        return Number.parseFloat(exchange.priceToPrecision(symbol, numericPrice));
+    } catch {
+        return numericPrice;
+    }
+};
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const quantile = (sortedValues, p) => {
@@ -755,7 +775,6 @@ const buildOrderPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides,
     const atrTargetMult = toFiniteNumber(riskOverrides.atrTargetMult, db.atrTargetMult);
     const trailingActivateATR = toFiniteNumber(riskOverrides.trailingActivateATR, db.trailingActivateATR);
     const trailingOffsetATR = toFiniteNumber(riskOverrides.trailingOffsetATR, db.trailingOffsetATR);
-    const pricePrecision = market?.precision?.price || 8;
 
     let targetProfitUSDT = db.targetProfitUSDT;
     let stopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
@@ -785,8 +804,8 @@ const buildOrderPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides,
         trailingOffsetATR,
         targetProfitUSDT,
         stopLossUSDT,
-        targetPrice: parseFloat(targetPrice.toFixed(pricePrecision)),
-        stopLossPrice: parseFloat(stopLossPrice.toFixed(pricePrecision))
+        targetPrice: formatPriceToMarketPrecision(db.pair, targetPrice),
+        stopLossPrice: formatPriceToMarketPrecision(db.pair, stopLossPrice)
     };
 };
 
@@ -1542,8 +1561,7 @@ const placeOrder = async (side, signalData = {}) => {
         }
         const qty = (db.usdtPerTrade * db.leverage) / entryPrice;
         const market = exchange.markets[db.pair];
-        const precision = market?.precision?.amount || 3;
-        const adjustedQty = parseFloat(qty.toFixed(precision));
+        const adjustedQty = formatAmountToMarketPrecision(db.pair, qty);
         if (!Number.isFinite(adjustedQty) || adjustedQty <= 0) {
             console.error("[ERROR] Invalid order quantity after precision adjustment.");
             return;
