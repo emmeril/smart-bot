@@ -1,424 +1,451 @@
-// menu.js - Interactive Configuration Menu
-const fs = require('fs');
-const readline = require('readline');
+const fs = require("fs");
+const readline = require("readline");
 
 const dbPath = "./db.json";
 
-// -------------------- LOAD CONFIG --------------------
+const getDefaultConfig = () => ({
+  strategy: "hybrid",
+  pair: "DOGE/USDT:USDT",
+  usdtPerTrade: 0.2,
+  leverage: 50,
+  targetProfitUSDT: 0.01,
+  targetDailyProfit: 1.0,
+  maxDailyLossPercent: 40,
+  maxTradesPerDay: 3,
+  coolingPeriod: 2000,
+  activePosition: null,
+  dailyPnL: 0,
+  dailyTrades: 0,
+  marginMode: "isolated",
+  monitoringInterval: 500,
+  stopLossPercent: 50,
+  breakoutTimeframe: "15m",
+  sessionStartUTC: 0,
+  sessionEndUTC: 23,
+  trendTimeframe: "15m",
+  trendPeriod: 80,
+  pullbackEmaPeriod: 5,
+  pullbackLookback: 2,
+  pullbackMaxDistancePct: 0.5,
+  rsiLongMin: 52,
+  rsiLongMax: 72,
+  minVolumeRatio: 1.1,
+  shortBreakoutPeriod: 20,
+  shortTrendPeriod: 120,
+  shortMinRangePercent: 0.8,
+  shortMinVolumeRatio: 1.4,
+  atrPeriod: 14,
+  atrStopMult: 0.8,
+  atrTargetMult: 1.6,
+  trailingActivateATR: 1.2,
+  trailingOffsetATR: 0.6,
+  shortAtrStopMult: 1.4,
+  shortAtrTargetMult: 1.6,
+  shortTrailingActivateATR: 1.0,
+  shortTrailingOffsetATR: 0.8,
+  allowLong: true,
+  allowShort: true
+});
+
 const loadDB = () => {
-    try {
-        if (fs.existsSync(dbPath)) {
-            return JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-        }
-    } catch (error) {
-        console.warn("⚠️ Failed to load DB, using default config");
+  try {
+    if (fs.existsSync(dbPath)) {
+      return { ...getDefaultConfig(), ...JSON.parse(fs.readFileSync(dbPath, "utf8")) };
     }
-
-    return {
-         pair: "DOGE/USDT:USDT",
-        usdtPerTrade: 0.2,
-        leverage: 50,
-        targetProfitUSDT: 0.01,
-        maxDailyLossPercent: 50,
-        coolingPeriod: 3000,
-        activePosition: null,
-        dailyPnL: 0,
-        dailyTrades: 0,
-        marginMode: "isolated",
-        monitoringInterval: 500,
-        stopLossPercent: 50,
-        breakoutPeriod: 20,
-        minBreakoutStrength: 0.001
-    };
+  } catch (error) {
+    console.warn(`Failed to load ${dbPath}: ${error.message}`);
+  }
+  return getDefaultConfig();
 };
 
-// -------------------- SAVE CONFIG --------------------
 const saveDB = (config) => {
-    try {
-        fs.writeFileSync(dbPath, JSON.stringify(config, null, 2));
-        console.log(`✅ Configuration saved to ${dbPath}`);
-        return true;
-    } catch (error) {
-        console.error("❌ Failed to save configuration:", error.message);
-        return false;
-    }
+  try {
+    fs.writeFileSync(dbPath, JSON.stringify(config, null, 2));
+    console.log(`Saved config to ${dbPath}`);
+    return true;
+  } catch (error) {
+    console.error(`Failed to save config: ${error.message}`);
+    return false;
+  }
 };
 
-// -------------------- DISPLAY CURRENT CONFIG --------------------
+const validateNumber = (input, min, max, isInteger = false) => {
+  const num = isInteger ? parseInt(input, 10) : parseFloat(input);
+  if (Number.isNaN(num)) return { valid: false, message: "Invalid number" };
+  if (min !== undefined && num < min) return { valid: false, message: `Must be at least ${min}` };
+  if (max !== undefined && num > max) return { valid: false, message: `Must be at most ${max}` };
+  return { valid: true, value: num };
+};
+
 const displayConfig = (config) => {
-    console.clear();
-    console.log("=".repeat(70));
-    console.log("🤖 REAL-TIME BREAKOUT SCALPING BOT - CONFIGURATION MENU");
-    console.log("=".repeat(70));
-    console.log("\n📊 CURRENT CONFIGURATION:");
-    console.log("=".repeat(40));
-    
-    const configDisplay = {
-        "1. Trading Pair": config.pair,
-        "2. USDT per Trade": `${config.usdtPerTrade} USDT`,
-        "3. Leverage": `${config.leverage}x`,
-        "4. Target Profit per Trade": `${config.targetProfitUSDT} USDT`,
-        "5. Max Daily Loss %": `${config.maxDailyLossPercent}%`,
-        "6. Cooling Period (ms)": `${config.coolingPeriod}ms`,
-        "7. Monitoring Interval (ms)": `${config.monitoringInterval}ms`,
-        "8. Stop Loss %": `${config.stopLossPercent}%`,
-        "9. Breakout Period": `${config.breakoutPeriod} candles`,
-        "10. Min Breakout Strength": config.minBreakoutStrength,
-        "11. Margin Mode": config.marginMode,
-        "12. Daily P&L": `${config.dailyPnL.toFixed(2)} USDT`,
-        "13. Daily Trades": config.dailyTrades
-    };
-
-    Object.entries(configDisplay).forEach(([key, value]) => {
-        console.log(`   ${key}: ${value}`);
-    });
-
-    console.log("=".repeat(40));
-    console.log("\n📈 ACTIVE POSITION:");
-    if (config.activePosition) {
-        const pos = config.activePosition;
-        const timeInTrade = Math.floor((Date.now() - pos.entryTime) / 1000);
-        console.log(`   ✅ ACTIVE - ${pos.side.toUpperCase()} @ ${pos.entryPrice}`);
-        console.log(`      Quantity: ${pos.quantity}`);
-        console.log(`      Target: ${pos.targetPrice} (+${pos.targetProfitUSDT} USDT)`);
-        console.log(`      Stop Loss: ${pos.stopLossPrice}`);
-        console.log(`      Time in trade: ${timeInTrade}s`);
-    } else {
-        console.log("   ⏳ No active position");
-    }
-    console.log("=".repeat(70));
+  console.clear();
+  console.log("=".repeat(72));
+  console.log("HYBRID DOGE BOT CONFIG");
+  console.log("=".repeat(72));
+  console.log(`Pair           : ${config.pair}`);
+  console.log(`Mode           : ${config.strategy} | ${config.breakoutTimeframe}`);
+  console.log(`Risk           : ${config.usdtPerTrade} USDT | ${config.leverage}x | max loss ${config.maxDailyLossPercent}%`);
+  console.log(`Session UTC    : ${config.sessionStartUTC}-${config.sessionEndUTC}`);
+  console.log(`Direction      : long=${config.allowLong} short=${config.allowShort}`);
+  console.log(`Long Pullback  : EMA ${config.pullbackEmaPeriod} | lookback ${config.pullbackLookback} | dist ${config.pullbackMaxDistancePct}%`);
+  console.log(`Long Filters   : RSI ${config.rsiLongMin}-${config.rsiLongMax} | vol ${config.minVolumeRatio}x | trend ${config.trendPeriod}`);
+  console.log(`Short Breakout : breakout ${config.shortBreakoutPeriod} | range ${config.shortMinRangePercent}% | vol ${config.shortMinVolumeRatio}x | trend ${config.shortTrendPeriod}`);
+  console.log(`ATR Long       : stop ${config.atrStopMult} | target ${config.atrTargetMult} | trail ${config.trailingActivateATR}/${config.trailingOffsetATR}`);
+  console.log(`ATR Short      : stop ${config.shortAtrStopMult} | target ${config.shortAtrTargetMult} | trail ${config.shortTrailingActivateATR}/${config.shortTrailingOffsetATR}`);
+  console.log(`Daily Status   : PnL ${(config.dailyPnL || 0).toFixed(2)} | trades ${config.dailyTrades || 0}`);
+  console.log("=".repeat(72));
+  if (config.activePosition) {
+    console.log(`Active Position: ${config.activePosition.side} @ ${config.activePosition.entryPrice}`);
+  } else {
+    console.log("Active Position: none");
+  }
+  console.log("=".repeat(72));
 };
 
-// -------------------- MENU OPTIONS --------------------
 const menuOptions = [
-    "Exit",
-    "Change Trading Pair",
-    "Change USDT per Trade",
-    "Change Leverage",
-    "Change Target Profit per Trade",
-    "Change Max Daily Loss %",
-    "Change Cooling Period",
-    "Change Monitoring Interval",
-    "Change Stop Loss %",
-    "Change Breakout Period",
-    "Change Min Breakout Strength",
-    "Reset Daily P&L & Trades",
-    "Force Close Position",
-    "Reload Configuration from File",
-    "View Log File"
+  "Exit",
+  "Change Pair",
+  "Change Strategy Mode",
+  "Change Timeframe",
+  "Change USDT per Trade",
+  "Change Leverage",
+  "Change Max Daily Loss %",
+  "Change Cooling Period",
+  "Change Monitoring Interval",
+  "Edit Long Pullback",
+  "Edit Long Filters",
+  "Edit Short Breakout",
+  "Edit ATR Long",
+  "Edit ATR Short",
+  "Edit Session UTC",
+  "Toggle Long/Short",
+  "Reset Daily PnL & Trades",
+  "Force Close Position",
+  "Reload Config",
+  "View Log"
 ];
 
-// -------------------- INPUT VALIDATION --------------------
-const validateNumber = (input, min, max, isInteger = false) => {
-    const num = isInteger ? parseInt(input) : parseFloat(input);
-    if (isNaN(num)) return { valid: false, message: "Invalid number" };
-    if (min !== undefined && num < min) return { valid: false, message: `Must be at least ${min}` };
-    if (max !== undefined && num > max) return { valid: false, message: `Must be at most ${max}` };
-    return { valid: true, value: num };
+const updateConfig = (rl, config, option) => {
+  switch (option) {
+    case 1:
+      rl.question(`Pair (${config.pair}): `, (input) => {
+        const value = String(input || "").trim();
+        if (value.includes("/")) {
+          config.pair = value;
+          saveDB(config);
+        } else {
+          console.log("Invalid pair format");
+        }
+        rl.prompt();
+      });
+      break;
+    case 2:
+      rl.question(`Strategy mode [hybrid/pullback/breakout] (${config.strategy}): `, (input) => {
+        const value = String(input || "").trim().toLowerCase();
+        if (["hybrid", "pullback", "breakout"].includes(value)) {
+          config.strategy = value;
+          saveDB(config);
+        } else {
+          console.log("Valid: hybrid, pullback, breakout");
+        }
+        rl.prompt();
+      });
+      break;
+    case 3:
+      rl.question(`Timeframe (${config.breakoutTimeframe}): `, (input) => {
+        const value = String(input || "").trim();
+        if (/^[1-9]\d*[mhdwM]$/.test(value)) {
+          config.breakoutTimeframe = value;
+          config.trendTimeframe = value;
+          saveDB(config);
+        } else {
+          console.log("Invalid timeframe format");
+        }
+        rl.prompt();
+      });
+      break;
+    case 4:
+      rl.question(`USDT per trade (${config.usdtPerTrade}): `, (input) => {
+        const result = validateNumber(input, 0.01, 1000);
+        if (result.valid) {
+          config.usdtPerTrade = result.value;
+          saveDB(config);
+        } else {
+          console.log(result.message);
+        }
+        rl.prompt();
+      });
+      break;
+    case 5:
+      rl.question(`Leverage (${config.leverage}): `, (input) => {
+        const result = validateNumber(input, 1, 125, true);
+        if (result.valid) {
+          config.leverage = result.value;
+          saveDB(config);
+        } else {
+          console.log(result.message);
+        }
+        rl.prompt();
+      });
+      break;
+    case 6:
+      rl.question(`Max daily loss % (${config.maxDailyLossPercent}): `, (input) => {
+        const result = validateNumber(input, 1, 100);
+        if (result.valid) {
+          config.maxDailyLossPercent = result.value;
+          saveDB(config);
+        } else {
+          console.log(result.message);
+        }
+        rl.prompt();
+      });
+      break;
+    case 7:
+      rl.question(`Cooling period ms (${config.coolingPeriod}): `, (input) => {
+        const result = validateNumber(input, 0, 600000, true);
+        if (result.valid) {
+          config.coolingPeriod = result.value;
+          saveDB(config);
+        } else {
+          console.log(result.message);
+        }
+        rl.prompt();
+      });
+      break;
+    case 8:
+      rl.question(`Monitoring interval ms (${config.monitoringInterval}): `, (input) => {
+        const result = validateNumber(input, 100, 10000, true);
+        if (result.valid) {
+          config.monitoringInterval = result.value;
+          saveDB(config);
+        } else {
+          console.log(result.message);
+        }
+        rl.prompt();
+      });
+      break;
+    case 9:
+      rl.question(`Long pullback ema,lookback,maxDist (${config.pullbackEmaPeriod},${config.pullbackLookback},${config.pullbackMaxDistancePct}): `, (input) => {
+        const [ema, lookback, dist] = String(input || "").split(",").map((v) => v.trim());
+        const a = validateNumber(ema, 2, 100, true);
+        const b = validateNumber(lookback, 1, 20, true);
+        const c = validateNumber(dist, 0.05, 5);
+        if (a.valid && b.valid && c.valid) {
+          config.pullbackEmaPeriod = a.value;
+          config.pullbackLookback = b.value;
+          config.pullbackMaxDistancePct = c.value;
+          saveDB(config);
+        } else {
+          console.log("Invalid format. Example: 5,2,0.5");
+        }
+        rl.prompt();
+      });
+      break;
+    case 10:
+      rl.question(`Long filters rsiMin,rsiMax,vol,trend (${config.rsiLongMin},${config.rsiLongMax},${config.minVolumeRatio},${config.trendPeriod}): `, (input) => {
+        const [rsiMin, rsiMax, vol, trend] = String(input || "").split(",").map((v) => v.trim());
+        const a = validateNumber(rsiMin, 1, 98);
+        const b = validateNumber(rsiMax, 2, 99);
+        const c = validateNumber(vol, 0.5, 5);
+        const d = validateNumber(trend, 2, 300, true);
+        if (a.valid && b.valid && b.value > a.value && c.valid && d.valid) {
+          config.rsiLongMin = a.value;
+          config.rsiLongMax = b.value;
+          config.minVolumeRatio = c.value;
+          config.trendPeriod = d.value;
+          saveDB(config);
+        } else {
+          console.log("Invalid format. Example: 52,72,1.1,80");
+        }
+        rl.prompt();
+      });
+      break;
+    case 11:
+      rl.question(`Short breakout period,range,vol,trend (${config.shortBreakoutPeriod},${config.shortMinRangePercent},${config.shortMinVolumeRatio},${config.shortTrendPeriod}): `, (input) => {
+        const [period, range, vol, trend] = String(input || "").split(",").map((v) => v.trim());
+        const a = validateNumber(period, 2, 100, true);
+        const b = validateNumber(range, 0, 10);
+        const c = validateNumber(vol, 0.5, 5);
+        const d = validateNumber(trend, 2, 300, true);
+        if (a.valid && b.valid && c.valid && d.valid) {
+          config.shortBreakoutPeriod = a.value;
+          config.shortMinRangePercent = b.value;
+          config.shortMinVolumeRatio = c.value;
+          config.shortTrendPeriod = d.value;
+          saveDB(config);
+        } else {
+          console.log("Invalid format. Example: 20,0.8,1.4,120");
+        }
+        rl.prompt();
+      });
+      break;
+    case 12:
+      rl.question(`ATR long stop,target,trailAct,trailOff (${config.atrStopMult},${config.atrTargetMult},${config.trailingActivateATR},${config.trailingOffsetATR}): `, (input) => {
+        const [stop, target, act, off] = String(input || "").split(",").map((v) => v.trim());
+        const a = validateNumber(stop, 0.2, 10);
+        const b = validateNumber(target, 0.2, 10);
+        const c = validateNumber(act, 0.2, 10);
+        const d = validateNumber(off, 0.1, 10);
+        if (a.valid && b.valid && c.valid && d.valid) {
+          config.atrStopMult = a.value;
+          config.atrTargetMult = b.value;
+          config.trailingActivateATR = c.value;
+          config.trailingOffsetATR = d.value;
+          saveDB(config);
+        } else {
+          console.log("Invalid format. Example: 0.8,1.6,1.2,0.6");
+        }
+        rl.prompt();
+      });
+      break;
+    case 13:
+      rl.question(`ATR short stop,target,trailAct,trailOff (${config.shortAtrStopMult},${config.shortAtrTargetMult},${config.shortTrailingActivateATR},${config.shortTrailingOffsetATR}): `, (input) => {
+        const [stop, target, act, off] = String(input || "").split(",").map((v) => v.trim());
+        const a = validateNumber(stop, 0.2, 10);
+        const b = validateNumber(target, 0.2, 10);
+        const c = validateNumber(act, 0.2, 10);
+        const d = validateNumber(off, 0.1, 10);
+        if (a.valid && b.valid && c.valid && d.valid) {
+          config.shortAtrStopMult = a.value;
+          config.shortAtrTargetMult = b.value;
+          config.shortTrailingActivateATR = c.value;
+          config.shortTrailingOffsetATR = d.value;
+          saveDB(config);
+        } else {
+          console.log("Invalid format. Example: 1.4,1.6,1.0,0.8");
+        }
+        rl.prompt();
+      });
+      break;
+    case 14:
+      rl.question(`Session UTC start,end (${config.sessionStartUTC},${config.sessionEndUTC}): `, (input) => {
+        const [start, end] = String(input || "").split(",").map((v) => v.trim());
+        const a = validateNumber(start, 0, 23, true);
+        const b = validateNumber(end, 0, 23, true);
+        if (a.valid && b.valid) {
+          config.sessionStartUTC = a.value;
+          config.sessionEndUTC = b.value;
+          saveDB(config);
+        } else {
+          console.log("Invalid format. Example: 0,23");
+        }
+        rl.prompt();
+      });
+      break;
+    case 15:
+      rl.question(`Enable long,short (${config.allowLong},${config.allowShort}): `, (input) => {
+        const [longVal, shortVal] = String(input || "").split(",").map((v) => v.trim().toLowerCase());
+        if (["true", "false"].includes(longVal) && ["true", "false"].includes(shortVal)) {
+          config.allowLong = longVal === "true";
+          config.allowShort = shortVal === "true";
+          saveDB(config);
+        } else {
+          console.log("Invalid format. Example: true,true");
+        }
+        rl.prompt();
+      });
+      break;
+    case 16:
+      rl.question("Reset daily PnL and trades? (yes/no): ", (input) => {
+        if (String(input || "").trim().toLowerCase() === "yes") {
+          config.dailyPnL = 0;
+          config.dailyTrades = 0;
+          saveDB(config);
+        }
+        rl.prompt();
+      });
+      break;
+    case 17:
+      if (config.activePosition) {
+        rl.question("Force clear activePosition? (yes/no): ", (input) => {
+          if (String(input || "").trim().toLowerCase() === "yes") {
+            config.activePosition = null;
+            saveDB(config);
+          }
+          rl.prompt();
+        });
+      } else {
+        console.log("No active position");
+        rl.prompt();
+      }
+      break;
+    case 18:
+      Object.assign(config, loadDB());
+      console.log("Reloaded config from file");
+      displayConfig(config);
+      rl.prompt();
+      break;
+    case 19:
+      try {
+        const logContent = fs.readFileSync("./log.csv", "utf8");
+        const lines = logContent.trim().split("\n").slice(-10);
+        console.log("\nLast log lines:");
+        lines.forEach((line) => console.log(line));
+      } catch {
+        console.log("No log file found");
+      }
+      rl.prompt();
+      break;
+    default:
+      rl.prompt();
+  }
 };
 
-// -------------------- CONFIGURATION UPDATERS --------------------
-const updateConfig = async (rl, config, option) => {
-    switch(option) {
-        case 1:
-            rl.question("Enter new trading pair (e.g., BTC/USDT:USDT): ", (pair) => {
-                if (pair && pair.includes('/')) {
-                    config.pair = pair;
-                    if (saveDB(config)) {
-                        console.log(`✅ Trading pair updated to: ${pair}`);
-                    }
-                } else {
-                    console.log("❌ Invalid pair format. Example: BTC/USDT:USDT");
-                }
-                rl.prompt();
-            });
-            break;
-
-        case 2:
-            rl.question(`Enter USDT per trade (current: ${config.usdtPerTrade}): `, (input) => {
-                const result = validateNumber(input, 1, 1000);
-                if (result.valid) {
-                    config.usdtPerTrade = result.value;
-                    if (saveDB(config)) {
-                        console.log(`✅ USDT per trade updated to: ${result.value}`);
-                    }
-                } else {
-                    console.log(`❌ ${result.message}`);
-                }
-                rl.prompt();
-            });
-            break;
-
-        case 3:
-            rl.question(`Enter leverage (1-100, current: ${config.leverage}): `, (input) => {
-                const result = validateNumber(input, 1, 100, true);
-                if (result.valid) {
-                    config.leverage = result.value;
-                    if (saveDB(config)) {
-                        console.log(`✅ Leverage updated to: ${result.value}x`);
-                    }
-                } else {
-                    console.log(`❌ ${result.message}`);
-                }
-                rl.prompt();
-            });
-            break;
-
-        case 4:
-            rl.question(`Enter target profit per trade (USDT, current: ${config.targetProfitUSDT}): `, (input) => {
-                const result = validateNumber(input, 0.001, 100);
-                if (result.valid) {
-                    config.targetProfitUSDT = result.value;
-                    if (saveDB(config)) {
-                        console.log(`✅ Target profit updated to: ${result.value} USDT`);
-                    }
-                } else {
-                    console.log(`❌ ${result.message}`);
-                }
-                rl.prompt();
-            });
-            break;
-
-        case 5:
-            rl.question(`Enter max daily loss % (1-50, current: ${config.maxDailyLossPercent}): `, (input) => {
-                const result = validateNumber(input, 1, 50);
-                if (result.valid) {
-                    config.maxDailyLossPercent = result.value;
-                    if (saveDB(config)) {
-                        console.log(`✅ Max daily loss updated to: ${result.value}%`);
-                    }
-                } else {
-                    console.log(`❌ ${result.message}`);
-                }
-                rl.prompt();
-            });
-            break;
-
-        case 6:
-            rl.question(`Enter cooling period in milliseconds (1000-60000, current: ${config.coolingPeriod}): `, (input) => {
-                const result = validateNumber(input, 1000, 60000, true);
-                if (result.valid) {
-                    config.coolingPeriod = result.value;
-                    if (saveDB(config)) {
-                        console.log(`✅ Cooling period updated to: ${result.value}ms`);
-                    }
-                } else {
-                    console.log(`❌ ${result.message}`);
-                }
-                rl.prompt();
-            });
-            break;
-
-        case 7:
-            rl.question(`Enter monitoring interval in milliseconds (100-5000, current: ${config.monitoringInterval}): `, (input) => {
-                const result = validateNumber(input, 100, 5000, true);
-                if (result.valid) {
-                    config.monitoringInterval = result.value;
-                    if (saveDB(config)) {
-                        console.log(`✅ Monitoring interval updated to: ${result.value}ms`);
-                    }
-                } else {
-                    console.log(`❌ ${result.message}`);
-                }
-                rl.prompt();
-            });
-            break;
-
-        case 8:
-            rl.question(`Enter stop loss % (1-100, current: ${config.stopLossPercent}): `, (input) => {
-                const result = validateNumber(input, 1, 100);
-                if (result.valid) {
-                    config.stopLossPercent = result.value;
-                    if (saveDB(config)) {
-                        console.log(`✅ Stop loss updated to: ${result.value}%`);
-                    }
-                } else {
-                    console.log(`❌ ${result.message}`);
-                }
-                rl.prompt();
-            });
-            break;
-
-        case 9:
-            rl.question(`Enter breakout period (5-100, current: ${config.breakoutPeriod}): `, (input) => {
-                const result = validateNumber(input, 5, 100, true);
-                if (result.valid) {
-                    config.breakoutPeriod = result.value;
-                    if (saveDB(config)) {
-                        console.log(`✅ Breakout period updated to: ${result.value} candles`);
-                    }
-                } else {
-                    console.log(`❌ ${result.message}`);
-                }
-                rl.prompt();
-            });
-            break;
-
-        case 10:
-            rl.question(`Enter min breakout strength (0.0001-0.1, current: ${config.minBreakoutStrength}): `, (input) => {
-                const result = validateNumber(input, 0.0001, 0.1);
-                if (result.valid) {
-                    config.minBreakoutStrength = result.value;
-                    if (saveDB(config)) {
-                        console.log(`✅ Min breakout strength updated to: ${result.value}`);
-                    }
-                } else {
-                    console.log(`❌ ${result.message}`);
-                }
-                rl.prompt();
-            });
-            break;
-
-        case 11:
-            rl.question("Are you sure you want to reset daily P&L and trade count? (yes/no): ", (answer) => {
-                if (answer.toLowerCase() === 'yes') {
-                    config.dailyPnL = 0;
-                    config.dailyTrades = 0;
-                    if (saveDB(config)) {
-                        console.log("✅ Daily P&L and trade count reset to zero");
-                    }
-                } else {
-                    console.log("❌ Reset cancelled");
-                }
-                rl.prompt();
-            });
-            break;
-
-        case 12:
-            if (config.activePosition) {
-                rl.question("⚠️ WARNING: Force closing position may result in loss. Continue? (yes/no): ", (answer) => {
-                    if (answer.toLowerCase() === 'yes') {
-                        config.activePosition = null;
-                        if (saveDB(config)) {
-                            console.log("✅ Position marked for closure (bot will close on next check)");
-                        }
-                    } else {
-                        console.log("❌ Force close cancelled");
-                    }
-                    rl.prompt();
-                });
-            } else {
-                console.log("❌ No active position to close");
-                rl.prompt();
-            }
-            break;
-
-        case 13:
-            const freshConfig = loadDB();
-            Object.assign(config, freshConfig);
-            console.log("✅ Configuration reloaded from file");
-            displayConfig(config);
-            rl.prompt();
-            break;
-
-        case 14:
-            try {
-                const logContent = fs.readFileSync('./log.csv', 'utf8');
-                console.log("\n" + "=".repeat(70));
-                console.log("📄 TRADE LOG (Last 10 entries):");
-                console.log("=".repeat(70));
-                const lines = logContent.trim().split('\n');
-                const lastLines = lines.slice(-10);
-                lastLines.forEach(line => console.log(line));
-                console.log("=".repeat(70));
-            } catch (error) {
-                console.log("❌ No log file found or error reading log");
-            }
-            rl.prompt();
-            break;
-    }
-};
-
-// -------------------- MAIN MENU --------------------
 const mainMenu = () => {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-        prompt: '\n📝 Enter option number (0 to exit, h for help): '
-    });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: "\nEnter option number (0 to exit, h for help): "
+  });
 
-    let config = loadDB();
+  let config = loadDB();
+  const autoReload = setInterval(() => {
+    const freshConfig = loadDB();
+    Object.assign(config, freshConfig);
+  }, 2000);
 
-    // Auto-reload config every 2 seconds
-    const autoReload = setInterval(() => {
-        const freshConfig = loadDB();
-        // Merge without overwriting display-specific values
-        const { dailyPnL, dailyTrades, activePosition, ...otherConfig } = freshConfig;
-        Object.assign(config, otherConfig);
-        
-        // Only update position if it's different
-        if (JSON.stringify(config.activePosition) !== JSON.stringify(activePosition)) {
-            config.activePosition = activePosition;
-        }
-        
-        // Update P&L and trades
-        config.dailyPnL = dailyPnL;
-        config.dailyTrades = dailyTrades;
-    }, 2000);
+  displayConfig(config);
+  console.log("\nMenu:");
+  menuOptions.forEach((option, index) => console.log(`  ${index}. ${option}`));
+  rl.prompt();
 
-    console.clear();
-    displayConfig(config);
+  rl.on("line", (line) => {
+    const input = line.trim().toLowerCase();
+    if (input === "0" || input === "exit" || input === "quit") {
+      clearInterval(autoReload);
+      rl.close();
+      return;
+    }
+    if (input === "h" || input === "help") {
+      displayConfig(config);
+      console.log("\nMenu:");
+      menuOptions.forEach((option, index) => console.log(`  ${index}. ${option}`));
+      rl.prompt();
+      return;
+    }
+    const option = parseInt(input, 10);
+    if (Number.isNaN(option) || option < 0 || option >= menuOptions.length) {
+      console.log(`Invalid option. Enter 0-${menuOptions.length - 1}`);
+      rl.prompt();
+      return;
+    }
+    if (option === 0) {
+      clearInterval(autoReload);
+      rl.close();
+      return;
+    }
+    updateConfig(rl, config, option);
+  });
 
-    console.log("\n📋 MENU OPTIONS:");
-    menuOptions.forEach((option, index) => {
-        console.log(`   ${index}. ${option}`);
-    });
-
-    rl.prompt();
-
-    rl.on('line', (line) => {
-        const input = line.trim().toLowerCase();
-        
-        if (input === '0' || input === 'exit' || input === 'quit') {
-            console.log("👋 Exiting menu... Bot continues running.");
-            clearInterval(autoReload);
-            rl.close();
-            return;
-        }
-
-        if (input === 'h' || input === 'help') {
-            displayConfig(config);
-            console.log("\n📋 MENU OPTIONS:");
-            menuOptions.forEach((option, index) => {
-                console.log(`   ${index}. ${option}`);
-            });
-            rl.prompt();
-            return;
-        }
-
-        const option = parseInt(input);
-        if (isNaN(option) || option < 0 || option >= menuOptions.length) {
-            console.log(`❌ Invalid option. Enter 0-${menuOptions.length-1} or 'h' for help`);
-            rl.prompt();
-            return;
-        }
-
-        if (option === 0) {
-            console.log("👋 Exiting menu... Bot continues running.");
-            clearInterval(autoReload);
-            rl.close();
-            return;
-        }
-
-        updateConfig(rl, config, option);
-    });
-
-    rl.on('close', () => {
-        clearInterval(autoReload);
-        console.log("\n🔄 Menu closed. Bot configuration auto-reload stopped.");
-        process.exit(0);
-    });
+  rl.on("close", () => {
+    clearInterval(autoReload);
+    console.log("\nMenu closed.");
+    process.exit(0);
+  });
 };
 
-// -------------------- START MENU --------------------
 if (require.main === module) {
-    console.log("🔧 Loading interactive configuration menu...");
-    console.log("📢 Note: This menu runs alongside the trading bot.");
-    console.log("   Changes are automatically loaded by the bot every 2 seconds.\n");
-    
-    setTimeout(() => {
-        mainMenu();
-    }, 1000);
+  mainMenu();
 }
 
-module.exports = { loadDB, saveDB };
+module.exports = { loadDB, saveDB, getDefaultConfig };

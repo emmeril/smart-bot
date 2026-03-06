@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "main": "smart.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "backtest": "node backtest.js",
+    "backtest:grid": "node backtest.js --mode grid",
+    "backtest:risk": "node backtest.js --mode grid-risk",
+    "backtest:sensitivity": "node backtest.js --mode sensitivity"
   },
   "keywords": [],
   "author": "",

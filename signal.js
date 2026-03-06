@@ -1,4 +1,4 @@
-﻿require("dotenv").config();
+﻿﻿require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const ccxt = require("ccxt");
@@ -13,6 +13,7 @@ const sequelize = new Sequelize({
 });
 
 const Config = sequelize.define('Config', {
+    strategy: { type: DataTypes.STRING, defaultValue: "hybrid" },
     pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
     usdtPerTrade: { type: DataTypes.FLOAT, defaultValue: 10 },
     leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
@@ -28,14 +29,48 @@ const Config = sequelize.define('Config', {
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: 500 },
     stopLossPercent: { type: DataTypes.FLOAT, defaultValue: 5 },
     breakoutPeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
-    breakoutTimeframe: { type: DataTypes.STRING, defaultValue: "5m" },
+    breakoutTimeframe: { type: DataTypes.STRING, defaultValue: "15m" },
     minBreakoutStrength: { type: DataTypes.FLOAT, defaultValue: 0.003 },
+    minRangePercent: { type: DataTypes.FLOAT, defaultValue: 1.2 },
+    sessionStartUTC: { type: DataTypes.INTEGER, defaultValue: 7 },
+    sessionEndUTC: { type: DataTypes.INTEGER, defaultValue: 22 },
     volumePeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
-    minVolumeRatio: { type: DataTypes.FLOAT, defaultValue: 1.4 },
+    minVolumeRatio: { type: DataTypes.FLOAT, defaultValue: 1.1 },
+    shortMinVolumeRatio: { type: DataTypes.FLOAT, defaultValue: 1.4 },
+    maxPriceDeviationPercent: { type: DataTypes.FLOAT, defaultValue: 0.5 },
     trendEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
-    trendTimeframe: { type: DataTypes.STRING, defaultValue: "1h" },
-    trendPeriod: { type: DataTypes.INTEGER, defaultValue: 120 },
-    adaptiveEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
+    trendTimeframe: { type: DataTypes.STRING, defaultValue: "15m" },
+    trendPeriod: { type: DataTypes.INTEGER, defaultValue: 80 },
+    shortTrendPeriod: { type: DataTypes.INTEGER, defaultValue: 120 },
+    shortBreakoutPeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
+    shortMinRangePercent: { type: DataTypes.FLOAT, defaultValue: 0.8 },
+    pullbackEmaPeriod: { type: DataTypes.INTEGER, defaultValue: 5 },
+    pullbackLookback: { type: DataTypes.INTEGER, defaultValue: 2 },
+    pullbackMaxDistancePct: { type: DataTypes.FLOAT, defaultValue: 0.5 },
+    rsiLongMin: { type: DataTypes.FLOAT, defaultValue: 52 },
+    rsiLongMax: { type: DataTypes.FLOAT, defaultValue: 72 },
+    atrPeriod: { type: DataTypes.INTEGER, defaultValue: 14 },
+    atrStopMult: { type: DataTypes.FLOAT, defaultValue: 0.8 },
+    atrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
+    shortAtrStopMult: { type: DataTypes.FLOAT, defaultValue: 1.4 },
+    shortAtrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
+    regimeFilterEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
+    regimeAtrLookback: { type: DataTypes.INTEGER, defaultValue: 288 },
+    regimeAtrPercentile: { type: DataTypes.FLOAT, defaultValue: 60 },
+    breakoutUseCloseConfirm: { type: DataTypes.BOOLEAN, defaultValue: true },
+    trailingEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
+    trailingActivateATR: { type: DataTypes.FLOAT, defaultValue: 1.2 },
+    trailingOffsetATR: { type: DataTypes.FLOAT, defaultValue: 0.6 },
+    shortTrailingActivateATR: { type: DataTypes.FLOAT, defaultValue: 1.0 },
+    shortTrailingOffsetATR: { type: DataTypes.FLOAT, defaultValue: 0.8 },
+    marketRegimeEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
+    marketRegimeSymbol: { type: DataTypes.STRING, defaultValue: "BTC/USDT:USDT" },
+    marketRegimeTimeframe: { type: DataTypes.STRING, defaultValue: "1h" },
+    marketRegimeFastPeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
+    marketRegimeSlowPeriod: { type: DataTypes.INTEGER, defaultValue: 120 },
+    allowLong: { type: DataTypes.BOOLEAN, defaultValue: true },
+    allowShort: { type: DataTypes.BOOLEAN, defaultValue: true },
+    adaptiveEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
     lastDailyReset: { type: DataTypes.BIGINT, defaultValue: Date.now() },
     lastUpdated: { type: DataTypes.BIGINT, defaultValue: Date.now() }
 }, { timestamps: false });
@@ -51,7 +86,7 @@ let lastPnlLog = Date.now();
 let lastTradeAt = 0;
 let balanceCache = { totalUSDT: 0, lastUpdate: 0 };
 let tickerCache = { price: null, lastUpdate: 0 };
-let breakoutOhlcvCache = { key: "", data: null, lastUpdate: 0 };
+let ohlcvCache = { key: "", data: null, lastUpdate: 0 }; // renamed from breakoutOhlcvCache
 let pnlMonitorTimer = null;
 let currentPnLMonitoringInterval = 0;
 let isMonitoringPnL = false;
@@ -59,6 +94,7 @@ let positionSyncTimer = null;
 let currentPositionSyncInterval = 0;
 let isSyncingPosition = false;
 let trendTimer = null;
+let marketRegimeTimer = null;
 let mainLoopTimer = null;
 let metricsTimer = null;
 let adaptiveTuneTimer = null;
@@ -75,19 +111,12 @@ const SYNC_LOG_TTL = 15000;
 const SIGNAL_DETAIL_LOG_TTL = 10000;
 const METRICS_LOG_INTERVAL = 60000;
 const ADAPTIVE_TUNE_INTERVAL = 60 * 60 * 1000;
-const ADAPTIVE_LOOKBACK_CANDLES = 288; // ~24h on 5m timeframe
-const ADAPTIVE_MIN_VOLUME_RATIO_MIN = 1.2;
-const ADAPTIVE_MIN_VOLUME_RATIO_MAX = 1.8;
-const ADAPTIVE_MIN_VOLUME_RATIO_STEP = 0.1;
-const ADAPTIVE_BREAKOUT_PERIOD_MIN = 16;
-const ADAPTIVE_BREAKOUT_PERIOD_MAX = 36;
-const ADAPTIVE_BREAKOUT_PERIOD_STEP = 2;
 
 let metrics = {
     windowStart: Date.now(),
     api: {
         ticker: 0,
-        breakoutOhlcv: 0,
+        ohlcv: 0,
         trendOhlcv: 0,
         balance: 0,
         positions: 0,
@@ -95,7 +124,7 @@ let metrics = {
     },
     signals: {
         analyzed: 0,
-        breakoutDetected: 0,
+        crossoverDetected: 0,
         longConfirmed: 0,
         shortConfirmed: 0
     },
@@ -109,6 +138,15 @@ let metrics = {
 
 // Trend data
 let trendData = { ema: null, lastUpdate: 0, timeframe: "1h", period: 200 };
+let marketRegimeData = {
+    symbol: "BTC/USDT:USDT",
+    timeframe: "1h",
+    state: "UNKNOWN",
+    fastEma: null,
+    slowEma: null,
+    price: null,
+    lastUpdate: 0
+};
 
 // -------------------- ENSURE LOG FILE EXISTS --------------------
 const ensureFileExists = (filePath, defaultContent = "{}") => {
@@ -149,16 +187,39 @@ const quantile = (sortedValues, p) => {
     return toFiniteNumber(sortedValues[idx], 0);
 };
 
+const calcATR = (highs, lows, closes, period) => {
+    const out = Array(closes.length).fill(null);
+    if (!Array.isArray(highs) || !Array.isArray(lows) || !Array.isArray(closes) || closes.length <= period) {
+        return out;
+    }
+
+    const tr = Array(closes.length).fill(0);
+    for (let i = 1; i < closes.length; i++) {
+        const hl = highs[i] - lows[i];
+        const hc = Math.abs(highs[i] - closes[i - 1]);
+        const lc = Math.abs(lows[i] - closes[i - 1]);
+        tr[i] = Math.max(hl, hc, lc);
+    }
+
+    let seed = 0;
+    for (let i = 1; i <= period; i++) seed += tr[i];
+    out[period] = seed / period;
+    for (let i = period + 1; i < closes.length; i++) {
+        out[i] = ((out[i - 1] * (period - 1)) + tr[i]) / period;
+    }
+    return out;
+};
+
 const resetMetricWindow = () => {
     metrics.windowStart = Date.now();
     metrics.api.ticker = 0;
-    metrics.api.breakoutOhlcv = 0;
+    metrics.api.ohlcv = 0;
     metrics.api.trendOhlcv = 0;
     metrics.api.balance = 0;
     metrics.api.positions = 0;
     metrics.api.orders = 0;
     metrics.signals.analyzed = 0;
-    metrics.signals.breakoutDetected = 0;
+    metrics.signals.crossoverDetected = 0;
     metrics.signals.longConfirmed = 0;
     metrics.signals.shortConfirmed = 0;
 };
@@ -169,7 +230,7 @@ const startMetricsReporting = () => {
         const elapsedSec = Math.max(1, Math.round((Date.now() - metrics.windowStart) / 1000));
         const apiTotal =
             metrics.api.ticker +
-            metrics.api.breakoutOhlcv +
+            metrics.api.ohlcv +
             metrics.api.trendOhlcv +
             metrics.api.balance +
             metrics.api.positions +
@@ -179,7 +240,7 @@ const startMetricsReporting = () => {
             : "0.0";
 
         console.log(
-            `[METRICS] ${elapsedSec}s | API=${apiTotal} (ticker:${metrics.api.ticker}, breakout:${metrics.api.breakoutOhlcv}, trend:${metrics.api.trendOhlcv}, bal:${metrics.api.balance}, pos:${metrics.api.positions}, order:${metrics.api.orders}) | Signals=${metrics.signals.analyzed} (breakout:${metrics.signals.breakoutDetected}, long:${metrics.signals.longConfirmed}, short:${metrics.signals.shortConfirmed}) | Trades today O/C/W/L=${metrics.trades.opened}/${metrics.trades.closed}/${metrics.trades.wins}/${metrics.trades.losses} (WR ${winRate}%)`
+            `[METRICS] ${elapsedSec}s | API=${apiTotal} (ticker:${metrics.api.ticker}, ohlcv:${metrics.api.ohlcv}, trend:${metrics.api.trendOhlcv}, bal:${metrics.api.balance}, pos:${metrics.api.positions}, order:${metrics.api.orders}) | Signals=${metrics.signals.analyzed} (setups:${metrics.signals.crossoverDetected}, long:${metrics.signals.longConfirmed}, short:${metrics.signals.shortConfirmed}) | Trades today O/C/W/L=${metrics.trades.opened}/${metrics.trades.closed}/${metrics.trades.wins}/${metrics.trades.losses} (WR ${winRate}%)`
         );
 
         resetMetricWindow();
@@ -188,6 +249,7 @@ const startMetricsReporting = () => {
 
 // -------------------- DEFAULT CONFIG --------------------
 const getDefaultConfig = () => ({
+    strategy: "hybrid",
     pair: "DOGE/USDT:USDT",
     usdtPerTrade: 10,
     leverage: 10,
@@ -203,15 +265,48 @@ const getDefaultConfig = () => ({
     monitoringInterval: 500,
     stopLossPercent: 5,
     breakoutPeriod: 20,
-    breakoutTimeframe: "5m",
+    breakoutTimeframe: "15m",
     minBreakoutStrength: 0.003,
+    minRangePercent: 1.2,
+    sessionStartUTC: 0,
+    sessionEndUTC: 23,
     volumePeriod: 20,
-    minVolumeRatio: 1.4,
+    minVolumeRatio: 1.1,
+    shortMinVolumeRatio: 1.4,
     maxPriceDeviationPercent: 0.5,
     trendEnabled: true,
-    trendTimeframe: "1h",
-    trendPeriod: 120,
-    adaptiveEnabled: true,
+    trendTimeframe: "15m",
+    trendPeriod: 80,
+    shortTrendPeriod: 120,
+    shortBreakoutPeriod: 20,
+    shortMinRangePercent: 0.8,
+    pullbackEmaPeriod: 5,
+    pullbackLookback: 2,
+    pullbackMaxDistancePct: 0.5,
+    rsiLongMin: 52,
+    rsiLongMax: 72,
+    atrPeriod: 14,
+    atrStopMult: 0.8,
+    atrTargetMult: 1.6,
+    shortAtrStopMult: 1.4,
+    shortAtrTargetMult: 1.6,
+    regimeFilterEnabled: false,
+    regimeAtrLookback: 288,
+    regimeAtrPercentile: 60,
+    breakoutUseCloseConfirm: true,
+    trailingEnabled: true,
+    trailingActivateATR: 1.2,
+    trailingOffsetATR: 0.6,
+    shortTrailingActivateATR: 1.0,
+    shortTrailingOffsetATR: 0.8,
+    marketRegimeEnabled: false,
+    marketRegimeSymbol: "BTC/USDT:USDT",
+    marketRegimeTimeframe: "1h",
+    marketRegimeFastPeriod: 20,
+    marketRegimeSlowPeriod: 120,
+    allowLong: true,
+    allowShort: true,
+    adaptiveEnabled: false,
     lastDailyReset: Date.now(),
     lastUpdated: Date.now()
 });
@@ -233,10 +328,35 @@ const normalizeConfig = (config) => {
         stopLossPercent: { min: 0, allowZero: false },
         breakoutPeriod: { min: 2, allowZero: false, integer: true },
         minBreakoutStrength: { min: 0, allowZero: false },
+        minRangePercent: { min: 0, allowZero: true },
+        sessionStartUTC: { min: 0, allowZero: true, integer: true },
+        sessionEndUTC: { min: 0, allowZero: true, integer: true },
         volumePeriod: { min: 2, allowZero: false, integer: true },
         minVolumeRatio: { min: 1, allowZero: false },
+        shortMinVolumeRatio: { min: 1, allowZero: false },
         maxPriceDeviationPercent: { min: 0, allowZero: true },
-        trendPeriod: { min: 2, allowZero: false, integer: true }
+        trendPeriod: { min: 2, allowZero: false, integer: true },
+        shortTrendPeriod: { min: 2, allowZero: false, integer: true },
+        shortBreakoutPeriod: { min: 2, allowZero: false, integer: true },
+        shortMinRangePercent: { min: 0, allowZero: true },
+        pullbackEmaPeriod: { min: 2, allowZero: false, integer: true },
+        pullbackLookback: { min: 1, allowZero: false, integer: true },
+        pullbackMaxDistancePct: { min: 0.05, allowZero: false },
+        rsiLongMin: { min: 1, allowZero: false },
+        rsiLongMax: { min: 2, allowZero: false },
+        atrPeriod: { min: 2, allowZero: false, integer: true },
+        atrStopMult: { min: 0.2, allowZero: false },
+        atrTargetMult: { min: 0.2, allowZero: false },
+        shortAtrStopMult: { min: 0.2, allowZero: false },
+        shortAtrTargetMult: { min: 0.2, allowZero: false },
+        trailingActivateATR: { min: 0.2, allowZero: false },
+        trailingOffsetATR: { min: 0.1, allowZero: false },
+        shortTrailingActivateATR: { min: 0.2, allowZero: false },
+        shortTrailingOffsetATR: { min: 0.1, allowZero: false },
+        regimeAtrLookback: { min: 20, allowZero: false, integer: true },
+        regimeAtrPercentile: { min: 10, allowZero: false },
+        marketRegimeFastPeriod: { min: 2, allowZero: false, integer: true },
+        marketRegimeSlowPeriod: { min: 2, allowZero: false, integer: true }
     };
 
     Object.entries(numericRules).forEach(([key, rule]) => {
@@ -264,6 +384,9 @@ const normalizeConfig = (config) => {
     const isValidTimeframe = (value) => typeof value === "string" && /^[1-9]\d*[mhdwM]$/.test(value.trim());
     const rawPair = typeof normalized.pair === "string" ? normalized.pair.trim() : "";
     normalized.pair = rawPair || defaults.pair;
+    normalized.strategy = typeof normalized.strategy === "string" && normalized.strategy.trim()
+        ? normalized.strategy.trim().toLowerCase()
+        : defaults.strategy;
 
     const rawMarginMode = typeof normalized.marginMode === "string" ? normalized.marginMode.trim().toLowerCase() : "";
     normalized.marginMode = rawMarginMode === "isolated" || rawMarginMode === "cross"
@@ -276,6 +399,9 @@ const normalizeConfig = (config) => {
     normalized.trendTimeframe = isValidTimeframe(normalized.trendTimeframe)
         ? normalized.trendTimeframe.trim()
         : defaults.trendTimeframe;
+    normalized.marketRegimeTimeframe = isValidTimeframe(normalized.marketRegimeTimeframe)
+        ? normalized.marketRegimeTimeframe.trim()
+        : defaults.marketRegimeTimeframe;
 
     const normalizeBoolean = (key) => {
         if (typeof normalized[key] === "boolean") return;
@@ -293,29 +419,23 @@ const normalizeConfig = (config) => {
 
     normalizeBoolean("trendEnabled");
     normalizeBoolean("adaptiveEnabled");
+    normalizeBoolean("regimeFilterEnabled");
+    normalizeBoolean("breakoutUseCloseConfirm");
+    normalizeBoolean("trailingEnabled");
+    normalizeBoolean("marketRegimeEnabled");
+    normalizeBoolean("allowLong");
+    normalizeBoolean("allowShort");
+
+    normalized.regimeAtrPercentile = clamp(toFiniteNumber(normalized.regimeAtrPercentile, defaults.regimeAtrPercentile), 10, 95);
+    normalized.rsiLongMin = clamp(toFiniteNumber(normalized.rsiLongMin, defaults.rsiLongMin), 1, 99);
+    normalized.rsiLongMax = clamp(toFiniteNumber(normalized.rsiLongMax, defaults.rsiLongMax), normalized.rsiLongMin + 1, 99);
+    normalized.sessionStartUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionStartUTC, defaults.sessionStartUTC)), 0, 23);
+    normalized.sessionEndUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionEndUTC, defaults.sessionEndUTC)), 0, 23);
+    normalized.marketRegimeSymbol = typeof normalized.marketRegimeSymbol === "string" && normalized.marketRegimeSymbol.trim()
+        ? normalized.marketRegimeSymbol.trim()
+        : defaults.marketRegimeSymbol;
 
     return normalized;
-};
-
-const applyDataDrivenConfigTuning = (config) => {
-    if (!config || typeof config !== "object") return false;
-    let changed = false;
-
-    // Data-backed relaxation:
-    // - 7-day DOGE 5m volume ratio p75~1.17, p90~1.98
-    // - 2.0x volume filter is too restrictive for daily consistency
-    if (Number(config.minVolumeRatio) === 2) {
-        config.minVolumeRatio = 1.4;
-        changed = true;
-    }
-
-    // Long trend period can over-filter entries on intraday breakout strategy.
-    if (Number(config.trendPeriod) === 200) {
-        config.trendPeriod = 120;
-        changed = true;
-    }
-
-    return changed;
 };
 
 // -------------------- INITIALIZE DATABASE --------------------
@@ -333,11 +453,6 @@ const initializeDB = async () => {
         db = configRow.toJSON();
         db.activePosition = safeParseJSON(db.activePosition, null);
         db = normalizeConfig(db);
-        if (applyDataDrivenConfigTuning(db)) {
-            await saveDB();
-            console.log("[TUNE] Applied data-driven config relaxation (volume/trend).");
-        }
-
         console.log("[OK] DB initialized successfully");
         return true;
     } catch (error) {
@@ -367,10 +482,6 @@ const reloadConfig = async () => {
         }
 
         Object.keys(normalizedConfig).forEach(key => db[key] = normalizedConfig[key]);
-        if (applyDataDrivenConfigTuning(db)) {
-            await saveDB();
-            console.log("[TUNE] Applied data-driven config relaxation (volume/trend).");
-        }
         return true;
     } catch (error) {
         console.error("[ERROR] Failed to reload config:", error.message);
@@ -448,12 +559,15 @@ const syncPositionWithExchange = async () => {
                 entryPrice: entryPrice,
                 targetPrice: null,
                 stopLossPrice: null,
-                stopLossUSDT: db.usdtPerTrade * (db.stopLossPercent / 100),
+                stopLossUSDT: -db.usdtPerTrade * (db.stopLossPercent / 100),
                 orderId: `SYNC_${Date.now()}`,
                 quantity: Math.abs(contracts),
                 entryTime: Date.now() - 300000,
+                highestSinceEntry: entryPrice,
+                lowestSinceEntry: entryPrice,
                 marginMode: (db.marginMode || "isolated").toLowerCase(),
-                targetProfitUSDT: db.targetProfitUSDT
+                targetProfitUSDT: db.targetProfitUSDT,
+                strategy: "SYNC_ONLY"
             };
             await saveDB();
             console.log("[OK] Created activePosition from exchange data");
@@ -531,89 +645,291 @@ const updateTrend = async () => {
     }
 };
 
-// -------------------- BREAKOUT SIGNAL DETECTION --------------------
+const updateMarketRegime = async () => {
+    try {
+        if (!exchange || !db || !db.marketRegimeEnabled) {
+            marketRegimeData.state = "DISABLED";
+            return;
+        }
+
+        const symbol = db.marketRegimeSymbol || "BTC/USDT:USDT";
+        const timeframe = db.marketRegimeTimeframe || "1h";
+        const fastPeriod = Math.max(2, Math.trunc(db.marketRegimeFastPeriod || 20));
+        const slowPeriod = Math.max(fastPeriod + 1, Math.trunc(db.marketRegimeSlowPeriod || 120));
+        metrics.api.trendOhlcv++;
+        const ohlcv = await exchange.fetchOHLCV(symbol, timeframe, undefined, slowPeriod + 10);
+        if (!Array.isArray(ohlcv) || ohlcv.length < slowPeriod) {
+            console.log(`[WARN] Not enough data for market regime (${symbol} ${timeframe})`);
+            return;
+        }
+
+        const closes = ohlcv.map(c => c[4]);
+        const fastEma = EMA.calculate({ values: closes, period: fastPeriod });
+        const slowEma = EMA.calculate({ values: closes, period: slowPeriod });
+        if (!fastEma.length || !slowEma.length) return;
+
+        const price = closes[closes.length - 1];
+        const fast = fastEma[fastEma.length - 1];
+        const slow = slowEma[slowEma.length - 1];
+        let state = "MIXED";
+        if (price > fast && fast > slow) state = "UP-UP";
+        else if (price < fast && fast < slow) state = "DOWN-DOWN";
+
+        marketRegimeData = {
+            symbol,
+            timeframe,
+            state,
+            fastEma: fast,
+            slowEma: slow,
+            price,
+            lastUpdate: Date.now()
+        };
+        console.log(`[REGIME] ${symbol} ${timeframe}: ${state} | price=${price} fast=${fast.toFixed(6)} slow=${slow.toFixed(6)}`);
+    } catch (error) {
+        console.error("[ERROR] Failed to update market regime:", error.message);
+    }
+};
+
+// -------------------- SIGNAL DETECTION --------------------
 const analyzeSignal = async () => {
     try {
         if (!db) return {};
         signalCount++;
         metrics.signals.analyzed++;
         const now = Date.now();
+        const strategyMode = String(db.strategy || "breakout").toLowerCase();
         if (now - lastLogTime > 5000) {
-            console.log(`\n[SIGNAL #${signalCount}] Analyzing market for BREAKOUT (${db.breakoutTimeframe})...`);
+            console.log(`\n[SIGNAL #${signalCount}] Analyzing ${strategyMode} setup (${db.breakoutTimeframe})...`);
             lastLogTime = now;
         }
 
-        const ohlcv = await getBreakoutOHLCV();
-        const minCandles = Math.max(db.breakoutPeriod + 1, db.volumePeriod + 1, 8);
-        if (ohlcv.length < minCandles) {
-            console.log(`[WARN] Not enough OHLCV data: ${ohlcv.length} candles`);
+        const breakoutPeriod = Math.max(2, Math.trunc(db.breakoutPeriod || 20));
+        const shortBreakoutPeriod = Math.max(2, Math.trunc(db.shortBreakoutPeriod || breakoutPeriod));
+        const volumePeriod = Math.max(2, Math.trunc(db.volumePeriod || 20));
+        const atrPeriod = Math.max(2, Math.trunc(db.atrPeriod || 14));
+        const regimeLookback = Math.max(20, Math.trunc(db.regimeAtrLookback || 288));
+        const pullbackEmaPeriod = Math.max(2, Math.trunc(db.pullbackEmaPeriod || 5));
+        const pullbackLookback = Math.max(1, Math.trunc(db.pullbackLookback || 2));
+        const neededCandles = Math.max(
+            breakoutPeriod + 2,
+            volumePeriod + 2,
+            atrPeriod + 2,
+            atrPeriod + regimeLookback + 2,
+            pullbackEmaPeriod + pullbackLookback + 5,
+            60
+        );
+        const ohlcv = await getOHLCV(neededCandles);
+        if (ohlcv.length < neededCandles) {
+            console.log(`[WARN] Not enough OHLCV data: ${ohlcv.length} < ${neededCandles}`);
             return {};
         }
 
-        const close = ohlcv.map(c => c[4]);
+        const open = ohlcv.map(c => c[1]);
         const high = ohlcv.map(c => c[2]);
         const low = ohlcv.map(c => c[3]);
+        const close = ohlcv.map(c => c[4]);
         const volume = ohlcv.map(c => c[5]);
+        const lastIndex = close.length - 1;
 
-        const currentPrice = close[close.length - 1];
-        const currentHigh = high[high.length - 1];
-        const currentLow = low[low.length - 1];
-        const currentVolume = volume[volume.length - 1];
+        const currentOpen = open[lastIndex];
+        const currentHigh = high[lastIndex];
+        const currentLow = low[lastIndex];
+        const currentPrice = close[lastIndex];
+        const currentVolume = volume[lastIndex];
 
-        const volumePeriod = db.volumePeriod;
         const avgVolume = volume.slice(-volumePeriod - 1, -1).reduce((a, b) => a + b, 0) / volumePeriod;
         const safeAvgVolume = avgVolume > 0 ? avgVolume : Number.EPSILON;
+        const volumeRatio = currentVolume / safeAvgVolume;
+        const volumeOk = volumeRatio >= db.minVolumeRatio;
 
-        const lookbackPeriod = db.breakoutPeriod;
-        const previousHighs = high.slice(-lookbackPeriod - 1, -1);
-        const previousLows = low.slice(-lookbackPeriod - 1, -1);
-        const resistance = Math.max(...previousHighs);
-        const support = Math.min(...previousLows);
+        const prevHighs = high.slice(lastIndex - breakoutPeriod, lastIndex);
+        const prevLows = low.slice(lastIndex - breakoutPeriod, lastIndex);
+        const resistance = Math.max(...prevHighs);
+        const support = Math.min(...prevLows);
         const range = resistance - support;
-        if (!Number.isFinite(resistance) || !Number.isFinite(support) || !Number.isFinite(range) || range <= 0) {
-            console.log("[WARN] Invalid breakout range data. Signal skipped.");
+        const shortPrevHighs = high.slice(lastIndex - shortBreakoutPeriod, lastIndex);
+        const shortPrevLows = low.slice(lastIndex - shortBreakoutPeriod, lastIndex);
+        const shortResistance = Math.max(...shortPrevHighs);
+        const shortSupport = Math.min(...shortPrevLows);
+        const shortRange = shortResistance - shortSupport;
+        if (!Number.isFinite(range) || range <= 0 || !Number.isFinite(shortRange) || shortRange <= 0) {
+            console.log("[WARN] Invalid setup range");
             return {};
         }
+
         const breakoutThreshold = range * db.minBreakoutStrength;
+        const bullishBreakout = db.breakoutUseCloseConfirm
+            ? currentPrice > resistance + breakoutThreshold
+            : currentHigh > resistance + breakoutThreshold;
+        const shortBreakoutThreshold = shortRange * db.minBreakoutStrength;
+        const bearishBreakout = db.breakoutUseCloseConfirm
+            ? currentPrice < shortSupport - shortBreakoutThreshold
+            : currentLow < shortSupport - shortBreakoutThreshold;
+        const rangePercent = currentPrice > 0 ? (range / currentPrice) * 100 : 0;
+        const rangeOk = rangePercent >= db.minRangePercent;
+        const shortRangePercent = currentPrice > 0 ? (shortRange / currentPrice) * 100 : 0;
+        const shortRangeOk = shortRangePercent >= toFiniteNumber(db.shortMinRangePercent, 0.8);
+        const hourUTC = new Date(ohlcv[lastIndex][0]).getUTCHours();
+        const sessionOk = db.sessionStartUTC <= db.sessionEndUTC
+            ? hourUTC >= db.sessionStartUTC && hourUTC <= db.sessionEndUTC
+            : hourUTC >= db.sessionStartUTC || hourUTC <= db.sessionEndUTC;
+
+        const atrSeries = calcATR(high, low, close, atrPeriod);
+        const currentATR = atrSeries[lastIndex];
+        if (!Number.isFinite(currentATR) || currentATR <= 0) {
+            console.log("[WARN] ATR is not ready");
+            return {};
+        }
 
         const rsi = RSI.calculate({ values: close, period: 7 });
         const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1] : 50;
+        const prevRSI = rsi.length > 1 ? rsi[rsi.length - 2] : currentRSI;
+        const pullbackEmaSeries = EMA.calculate({ values: close, period: pullbackEmaPeriod });
+        const currentPullbackEma = pullbackEmaSeries.length > 0 ? pullbackEmaSeries[pullbackEmaSeries.length - 1] : null;
+        const prevPullbackEma = pullbackEmaSeries.length > 1 ? pullbackEmaSeries[pullbackEmaSeries.length - 2] : currentPullbackEma;
+        const longTrendSeries = EMA.calculate({ values: close, period: Math.max(2, Math.trunc(db.trendPeriod || 80)) });
+        const currentLongTrendEma = longTrendSeries.length > 0 ? longTrendSeries[longTrendSeries.length - 1] : trendData.ema;
+        const shortTrendPeriod = Math.max(2, Math.trunc(db.shortTrendPeriod || 120));
+        const shortTrendSeries = EMA.calculate({ values: close, period: shortTrendPeriod });
+        const currentShortTrendEma = shortTrendSeries.length > 0 ? shortTrendSeries[shortTrendSeries.length - 1] : trendData.ema;
 
-        const bullishBreakout = currentHigh > resistance + breakoutThreshold;
-        const bearishBreakout = currentLow < support - breakoutThreshold;
-        const volumeOk = currentVolume > safeAvgVolume * db.minVolumeRatio;
-        const hasBreakout = bullishBreakout || bearishBreakout;
-        if (hasBreakout) metrics.signals.breakoutDetected++;
-        const shouldDetailLog = hasBreakout || (Date.now() - lastSignalDetailLogAt >= SIGNAL_DETAIL_LOG_TTL);
+        let regimeOk = true;
+        if (db.regimeFilterEnabled) {
+            const atrWindow = atrSeries
+                .slice(Math.max(0, lastIndex - regimeLookback), lastIndex)
+                .filter(value => Number.isFinite(value) && value > 0)
+                .sort((a, b) => a - b);
+            const atrThreshold = quantile(atrWindow, db.regimeAtrPercentile / 100);
+            regimeOk = atrWindow.length >= Math.min(regimeLookback, 20) && currentATR >= atrThreshold;
+        }
 
-        let canLong = bullishBreakout && currentRSI > 50 && currentRSI < 75 && volumeOk;
-        let canShort = bearishBreakout && currentRSI > 25 && currentRSI < 50 && volumeOk;
+        let marketRegimeOkLong = true;
+        let marketRegimeOkShort = true;
+        if (db.marketRegimeEnabled) {
+            marketRegimeOkLong = marketRegimeData.state === "UP-UP";
+            marketRegimeOkShort = marketRegimeData.state === "DOWN-DOWN";
+        }
 
-        if (db.trendEnabled && trendData.ema) {
+        let canLong = false, canShort = false;
+        let detailTitle = "HYBRID ANALYSIS";
+        let setupDetected = bullishBreakout || bearishBreakout;
+        let extraDetailLines = [];
+        if (strategyMode === "pullback" || strategyMode === "hybrid") {
+            detailTitle = "PULLBACK MOMENTUM ANALYSIS";
+            const trendOk = Number.isFinite(currentLongTrendEma) ? currentPrice > currentLongTrendEma : true;
+            const recentLow = Math.min(...low.slice(Math.max(0, lastIndex - pullbackLookback), lastIndex + 1));
+            const touchDistancePct = Number.isFinite(currentPullbackEma) && currentPullbackEma > 0
+                ? Math.abs((recentLow - currentPullbackEma) / currentPullbackEma) * 100
+                : Number.POSITIVE_INFINITY;
+            const touchedPullbackZone = Number.isFinite(currentPullbackEma) &&
+                recentLow <= currentPullbackEma &&
+                touchDistancePct <= db.pullbackMaxDistancePct;
+            const prevClose = close[lastIndex - 1];
+            const reclaim = Number.isFinite(prevPullbackEma) && prevClose <= prevPullbackEma && currentPrice > currentPullbackEma;
+            const momentumLongOk = currentPrice > currentOpen && currentPrice > prevClose && currentRSI > prevRSI;
+            setupDetected = touchedPullbackZone || reclaim;
+            canLong =
+                trendOk &&
+                touchedPullbackZone &&
+                reclaim &&
+                volumeOk &&
+                sessionOk &&
+                regimeOk &&
+                marketRegimeOkLong &&
+                momentumLongOk &&
+                currentRSI >= db.rsiLongMin &&
+                currentRSI <= db.rsiLongMax;
+            canShort = false;
+            extraDetailLines = [
+                `   Pullback EMA (${pullbackEmaPeriod}): ${Number.isFinite(currentPullbackEma) ? currentPullbackEma.toFixed(6) : "n/a"}`,
+                `   Recent Low (${pullbackLookback}): ${recentLow.toFixed(6)}`,
+                `   Pullback Distance: ${Number.isFinite(touchDistancePct) ? touchDistancePct.toFixed(2) : "n/a"}% (max ${db.pullbackMaxDistancePct}%)`,
+                `   Pullback Touched: ${touchedPullbackZone ? "[OK]" : "[NO]"}`,
+                `   Reclaim EMA: ${reclaim ? "[OK]" : "[NO]"}`,
+                `   RSI Momentum: ${momentumLongOk ? "[OK]" : "[NO]"} (${currentRSI.toFixed(2)} vs prev ${prevRSI.toFixed(2)})`,
+                `   Trend EMA Long: ${currentLongTrendEma} → Long trend ok: ${trendOk}`
+            ];
+            if (strategyMode === "hybrid") {
+                const shortTrendOk = Number.isFinite(currentShortTrendEma) ? currentPrice < currentShortTrendEma : true;
+                const shortVolumeOk = volumeRatio >= toFiniteNumber(db.shortMinVolumeRatio, 1.4);
+                const shortMomentumOk = currentPrice < currentOpen;
+                canShort =
+                    bearishBreakout &&
+                    shortVolumeOk &&
+                    shortRangeOk &&
+                    sessionOk &&
+                    regimeOk &&
+                    shortTrendOk &&
+                    marketRegimeOkShort &&
+                    shortMomentumOk &&
+                    currentRSI > 25 &&
+                    currentRSI < 50;
+                setupDetected = setupDetected || bearishBreakout;
+                detailTitle = "HYBRID PULLBACK/BREAKOUT ANALYSIS";
+                extraDetailLines.push(`   Short Breakout (${shortBreakoutPeriod}): ${bearishBreakout ? "[OK]" : "[NO]"}`);
+                extraDetailLines.push(`   Short Volume OK: ${shortVolumeOk ? "[OK]" : "[NO]"} (min ${db.shortMinVolumeRatio}x)`);
+                extraDetailLines.push(`   Short Range OK: ${shortRangeOk ? "[OK]" : "[NO]"} (min ${db.shortMinRangePercent}%)`);
+                extraDetailLines.push(`   Trend EMA Short: ${currentShortTrendEma} → Short trend ok: ${shortTrendOk}`);
+            }
+        } else {
+            if (bullishBreakout && volumeOk && rangeOk && sessionOk && regimeOk && marketRegimeOkLong && currentRSI > 50 && currentRSI < 75) {
+                canLong = true;
+            }
+            if (bearishBreakout && volumeRatio >= toFiniteNumber(db.shortMinVolumeRatio, db.minVolumeRatio) && shortRangeOk && sessionOk && regimeOk && marketRegimeOkShort && currentRSI > 25 && currentRSI < 50) {
+                canShort = true;
+            }
+        }
+
+        if (strategyMode !== "pullback") {
+            if (currentPrice <= currentOpen) canLong = false;
+            if (currentPrice >= currentOpen) canShort = false;
+        }
+
+        if (!db.allowLong) canLong = false;
+        if (!db.allowShort) canShort = false;
+
+        if (strategyMode !== "pullback" && db.trendEnabled && trendData.ema) {
             if (currentPrice <= trendData.ema) canLong = false;
             if (currentPrice >= trendData.ema) canShort = false;
         }
+
+        if (setupDetected) metrics.signals.crossoverDetected++;
         if (canLong) metrics.signals.longConfirmed++;
         if (canShort) metrics.signals.shortConfirmed++;
 
+        const shouldDetailLog = setupDetected || (Date.now() - lastSignalDetailLogAt >= SIGNAL_DETAIL_LOG_TTL);
+
         if (shouldDetailLog) {
             console.log("\n" + "=".repeat(50));
-            console.log(`BREAKOUT LEVELS (${db.breakoutTimeframe}):`);
+            console.log(`${detailTitle} (${db.breakoutTimeframe}):`);
             console.log(`   Current Price: ${currentPrice}`);
+            if (strategyMode !== "pullback") {
+                console.log(`   Resistance (${breakoutPeriod}): ${resistance.toFixed(6)}`);
+                console.log(`   Support (${breakoutPeriod}): ${support.toFixed(6)}`);
+                console.log(`   Range: ${range.toFixed(6)} (${rangePercent.toFixed(2)}%)`);
+            }
             console.log(`   Current Volume: ${currentVolume.toFixed(2)}`);
             console.log(`   Avg Volume (${volumePeriod}): ${avgVolume.toFixed(2)}`);
-            console.log(`   Volume Ratio: ${(currentVolume / safeAvgVolume).toFixed(2)}x (min ${db.minVolumeRatio}x)`);
-            console.log(`   Resistance: ${resistance.toFixed(6)}`);
-            console.log(`   Support: ${support.toFixed(6)}`);
-            console.log(`   Range: ${range.toFixed(6)}`);
-            console.log(`   Breakout Threshold: ±${breakoutThreshold.toFixed(6)} (${db.minBreakoutStrength*100}% of range)`);
+            console.log(`   Volume Ratio: ${volumeRatio.toFixed(2)}x (min ${db.minVolumeRatio}x)`);
             console.log(`   RSI 7: ${currentRSI.toFixed(2)}`);
+            console.log(`   ATR ${atrPeriod}: ${currentATR.toFixed(6)}`);
             console.log("");
-            console.log("BREAKOUT CONDITIONS:");
-            console.log(`   Bullish Breakout: ${bullishBreakout ? "[OK] ABOVE RESISTANCE" : "[NO] NOT BROKEN"}`);
-            console.log(`   Bearish Breakout: ${bearishBreakout ? "[OK] BELOW SUPPORT" : "[NO] NOT BROKEN"}`);
+            console.log("SETUP CONDITIONS:");
+            if (strategyMode !== "pullback") {
+                console.log(`   Bullish Breakout: ${bullishBreakout ? "[OK]" : "[NO]"}`);
+                console.log(`   Bearish Breakout: ${bearishBreakout ? "[OK]" : "[NO]"}`);
+            }
             console.log(`   Volume OK: ${volumeOk ? "[OK]" : "[NO]"}`);
-            if (db.trendEnabled && trendData.ema) {
+            if (strategyMode !== "pullback") {
+                console.log(`   Range OK: ${rangeOk ? "[OK]" : "[NO]"} (min ${db.minRangePercent}%)`);
+            }
+            console.log(`   Session OK: ${sessionOk ? "[OK]" : "[NO]"} (${db.sessionStartUTC}-${db.sessionEndUTC} UTC, now ${hourUTC})`);
+            console.log(`   Regime OK: ${regimeOk ? "[OK]" : "[NO]"}`);
+            if (db.marketRegimeEnabled) {
+                console.log(`   Market Regime: ${marketRegimeData.state} (${marketRegimeData.symbol} ${marketRegimeData.timeframe})`);
+            }
+            extraDetailLines.forEach((line) => console.log(line));
+            if (strategyMode !== "pullback" && db.trendEnabled && trendData.ema) {
                 console.log(`   Trend EMA: ${trendData.ema} → Long allowed: ${canLong}, Short allowed: ${canShort}`);
             }
             console.log("");
@@ -624,7 +940,31 @@ const analyzeSignal = async () => {
             lastSignalDetailLogAt = Date.now();
         }
 
-        return { canLong, canShort, price: currentPrice, rsi: currentRSI, resistance, support, hasSignal: hasBreakout };
+        return {
+            canLong,
+            canShort,
+            price: currentPrice,
+            rsi: currentRSI,
+            atr: currentATR,
+            rangePercent,
+            resistance,
+            support,
+            hasSignal: setupDetected,
+            strategy: strategyMode === "hybrid" ? (canShort ? "BREAKOUT_SHORT_ATR" : "PULLBACK_LONG_ATR") : (strategyMode === "pullback" ? "PULLBACK_ATR" : "BREAKOUT_ATR"),
+            riskOverrides: canShort
+                ? {
+                    atrStopMult: toFiniteNumber(db.shortAtrStopMult, db.atrStopMult),
+                    atrTargetMult: toFiniteNumber(db.shortAtrTargetMult, db.atrTargetMult),
+                    trailingActivateATR: toFiniteNumber(db.shortTrailingActivateATR, db.trailingActivateATR),
+                    trailingOffsetATR: toFiniteNumber(db.shortTrailingOffsetATR, db.trailingOffsetATR)
+                }
+                : {
+                    atrStopMult: toFiniteNumber(db.atrStopMult, 0.8),
+                    atrTargetMult: toFiniteNumber(db.atrTargetMult, 1.6),
+                    trailingActivateATR: toFiniteNumber(db.trailingActivateATR, 1.2),
+                    trailingOffsetATR: toFiniteNumber(db.trailingOffsetATR, 0.6)
+                }
+        };
     } catch (error) {
         console.error("[ERROR] Breakout analysis failed:", error.message);
         return {};
@@ -632,7 +972,7 @@ const analyzeSignal = async () => {
 };
 
 // -------------------- PLACE ORDER --------------------
-const placeOrder = async (side, signalPrice) => {
+const placeOrder = async (side, signalData = {}) => {
     try {
         if (!db || db.activePosition || isPlacingOrder || isClosingPosition) return;
         isPlacingOrder = true;
@@ -647,6 +987,14 @@ const placeOrder = async (side, signalPrice) => {
             return;
         }
 
+        const signalPrice = typeof signalData === "object" ? signalData.price : signalData;
+        const signalATR = typeof signalData === "object" ? toFiniteNumber(signalData.atr, null) : null;
+        const strategyName = typeof signalData === "object" && signalData.strategy ? String(signalData.strategy) : "BREAKOUT_ATR";
+        const riskOverrides = typeof signalData === "object" && signalData.riskOverrides ? signalData.riskOverrides : {};
+        const atrStopMult = toFiniteNumber(riskOverrides.atrStopMult, db.atrStopMult);
+        const atrTargetMult = toFiniteNumber(riskOverrides.atrTargetMult, db.atrTargetMult);
+        const trailingActivateATR = toFiniteNumber(riskOverrides.trailingActivateATR, db.trailingActivateATR);
+        const trailingOffsetATR = toFiniteNumber(riskOverrides.trailingOffsetATR, db.trailingOffsetATR);
         const hasSignalPrice = Number(signalPrice) > 0;
         const entryPrice = hasSignalPrice ? Number(signalPrice) : tickerPrice;
         const maxDeviationPercent = Number(db.maxPriceDeviationPercent ?? 0.5);
@@ -673,33 +1021,39 @@ const placeOrder = async (side, signalPrice) => {
             return;
         }
 
-        const targetProfitUSDT = db.targetProfitUSDT;
         let targetPrice;
-        if (side === "buy") {
-            targetPrice = entryPrice + (targetProfitUSDT / adjustedQty);
-        } else {
-            targetPrice = entryPrice - (targetProfitUSDT / adjustedQty);
-        }
         const pricePrecision = market?.precision?.price || 8;
-        targetPrice = parseFloat(targetPrice.toFixed(pricePrecision));
-
-        const stopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
         let stopLossPrice;
-        if (side === "buy") {
-            stopLossPrice = entryPrice + (stopLossUSDT / adjustedQty);
+        let targetProfitUSDT = db.targetProfitUSDT;
+        let stopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
+        if (signalATR && signalATR > 0) {
+            const stopDistance = signalATR * atrStopMult;
+            const targetDistance = signalATR * atrTargetMult;
+            targetPrice = side === "buy" ? entryPrice + targetDistance : entryPrice - targetDistance;
+            stopLossPrice = side === "buy" ? entryPrice - stopDistance : entryPrice + stopDistance;
+            targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
+            stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
         } else {
-            stopLossPrice = entryPrice - (stopLossUSDT / adjustedQty);
+            targetPrice = side === "buy"
+                ? entryPrice + (targetProfitUSDT / adjustedQty)
+                : entryPrice - (targetProfitUSDT / adjustedQty);
+            stopLossPrice = side === "buy"
+                ? entryPrice + (stopLossUSDT / adjustedQty)
+                : entryPrice - (stopLossUSDT / adjustedQty);
         }
+        targetPrice = parseFloat(targetPrice.toFixed(pricePrecision));
         stopLossPrice = parseFloat(stopLossPrice.toFixed(pricePrecision));
 
         console.log(`   Order Details:`);
         console.log(`   - Amount: ${db.usdtPerTrade} USDT × ${db.leverage}x = ${(db.usdtPerTrade * db.leverage).toFixed(2)} USDT`);
         console.log(`   - Quantity: ${adjustedQty} ${db.pair.split('/')[0]}`);
         console.log(`   - Entry Price: ${entryPrice}`);
-        console.log(`   - Target Profit: ${targetProfitUSDT} USDT (1:1 risk-reward)`);
+        console.log(`   - Strategy: ${strategyName}`);
+        console.log(`   - Target Profit: ${targetProfitUSDT.toFixed(4)} USDT`);
         console.log(`   - Target Price: ${targetPrice}`);
-        console.log(`   - Stop Loss: ${stopLossUSDT} USDT (${db.stopLossPercent}%)`);
+        console.log(`   - Stop Loss: ${stopLossUSDT.toFixed(4)} USDT`);
         console.log(`   - Stop Loss Price: ${stopLossPrice}`);
+        console.log(`   - ATR Risk: stop ${atrStopMult}x | target ${atrTargetMult}x | trail ${trailingActivateATR}/${trailingOffsetATR}x`);
 
         const order = await exchange.createOrder(db.pair, "market", side, adjustedQty, undefined, {
             marginMode: (db.marginMode || "isolated").toLowerCase()
@@ -715,8 +1069,14 @@ const placeOrder = async (side, signalPrice) => {
             orderId: order.id,
             quantity: adjustedQty,
             entryTime: Date.now(),
+            highestSinceEntry: entryPrice,
+            lowestSinceEntry: entryPrice,
             marginMode: (db.marginMode || "isolated").toLowerCase(),
-            targetProfitUSDT: targetProfitUSDT
+            targetProfitUSDT: targetProfitUSDT,
+            atrAtEntry: signalATR,
+            strategy: strategyName,
+            trailingActivateATR,
+            trailingOffsetATR
         };
 
         await saveDB();
@@ -796,122 +1156,35 @@ const getPrice = async (forceRefresh = false) => {
     }
 };
 
-const getBreakoutOHLCV = async (forceRefresh = false) => {
+const getOHLCV = async (limit = 100, forceRefresh = false) => {
     const timeframe = db?.breakoutTimeframe || "5m";
-    const limit = (db?.breakoutPeriod || 20) + 10 + (db?.volumePeriod || 20);
     const cacheKey = `${db?.pair || ""}:${timeframe}:${limit}`;
     const now = Date.now();
 
     if (
         !forceRefresh &&
-        breakoutOhlcvCache.key === cacheKey &&
-        now - breakoutOhlcvCache.lastUpdate < OHLCV_CACHE_TTL &&
-        Array.isArray(breakoutOhlcvCache.data)
+        ohlcvCache.key === cacheKey &&
+        now - ohlcvCache.lastUpdate < OHLCV_CACHE_TTL &&
+        Array.isArray(ohlcvCache.data)
     ) {
-        return breakoutOhlcvCache.data;
+        return ohlcvCache.data;
     }
 
     const ohlcv = await exchange.fetchOHLCV(db.pair, timeframe, undefined, limit);
-    metrics.api.breakoutOhlcv++;
-    breakoutOhlcvCache = { key: cacheKey, data: ohlcv, lastUpdate: now };
+    metrics.api.ohlcv++;
+    ohlcvCache = { key: cacheKey, data: ohlcv, lastUpdate: now };
     return ohlcv;
 };
 
+// Adaptive tuning is disabled; this function now does nothing if adaptiveEnabled is false
 const runAdaptiveConfigTuning = async () => {
     if (!db || !exchange || isAdaptiveTuning) return;
-    if (!db.trendEnabled && !db.breakoutTimeframe) return;
+    if (!db.adaptiveEnabled) return; // disabled for new strategy
     isAdaptiveTuning = true;
     try {
-        const timeframe = db.breakoutTimeframe || "5m";
-        const limit = Math.max(
-            ADAPTIVE_LOOKBACK_CANDLES,
-            (db.breakoutPeriod || 20) + (db.volumePeriod || 20) + 30
-        );
-        const ohlcv = await exchange.fetchOHLCV(db.pair, timeframe, undefined, limit);
-        metrics.api.breakoutOhlcv++;
-        if (!Array.isArray(ohlcv) || ohlcv.length < Math.max(80, (db.volumePeriod || 20) + 10)) {
-            return;
-        }
-
-        const highs = ohlcv.map(c => toFiniteNumber(c[2], 0));
-        const lows = ohlcv.map(c => toFiniteNumber(c[3], 0));
-        const volumes = ohlcv.map(c => toFiniteNumber(c[5], 0));
-        const period = Math.max(2, Math.trunc(db.breakoutPeriod || 20));
-        const volumePeriod = Math.max(2, Math.trunc(db.volumePeriod || 20));
-        const minStrength = toFiniteNumber(db.minBreakoutStrength, 0.003);
-        const start = Math.max(period, volumePeriod);
-
-        const volRatios = [];
-        let breakoutCount = 0;
-        let tested = 0;
-        for (let i = start; i < ohlcv.length; i++) {
-            const resistance = Math.max(...highs.slice(i - period, i));
-            const support = Math.min(...lows.slice(i - period, i));
-            const range = resistance - support;
-            if (!Number.isFinite(range) || range <= 0) continue;
-
-            tested++;
-            const threshold = range * minStrength;
-            if (highs[i] > resistance + threshold || lows[i] < support - threshold) {
-                breakoutCount++;
-            }
-
-            const avgVol = volumes.slice(i - volumePeriod, i).reduce((a, b) => a + b, 0) / volumePeriod;
-            if (avgVol > 0) volRatios.push(volumes[i] / avgVol);
-        }
-
-        if (tested < 30 || volRatios.length < 30) return;
-        const sortedRatios = [...volRatios].sort((a, b) => a - b);
-        const p75 = quantile(sortedRatios, 0.75);
-        const breakoutRatePct = (breakoutCount / tested) * 100;
-
-        const oldVolumeRatio = toFiniteNumber(db.minVolumeRatio, 1.4);
-        const oldBreakoutPeriod = period;
-
-        const targetVolumeRatio = clamp(
-            Number((p75 * 1.05).toFixed(2)),
-            ADAPTIVE_MIN_VOLUME_RATIO_MIN,
-            ADAPTIVE_MIN_VOLUME_RATIO_MAX
-        );
-        const volumeDelta = clamp(
-            targetVolumeRatio - oldVolumeRatio,
-            -ADAPTIVE_MIN_VOLUME_RATIO_STEP,
-            ADAPTIVE_MIN_VOLUME_RATIO_STEP
-        );
-        const newVolumeRatio = Number(
-            clamp(oldVolumeRatio + volumeDelta, ADAPTIVE_MIN_VOLUME_RATIO_MIN, ADAPTIVE_MIN_VOLUME_RATIO_MAX).toFixed(2)
-        );
-
-        let breakoutPeriodDelta = 0;
-        if (breakoutRatePct > 22) breakoutPeriodDelta = ADAPTIVE_BREAKOUT_PERIOD_STEP;
-        else if (breakoutRatePct < 10) breakoutPeriodDelta = -ADAPTIVE_BREAKOUT_PERIOD_STEP;
-
-        const newBreakoutPeriod = clamp(
-            oldBreakoutPeriod + breakoutPeriodDelta,
-            ADAPTIVE_BREAKOUT_PERIOD_MIN,
-            ADAPTIVE_BREAKOUT_PERIOD_MAX
-        );
-
-        let changed = false;
-        if (Math.abs(newVolumeRatio - oldVolumeRatio) >= 0.01) {
-            db.minVolumeRatio = newVolumeRatio;
-            changed = true;
-        }
-        if (newBreakoutPeriod !== oldBreakoutPeriod) {
-            db.breakoutPeriod = newBreakoutPeriod;
-            changed = true;
-        }
-
-        if (changed) {
-            await saveDB();
-            console.log(
-                `[ADAPTIVE] Updated config from market stats (${timeframe}, ${ohlcv.length} candles): minVolumeRatio ${oldVolumeRatio} -> ${db.minVolumeRatio}, breakoutPeriod ${oldBreakoutPeriod} -> ${db.breakoutPeriod}, breakoutRate=${breakoutRatePct.toFixed(2)}%, volP75=${p75.toFixed(2)}`
-            );
-        } else {
-            console.log(
-                `[ADAPTIVE] No config change (${timeframe}): breakoutRate=${breakoutRatePct.toFixed(2)}%, volP75=${p75.toFixed(2)}, minVolumeRatio=${oldVolumeRatio}, breakoutPeriod=${oldBreakoutPeriod}`
-            );
-        }
+        // Original tuning logic for breakout – not used, but kept for compatibility
+        // (could be removed or left as is)
+        console.log("[ADAPTIVE] Tuning is disabled for breakout ATR strategy.");
     } catch (error) {
         console.error("[ERROR] Adaptive tuning failed:", error.message);
     } finally {
@@ -926,7 +1199,7 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         const parsedTime = Date.parse(timestamp);
         lastTradeAt = Number.isFinite(parsedTime) ? parsedTime : Date.now();
         const marginMode = (db.marginMode || "isolated").toUpperCase();
-        const strategy = `BREAKOUT_${String(db.breakoutTimeframe || "5m").toUpperCase()}`;
+        const strategy = db?.activePosition?.strategy || `BREAKOUT_ATR_${String(db.breakoutTimeframe || "5m").toUpperCase()}`;
         const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},${marginMode},${db.stopLossPercent},${strategy}\n`;
         fs.appendFileSync(logPath, line);
     } catch (error) {
@@ -994,10 +1267,53 @@ const startPnLMonitoring = () => {
         const currentPrice = await getPrice();
         if (!currentPrice) return;
 
-        const { side, entryPrice, quantity, targetProfitUSDT } = db.activePosition;
+        const {
+            side,
+            entryPrice,
+            quantity,
+            targetProfitUSDT,
+            targetPrice,
+            stopLossPrice,
+            atrAtEntry,
+            highestSinceEntry,
+            lowestSinceEntry,
+            trailingActivateATR: positionTrailingActivateATR,
+            trailingOffsetATR: positionTrailingOffsetATR
+        } = db.activePosition;
         if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
             console.error("[ERROR] Invalid active position data for P&L monitoring.");
             return;
+        }
+
+        if (!Number.isFinite(db.activePosition.highestSinceEntry)) db.activePosition.highestSinceEntry = entryPrice;
+        if (!Number.isFinite(db.activePosition.lowestSinceEntry)) db.activePosition.lowestSinceEntry = entryPrice;
+        db.activePosition.highestSinceEntry = Math.max(highestSinceEntry ?? entryPrice, currentPrice);
+        db.activePosition.lowestSinceEntry = Math.min(lowestSinceEntry ?? entryPrice, currentPrice);
+
+        if (db.trailingEnabled && Number.isFinite(atrAtEntry) && atrAtEntry > 0) {
+            const effectiveTrailingActivateATR = toFiniteNumber(positionTrailingActivateATR, db.trailingActivateATR);
+            const effectiveTrailingOffsetATR = toFiniteNumber(positionTrailingOffsetATR, db.trailingOffsetATR);
+            const trailActivationMove = effectiveTrailingActivateATR * atrAtEntry;
+            const trailOffsetMove = effectiveTrailingOffsetATR * atrAtEntry;
+            if (side === "buy") {
+                const activated = db.activePosition.highestSinceEntry >= entryPrice + trailActivationMove;
+                if (activated) {
+                    const trailedStop = db.activePosition.highestSinceEntry - trailOffsetMove;
+                    if (!Number.isFinite(db.activePosition.stopLossPrice) || trailedStop > db.activePosition.stopLossPrice) {
+                        db.activePosition.stopLossPrice = trailedStop;
+                        db.activePosition.stopLossUSDT = -Math.abs(db.activePosition.stopLossPrice - entryPrice) * quantity;
+                    }
+                }
+            } else {
+                const activated = db.activePosition.lowestSinceEntry <= entryPrice - trailActivationMove;
+                if (activated) {
+                    const trailedStop = db.activePosition.lowestSinceEntry + trailOffsetMove;
+                    if (!Number.isFinite(db.activePosition.stopLossPrice) || trailedStop < db.activePosition.stopLossPrice) {
+                        db.activePosition.stopLossPrice = trailedStop;
+                        db.activePosition.stopLossUSDT = -Math.abs(db.activePosition.stopLossPrice - entryPrice) * quantity;
+                    }
+                }
+            }
         }
         const profitUSDT = side === "buy"
             ? (currentPrice - entryPrice) * quantity
@@ -1006,22 +1322,34 @@ const startPnLMonitoring = () => {
             ? ((currentPrice - entryPrice) / entryPrice * 100)
             : ((entryPrice - currentPrice) / entryPrice * 100);
 
-        if (profitUSDT >= targetProfitUSDT) {
-            console.log(`\n[PROFIT] Target hit (+${targetProfitUSDT} USDT)! Closing...`);
+        const targetHit = Number.isFinite(targetPrice) &&
+            (side === "buy" ? currentPrice >= targetPrice : currentPrice <= targetPrice);
+        const effectiveTargetProfitUSDT = Number.isFinite(targetProfitUSDT) && targetProfitUSDT > 0
+            ? targetProfitUSDT
+            : db.targetProfitUSDT;
+        if (targetHit || profitUSDT >= effectiveTargetProfitUSDT) {
+            console.log(`\n[PROFIT] Target hit (+${effectiveTargetProfitUSDT.toFixed(4)} USDT)! Closing...`);
             await closePosition("PROFIT_TARGET", profitUSDT, profitPercent);
             return;
         }
 
-        const stopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
-        if (profitUSDT <= stopLossUSDT) {
-            console.log(`\n[STOP] Stop loss hit (${stopLossUSDT} USDT)! Closing...`);
+        const effectiveStopLossUSDT = Number.isFinite(db.activePosition.stopLossUSDT)
+            ? db.activePosition.stopLossUSDT
+            : -db.usdtPerTrade * (db.stopLossPercent / 100);
+        const effectiveStopLossPrice = Number.isFinite(db.activePosition.stopLossPrice)
+            ? db.activePosition.stopLossPrice
+            : stopLossPrice;
+        const stopHit = Number.isFinite(effectiveStopLossPrice) &&
+            (side === "buy" ? currentPrice <= effectiveStopLossPrice : currentPrice >= effectiveStopLossPrice);
+        if (stopHit || profitUSDT <= effectiveStopLossUSDT) {
+            console.log(`\n[STOP] Stop loss hit (${effectiveStopLossUSDT.toFixed(4)} USDT)! Closing...`);
             await closePosition("STOP_LOSS", profitUSDT, profitPercent);
             return;
         }
 
         const nearExit =
-            profitUSDT >= (targetProfitUSDT * 0.7) ||
-            profitUSDT <= (stopLossUSDT * 0.7);
+            profitUSDT >= (effectiveTargetProfitUSDT * 0.7) ||
+            profitUSDT <= (effectiveStopLossUSDT * 0.7);
         const pnlLogInterval = nearExit ? 2000 : 5000;
         if (Date.now() - lastPnlLog > pnlLogInterval) {
             console.log(`\n[PNL] Real-time P&L: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
@@ -1078,6 +1406,7 @@ const shutdown = async (signal = "EXIT") => {
     if (pnlMonitorTimer) clearInterval(pnlMonitorTimer);
     if (positionSyncTimer) clearInterval(positionSyncTimer);
     if (trendTimer) clearInterval(trendTimer);
+    if (marketRegimeTimer) clearInterval(marketRegimeTimer);
     if (mainLoopTimer) clearInterval(mainLoopTimer);
     if (metricsTimer) clearInterval(metricsTimer);
     if (adaptiveTuneTimer) clearInterval(adaptiveTuneTimer);
@@ -1107,7 +1436,9 @@ const shutdown = async (signal = "EXIT") => {
         await setMarginMode();
         await syncPositionWithExchange();
         await updateTrend();
+        await updateMarketRegime();
         trendTimer = setInterval(updateTrend, 15 * 60 * 1000);
+        marketRegimeTimer = setInterval(updateMarketRegime, 15 * 60 * 1000);
 
         startPnLMonitoring();
         startPositionSync();
@@ -1119,13 +1450,16 @@ const shutdown = async (signal = "EXIT") => {
         const totalUSDT = await getTotalUSDTBalance(true);
 
         console.log("\n" + "=".repeat(70));
-        console.log("BREAKOUT SCALPING BOT (5m, Volume 2x, RSI Ketat)");
+        console.log("HYBRID DOGE MOMENTUM BOT");
         console.log("=".repeat(70));
         console.log(`Balance: $${totalUSDT.toFixed(2)}`);
         console.log(`Pair: ${db.pair}`);
-        console.log(`Strategy: ${db.breakoutTimeframe} breakout (${db.breakoutPeriod}c) + Volume ${db.minVolumeRatio}x + RSI`);
-        console.log(`Target per trade: $${db.targetProfitUSDT} | Stop loss: $${(db.usdtPerTrade * db.stopLossPercent/100).toFixed(2)}`);
-        console.log(`Risk:Reward = 1:1`);
+        console.log(`Strategy: ${db.strategy} | ${db.breakoutTimeframe} | pair ${db.pair}`);
+        console.log(`Long: pullback EMA ${db.pullbackEmaPeriod} | lookback ${db.pullbackLookback} | max distance ${db.pullbackMaxDistancePct}% | RSI ${db.rsiLongMin}-${db.rsiLongMax} | vol ${db.minVolumeRatio}x | trend ${db.trendPeriod}`);
+        console.log(`Short: breakout ${db.shortBreakoutPeriod} | min range ${db.shortMinRangePercent}% | vol ${db.shortMinVolumeRatio}x | trend ${db.shortTrendPeriod}`);
+        console.log(`ATR long: ${db.atrStopMult}/${db.atrTargetMult}x trail ${db.trailingEnabled ? `${db.trailingActivateATR}/${db.trailingOffsetATR}x` : "OFF"}`);
+        console.log(`ATR short: ${db.shortAtrStopMult}/${db.shortAtrTargetMult}x trail ${db.trailingEnabled ? `${db.shortTrailingActivateATR}/${db.shortTrailingOffsetATR}x` : "OFF"}`);
+        console.log(`Filters: session ${db.sessionStartUTC}-${db.sessionEndUTC} UTC | atr regime ${db.regimeFilterEnabled ? `ON p${db.regimeAtrPercentile}` : "OFF"} | market regime ${db.marketRegimeEnabled ? `${db.marketRegimeSymbol} ${marketRegimeData.state}` : "OFF"}`);
         console.log(`Leverage: ${db.leverage}x`);
         console.log(`Adaptive tuning: ${db.adaptiveEnabled ? "ON" : "OFF"}`);
         console.log(`Daily target: $${db.targetDailyProfit} (max ${db.maxTradesPerDay} trades)`);
@@ -1193,8 +1527,8 @@ const shutdown = async (signal = "EXIT") => {
                 }
 
                 const signal = await analyzeSignal();
-                if (signal.canLong) await placeOrder("buy", signal.price);
-                else if (signal.canShort) await placeOrder("sell", signal.price);
+                if (signal.canLong) await placeOrder("buy", signal);
+                else if (signal.canShort) await placeOrder("sell", signal);
 
             } catch (error) {
                 console.error("[ERROR] Loop error:", error.message);
