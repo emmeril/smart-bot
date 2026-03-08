@@ -15,7 +15,7 @@ const sequelize = new Sequelize({
 const Config = sequelize.define('Config', {
     strategy: { type: DataTypes.STRING, defaultValue: "hybrid" },
     pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
-    usdtPerTrade: { type: DataTypes.FLOAT, defaultValue: 10 },
+    usdtPerTrade: { type: DataTypes.FLOAT, defaultValue: 2 },
     leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
     targetProfitUSDT: { type: DataTypes.FLOAT, defaultValue: 0.5 },
     targetDailyProfit: { type: DataTypes.FLOAT, defaultValue: 1.0 },
