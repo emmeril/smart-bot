@@ -46,16 +46,14 @@ const Config = sequelize.define('Config', {
     shortMinRangePercent: { type: DataTypes.FLOAT, defaultValue: 0.8 },
     pullbackEmaPeriod: { type: DataTypes.INTEGER, defaultValue: 5 },
     pullbackLookback: { type: DataTypes.INTEGER, defaultValue: 2 },
-	    pullbackMaxDistancePct: { type: DataTypes.FLOAT, defaultValue: 0.5 },
-	    rsiLongMin: { type: DataTypes.FLOAT, defaultValue: 52 },
-	    rsiLongMax: { type: DataTypes.FLOAT, defaultValue: 72 },
-	    rsiShortMin: { type: DataTypes.FLOAT, defaultValue: 25 },
-	    rsiShortMax: { type: DataTypes.FLOAT, defaultValue: 50 },
-	    atrPeriod: { type: DataTypes.INTEGER, defaultValue: 14 },
-	    atrStopMult: { type: DataTypes.FLOAT, defaultValue: 0.8 },
-	    atrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
-	    shortAtrStopMult: { type: DataTypes.FLOAT, defaultValue: 1.4 },
-	    shortAtrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
+    pullbackMaxDistancePct: { type: DataTypes.FLOAT, defaultValue: 0.5 },
+    rsiLongMin: { type: DataTypes.FLOAT, defaultValue: 52 },
+    rsiLongMax: { type: DataTypes.FLOAT, defaultValue: 72 },
+    atrPeriod: { type: DataTypes.INTEGER, defaultValue: 14 },
+    atrStopMult: { type: DataTypes.FLOAT, defaultValue: 0.8 },
+    atrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
+    shortAtrStopMult: { type: DataTypes.FLOAT, defaultValue: 1.4 },
+    shortAtrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
     regimeFilterEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
     regimeAtrLookback: { type: DataTypes.INTEGER, defaultValue: 288 },
     regimeAtrPercentile: { type: DataTypes.FLOAT, defaultValue: 60 },
@@ -72,10 +70,6 @@ const Config = sequelize.define('Config', {
     marketRegimeSlowPeriod: { type: DataTypes.INTEGER, defaultValue: 120 },
     allowLong: { type: DataTypes.BOOLEAN, defaultValue: true },
     allowShort: { type: DataTypes.BOOLEAN, defaultValue: true },
-    requireBacktestApproval: { type: DataTypes.BOOLEAN, defaultValue: true },
-    autoBacktestEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
-    autoBacktestIntervalMinutes: { type: DataTypes.INTEGER, defaultValue: 360 },
-    autoBacktestLookbackDays: { type: DataTypes.INTEGER, defaultValue: 30 },
     adaptiveEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
     lastDailyReset: { type: DataTypes.BIGINT, defaultValue: Date.now() },
     lastUpdated: { type: DataTypes.BIGINT, defaultValue: Date.now() }
@@ -105,16 +99,11 @@ let marketRegimeTimer = null;
 let mainLoopTimer = null;
 let metricsTimer = null;
 let adaptiveTuneTimer = null;
-let autoBacktestTimer = null;
-let currentAutoBacktestInterval = 0;
 let lastSignalDetailLogAt = 0;
 let lastSyncLogAt = 0;
 let isShuttingDown = false;
 let isAdaptiveTuning = false;
-let isRunningAutoBacktest = false;
-let autoBacktestBlockedReason = "";
 const logPath = path.join(__dirname, 'trades.csv');
-const strategyApprovalPath = path.join(__dirname, 'strategy-approval.json');
 let db = null;
 const BALANCE_CACHE_TTL = 15000;
 const TICKER_CACHE_TTL = 800;
@@ -134,30 +123,7 @@ const BOOLEAN_CONFIG_KEYS = [
     "trailingEnabled",
     "marketRegimeEnabled",
     "allowLong",
-    "allowShort",
-    "requireBacktestApproval",
-    "autoBacktestEnabled"
-];
-const APPROVAL_APPLY_KEYS = [
-	    "strategy",
-	    "allowLong",
-	    "allowShort",
-	    "minVolumeRatio",
-	    "shortMinVolumeRatio",
-	    "breakoutPeriod",
-	    "trendPeriod",
-	    "shortTrendPeriod",
-	    "targetProfitUSDT",
-	    "minRangePercent",
-	    "sessionStartUTC",
-	    "sessionEndUTC",
-	    "pullbackEmaPeriod",
-	    "pullbackLookback",
-	    "pullbackMaxDistancePct",
-	    "rsiLongMin",
-	    "rsiLongMax",
-	    "rsiShortMin",
-	    "rsiShortMax"
+    "allowShort"
 ];
 const DEFAULT_CONFIG = {
     strategy: "hybrid",
@@ -193,16 +159,14 @@ const DEFAULT_CONFIG = {
     shortMinRangePercent: 0.8,
     pullbackEmaPeriod: 5,
     pullbackLookback: 2,
-	    pullbackMaxDistancePct: 0.5,
-	    rsiLongMin: 52,
-	    rsiLongMax: 72,
-	    rsiShortMin: 25,
-	    rsiShortMax: 50,
-	    atrPeriod: 14,
-	    atrStopMult: 0.8,
-	    atrTargetMult: 1.6,
-	    shortAtrStopMult: 1.4,
-	    shortAtrTargetMult: 1.6,
+    pullbackMaxDistancePct: 0.5,
+    rsiLongMin: 52,
+    rsiLongMax: 72,
+    atrPeriod: 14,
+    atrStopMult: 0.8,
+    atrTargetMult: 1.6,
+    shortAtrStopMult: 1.4,
+    shortAtrTargetMult: 1.6,
     regimeFilterEnabled: false,
     regimeAtrLookback: 288,
     regimeAtrPercentile: 60,
@@ -219,10 +183,6 @@ const DEFAULT_CONFIG = {
     marketRegimeSlowPeriod: 120,
     allowLong: true,
     allowShort: true,
-    requireBacktestApproval: true,
-    autoBacktestEnabled: true,
-    autoBacktestIntervalMinutes: 360,
-    autoBacktestLookbackDays: 30,
     adaptiveEnabled: false
 };
 
@@ -373,8 +333,7 @@ const clearRuntimeTimers = () => {
         [marketRegimeTimer, () => { marketRegimeTimer = null; }],
         [mainLoopTimer, () => { mainLoopTimer = null; }],
         [metricsTimer, () => { metricsTimer = null; }],
-        [adaptiveTuneTimer, () => { adaptiveTuneTimer = null; }],
-        [autoBacktestTimer, () => { autoBacktestTimer = null; }]
+        [adaptiveTuneTimer, () => { adaptiveTuneTimer = null; }]
     ];
 
     for (const [timer, resetTimer] of timers) {
@@ -397,8 +356,6 @@ const printStartupBanner = (totalUSDT) => {
     console.log(`ATR short: ${db.shortAtrStopMult}/${db.shortAtrTargetMult}x trail ${db.trailingEnabled ? `${db.shortTrailingActivateATR}/${db.shortTrailingOffsetATR}x` : "OFF"}`);
     console.log(`Filters: session ${db.sessionStartUTC}-${db.sessionEndUTC} UTC | atr regime ${db.regimeFilterEnabled ? `ON p${db.regimeAtrPercentile}` : "OFF"} | market regime ${db.marketRegimeEnabled ? `${db.marketRegimeSymbol} ${marketRegimeData.state}` : "OFF"}`);
     console.log(`Leverage: ${db.leverage}x`);
-    console.log(`Backtest approval: ${db.requireBacktestApproval ? "REQUIRED" : "OPTIONAL"}`);
-    console.log(`Auto approval refresh: ${db.autoBacktestEnabled ? `ON every ${db.autoBacktestIntervalMinutes}m` : "OFF"}`);
     console.log(`Adaptive tuning: ${db.adaptiveEnabled ? "ON" : "OFF"}`);
     console.log(`Daily target: $${db.targetDailyProfit} (max ${db.maxTradesPerDay} trades)`);
     console.log("=".repeat(70) + "\n");
@@ -415,65 +372,6 @@ const serializeConfigForSave = (config) => ({
     activePosition: config.activePosition ? JSON.stringify(config.activePosition) : null,
     lastUpdated: Date.now()
 });
-
-const loadStrategyApproval = () => {
-    try {
-        if (!fs.existsSync(strategyApprovalPath)) {
-            return {
-                approved: false,
-                reason: `Approval file not found: ${path.basename(strategyApprovalPath)}`
-            };
-        }
-
-        const raw = fs.readFileSync(strategyApprovalPath, "utf8").trim();
-        if (!raw) {
-            return {
-                approved: false,
-                reason: "Approval file is empty"
-            };
-        }
-
-        const parsed = JSON.parse(raw);
-        return typeof parsed === "object" && parsed !== null
-            ? parsed
-            : { approved: false, reason: "Approval file has invalid payload" };
-    } catch (error) {
-        return {
-            approved: false,
-            reason: `Failed to read approval file: ${error.message}`
-        };
-    }
-};
-
-const applyApprovedStrategyConfig = (approval) => {
-    if (!approval?.approved || !approval.approvedConfig || !db) return;
-    APPROVAL_APPLY_KEYS.forEach((key) => {
-        if (approval.approvedConfig[key] !== undefined) {
-            db[key] = approval.approvedConfig[key];
-        }
-    });
-};
-
-const runAutoBacktest = async (reason = "scheduled") => {
-    if (!db || isRunningAutoBacktest || !db.autoBacktestEnabled || autoBacktestBlockedReason) return false;
-    isRunningAutoBacktest = true;
-    try {
-        const approval = loadStrategyApproval();
-        applyApprovedStrategyConfig(approval);
-
-        if (approval?.approved) {
-            console.log(`[AUTO-BACKTEST] Approval applied (${reason}).`);
-        } else {
-            console.log(`[AUTO-BACKTEST] Not approved (${reason}): ${approval?.reason || "unknown"}`);
-        }
-        return true;
-    } catch (error) {
-        console.error("[AUTO-BACKTEST] Failed:", error.message);
-        return false;
-    } finally {
-        isRunningAutoBacktest = false;
-    }
-};
 
 const getConfigRow = async () => Config.findOne();
 
@@ -699,111 +597,71 @@ const getRegimeState = (snapshot, params) => {
 };
 
 const evaluatePullbackSignal = (snapshot, params, regimeState, strategyMode) => {
-	    const trendOk = Number.isFinite(snapshot.currentLongTrendEma) ? snapshot.currentPrice > snapshot.currentLongTrendEma : true;
-	    const shortTrendOk = Number.isFinite(snapshot.currentShortTrendEma) ? snapshot.currentPrice < snapshot.currentShortTrendEma : true;
-	    const recentLow = Math.min(...snapshot.low.slice(Math.max(0, snapshot.lastIndex - params.pullbackLookback), snapshot.lastIndex + 1));
-	    const recentHigh = Math.max(...snapshot.high.slice(Math.max(0, snapshot.lastIndex - params.pullbackLookback), snapshot.lastIndex + 1));
-	    const touchDistancePct = Number.isFinite(snapshot.currentPullbackEma) && snapshot.currentPullbackEma > 0
-	        ? Math.abs((recentLow - snapshot.currentPullbackEma) / snapshot.currentPullbackEma) * 100
-	        : Number.POSITIVE_INFINITY;
-	    const shortTouchDistancePct = Number.isFinite(snapshot.currentPullbackEma) && snapshot.currentPullbackEma > 0
-	        ? Math.abs((recentHigh - snapshot.currentPullbackEma) / snapshot.currentPullbackEma) * 100
-	        : Number.POSITIVE_INFINITY;
-	    const touchedPullbackZone = Number.isFinite(snapshot.currentPullbackEma) &&
-	        recentLow <= snapshot.currentPullbackEma &&
-	        touchDistancePct <= db.pullbackMaxDistancePct;
-	    const shortTouchedPullbackZone = Number.isFinite(snapshot.currentPullbackEma) &&
-	        recentHigh >= snapshot.currentPullbackEma &&
-	        shortTouchDistancePct <= db.pullbackMaxDistancePct;
-	    const prevClose = snapshot.close[snapshot.lastIndex - 1];
-	    const reclaim = Number.isFinite(snapshot.prevPullbackEma) &&
-	        prevClose <= snapshot.prevPullbackEma &&
-	        snapshot.currentPrice > snapshot.currentPullbackEma;
-	    const shortReclaim = Number.isFinite(snapshot.prevPullbackEma) &&
-	        prevClose >= snapshot.prevPullbackEma &&
-	        snapshot.currentPrice < snapshot.currentPullbackEma;
-	    const momentumLongOk = snapshot.currentPrice > snapshot.currentOpen &&
-	        snapshot.currentPrice > prevClose &&
-	        snapshot.currentRSI > snapshot.prevRSI;
-	    const momentumShortOk = snapshot.currentPrice < snapshot.currentOpen &&
-	        snapshot.currentPrice < prevClose &&
-	        snapshot.currentRSI < snapshot.prevRSI;
-	    const rsiRangeOk =
-	        snapshot.currentRSI >= toFiniteNumber(db.rsiLongMin, 50) &&
-	        snapshot.currentRSI <= toFiniteNumber(db.rsiLongMax, 72);
-	    const rsiShortRangeOk =
-	        snapshot.currentRSI >= toFiniteNumber(db.rsiShortMin, 25) &&
-	        snapshot.currentRSI <= toFiniteNumber(db.rsiShortMax, 50);
-	    const shortVolumeOk = snapshot.volumeRatio >= toFiniteNumber(db.shortMinVolumeRatio, db.minVolumeRatio);
+    const trendOk = Number.isFinite(snapshot.currentLongTrendEma) ? snapshot.currentPrice > snapshot.currentLongTrendEma : true;
+    const recentLow = Math.min(...snapshot.low.slice(Math.max(0, snapshot.lastIndex - params.pullbackLookback), snapshot.lastIndex + 1));
+    const touchDistancePct = Number.isFinite(snapshot.currentPullbackEma) && snapshot.currentPullbackEma > 0
+        ? Math.abs((recentLow - snapshot.currentPullbackEma) / snapshot.currentPullbackEma) * 100
+        : Number.POSITIVE_INFINITY;
+    const touchedPullbackZone = Number.isFinite(snapshot.currentPullbackEma) &&
+        recentLow <= snapshot.currentPullbackEma &&
+        touchDistancePct <= db.pullbackMaxDistancePct;
+    const prevClose = snapshot.close[snapshot.lastIndex - 1];
+    const reclaim = Number.isFinite(snapshot.prevPullbackEma) &&
+        prevClose <= snapshot.prevPullbackEma &&
+        snapshot.currentPrice > snapshot.currentPullbackEma;
+    const momentumLongOk = snapshot.currentPrice > snapshot.currentOpen &&
+        snapshot.currentPrice > prevClose &&
+        snapshot.currentRSI > snapshot.prevRSI;
 
-	    let canShort = false;
-	    let setupDetected = touchedPullbackZone || reclaim;
-	    let detailTitle = "PULLBACK MOMENTUM ANALYSIS";
-	    const extraDetailLines = [
-	        `   Pullback EMA (${params.pullbackEmaPeriod}): ${Number.isFinite(snapshot.currentPullbackEma) ? snapshot.currentPullbackEma.toFixed(6) : "n/a"}`,
-	        `   Recent Low (${params.pullbackLookback}): ${recentLow.toFixed(6)}`,
-	        `   Pullback Distance: ${Number.isFinite(touchDistancePct) ? touchDistancePct.toFixed(2) : "n/a"}% (max ${db.pullbackMaxDistancePct}%)`,
-	        `   Pullback Touched: ${touchedPullbackZone ? "[OK]" : "[NO]"}`,
-	        `   Reclaim EMA: ${reclaim ? "[OK]" : "[NO]"}`,
-	        `   RSI Momentum: ${momentumLongOk ? "[OK]" : "[NO]"} (${snapshot.currentRSI.toFixed(2)} vs prev ${snapshot.prevRSI.toFixed(2)})`,
-	        `   RSI Range: ${rsiRangeOk ? "[OK]" : "[NO]"} (${snapshot.currentRSI.toFixed(2)} vs ${db.rsiLongMin}-${db.rsiLongMax})`,
-	        `   Trend EMA Long: ${snapshot.currentLongTrendEma} → Long trend ok: ${trendOk}`
-	    ];
+    let canShort = false;
+    let setupDetected = touchedPullbackZone || reclaim;
+    let detailTitle = "PULLBACK MOMENTUM ANALYSIS";
+    const extraDetailLines = [
+        `   Pullback EMA (${params.pullbackEmaPeriod}): ${Number.isFinite(snapshot.currentPullbackEma) ? snapshot.currentPullbackEma.toFixed(6) : "n/a"}`,
+        `   Recent Low (${params.pullbackLookback}): ${recentLow.toFixed(6)}`,
+        `   Pullback Distance: ${Number.isFinite(touchDistancePct) ? touchDistancePct.toFixed(2) : "n/a"}% (max ${db.pullbackMaxDistancePct}%)`,
+        `   Pullback Touched: ${touchedPullbackZone ? "[OK]" : "[NO]"}`,
+        `   Reclaim EMA: ${reclaim ? "[OK]" : "[NO]"}`,
+        `   RSI Momentum: ${momentumLongOk ? "[OK]" : "[NO]"} (${snapshot.currentRSI.toFixed(2)} vs prev ${snapshot.prevRSI.toFixed(2)})`,
+        `   Trend EMA Long: ${snapshot.currentLongTrendEma} → Long trend ok: ${trendOk}`
+    ];
 
-	    const canLong =
-	        trendOk &&
-	        touchedPullbackZone &&
-	        reclaim &&
-	        snapshot.volumeOk &&
-	        snapshot.sessionOk &&
-	        regimeState.regimeOk &&
-	        regimeState.marketRegimeOkLong &&
-	        momentumLongOk &&
-	        rsiRangeOk;
+    const canLong =
+        trendOk &&
+        touchedPullbackZone &&
+        reclaim &&
+        snapshot.volumeOk &&
+        snapshot.sessionOk &&
+        regimeState.regimeOk &&
+        regimeState.marketRegimeOkLong &&
+        momentumLongOk &&
+        snapshot.currentRSI >= db.rsiLongMin &&
+        snapshot.currentRSI <= db.rsiLongMax;
 
-	    if (strategyMode === "pullback") {
-	        canShort =
-	            shortTrendOk &&
-	            shortTouchedPullbackZone &&
-	            shortReclaim &&
-	            shortVolumeOk &&
-	            snapshot.sessionOk &&
-	            regimeState.regimeOk &&
-	            regimeState.marketRegimeOkShort &&
-	            momentumShortOk &&
-	            rsiShortRangeOk;
-	        setupDetected = setupDetected || shortTouchedPullbackZone || shortReclaim;
-	        extraDetailLines.push(`   Short Recent High (${params.pullbackLookback}): ${recentHigh.toFixed(6)}`);
-	        extraDetailLines.push(`   Short Pullback Distance: ${Number.isFinite(shortTouchDistancePct) ? shortTouchDistancePct.toFixed(2) : "n/a"}% (max ${db.pullbackMaxDistancePct}%)`);
-	        extraDetailLines.push(`   Short Pullback Touched: ${shortTouchedPullbackZone ? "[OK]" : "[NO]"}`);
-	        extraDetailLines.push(`   Short Reclaim EMA: ${shortReclaim ? "[OK]" : "[NO]"}`);
-	        extraDetailLines.push(`   Short Volume OK: ${shortVolumeOk ? "[OK]" : "[NO]"} (min ${db.shortMinVolumeRatio}x)`);
-	        extraDetailLines.push(`   Short RSI Momentum: ${momentumShortOk ? "[OK]" : "[NO]"} (${snapshot.currentRSI.toFixed(2)} vs prev ${snapshot.prevRSI.toFixed(2)})`);
-	        extraDetailLines.push(`   Short RSI Range: ${rsiShortRangeOk ? "[OK]" : "[NO]"} (${snapshot.currentRSI.toFixed(2)} vs ${db.rsiShortMin}-${db.rsiShortMax})`);
-	        extraDetailLines.push(`   Trend EMA Short: ${snapshot.currentShortTrendEma} → Short trend ok: ${shortTrendOk}`);
-	    } else if (strategyMode === "hybrid") {
-	        const shortVolumeOkHybrid = snapshot.volumeRatio >= toFiniteNumber(db.shortMinVolumeRatio, 1.4);
-	        const shortMomentumOkHybrid = snapshot.currentPrice < snapshot.currentOpen;
-	        canShort =
-	            snapshot.bearishBreakout &&
-	            shortVolumeOkHybrid &&
-	            snapshot.shortRangeOk &&
-	            snapshot.sessionOk &&
-	            regimeState.regimeOk &&
-	            shortTrendOk &&
-	            regimeState.marketRegimeOkShort &&
-	            shortMomentumOkHybrid &&
-	            snapshot.currentRSI > 25 &&
-	            snapshot.currentRSI < 50;
-	        setupDetected = setupDetected || snapshot.bearishBreakout;
-	        detailTitle = "HYBRID PULLBACK/BREAKOUT ANALYSIS";
-	        extraDetailLines.push(`   Short Breakout (${params.shortBreakoutPeriod}): ${snapshot.bearishBreakout ? "[OK]" : "[NO]"}`);
-	        extraDetailLines.push(`   Short Volume OK: ${shortVolumeOkHybrid ? "[OK]" : "[NO]"} (min ${db.shortMinVolumeRatio}x)`);
-	        extraDetailLines.push(`   Short Range OK: ${snapshot.shortRangeOk ? "[OK]" : "[NO]"} (min ${db.shortMinRangePercent}%)`);
-	        extraDetailLines.push(`   Trend EMA Short: ${snapshot.currentShortTrendEma} → Short trend ok: ${shortTrendOk}`);
-	    }
+    if (strategyMode === "hybrid") {
+        const shortTrendOk = Number.isFinite(snapshot.currentShortTrendEma) ? snapshot.currentPrice < snapshot.currentShortTrendEma : true;
+        const shortVolumeOk = snapshot.volumeRatio >= toFiniteNumber(db.shortMinVolumeRatio, 1.4);
+        const shortMomentumOk = snapshot.currentPrice < snapshot.currentOpen;
+        canShort =
+            snapshot.bearishBreakout &&
+            shortVolumeOk &&
+            snapshot.shortRangeOk &&
+            snapshot.sessionOk &&
+            regimeState.regimeOk &&
+            shortTrendOk &&
+            regimeState.marketRegimeOkShort &&
+            shortMomentumOk &&
+            snapshot.currentRSI > 25 &&
+            snapshot.currentRSI < 50;
+        setupDetected = setupDetected || snapshot.bearishBreakout;
+        detailTitle = "HYBRID PULLBACK/BREAKOUT ANALYSIS";
+        extraDetailLines.push(`   Short Breakout (${params.shortBreakoutPeriod}): ${snapshot.bearishBreakout ? "[OK]" : "[NO]"}`);
+        extraDetailLines.push(`   Short Volume OK: ${shortVolumeOk ? "[OK]" : "[NO]"} (min ${db.shortMinVolumeRatio}x)`);
+        extraDetailLines.push(`   Short Range OK: ${snapshot.shortRangeOk ? "[OK]" : "[NO]"} (min ${db.shortMinRangePercent}%)`);
+        extraDetailLines.push(`   Trend EMA Short: ${snapshot.currentShortTrendEma} → Short trend ok: ${shortTrendOk}`);
+    }
 
-	    return { canLong, canShort, setupDetected, detailTitle, extraDetailLines };
+    return { canLong, canShort, setupDetected, detailTitle, extraDetailLines };
 };
 
 const evaluateBreakoutSignal = (snapshot, regimeState) => ({
@@ -1067,43 +925,24 @@ const findOpenExchangePosition = (positions, pair) => {
     )) || null;
 };
 
-const buildSyncedActivePosition = (openPosition, entryPrice, previousPosition = null) => {
+const buildSyncedActivePosition = (openPosition, entryPrice) => {
     const contracts = Math.abs(getExchangePositionContracts(openPosition));
     const side = getExchangePositionSide(openPosition) || "buy";
-    const canReusePreviousState = previousPosition && previousPosition.side === side;
-    const fallbackStopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
 
     return {
         side,
         entryPrice,
-        targetPrice: canReusePreviousState ? previousPosition.targetPrice ?? null : null,
-        stopLossPrice: canReusePreviousState ? previousPosition.stopLossPrice ?? null : null,
-        stopLossUSDT: canReusePreviousState && Number.isFinite(previousPosition.stopLossUSDT)
-            ? previousPosition.stopLossUSDT
-            : fallbackStopLossUSDT,
+        targetPrice: null,
+        stopLossPrice: null,
+        stopLossUSDT: -db.usdtPerTrade * (db.stopLossPercent / 100),
         orderId: `SYNC_${Date.now()}`,
         quantity: contracts,
-        entryTime: canReusePreviousState ? previousPosition.entryTime ?? Date.now() - 300000 : Date.now() - 300000,
-        highestSinceEntry: canReusePreviousState && Number.isFinite(previousPosition.highestSinceEntry)
-            ? previousPosition.highestSinceEntry
-            : entryPrice,
-        lowestSinceEntry: canReusePreviousState && Number.isFinite(previousPosition.lowestSinceEntry)
-            ? previousPosition.lowestSinceEntry
-            : entryPrice,
+        entryTime: Date.now() - 300000,
+        highestSinceEntry: entryPrice,
+        lowestSinceEntry: entryPrice,
         marginMode: (db.marginMode || "isolated").toLowerCase(),
-        targetProfitUSDT: canReusePreviousState && Number.isFinite(previousPosition.targetProfitUSDT)
-            ? previousPosition.targetProfitUSDT
-            : db.targetProfitUSDT,
-        atrAtEntry: canReusePreviousState ? toFiniteNumber(previousPosition.atrAtEntry, null) : null,
-        strategy: canReusePreviousState && previousPosition.strategy
-            ? previousPosition.strategy
-            : "SYNC_ONLY",
-        trailingActivateATR: canReusePreviousState
-            ? toFiniteNumber(previousPosition.trailingActivateATR, db.trailingActivateATR)
-            : db.trailingActivateATR,
-        trailingOffsetATR: canReusePreviousState
-            ? toFiniteNumber(previousPosition.trailingOffsetATR, db.trailingOffsetATR)
-            : db.trailingOffsetATR
+        targetProfitUSDT: db.targetProfitUSDT,
+        strategy: "SYNC_ONLY"
     };
 };
 
@@ -1361,14 +1200,7 @@ const getDailyRiskLimit = async () => {
     return totalUSDT * db.maxDailyLossPercent / 100;
 };
 
-const getTradingPauseReason = async (approval = null) => {
-    if (db.requireBacktestApproval) {
-        if (!approval?.approved) {
-            const reason = approval?.reason || "Strategy has not passed backtest approval";
-            return `[PAUSE] Backtest approval required. ${reason}`;
-        }
-    }
-
+const getTradingPauseReason = async () => {
     const maxDailyLoss = await getDailyRiskLimit();
 
     if (db.dailyPnL >= db.targetDailyProfit) {
@@ -1395,7 +1227,6 @@ const refreshRuntimeSchedulers = () => {
     startPnLMonitoring();
     startPositionSync();
     startAdaptiveTuning();
-    startAutoBacktest();
 };
 
 const handleRuntimeCommand = (input) => {
@@ -1433,22 +1264,19 @@ const bootstrapRuntime = async () => {
     startPositionSync();
     startMetricsReporting();
     startAdaptiveTuning();
-    startAutoBacktest();
     process.once("SIGINT", () => { shutdown("SIGINT"); });
     process.once("SIGTERM", () => { shutdown("SIGTERM"); });
 };
 
 const runTradingCycle = async () => {
     await reloadConfig();
-    const approval = loadStrategyApproval();
-    applyApprovedStrategyConfig(approval);
     refreshRuntimeSchedulers();
 
     if (isPlacingOrder || isClosingPosition) return;
 
     await resetDailyStateIfNeeded(Date.now());
 
-    const pauseReason = await getTradingPauseReason(approval);
+    const pauseReason = await getTradingPauseReason();
     if (pauseReason) {
         console.log(pauseReason);
         return;
@@ -1536,9 +1364,7 @@ const normalizeConfig = (config) => {
         regimeAtrLookback: { min: 20, allowZero: false, integer: true },
         regimeAtrPercentile: { min: 10, allowZero: false },
         marketRegimeFastPeriod: { min: 2, allowZero: false, integer: true },
-        marketRegimeSlowPeriod: { min: 2, allowZero: false, integer: true },
-        autoBacktestIntervalMinutes: { min: 15, allowZero: false, integer: true },
-        autoBacktestLookbackDays: { min: 3, allowZero: false, integer: true }
+        marketRegimeSlowPeriod: { min: 2, allowZero: false, integer: true }
     };
 
     Object.entries(numericRules).forEach(([key, rule]) => {
@@ -1601,47 +1427,22 @@ const normalizeConfig = (config) => {
 
     BOOLEAN_CONFIG_KEYS.forEach(normalizeBoolean);
 
-	    normalized.regimeAtrPercentile = clamp(toFiniteNumber(normalized.regimeAtrPercentile, defaults.regimeAtrPercentile), 10, 95);
-	    normalized.rsiLongMin = clamp(toFiniteNumber(normalized.rsiLongMin, defaults.rsiLongMin), 1, 99);
-	    normalized.rsiLongMax = clamp(toFiniteNumber(normalized.rsiLongMax, defaults.rsiLongMax), normalized.rsiLongMin + 1, 99);
-	    normalized.rsiShortMin = clamp(toFiniteNumber(normalized.rsiShortMin, defaults.rsiShortMin), 1, 99);
-	    normalized.rsiShortMax = clamp(toFiniteNumber(normalized.rsiShortMax, defaults.rsiShortMax), normalized.rsiShortMin + 1, 99);
-	    normalized.sessionStartUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionStartUTC, defaults.sessionStartUTC)), 0, 23);
-	    normalized.sessionEndUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionEndUTC, defaults.sessionEndUTC)), 0, 23);
-	    normalized.marketRegimeSymbol = typeof normalized.marketRegimeSymbol === "string" && normalized.marketRegimeSymbol.trim()
-	        ? normalized.marketRegimeSymbol.trim()
-	        : defaults.marketRegimeSymbol;
+    normalized.regimeAtrPercentile = clamp(toFiniteNumber(normalized.regimeAtrPercentile, defaults.regimeAtrPercentile), 10, 95);
+    normalized.rsiLongMin = clamp(toFiniteNumber(normalized.rsiLongMin, defaults.rsiLongMin), 1, 99);
+    normalized.rsiLongMax = clamp(toFiniteNumber(normalized.rsiLongMax, defaults.rsiLongMax), normalized.rsiLongMin + 1, 99);
+    normalized.sessionStartUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionStartUTC, defaults.sessionStartUTC)), 0, 23);
+    normalized.sessionEndUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionEndUTC, defaults.sessionEndUTC)), 0, 23);
+    normalized.marketRegimeSymbol = typeof normalized.marketRegimeSymbol === "string" && normalized.marketRegimeSymbol.trim()
+        ? normalized.marketRegimeSymbol.trim()
+        : defaults.marketRegimeSymbol;
 
     return normalized;
 };
 
 // -------------------- INITIALIZE DATABASE --------------------
-const ensureConfigSchema = async () => {
-    try {
-        const queryInterface = sequelize.getQueryInterface();
-        const tableName = Config.getTableName();
-        const desc = await queryInterface.describeTable(tableName);
-        if (!desc.rsiShortMin) {
-            await queryInterface.addColumn(tableName, "rsiShortMin", {
-                type: DataTypes.FLOAT,
-                defaultValue: 25
-            });
-        }
-        if (!desc.rsiShortMax) {
-            await queryInterface.addColumn(tableName, "rsiShortMax", {
-                type: DataTypes.FLOAT,
-                defaultValue: 50
-            });
-        }
-    } catch (error) {
-        console.error("[WARN] Failed to ensure config schema:", error.message);
-    }
-};
-
 const initializeDB = async () => {
     try {
         await sequelize.sync();
-        await ensureConfigSchema();
         console.log("[OK] Database synced");
 
         const configRow = await ensureConfigRow();
@@ -1651,7 +1452,7 @@ const initializeDB = async () => {
     } catch (error) {
         console.error("[ERROR] Error initializing DB:", error.message);
         db = getDefaultConfig();
-        return false;
+        return true;
     }
 };
 
@@ -1701,7 +1502,7 @@ const syncPositionWithExchange = async () => {
         }
 
         const entryPrice = getExchangePositionEntryPrice(openPosition, await getPrice());
-        const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, db.activePosition);
+        const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice);
 
         if (shouldRefreshSyncedPosition(db.activePosition, syncedPosition)) {
             const wasTrackingPosition = !!db.activePosition;
@@ -1876,7 +1677,7 @@ const analyzeSignal = async () => {
             riskOverrides: buildRiskOverrides(signalState.canShort)
         };
     } catch (error) {
-        console.error("[ERROR] Signal analysis failed:", error.message);
+        console.error("[ERROR] Breakout analysis failed:", error.message);
         return {};
     }
 };
@@ -1963,7 +1764,7 @@ const placeOrder = async (side, signalData = {}) => {
 };
 
 // -------------------- CLOSE POSITION --------------------
-const closePosition = async (reason) => {
+const closePosition = async (reason, profitUSDT, profitPercent) => {
     try {
         if (!db || !db.activePosition || isClosingPosition) return;
         isClosingPosition = true;
@@ -1975,25 +1776,20 @@ const closePosition = async (reason) => {
             return;
         }
         const closeSide = side === "buy" ? "sell" : "buy";
-        const adjustedCloseQuantity = formatAmountToMarketPrecision(db.pair, quantity);
-        if (!Number.isFinite(adjustedCloseQuantity) || adjustedCloseQuantity <= 0) {
-            console.error("[ERROR] Invalid close quantity after precision adjustment.");
-            return;
-        }
 
         console.log(`\n[CLOSE] Closing position...`);
-        const closeOrder = await exchange.createOrder(db.pair, "market", closeSide, adjustedCloseQuantity, undefined, {
+        const closeOrder = await exchange.createOrder(db.pair, "market", closeSide, quantity, undefined, {
             reduceOnly: true,
             marginMode: (db.marginMode || "isolated").toLowerCase()
         });
         metrics.api.orders++;
-        const closeFillSnapshot = getOrderFillSnapshot(closeOrder, await getPrice(true), adjustedCloseQuantity);
+        const closeFillSnapshot = getOrderFillSnapshot(closeOrder, await getPrice(true), quantity);
         const remainingPosition = await fetchTrackedExchangePosition();
         if (remainingPosition) {
             const remainingContracts = Math.abs(getExchangePositionContracts(remainingPosition));
             if (remainingContracts > POSITION_SYNC_QTY_TOLERANCE) {
                 const remainingEntryPrice = getExchangePositionEntryPrice(remainingPosition, position.entryPrice);
-                db.activePosition = buildSyncedActivePosition(remainingPosition, remainingEntryPrice, position);
+                db.activePosition = buildSyncedActivePosition(remainingPosition, remainingEntryPrice);
                 await saveDB();
                 console.warn(`[WARN] Close order partially filled. Remaining quantity on exchange: ${remainingContracts}`);
                 return;
@@ -2158,7 +1954,7 @@ const startPnLMonitoring = () => {
 
             if (exitState.shouldClose) {
                 console.log(exitState.message);
-                await closePosition(exitState.reason);
+                await closePosition(exitState.reason, pnlState.profitUSDT, pnlState.profitPercent);
                 return;
             }
 
@@ -2212,40 +2008,6 @@ const startAdaptiveTuning = () => {
     console.log(`[ADAPTIVE] Dynamic config tuning active (${Math.round(ADAPTIVE_TUNE_INTERVAL / 60000)}m interval).`);
 };
 
-const startAutoBacktest = () => {
-    if (autoBacktestBlockedReason) {
-        if (autoBacktestTimer) {
-            clearInterval(autoBacktestTimer);
-            autoBacktestTimer = null;
-            currentAutoBacktestInterval = 0;
-        }
-        return;
-    }
-
-    if (!db?.autoBacktestEnabled) {
-        if (autoBacktestTimer) {
-            clearInterval(autoBacktestTimer);
-            autoBacktestTimer = null;
-            currentAutoBacktestInterval = 0;
-            console.log("[AUTO-BACKTEST] Scheduler disabled.");
-        }
-        return;
-    }
-
-    const desiredInterval = Math.max(15, Math.trunc(toFiniteNumber(db.autoBacktestIntervalMinutes, 360))) * 60 * 1000;
-    configureRecurringTask(
-        autoBacktestTimer,
-        currentAutoBacktestInterval,
-        desiredInterval,
-        "[AUTO-BACKTEST] Scheduler interval: ",
-        async () => {
-            await runAutoBacktest("scheduled");
-        },
-        (timer) => { autoBacktestTimer = timer; },
-        (interval) => { currentAutoBacktestInterval = interval; }
-    );
-};
-
 const shutdown = async (signal = "EXIT") => {
     if (isShuttingDown) return;
     isShuttingDown = true;
@@ -2277,14 +2039,8 @@ const shutdown = async (signal = "EXIT") => {
         await bootstrapRuntime();
 
         const totalUSDT = await getTotalUSDTBalance(true);
-        applyApprovedStrategyConfig(loadStrategyApproval());
 
         printStartupBanner(totalUSDT);
-        if (db.autoBacktestEnabled) {
-            runAutoBacktest("startup").catch((error) => {
-                console.error("[AUTO-BACKTEST] Startup run failed:", error.message);
-            });
-        }
 
         lastTradeAt = getLastTradeTimestampFromLog();
 
