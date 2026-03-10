@@ -1,3 +1,8 @@
+const fs = require("fs");
+const path = require("path");
+
+const APPROVAL_FILE = path.join(__dirname, "strategy-approval.json");
+
 const DEFAULTS = {
   symbol: "DOGEUSDT",
   interval: "5m",
@@ -51,6 +56,15 @@ const getArg = (key, fallback) => {
   return args[idx + 1];
 };
 
+const getBoolArg = (key, fallback = false) => {
+  const raw = getArg(key, null);
+  if (raw === null) return fallback;
+  const normalized = String(raw).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
+
 const options = {
   symbol: getArg("symbol", DEFAULTS.symbol).toUpperCase(),
   interval: getArg("interval", DEFAULTS.interval),
@@ -58,6 +72,7 @@ const options = {
   mode: String(getArg("mode", "single")).toLowerCase(),
   strategy: String(getArg("strategy", DEFAULTS.config.strategy)).toLowerCase(),
 };
+const AUTO_APPROVE_STRATEGIES = ["breakout", "pullback"];
 
 const toNum = (v, d = 0) => {
   const n = Number(v);
@@ -154,6 +169,142 @@ const buildRuntimeConfig = () => {
   cfg.trailingActivateATR = Math.max(0.2, cfg.trailingActivateATR);
   cfg.trailingOffsetATR = Math.max(0.1, cfg.trailingOffsetATR);
   return cfg;
+};
+
+const buildApprovalThresholds = (strategy) => {
+  const isPullback = strategy === "pullback";
+  return {
+    minNetPnlUSDT: toNum(getArg("minNetPnlUSDT", "0.01"), 0.01),
+    minWinRate: clamp(toNum(getArg("minWinRate", isPullback ? "45" : "40"), isPullback ? 45 : 40), 0, 100),
+    minTrades: Math.max(1, Math.trunc(toNum(getArg("minTrades", isPullback ? "12" : "20"), isPullback ? 12 : 20))),
+    minProfitableDays: Math.max(0, Math.trunc(toNum(getArg("minProfitableDays", "1"), 1))),
+    maxDrawdownUSDT: Math.max(0, toNum(getArg("maxDrawdownUSDT", "999999"), 999999)),
+    minScore: toNum(getArg("minScore", "0"), 0),
+  };
+};
+
+const buildApprovalEvaluation = (result, thresholds, score) => {
+  const profitableDays = result.daily.filter((d) => d.pnl > 0).length;
+  const losingDays = result.daily.filter((d) => d.pnl < 0).length;
+  const checks = {
+    netPnlUSDT: result.netPnlUSDT >= thresholds.minNetPnlUSDT,
+    winRate: result.winRate >= thresholds.minWinRate,
+    trades: result.trades >= thresholds.minTrades,
+    profitableDays: profitableDays >= thresholds.minProfitableDays,
+    maxDrawdownUSDT: Math.abs(result.maxDrawdownUSDT) <= thresholds.maxDrawdownUSDT,
+    score: score >= thresholds.minScore,
+  };
+  return {
+    approved: Object.values(checks).every(Boolean),
+    profitableDays,
+    losingDays,
+    checks,
+  };
+};
+
+const writeApprovalFile = (payload) => {
+  fs.writeFileSync(APPROVAL_FILE, JSON.stringify(payload, null, 2));
+  console.log(`[BACKTEST] Approval file updated: ${APPROVAL_FILE}`);
+};
+
+const extractApprovedConfig = (strategy, candidate) => {
+  if (!candidate) return null;
+  if (strategy === "pullback") {
+    return {
+      strategy: "pullback",
+      allowLong: true,
+      allowShort: false,
+      minVolumeRatio: candidate.minVolumeRatio,
+      trendPeriod: candidate.trendPeriod,
+      pullbackEmaPeriod: candidate.pullbackEmaPeriod,
+      pullbackLookback: candidate.pullbackLookback,
+      pullbackMaxDistancePct: candidate.pullbackMaxDistancePct,
+      rsiLongMin: candidate.rsiLongMin,
+      rsiLongMax: candidate.rsiLongMax,
+      sessionStartUTC: candidate.sessionStartUTC,
+      sessionEndUTC: candidate.sessionEndUTC,
+    };
+  }
+  return {
+    strategy,
+    minVolumeRatio: candidate.minVolumeRatio,
+    breakoutPeriod: candidate.breakoutPeriod,
+    trendPeriod: candidate.trendPeriod,
+    targetProfitUSDT: candidate.targetProfitUSDT,
+    minRangePercent: candidate.minRangePercent,
+    sessionStartUTC: candidate.sessionStartUTC,
+    sessionEndUTC: candidate.sessionEndUTC,
+  };
+};
+
+const buildConfigForStrategy = (strategy) => {
+  const previousStrategy = options.strategy;
+  options.strategy = strategy;
+  const cfg = buildRuntimeConfig();
+  options.strategy = previousStrategy;
+  return cfg;
+};
+
+const evaluateApprovalCandidate = (candles, strategy) => {
+  const strategyConfig = buildConfigForStrategy(strategy);
+  const grid = strategy === "pullback"
+    ? runPullbackGridSearch(candles)
+    : runGridSearch(candles);
+  if (!grid.top.length) {
+    return {
+      approved: false,
+      strategy,
+      reason: "No qualified grid-search candidate",
+      tested: grid.tested,
+      qualified: grid.qualified,
+      minTrades: grid.minTrades || (strategy === "pullback" ? 12 : 20),
+    };
+  }
+
+  const best = grid.top[0];
+  const approvedConfig = {
+    ...strategyConfig,
+    ...extractApprovedConfig(strategy, best),
+  };
+  const result = backtest(candles, approvedConfig, DEFAULTS.feeRate, DEFAULTS.slippageRate);
+  const score = result.netPnlUSDT - Math.abs(result.maxDrawdownUSDT) * 0.3 + result.winRate * 0.02;
+  const thresholds = buildApprovalThresholds(strategy);
+  const evaluation = buildApprovalEvaluation(result, thresholds, score);
+
+  return {
+    approved: evaluation.approved,
+    strategy,
+    tested: grid.tested,
+    qualified: grid.qualified,
+    thresholds,
+    summary: {
+      trades: result.trades,
+      winRate: Number(result.winRate.toFixed(4)),
+      netPnlUSDT: Number(result.netPnlUSDT.toFixed(4)),
+      avgPnlUSDT: Number(result.avgPnlUSDT.toFixed(4)),
+      maxDrawdownUSDT: Number(result.maxDrawdownUSDT.toFixed(4)),
+      score: Number(score.toFixed(4)),
+      profitableDays: evaluation.profitableDays,
+      losingDays: evaluation.losingDays,
+    },
+    checks: evaluation.checks,
+    approvedConfig,
+  };
+};
+
+const pickBestApprovalCandidate = (candidates) => {
+  const ordered = [...candidates].sort((a, b) => {
+    const aApproved = a.approved ? 1 : 0;
+    const bApproved = b.approved ? 1 : 0;
+    if (bApproved !== aApproved) return bApproved - aApproved;
+    const aScore = a.summary?.score ?? Number.NEGATIVE_INFINITY;
+    const bScore = b.summary?.score ?? Number.NEGATIVE_INFINITY;
+    if (bScore !== aScore) return bScore - aScore;
+    const aPnl = a.summary?.netPnlUSDT ?? Number.NEGATIVE_INFINITY;
+    const bPnl = b.summary?.netPnlUSDT ?? Number.NEGATIVE_INFINITY;
+    return bPnl - aPnl;
+  });
+  return ordered[0] || null;
 };
 
 const formatDateKey = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -771,7 +922,70 @@ const runSensitivityAnalysis = (candles) => {
     if (!candles.length) throw new Error("No candles fetched");
     const selectedConfig = buildRuntimeConfig();
 
-    if (options.mode === "grid") {
+    if (options.mode === "approve") {
+      console.log("[BACKTEST] Running approval workflow...");
+      const compareAllStrategies = ["auto", "best", "all"].includes(selectedConfig.strategy);
+      const strategyCandidates = compareAllStrategies
+        ? AUTO_APPROVE_STRATEGIES
+        : [selectedConfig.strategy];
+      const evaluatedCandidates = strategyCandidates.map((strategy) => evaluateApprovalCandidate(candles, strategy));
+      const bestCandidate = pickBestApprovalCandidate(evaluatedCandidates);
+      if (!bestCandidate) {
+        writeApprovalFile({
+          approved: false,
+          mode: "approve",
+          strategy: selectedConfig.strategy,
+          symbol: options.symbol,
+          interval: options.interval,
+          days: options.days,
+          evaluatedAt: new Date().toISOString(),
+          reason: "No approval candidates evaluated",
+        });
+        console.log("No approval candidates evaluated.");
+        return;
+      }
+      const payload = {
+        ...bestCandidate,
+        mode: "approve",
+        strategyRequest: selectedConfig.strategy,
+        symbol: options.symbol,
+        interval: options.interval,
+        days: options.days,
+        evaluatedAt: new Date().toISOString(),
+        candidates: evaluatedCandidates,
+      };
+      writeApprovalFile(payload);
+
+      console.log("\n=== Approval Summary ===");
+      console.log(`Approved       : ${payload.approved ? "YES" : "NO"}`);
+      console.log(`Strategy       : ${payload.strategy}`);
+      if (compareAllStrategies) {
+        console.table(
+          evaluatedCandidates.map((candidate) => ({
+            strategy: candidate.strategy,
+            approved: candidate.approved ? "YES" : "NO",
+            trades: candidate.summary?.trades ?? 0,
+            winRate: candidate.summary ? `${candidate.summary.winRate.toFixed(2)}%` : "-",
+            netPnlUSDT: candidate.summary ? candidate.summary.netPnlUSDT.toFixed(4) : "-",
+            maxDD: candidate.summary ? candidate.summary.maxDrawdownUSDT.toFixed(4) : "-",
+            score: candidate.summary ? candidate.summary.score.toFixed(4) : "-",
+            reason: candidate.reason || "",
+          }))
+        );
+      }
+      if (payload.summary) {
+        console.log(`Trades         : ${payload.summary.trades}`);
+        console.log(`Win rate       : ${payload.summary.winRate.toFixed(2)}%`);
+        console.log(`Net PnL        : ${payload.summary.netPnlUSDT.toFixed(4)} USDT`);
+        console.log(`Max drawdown   : ${payload.summary.maxDrawdownUSDT.toFixed(4)} USDT`);
+        console.log(`Score          : ${payload.summary.score.toFixed(4)}`);
+        console.log(`Days + / -     : ${payload.summary.profitableDays} / ${payload.summary.losingDays}`);
+        console.log("\nApproved config:");
+        console.log(JSON.stringify(payload.approvedConfig, null, 2));
+      } else {
+        console.log(`Reason         : ${payload.reason || "Strategy rejected"}`);
+      }
+    } else if (options.mode === "grid") {
       console.log("[BACKTEST] Running grid search...");
       const grid = runGridSearch(candles);
       console.log("\n=== Grid Summary ===");
@@ -921,6 +1135,7 @@ const runSensitivityAnalysis = (candles) => {
       const result = backtest(candles, runtimeConfig, DEFAULTS.feeRate, DEFAULTS.slippageRate);
       const profitableDays = result.daily.filter((d) => d.pnl > 0).length;
       const losingDays = result.daily.filter((d) => d.pnl < 0).length;
+      const score = result.netPnlUSDT - Math.abs(result.maxDrawdownUSDT) * 0.3 + result.winRate * 0.02;
 
       console.log("\n=== Backtest Summary ===");
       console.log(
@@ -934,6 +1149,7 @@ const runSensitivityAnalysis = (candles) => {
       console.log(`Net PnL        : ${result.netPnlUSDT.toFixed(4)} USDT`);
       console.log(`Avg / trade    : ${result.avgPnlUSDT.toFixed(4)} USDT`);
       console.log(`Max drawdown   : ${result.maxDrawdownUSDT.toFixed(4)} USDT`);
+      console.log(`Score          : ${score.toFixed(4)}`);
       console.log(`Days + / -     : ${profitableDays} / ${losingDays}`);
       console.log("\nSample trades:");
       console.table(
@@ -947,6 +1163,33 @@ const runSensitivityAnalysis = (candles) => {
           exitTs: new Date(t.exitTs).toISOString(),
         }))
       );
+
+      if (getBoolArg("writeApproval", false)) {
+        const thresholds = buildApprovalThresholds(runtimeConfig.strategy);
+        const evaluation = buildApprovalEvaluation(result, thresholds, score);
+        writeApprovalFile({
+          approved: evaluation.approved,
+          mode: "single",
+          strategy: runtimeConfig.strategy,
+          symbol: options.symbol,
+          interval: options.interval,
+          days: options.days,
+          evaluatedAt: new Date().toISOString(),
+          thresholds,
+          summary: {
+            trades: result.trades,
+            winRate: Number(result.winRate.toFixed(4)),
+            netPnlUSDT: Number(result.netPnlUSDT.toFixed(4)),
+            avgPnlUSDT: Number(result.avgPnlUSDT.toFixed(4)),
+            maxDrawdownUSDT: Number(result.maxDrawdownUSDT.toFixed(4)),
+            score: Number(score.toFixed(4)),
+            profitableDays,
+            losingDays,
+          },
+          checks: evaluation.checks,
+          approvedConfig: runtimeConfig,
+        });
+      }
     }
   } catch (error) {
     console.error("[BACKTEST_ERROR]", error.message);

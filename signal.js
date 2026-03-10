@@ -1,6 +1,7 @@
 ﻿﻿require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
+const { spawn } = require("child_process");
 const ccxt = require("ccxt");
 const { RSI, EMA } = require("technicalindicators");
 const { Sequelize, DataTypes } = require('sequelize');
@@ -70,6 +71,10 @@ const Config = sequelize.define('Config', {
     marketRegimeSlowPeriod: { type: DataTypes.INTEGER, defaultValue: 120 },
     allowLong: { type: DataTypes.BOOLEAN, defaultValue: true },
     allowShort: { type: DataTypes.BOOLEAN, defaultValue: true },
+    requireBacktestApproval: { type: DataTypes.BOOLEAN, defaultValue: true },
+    autoBacktestEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
+    autoBacktestIntervalMinutes: { type: DataTypes.INTEGER, defaultValue: 360 },
+    autoBacktestLookbackDays: { type: DataTypes.INTEGER, defaultValue: 30 },
     adaptiveEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
     lastDailyReset: { type: DataTypes.BIGINT, defaultValue: Date.now() },
     lastUpdated: { type: DataTypes.BIGINT, defaultValue: Date.now() }
@@ -99,11 +104,16 @@ let marketRegimeTimer = null;
 let mainLoopTimer = null;
 let metricsTimer = null;
 let adaptiveTuneTimer = null;
+let autoBacktestTimer = null;
+let currentAutoBacktestInterval = 0;
 let lastSignalDetailLogAt = 0;
 let lastSyncLogAt = 0;
 let isShuttingDown = false;
 let isAdaptiveTuning = false;
+let isRunningAutoBacktest = false;
+let autoBacktestBlockedReason = "";
 const logPath = path.join(__dirname, 'trades.csv');
+const strategyApprovalPath = path.join(__dirname, 'strategy-approval.json');
 let db = null;
 const BALANCE_CACHE_TTL = 15000;
 const TICKER_CACHE_TTL = 800;
@@ -123,7 +133,26 @@ const BOOLEAN_CONFIG_KEYS = [
     "trailingEnabled",
     "marketRegimeEnabled",
     "allowLong",
-    "allowShort"
+    "allowShort",
+    "requireBacktestApproval",
+    "autoBacktestEnabled"
+];
+const APPROVAL_APPLY_KEYS = [
+    "strategy",
+    "allowLong",
+    "allowShort",
+    "minVolumeRatio",
+    "breakoutPeriod",
+    "trendPeriod",
+    "targetProfitUSDT",
+    "minRangePercent",
+    "sessionStartUTC",
+    "sessionEndUTC",
+    "pullbackEmaPeriod",
+    "pullbackLookback",
+    "pullbackMaxDistancePct",
+    "rsiLongMin",
+    "rsiLongMax"
 ];
 const DEFAULT_CONFIG = {
     strategy: "hybrid",
@@ -183,6 +212,10 @@ const DEFAULT_CONFIG = {
     marketRegimeSlowPeriod: 120,
     allowLong: true,
     allowShort: true,
+    requireBacktestApproval: true,
+    autoBacktestEnabled: true,
+    autoBacktestIntervalMinutes: 360,
+    autoBacktestLookbackDays: 30,
     adaptiveEnabled: false
 };
 
@@ -333,7 +366,8 @@ const clearRuntimeTimers = () => {
         [marketRegimeTimer, () => { marketRegimeTimer = null; }],
         [mainLoopTimer, () => { mainLoopTimer = null; }],
         [metricsTimer, () => { metricsTimer = null; }],
-        [adaptiveTuneTimer, () => { adaptiveTuneTimer = null; }]
+        [adaptiveTuneTimer, () => { adaptiveTuneTimer = null; }],
+        [autoBacktestTimer, () => { autoBacktestTimer = null; }]
     ];
 
     for (const [timer, resetTimer] of timers) {
@@ -356,6 +390,8 @@ const printStartupBanner = (totalUSDT) => {
     console.log(`ATR short: ${db.shortAtrStopMult}/${db.shortAtrTargetMult}x trail ${db.trailingEnabled ? `${db.shortTrailingActivateATR}/${db.shortTrailingOffsetATR}x` : "OFF"}`);
     console.log(`Filters: session ${db.sessionStartUTC}-${db.sessionEndUTC} UTC | atr regime ${db.regimeFilterEnabled ? `ON p${db.regimeAtrPercentile}` : "OFF"} | market regime ${db.marketRegimeEnabled ? `${db.marketRegimeSymbol} ${marketRegimeData.state}` : "OFF"}`);
     console.log(`Leverage: ${db.leverage}x`);
+    console.log(`Backtest approval: ${db.requireBacktestApproval ? "REQUIRED" : "OPTIONAL"}`);
+    console.log(`Auto backtest: ${db.autoBacktestEnabled ? `ON every ${db.autoBacktestIntervalMinutes}m (${db.autoBacktestLookbackDays}d lookback)` : "OFF"}`);
     console.log(`Adaptive tuning: ${db.adaptiveEnabled ? "ON" : "OFF"}`);
     console.log(`Daily target: $${db.targetDailyProfit} (max ${db.maxTradesPerDay} trades)`);
     console.log("=".repeat(70) + "\n");
@@ -372,6 +408,117 @@ const serializeConfigForSave = (config) => ({
     activePosition: config.activePosition ? JSON.stringify(config.activePosition) : null,
     lastUpdated: Date.now()
 });
+
+const loadStrategyApproval = () => {
+    try {
+        if (!fs.existsSync(strategyApprovalPath)) {
+            return {
+                approved: false,
+                reason: `Approval file not found: ${path.basename(strategyApprovalPath)}`
+            };
+        }
+
+        const raw = fs.readFileSync(strategyApprovalPath, "utf8").trim();
+        if (!raw) {
+            return {
+                approved: false,
+                reason: "Approval file is empty"
+            };
+        }
+
+        const parsed = JSON.parse(raw);
+        return typeof parsed === "object" && parsed !== null
+            ? parsed
+            : { approved: false, reason: "Approval file has invalid payload" };
+    } catch (error) {
+        return {
+            approved: false,
+            reason: `Failed to read approval file: ${error.message}`
+        };
+    }
+};
+
+const applyApprovedStrategyConfig = (approval) => {
+    if (!approval?.approved || !approval.approvedConfig || !db) return;
+    APPROVAL_APPLY_KEYS.forEach((key) => {
+        if (approval.approvedConfig[key] !== undefined) {
+            db[key] = approval.approvedConfig[key];
+        }
+    });
+};
+
+const pairToBacktestSymbol = (pair) => {
+    const normalizedPair = typeof pair === "string" ? pair.toUpperCase().trim() : "";
+    if (!normalizedPair) return "";
+
+    const [baseRaw = "", quoteWithSettleRaw = ""] = normalizedPair.split("/");
+    const [quoteRaw = ""] = quoteWithSettleRaw.split(":");
+    const base = baseRaw.replace(/[^A-Z0-9]/g, "");
+    const quote = quoteRaw.replace(/[^A-Z0-9]/g, "");
+    if (base && quote) {
+        return `${base}${quote}`;
+    }
+
+    return normalizedPair
+        .replace(/:[A-Z0-9]+$/g, "")
+        .replace(/[^A-Z0-9]/g, "");
+};
+
+const runAutoBacktest = async (reason = "scheduled") => {
+    if (!db || isRunningAutoBacktest || !db.autoBacktestEnabled || autoBacktestBlockedReason) return false;
+    isRunningAutoBacktest = true;
+    const startedAt = Date.now();
+    try {
+        const lookbackDays = Math.max(3, Math.trunc(toFiniteNumber(db.autoBacktestLookbackDays, 30)));
+        const symbol = pairToBacktestSymbol(db.pair || "DOGE/USDT:USDT") || "DOGEUSDT";
+        const interval = db.breakoutTimeframe || "5m";
+        const args = ["backtest.js", "--mode", "approve", "--strategy", "auto", "--symbol", symbol, "--interval", interval, "--days", String(lookbackDays)];
+        console.log(`[AUTO-BACKTEST] Starting (${reason}) with ${symbol} ${interval} ${lookbackDays}d...`);
+
+        await new Promise((resolve, reject) => {
+            const child = spawn(process.execPath, args, {
+                cwd: __dirname,
+                stdio: ["ignore", "pipe", "pipe"]
+            });
+
+            let stdout = "";
+            let stderr = "";
+            child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+            child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+            child.on("error", reject);
+            child.on("close", (code) => {
+                if (code === 0) {
+                    const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+                    const summary = lines.slice(-8).join(" | ");
+                    console.log(`[AUTO-BACKTEST] Completed in ${Math.round((Date.now() - startedAt) / 1000)}s`);
+                    if (summary) console.log(`[AUTO-BACKTEST] ${summary}`);
+                    resolve();
+                    return;
+                }
+                reject(new Error(`backtest exit ${code}: ${(stderr || stdout).trim()}`));
+            });
+        });
+
+        const approval = loadStrategyApproval();
+        applyApprovedStrategyConfig(approval);
+        return true;
+    } catch (error) {
+        if (error?.code === "EPERM" || String(error?.message || "").includes("spawn EPERM")) {
+            autoBacktestBlockedReason = "child_process spawn is not allowed in this runtime";
+            if (autoBacktestTimer) {
+                clearInterval(autoBacktestTimer);
+                autoBacktestTimer = null;
+                currentAutoBacktestInterval = 0;
+            }
+            console.warn(`[AUTO-BACKTEST] Disabled for this session: ${autoBacktestBlockedReason}`);
+            return false;
+        }
+        console.error("[AUTO-BACKTEST] Failed:", error.message);
+        return false;
+    } finally {
+        isRunningAutoBacktest = false;
+    }
+};
 
 const getConfigRow = async () => Config.findOne();
 
@@ -925,24 +1072,43 @@ const findOpenExchangePosition = (positions, pair) => {
     )) || null;
 };
 
-const buildSyncedActivePosition = (openPosition, entryPrice) => {
+const buildSyncedActivePosition = (openPosition, entryPrice, previousPosition = null) => {
     const contracts = Math.abs(getExchangePositionContracts(openPosition));
     const side = getExchangePositionSide(openPosition) || "buy";
+    const canReusePreviousState = previousPosition && previousPosition.side === side;
+    const fallbackStopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
 
     return {
         side,
         entryPrice,
-        targetPrice: null,
-        stopLossPrice: null,
-        stopLossUSDT: -db.usdtPerTrade * (db.stopLossPercent / 100),
+        targetPrice: canReusePreviousState ? previousPosition.targetPrice ?? null : null,
+        stopLossPrice: canReusePreviousState ? previousPosition.stopLossPrice ?? null : null,
+        stopLossUSDT: canReusePreviousState && Number.isFinite(previousPosition.stopLossUSDT)
+            ? previousPosition.stopLossUSDT
+            : fallbackStopLossUSDT,
         orderId: `SYNC_${Date.now()}`,
         quantity: contracts,
-        entryTime: Date.now() - 300000,
-        highestSinceEntry: entryPrice,
-        lowestSinceEntry: entryPrice,
+        entryTime: canReusePreviousState ? previousPosition.entryTime ?? Date.now() - 300000 : Date.now() - 300000,
+        highestSinceEntry: canReusePreviousState && Number.isFinite(previousPosition.highestSinceEntry)
+            ? previousPosition.highestSinceEntry
+            : entryPrice,
+        lowestSinceEntry: canReusePreviousState && Number.isFinite(previousPosition.lowestSinceEntry)
+            ? previousPosition.lowestSinceEntry
+            : entryPrice,
         marginMode: (db.marginMode || "isolated").toLowerCase(),
-        targetProfitUSDT: db.targetProfitUSDT,
-        strategy: "SYNC_ONLY"
+        targetProfitUSDT: canReusePreviousState && Number.isFinite(previousPosition.targetProfitUSDT)
+            ? previousPosition.targetProfitUSDT
+            : db.targetProfitUSDT,
+        atrAtEntry: canReusePreviousState ? toFiniteNumber(previousPosition.atrAtEntry, null) : null,
+        strategy: canReusePreviousState && previousPosition.strategy
+            ? previousPosition.strategy
+            : "SYNC_ONLY",
+        trailingActivateATR: canReusePreviousState
+            ? toFiniteNumber(previousPosition.trailingActivateATR, db.trailingActivateATR)
+            : db.trailingActivateATR,
+        trailingOffsetATR: canReusePreviousState
+            ? toFiniteNumber(previousPosition.trailingOffsetATR, db.trailingOffsetATR)
+            : db.trailingOffsetATR
     };
 };
 
@@ -1200,7 +1366,14 @@ const getDailyRiskLimit = async () => {
     return totalUSDT * db.maxDailyLossPercent / 100;
 };
 
-const getTradingPauseReason = async () => {
+const getTradingPauseReason = async (approval = null) => {
+    if (db.requireBacktestApproval) {
+        if (!approval?.approved) {
+            const reason = approval?.reason || "Strategy has not passed backtest approval";
+            return `[PAUSE] Backtest approval required. ${reason}`;
+        }
+    }
+
     const maxDailyLoss = await getDailyRiskLimit();
 
     if (db.dailyPnL >= db.targetDailyProfit) {
@@ -1227,6 +1400,7 @@ const refreshRuntimeSchedulers = () => {
     startPnLMonitoring();
     startPositionSync();
     startAdaptiveTuning();
+    startAutoBacktest();
 };
 
 const handleRuntimeCommand = (input) => {
@@ -1264,19 +1438,22 @@ const bootstrapRuntime = async () => {
     startPositionSync();
     startMetricsReporting();
     startAdaptiveTuning();
+    startAutoBacktest();
     process.once("SIGINT", () => { shutdown("SIGINT"); });
     process.once("SIGTERM", () => { shutdown("SIGTERM"); });
 };
 
 const runTradingCycle = async () => {
     await reloadConfig();
+    const approval = loadStrategyApproval();
+    applyApprovedStrategyConfig(approval);
     refreshRuntimeSchedulers();
 
     if (isPlacingOrder || isClosingPosition) return;
 
     await resetDailyStateIfNeeded(Date.now());
 
-    const pauseReason = await getTradingPauseReason();
+    const pauseReason = await getTradingPauseReason(approval);
     if (pauseReason) {
         console.log(pauseReason);
         return;
@@ -1364,7 +1541,9 @@ const normalizeConfig = (config) => {
         regimeAtrLookback: { min: 20, allowZero: false, integer: true },
         regimeAtrPercentile: { min: 10, allowZero: false },
         marketRegimeFastPeriod: { min: 2, allowZero: false, integer: true },
-        marketRegimeSlowPeriod: { min: 2, allowZero: false, integer: true }
+        marketRegimeSlowPeriod: { min: 2, allowZero: false, integer: true },
+        autoBacktestIntervalMinutes: { min: 15, allowZero: false, integer: true },
+        autoBacktestLookbackDays: { min: 3, allowZero: false, integer: true }
     };
 
     Object.entries(numericRules).forEach(([key, rule]) => {
@@ -1452,7 +1631,7 @@ const initializeDB = async () => {
     } catch (error) {
         console.error("[ERROR] Error initializing DB:", error.message);
         db = getDefaultConfig();
-        return true;
+        return false;
     }
 };
 
@@ -1502,7 +1681,7 @@ const syncPositionWithExchange = async () => {
         }
 
         const entryPrice = getExchangePositionEntryPrice(openPosition, await getPrice());
-        const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice);
+        const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, db.activePosition);
 
         if (shouldRefreshSyncedPosition(db.activePosition, syncedPosition)) {
             const wasTrackingPosition = !!db.activePosition;
@@ -1677,7 +1856,7 @@ const analyzeSignal = async () => {
             riskOverrides: buildRiskOverrides(signalState.canShort)
         };
     } catch (error) {
-        console.error("[ERROR] Breakout analysis failed:", error.message);
+        console.error("[ERROR] Signal analysis failed:", error.message);
         return {};
     }
 };
@@ -1764,7 +1943,7 @@ const placeOrder = async (side, signalData = {}) => {
 };
 
 // -------------------- CLOSE POSITION --------------------
-const closePosition = async (reason, profitUSDT, profitPercent) => {
+const closePosition = async (reason) => {
     try {
         if (!db || !db.activePosition || isClosingPosition) return;
         isClosingPosition = true;
@@ -1776,20 +1955,25 @@ const closePosition = async (reason, profitUSDT, profitPercent) => {
             return;
         }
         const closeSide = side === "buy" ? "sell" : "buy";
+        const adjustedCloseQuantity = formatAmountToMarketPrecision(db.pair, quantity);
+        if (!Number.isFinite(adjustedCloseQuantity) || adjustedCloseQuantity <= 0) {
+            console.error("[ERROR] Invalid close quantity after precision adjustment.");
+            return;
+        }
 
         console.log(`\n[CLOSE] Closing position...`);
-        const closeOrder = await exchange.createOrder(db.pair, "market", closeSide, quantity, undefined, {
+        const closeOrder = await exchange.createOrder(db.pair, "market", closeSide, adjustedCloseQuantity, undefined, {
             reduceOnly: true,
             marginMode: (db.marginMode || "isolated").toLowerCase()
         });
         metrics.api.orders++;
-        const closeFillSnapshot = getOrderFillSnapshot(closeOrder, await getPrice(true), quantity);
+        const closeFillSnapshot = getOrderFillSnapshot(closeOrder, await getPrice(true), adjustedCloseQuantity);
         const remainingPosition = await fetchTrackedExchangePosition();
         if (remainingPosition) {
             const remainingContracts = Math.abs(getExchangePositionContracts(remainingPosition));
             if (remainingContracts > POSITION_SYNC_QTY_TOLERANCE) {
                 const remainingEntryPrice = getExchangePositionEntryPrice(remainingPosition, position.entryPrice);
-                db.activePosition = buildSyncedActivePosition(remainingPosition, remainingEntryPrice);
+                db.activePosition = buildSyncedActivePosition(remainingPosition, remainingEntryPrice, position);
                 await saveDB();
                 console.warn(`[WARN] Close order partially filled. Remaining quantity on exchange: ${remainingContracts}`);
                 return;
@@ -1954,7 +2138,7 @@ const startPnLMonitoring = () => {
 
             if (exitState.shouldClose) {
                 console.log(exitState.message);
-                await closePosition(exitState.reason, pnlState.profitUSDT, pnlState.profitPercent);
+                await closePosition(exitState.reason);
                 return;
             }
 
@@ -2008,6 +2192,40 @@ const startAdaptiveTuning = () => {
     console.log(`[ADAPTIVE] Dynamic config tuning active (${Math.round(ADAPTIVE_TUNE_INTERVAL / 60000)}m interval).`);
 };
 
+const startAutoBacktest = () => {
+    if (autoBacktestBlockedReason) {
+        if (autoBacktestTimer) {
+            clearInterval(autoBacktestTimer);
+            autoBacktestTimer = null;
+            currentAutoBacktestInterval = 0;
+        }
+        return;
+    }
+
+    if (!db?.autoBacktestEnabled) {
+        if (autoBacktestTimer) {
+            clearInterval(autoBacktestTimer);
+            autoBacktestTimer = null;
+            currentAutoBacktestInterval = 0;
+            console.log("[AUTO-BACKTEST] Scheduler disabled.");
+        }
+        return;
+    }
+
+    const desiredInterval = Math.max(15, Math.trunc(toFiniteNumber(db.autoBacktestIntervalMinutes, 360))) * 60 * 1000;
+    configureRecurringTask(
+        autoBacktestTimer,
+        currentAutoBacktestInterval,
+        desiredInterval,
+        "[AUTO-BACKTEST] Scheduler interval: ",
+        async () => {
+            await runAutoBacktest("scheduled");
+        },
+        (timer) => { autoBacktestTimer = timer; },
+        (interval) => { currentAutoBacktestInterval = interval; }
+    );
+};
+
 const shutdown = async (signal = "EXIT") => {
     if (isShuttingDown) return;
     isShuttingDown = true;
@@ -2039,8 +2257,14 @@ const shutdown = async (signal = "EXIT") => {
         await bootstrapRuntime();
 
         const totalUSDT = await getTotalUSDTBalance(true);
+        applyApprovedStrategyConfig(loadStrategyApproval());
 
         printStartupBanner(totalUSDT);
+        if (db.autoBacktestEnabled) {
+            runAutoBacktest("startup").catch((error) => {
+                console.error("[AUTO-BACKTEST] Startup run failed:", error.message);
+            });
+        }
 
         lastTradeAt = getLastTradeTimestampFromLog();
 
