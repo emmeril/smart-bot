@@ -1,7 +1,6 @@
 ﻿﻿require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
-const { spawn } = require("child_process");
 const ccxt = require("ccxt");
 const { RSI, EMA } = require("technicalindicators");
 const { Sequelize, DataTypes } = require('sequelize');
@@ -391,7 +390,7 @@ const printStartupBanner = (totalUSDT) => {
     console.log(`Filters: session ${db.sessionStartUTC}-${db.sessionEndUTC} UTC | atr regime ${db.regimeFilterEnabled ? `ON p${db.regimeAtrPercentile}` : "OFF"} | market regime ${db.marketRegimeEnabled ? `${db.marketRegimeSymbol} ${marketRegimeData.state}` : "OFF"}`);
     console.log(`Leverage: ${db.leverage}x`);
     console.log(`Backtest approval: ${db.requireBacktestApproval ? "REQUIRED" : "OPTIONAL"}`);
-    console.log(`Auto backtest: ${db.autoBacktestEnabled ? `ON every ${db.autoBacktestIntervalMinutes}m (${db.autoBacktestLookbackDays}d lookback)` : "OFF"}`);
+    console.log(`Auto approval refresh: ${db.autoBacktestEnabled ? `ON every ${db.autoBacktestIntervalMinutes}m` : "OFF"}`);
     console.log(`Adaptive tuning: ${db.adaptiveEnabled ? "ON" : "OFF"}`);
     console.log(`Daily target: $${db.targetDailyProfit} (max ${db.maxTradesPerDay} trades)`);
     console.log("=".repeat(70) + "\n");
@@ -447,72 +446,20 @@ const applyApprovedStrategyConfig = (approval) => {
     });
 };
 
-const pairToBacktestSymbol = (pair) => {
-    const normalizedPair = typeof pair === "string" ? pair.toUpperCase().trim() : "";
-    if (!normalizedPair) return "";
-
-    const [baseRaw = "", quoteWithSettleRaw = ""] = normalizedPair.split("/");
-    const [quoteRaw = ""] = quoteWithSettleRaw.split(":");
-    const base = baseRaw.replace(/[^A-Z0-9]/g, "");
-    const quote = quoteRaw.replace(/[^A-Z0-9]/g, "");
-    if (base && quote) {
-        return `${base}${quote}`;
-    }
-
-    return normalizedPair
-        .replace(/:[A-Z0-9]+$/g, "")
-        .replace(/[^A-Z0-9]/g, "");
-};
-
 const runAutoBacktest = async (reason = "scheduled") => {
     if (!db || isRunningAutoBacktest || !db.autoBacktestEnabled || autoBacktestBlockedReason) return false;
     isRunningAutoBacktest = true;
-    const startedAt = Date.now();
     try {
-        const lookbackDays = Math.max(3, Math.trunc(toFiniteNumber(db.autoBacktestLookbackDays, 30)));
-        const symbol = pairToBacktestSymbol(db.pair || "DOGE/USDT:USDT") || "DOGEUSDT";
-        const interval = db.breakoutTimeframe || "5m";
-        const args = ["backtest.js", "--mode", "approve", "--strategy", "auto", "--symbol", symbol, "--interval", interval, "--days", String(lookbackDays)];
-        console.log(`[AUTO-BACKTEST] Starting (${reason}) with ${symbol} ${interval} ${lookbackDays}d...`);
-
-        await new Promise((resolve, reject) => {
-            const child = spawn(process.execPath, args, {
-                cwd: __dirname,
-                stdio: ["ignore", "pipe", "pipe"]
-            });
-
-            let stdout = "";
-            let stderr = "";
-            child.stdout.on("data", (chunk) => { stdout += String(chunk); });
-            child.stderr.on("data", (chunk) => { stderr += String(chunk); });
-            child.on("error", reject);
-            child.on("close", (code) => {
-                if (code === 0) {
-                    const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-                    const summary = lines.slice(-8).join(" | ");
-                    console.log(`[AUTO-BACKTEST] Completed in ${Math.round((Date.now() - startedAt) / 1000)}s`);
-                    if (summary) console.log(`[AUTO-BACKTEST] ${summary}`);
-                    resolve();
-                    return;
-                }
-                reject(new Error(`backtest exit ${code}: ${(stderr || stdout).trim()}`));
-            });
-        });
-
         const approval = loadStrategyApproval();
         applyApprovedStrategyConfig(approval);
+
+        if (approval?.approved) {
+            console.log(`[AUTO-BACKTEST] Approval applied (${reason}).`);
+        } else {
+            console.log(`[AUTO-BACKTEST] Not approved (${reason}): ${approval?.reason || "unknown"}`);
+        }
         return true;
     } catch (error) {
-        if (error?.code === "EPERM" || String(error?.message || "").includes("spawn EPERM")) {
-            autoBacktestBlockedReason = "child_process spawn is not allowed in this runtime";
-            if (autoBacktestTimer) {
-                clearInterval(autoBacktestTimer);
-                autoBacktestTimer = null;
-                currentAutoBacktestInterval = 0;
-            }
-            console.warn(`[AUTO-BACKTEST] Disabled for this session: ${autoBacktestBlockedReason}`);
-            return false;
-        }
         console.error("[AUTO-BACKTEST] Failed:", error.message);
         return false;
     } finally {
