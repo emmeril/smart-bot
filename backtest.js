@@ -5,7 +5,7 @@ const DEFAULTS = {
   feeRate: 0.0004, // taker fee estimate per side (0.04%)
   slippageRate: 0.0002, // 0.02% per side
   config: {
-    strategy: "breakout",
+    strategy: "hybrid",
     usdtPerTrade: 10,
     leverage: 10,
     targetProfitUSDT: 0.5,
@@ -15,14 +15,18 @@ const DEFAULTS = {
     coolingPeriod: 3000,
     stopLossPercent: 5,
     breakoutPeriod: 20,
+    shortBreakoutPeriod: 20,
     minBreakoutStrength: 0.003,
     minRangePercent: 1.0,
+    shortMinRangePercent: 0.8,
     sessionStartUTC: 7,
     sessionEndUTC: 22,
     volumePeriod: 20,
     minVolumeRatio: 1.4,
+    shortMinVolumeRatio: 1.4,
     trendEnabled: true,
     trendPeriod: 120,
+    shortTrendPeriod: 120,
     v2Enabled: true,
     breakoutUseCloseConfirm: true,
     atrPeriod: 14,
@@ -41,6 +45,8 @@ const DEFAULTS = {
     pullbackMaxDistancePct: 0.6,
     rsiLongMin: 52,
     rsiLongMax: 68,
+    rsiShortMin: 25,
+    rsiShortMax: 50,
   },
 };
 
@@ -51,7 +57,7 @@ const getArg = (key, fallback) => {
   return args[idx + 1];
 };
 
-const options = {
+  const options = {
   symbol: getArg("symbol", DEFAULTS.symbol).toUpperCase(),
   interval: getArg("interval", DEFAULTS.interval),
   days: Number(getArg("days", DEFAULTS.days)),
@@ -96,13 +102,17 @@ const buildRuntimeConfig = () => {
     "coolingPeriod",
     "stopLossPercent",
     "breakoutPeriod",
+    "shortBreakoutPeriod",
     "minBreakoutStrength",
     "minRangePercent",
+    "shortMinRangePercent",
     "sessionStartUTC",
     "sessionEndUTC",
     "volumePeriod",
     "minVolumeRatio",
+    "shortMinVolumeRatio",
     "trendPeriod",
+    "shortTrendPeriod",
     "atrPeriod",
     "atrStopMult",
     "atrTargetMult",
@@ -115,6 +125,8 @@ const buildRuntimeConfig = () => {
     "pullbackMaxDistancePct",
     "rsiLongMin",
     "rsiLongMax",
+    "rsiShortMin",
+    "rsiShortMax",
   ];
   for (const key of numKeys) {
     const raw = getArg(key, null);
@@ -135,8 +147,10 @@ const buildRuntimeConfig = () => {
     if (["0", "false", "no", "off"].includes(p)) cfg[key] = false;
   }
   cfg.breakoutPeriod = Math.max(2, Math.trunc(cfg.breakoutPeriod));
+  cfg.shortBreakoutPeriod = Math.max(2, Math.trunc(cfg.shortBreakoutPeriod));
   cfg.volumePeriod = Math.max(2, Math.trunc(cfg.volumePeriod));
   cfg.trendPeriod = Math.max(2, Math.trunc(cfg.trendPeriod));
+  cfg.shortTrendPeriod = Math.max(2, Math.trunc(cfg.shortTrendPeriod));
   cfg.atrPeriod = Math.max(2, Math.trunc(cfg.atrPeriod));
   cfg.pullbackEmaPeriod = Math.max(2, Math.trunc(cfg.pullbackEmaPeriod));
   cfg.pullbackLookback = Math.max(1, Math.trunc(cfg.pullbackLookback));
@@ -146,13 +160,18 @@ const buildRuntimeConfig = () => {
   cfg.sessionStartUTC = clamp(Math.trunc(cfg.sessionStartUTC), 0, 23);
   cfg.sessionEndUTC = clamp(Math.trunc(cfg.sessionEndUTC), 0, 23);
   cfg.minRangePercent = Math.max(0, cfg.minRangePercent);
+  cfg.shortMinRangePercent = Math.max(0, cfg.shortMinRangePercent);
   cfg.pullbackMaxDistancePct = Math.max(0.05, cfg.pullbackMaxDistancePct);
   cfg.rsiLongMin = clamp(cfg.rsiLongMin, 1, 99);
   cfg.rsiLongMax = clamp(cfg.rsiLongMax, cfg.rsiLongMin + 1, 99);
+  cfg.rsiShortMin = clamp(cfg.rsiShortMin, 1, 99);
+  cfg.rsiShortMax = clamp(cfg.rsiShortMax, cfg.rsiShortMin + 1, 99);
   cfg.atrStopMult = Math.max(0.2, cfg.atrStopMult);
   cfg.atrTargetMult = Math.max(0.2, cfg.atrTargetMult);
   cfg.trailingActivateATR = Math.max(0.2, cfg.trailingActivateATR);
   cfg.trailingOffsetATR = Math.max(0.1, cfg.trailingOffsetATR);
+  cfg.minVolumeRatio = Math.max(1, cfg.minVolumeRatio);
+  cfg.shortMinVolumeRatio = Math.max(1, cfg.shortMinVolumeRatio);
   return cfg;
 };
 
@@ -259,6 +278,7 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
 
   const rsiAligned = calcRSI(closes, 7);
   const emaAligned = calcEMA(closes, cfg.trendPeriod);
+  const shortEmaAligned = calcEMA(closes, cfg.shortTrendPeriod);
   const pullbackEmaAligned = calcEMA(closes, cfg.pullbackEmaPeriod);
   const atrAligned = calcATR(highs, lows, closes, cfg.atrPeriod);
 
@@ -406,13 +426,15 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
 
     const avgVolume = volumes.slice(i - cfg.volumePeriod, i).reduce((a, b) => a + b, 0) / cfg.volumePeriod;
     const safeAvgVol = avgVolume > 0 ? avgVolume : Number.EPSILON;
-    const volumeOk = volumes[i] > safeAvgVol * cfg.minVolumeRatio;
+    const volumeRatio = volumes[i] / safeAvgVol;
+    const volumeOkLong = volumeRatio >= cfg.minVolumeRatio;
+    const volumeOkShort = volumeRatio >= cfg.shortMinVolumeRatio;
 
     const currentRSI = rsiAligned[i] ?? 50;
     const prevRSI = rsiAligned[i - 1] ?? currentRSI;
     let canLong = false;
     let canShort = false;
-    if (cfg.strategy === "pullback") {
+    if (cfg.strategy === "pullback" || cfg.strategy === "hybrid") {
       const trendEma = emaAligned[i];
       const pullbackEma = pullbackEmaAligned[i];
       const prevPullbackEma = pullbackEmaAligned[i - 1];
@@ -427,13 +449,43 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
         trendOk &&
         touchedPullbackZone &&
         reclaim &&
-        volumeOk &&
+        volumeOkLong &&
         sessionOk &&
         regimeOk &&
         currentRSI >= cfg.rsiLongMin &&
         currentRSI <= cfg.rsiLongMax &&
         momentumOk;
-      canShort = false;
+
+      if (cfg.strategy === "hybrid") {
+        const shortTrendEma = shortEmaAligned[i];
+        const shortTrendOk = Number.isFinite(shortTrendEma) ? price < shortTrendEma : true;
+        const shortPrevHighs = highs.slice(i - cfg.shortBreakoutPeriod, i);
+        const shortPrevLows = lows.slice(i - cfg.shortBreakoutPeriod, i);
+        const shortResistance = Math.max(...shortPrevHighs);
+        const shortSupport = Math.min(...shortPrevLows);
+        const shortRange = shortResistance - shortSupport;
+        if (Number.isFinite(shortRange) && shortRange > 0) {
+          const shortBreakoutThreshold = shortRange * cfg.minBreakoutStrength;
+          const bearishBreakout = cfg.v2Enabled && cfg.breakoutUseCloseConfirm
+            ? price < shortSupport - shortBreakoutThreshold
+            : low < shortSupport - shortBreakoutThreshold;
+          const shortRangePercent = price > 0 ? (shortRange / price) * 100 : 0;
+          const shortRangeOk = shortRangePercent >= cfg.shortMinRangePercent;
+          const shortMomentumOk = !cfg.v2Enabled || price < open;
+          canShort =
+            bearishBreakout &&
+            volumeOkShort &&
+            shortRangeOk &&
+            sessionOk &&
+            regimeOk &&
+            shortTrendOk &&
+            currentRSI >= cfg.rsiShortMin &&
+            currentRSI <= cfg.rsiShortMax &&
+            shortMomentumOk;
+        }
+      } else {
+        canShort = false;
+      }
     } else {
       const prevHighs = highs.slice(i - cfg.breakoutPeriod, i);
       const prevLows = lows.slice(i - cfg.breakoutPeriod, i);
@@ -446,28 +498,38 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
       const bullishBreakout = cfg.v2Enabled && cfg.breakoutUseCloseConfirm
         ? price > resistance + breakoutThreshold
         : high > resistance + breakoutThreshold;
+
+      const shortPrevHighs = highs.slice(i - cfg.shortBreakoutPeriod, i);
+      const shortPrevLows = lows.slice(i - cfg.shortBreakoutPeriod, i);
+      const shortResistance = Math.max(...shortPrevHighs);
+      const shortSupport = Math.min(...shortPrevLows);
+      const shortRange = shortResistance - shortSupport;
+      if (!Number.isFinite(shortRange) || shortRange <= 0) continue;
+      const shortBreakoutThreshold = shortRange * cfg.minBreakoutStrength;
       const bearishBreakout = cfg.v2Enabled && cfg.breakoutUseCloseConfirm
-        ? price < support - breakoutThreshold
-        : low < support - breakoutThreshold;
+        ? price < shortSupport - shortBreakoutThreshold
+        : low < shortSupport - shortBreakoutThreshold;
       const rangePercent = price > 0 ? (range / price) * 100 : 0;
       const rangeOk = rangePercent >= cfg.minRangePercent;
+      const shortRangePercent = price > 0 ? (shortRange / price) * 100 : 0;
+      const shortRangeOk = shortRangePercent >= cfg.shortMinRangePercent;
       const momentumLongOk = !cfg.v2Enabled || price > open;
       const momentumShortOk = !cfg.v2Enabled || price < open;
       canLong =
         bullishBreakout &&
-        currentRSI > 50 &&
-        currentRSI < 75 &&
-        volumeOk &&
+        currentRSI >= cfg.rsiLongMin &&
+        currentRSI <= cfg.rsiLongMax &&
+        volumeOkLong &&
         rangeOk &&
         sessionOk &&
         regimeOk &&
         momentumLongOk;
       canShort =
         bearishBreakout &&
-        currentRSI > 25 &&
-        currentRSI < 50 &&
-        volumeOk &&
-        rangeOk &&
+        currentRSI >= cfg.rsiShortMin &&
+        currentRSI <= cfg.rsiShortMax &&
+        volumeOkShort &&
+        shortRangeOk &&
         sessionOk &&
         regimeOk &&
         momentumShortOk;
@@ -475,7 +537,7 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
     if (!cfg.allowLong) canLong = false;
     if (!cfg.allowShort) canShort = false;
 
-    if (cfg.trendEnabled && Number.isFinite(emaAligned[i])) {
+    if (cfg.trendEnabled && cfg.strategy !== "pullback" && Number.isFinite(emaAligned[i])) {
       if (price <= emaAligned[i]) canLong = false;
       if (price >= emaAligned[i]) canShort = false;
     }
@@ -599,6 +661,70 @@ const runGridSearch = (candles) => {
     .sort((a, b) => b.score - a.score || b.netPnlUSDT - a.netPnlUSDT);
   const top = filtered.slice(0, 10);
   return { tested: results.length, qualified: filtered.length, top };
+};
+
+const runShortGridSearch = (candles) => {
+  const baseConfig = buildRuntimeConfig();
+  const minTrades = Math.max(5, Math.trunc(toNum(getArg("minTrades", "20"), 20)));
+
+  const shortMinVolumeRatios = toNumList(getArg("shortMinVolumeRatios", ""), [1.1, 1.2, 1.3, 1.4, 1.5]);
+  const shortBreakoutPeriods = toNumList(getArg("shortBreakoutPeriods", ""), [12, 16, 20, 24, 28]).map((v) => Math.trunc(v));
+  const shortTrendPeriods = toNumList(getArg("shortTrendPeriods", ""), [80, 100, 120, 150]).map((v) => Math.trunc(v));
+  const shortMinRangePercents = toNumList(getArg("shortMinRangePercents", ""), [0.4, 0.6, 0.8, 1.0]);
+  const sessionWindowsRaw = String(getArg("sessionWindows", "0-23,7-22"));
+  const sessionWindows = sessionWindowsRaw
+    .split(",")
+    .map((s) => s.trim())
+    .map((s) => {
+      const [a, b] = s.split("-").map((v) => Math.trunc(toNum(v, NaN)));
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+      return { start: clamp(a, 0, 23), end: clamp(b, 0, 23) };
+    })
+    .filter(Boolean);
+
+  const results = [];
+  for (const shortMinVolumeRatio of shortMinVolumeRatios) {
+    for (const shortBreakoutPeriod of shortBreakoutPeriods) {
+      for (const shortTrendPeriod of shortTrendPeriods) {
+        for (const shortMinRangePercent of shortMinRangePercents) {
+          for (const win of sessionWindows) {
+            const cfg = {
+              ...baseConfig,
+              strategy: "breakout",
+              allowLong: false,
+              allowShort: true,
+              shortMinVolumeRatio,
+              shortBreakoutPeriod,
+              shortTrendPeriod,
+              shortMinRangePercent,
+              sessionStartUTC: win.start,
+              sessionEndUTC: win.end,
+            };
+            const r = backtest(candles, cfg, DEFAULTS.feeRate, DEFAULTS.slippageRate);
+            const score = r.netPnlUSDT - Math.abs(r.maxDrawdownUSDT) * 0.3 + r.winRate * 0.02;
+            results.push({
+              shortMinVolumeRatio,
+              shortBreakoutPeriod,
+              shortTrendPeriod,
+              shortMinRangePercent,
+              sessionStartUTC: win.start,
+              sessionEndUTC: win.end,
+              trades: r.trades,
+              winRate: r.winRate,
+              netPnlUSDT: r.netPnlUSDT,
+              maxDrawdownUSDT: r.maxDrawdownUSDT,
+              score,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  const filtered = results
+    .filter((r) => r.trades >= minTrades)
+    .sort((a, b) => b.score - a.score || b.netPnlUSDT - a.netPnlUSDT);
+  return { tested: results.length, qualified: filtered.length, top: filtered.slice(0, 12), minTrades };
 };
 
 const runPullbackGridSearch = (candles) => {
@@ -839,6 +965,49 @@ const runSensitivityAnalysis = (candles) => {
                 sessionStartUTC: best.sessionStartUTC,
                 sessionEndUTC: best.sessionEndUTC,
               },
+          null,
+          2
+        )
+      );
+    } else if (options.mode === "grid-short") {
+      console.log("[BACKTEST] Running short-only grid search...");
+      const grid = runShortGridSearch(candles);
+      console.log("\n=== Short Grid Summary ===");
+      console.log(`Tested combos : ${grid.tested}`);
+      console.log(`Qualified     : ${grid.qualified} (trades >= ${grid.minTrades})`);
+      if (!grid.top.length) {
+        console.log("No qualified result. Try wider ranges or longer days.");
+        return;
+      }
+      console.table(
+        grid.top.map((r, i) => ({
+          rank: i + 1,
+          shortMinVolumeRatio: r.shortMinVolumeRatio.toFixed(2),
+          shortBreakoutPeriod: r.shortBreakoutPeriod,
+          shortTrendPeriod: r.shortTrendPeriod,
+          shortMinRangePercent: r.shortMinRangePercent.toFixed(2),
+          sessionUTC: `${r.sessionStartUTC}-${r.sessionEndUTC}`,
+          trades: r.trades,
+          winRate: `${r.winRate.toFixed(2)}%`,
+          netPnlUSDT: r.netPnlUSDT.toFixed(4),
+          maxDD: r.maxDrawdownUSDT.toFixed(4),
+          score: r.score.toFixed(4),
+        }))
+      );
+      const best = grid.top[0];
+      console.log("\nBest short config candidate:");
+      console.log(
+        JSON.stringify(
+          {
+            allowLong: false,
+            allowShort: true,
+            shortMinVolumeRatio: best.shortMinVolumeRatio,
+            shortBreakoutPeriod: best.shortBreakoutPeriod,
+            shortTrendPeriod: best.shortTrendPeriod,
+            shortMinRangePercent: best.shortMinRangePercent,
+            sessionStartUTC: best.sessionStartUTC,
+            sessionEndUTC: best.sessionEndUTC,
+          },
           null,
           2
         )

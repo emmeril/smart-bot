@@ -13,7 +13,7 @@ const sequelize = new Sequelize({
 });
 
 const Config = sequelize.define('Config', {
-    strategy: { type: DataTypes.STRING, defaultValue: "hybrid" },
+	    strategy: { type: DataTypes.STRING, defaultValue: "pullback" },
     pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
     usdtPerTrade: { type: DataTypes.FLOAT, defaultValue: 2 },
     leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
@@ -29,28 +29,28 @@ const Config = sequelize.define('Config', {
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: 500 },
     stopLossPercent: { type: DataTypes.FLOAT, defaultValue: 5 },
     breakoutPeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
-    breakoutTimeframe: { type: DataTypes.STRING, defaultValue: "15m" },
+	    breakoutTimeframe: { type: DataTypes.STRING, defaultValue: "5m" },
     minBreakoutStrength: { type: DataTypes.FLOAT, defaultValue: 0.003 },
     minRangePercent: { type: DataTypes.FLOAT, defaultValue: 1.2 },
-    sessionStartUTC: { type: DataTypes.INTEGER, defaultValue: 7 },
-    sessionEndUTC: { type: DataTypes.INTEGER, defaultValue: 22 },
-    volumePeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
-    minVolumeRatio: { type: DataTypes.FLOAT, defaultValue: 1.1 },
-    shortMinVolumeRatio: { type: DataTypes.FLOAT, defaultValue: 1.4 },
-    maxPriceDeviationPercent: { type: DataTypes.FLOAT, defaultValue: 0.5 },
+	    sessionStartUTC: { type: DataTypes.INTEGER, defaultValue: 0 },
+	    sessionEndUTC: { type: DataTypes.INTEGER, defaultValue: 23 },
+	    volumePeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
+		    minVolumeRatio: { type: DataTypes.FLOAT, defaultValue: 1.3 },
+	    shortMinVolumeRatio: { type: DataTypes.FLOAT, defaultValue: 1.25 },
+	    maxPriceDeviationPercent: { type: DataTypes.FLOAT, defaultValue: 0.5 },
     trendEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
     trendTimeframe: { type: DataTypes.STRING, defaultValue: "15m" },
-    trendPeriod: { type: DataTypes.INTEGER, defaultValue: 80 },
+	    trendPeriod: { type: DataTypes.INTEGER, defaultValue: 150 },
     shortTrendPeriod: { type: DataTypes.INTEGER, defaultValue: 120 },
-    shortBreakoutPeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
-    shortMinRangePercent: { type: DataTypes.FLOAT, defaultValue: 0.8 },
-    pullbackEmaPeriod: { type: DataTypes.INTEGER, defaultValue: 5 },
-    pullbackLookback: { type: DataTypes.INTEGER, defaultValue: 2 },
-    pullbackMaxDistancePct: { type: DataTypes.FLOAT, defaultValue: 0.5 },
-    rsiLongMin: { type: DataTypes.FLOAT, defaultValue: 52 },
-    rsiLongMax: { type: DataTypes.FLOAT, defaultValue: 72 },
+	    shortBreakoutPeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
+	    shortMinRangePercent: { type: DataTypes.FLOAT, defaultValue: 0.6 },
+		    pullbackEmaPeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
+	    pullbackLookback: { type: DataTypes.INTEGER, defaultValue: 2 },
+	    pullbackMaxDistancePct: { type: DataTypes.FLOAT, defaultValue: 0.6 },
+		    rsiLongMin: { type: DataTypes.FLOAT, defaultValue: 50 },
+		    rsiLongMax: { type: DataTypes.FLOAT, defaultValue: 62 },
     atrPeriod: { type: DataTypes.INTEGER, defaultValue: 14 },
-    atrStopMult: { type: DataTypes.FLOAT, defaultValue: 0.8 },
+	    atrStopMult: { type: DataTypes.FLOAT, defaultValue: 1.4 },
     atrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
     shortAtrStopMult: { type: DataTypes.FLOAT, defaultValue: 1.4 },
     shortAtrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
@@ -69,7 +69,7 @@ const Config = sequelize.define('Config', {
     marketRegimeFastPeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
     marketRegimeSlowPeriod: { type: DataTypes.INTEGER, defaultValue: 120 },
     allowLong: { type: DataTypes.BOOLEAN, defaultValue: true },
-    allowShort: { type: DataTypes.BOOLEAN, defaultValue: true },
+	    allowShort: { type: DataTypes.BOOLEAN, defaultValue: false },
     adaptiveEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
     lastDailyReset: { type: DataTypes.BIGINT, defaultValue: Date.now() },
     lastUpdated: { type: DataTypes.BIGINT, defaultValue: Date.now() }
@@ -126,7 +126,7 @@ const BOOLEAN_CONFIG_KEYS = [
     "allowShort"
 ];
 const DEFAULT_CONFIG = {
-    strategy: "hybrid",
+	    strategy: "pullback",
     pair: "DOGE/USDT:USDT",
     usdtPerTrade: 2,
     leverage: 10,
@@ -142,28 +142,28 @@ const DEFAULT_CONFIG = {
     monitoringInterval: 500,
     stopLossPercent: 5,
     breakoutPeriod: 20,
-    breakoutTimeframe: "15m",
+	    breakoutTimeframe: "5m",
     minBreakoutStrength: 0.003,
     minRangePercent: 1.2,
     sessionStartUTC: 0,
     sessionEndUTC: 23,
-    volumePeriod: 20,
-    minVolumeRatio: 1.1,
-    shortMinVolumeRatio: 1.4,
-    maxPriceDeviationPercent: 0.5,
+	    volumePeriod: 20,
+		    minVolumeRatio: 1.3,
+	    shortMinVolumeRatio: 1.25,
+	    maxPriceDeviationPercent: 0.5,
     trendEnabled: true,
     trendTimeframe: "15m",
-    trendPeriod: 80,
+	    trendPeriod: 150,
     shortTrendPeriod: 120,
-    shortBreakoutPeriod: 20,
-    shortMinRangePercent: 0.8,
-    pullbackEmaPeriod: 5,
-    pullbackLookback: 2,
-    pullbackMaxDistancePct: 0.5,
-    rsiLongMin: 52,
-    rsiLongMax: 72,
+	    shortBreakoutPeriod: 20,
+	    shortMinRangePercent: 0.6,
+		    pullbackEmaPeriod: 20,
+	    pullbackLookback: 2,
+	    pullbackMaxDistancePct: 0.6,
+		    rsiLongMin: 50,
+		    rsiLongMax: 62,
     atrPeriod: 14,
-    atrStopMult: 0.8,
+	    atrStopMult: 1.4,
     atrTargetMult: 1.6,
     shortAtrStopMult: 1.4,
     shortAtrTargetMult: 1.6,
@@ -182,7 +182,7 @@ const DEFAULT_CONFIG = {
     marketRegimeFastPeriod: 20,
     marketRegimeSlowPeriod: 120,
     allowLong: true,
-    allowShort: true,
+	    allowShort: false,
     adaptiveEnabled: false
 };
 
@@ -362,9 +362,74 @@ const printStartupBanner = (totalUSDT) => {
 };
 
 const hydrateConfig = (config) => {
-    const hydrated = { ...config };
-    hydrated.activePosition = safeParseJSON(hydrated.activePosition, null);
-    return normalizeConfig(hydrated);
+	    const hydrated = { ...config };
+	    hydrated.activePosition = safeParseJSON(hydrated.activePosition, null);
+	    return normalizeConfig(hydrated);
+};
+
+const maybeMigratePersistedConfig = (config) => {
+    if (!config || typeof config !== "object") return { migrated: config, changed: false };
+
+    const migrated = { ...config };
+    let changed = false;
+
+    const pullbackMaxDistancePct = toFiniteNumber(migrated.pullbackMaxDistancePct, NaN);
+    if (Number.isFinite(pullbackMaxDistancePct) && Math.abs(pullbackMaxDistancePct - 0.5) < 1e-9) {
+        migrated.pullbackMaxDistancePct = 0.6;
+        changed = true;
+    }
+
+    const shortMinVolumeRatio = toFiniteNumber(migrated.shortMinVolumeRatio, NaN);
+    if (Number.isFinite(shortMinVolumeRatio) && Math.abs(shortMinVolumeRatio - 1.4) < 1e-9) {
+        migrated.shortMinVolumeRatio = 1.25;
+        changed = true;
+    }
+
+    const shortMinRangePercent = toFiniteNumber(migrated.shortMinRangePercent, NaN);
+    if (Number.isFinite(shortMinRangePercent) && Math.abs(shortMinRangePercent - 0.8) < 1e-9) {
+        migrated.shortMinRangePercent = 0.6;
+        changed = true;
+    }
+
+    return { migrated, changed };
+};
+
+const SCALPING_PULLBACK_PRESET = {
+    strategy: "pullback",
+    allowLong: true,
+    allowShort: false,
+    breakoutTimeframe: "5m",
+    sessionStartUTC: 0,
+    sessionEndUTC: 23,
+    volumePeriod: 20,
+    minVolumeRatio: 1.3,
+    trendEnabled: true,
+    trendPeriod: 150,
+    pullbackEmaPeriod: 20,
+    pullbackLookback: 2,
+    pullbackMaxDistancePct: 0.6,
+    rsiLongMin: 50,
+    rsiLongMax: 62,
+    atrPeriod: 14,
+    atrStopMult: 1.4,
+    atrTargetMult: 1.6,
+    trailingEnabled: true,
+    trailingActivateATR: 1.2,
+    trailingOffsetATR: 0.6
+};
+
+const applyStrategyPreset = (config, preset) => {
+    if (!config || typeof config !== "object") return false;
+    if (!preset || typeof preset !== "object") return false;
+
+    let changed = false;
+    for (const [key, value] of Object.entries(preset)) {
+        if (config[key] !== value) {
+            config[key] = value;
+            changed = true;
+        }
+    }
+    return changed;
 };
 
 const serializeConfigForSave = (config) => ({
@@ -1441,16 +1506,25 @@ const normalizeConfig = (config) => {
 
 // -------------------- INITIALIZE DATABASE --------------------
 const initializeDB = async () => {
-    try {
-        await sequelize.sync();
-        console.log("[OK] Database synced");
+	    try {
+	        await sequelize.sync();
+	        console.log("[OK] Database synced");
 
-        const configRow = await ensureConfigRow();
-        db = hydrateConfig(configRow.toJSON());
-        console.log("[OK] DB initialized successfully");
-        return true;
-    } catch (error) {
-        console.error("[ERROR] Error initializing DB:", error.message);
+	        const configRow = await ensureConfigRow();
+	        const persisted = configRow.toJSON();
+	        const { migrated, changed } = maybeMigratePersistedConfig(persisted);
+	        db = hydrateConfig(migrated);
+	        const presetApplied = (!db.activePosition) && applyStrategyPreset(db, SCALPING_PULLBACK_PRESET);
+	        if (changed || presetApplied) {
+	            await persistConfig(db);
+	            console.log(presetApplied
+	                ? "[PRESET] Applied scalping pullback preset"
+	                : "[MIGRATE] Updated default params (pullback/short) for this config row");
+	        }
+	        console.log("[OK] DB initialized successfully");
+	        return true;
+	    } catch (error) {
+	        console.error("[ERROR] Error initializing DB:", error.message);
         db = getDefaultConfig();
         return true;
     }
