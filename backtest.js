@@ -597,7 +597,7 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
 
 const runGridSearch = (candles) => {
   const baseConfig = buildRuntimeConfig();
-  if (baseConfig.strategy === "pullback") {
+  if (baseConfig.strategy === "pullback" || baseConfig.strategy === "hybrid") {
     return runPullbackGridSearch(candles);
   }
   const minVolumeRatios = toNumList(getArg("minVolumeRatios", ""), [1.2, 1.3, 1.4, 1.5, 1.6]);
@@ -907,7 +907,7 @@ const runSensitivityAnalysis = (candles) => {
         console.log("No qualified result. Try wider ranges or longer days.");
         return;
       }
-      console.table(selectedConfig.strategy === "pullback"
+      console.table((selectedConfig.strategy === "pullback" || selectedConfig.strategy === "hybrid")
         ? grid.top.map((r, i) => ({
             rank: i + 1,
             minVolumeRatio: r.minVolumeRatio.toFixed(2),
@@ -1095,7 +1095,9 @@ const runSensitivityAnalysis = (candles) => {
       console.log(
         runtimeConfig.strategy === "pullback"
           ? `Config         : strategy=pullback | vol>=${runtimeConfig.minVolumeRatio}x | trend=${runtimeConfig.trendPeriod} | pullbackEMA=${runtimeConfig.pullbackEmaPeriod} | lookback=${runtimeConfig.pullbackLookback} | maxDist=${runtimeConfig.pullbackMaxDistancePct}% | RSI=${runtimeConfig.rsiLongMin}-${runtimeConfig.rsiLongMax} | session=${runtimeConfig.sessionStartUTC}-${runtimeConfig.sessionEndUTC} UTC | regime=${runtimeConfig.regimeFilterEnabled ? `ATR p${runtimeConfig.regimeAtrPercentile} (${runtimeConfig.regimeAtrLookback})` : "OFF"} | ATR(${runtimeConfig.atrPeriod}) stop=${runtimeConfig.atrStopMult} target=${runtimeConfig.atrTargetMult} trail=${runtimeConfig.trailingEnabled}`
-          : `Config         : strategy=breakout | vol>=${runtimeConfig.minVolumeRatio}x | breakout=${runtimeConfig.breakoutPeriod} | trend=${runtimeConfig.trendPeriod} | TP=${runtimeConfig.targetProfitUSDT} | range>=${runtimeConfig.minRangePercent}% | session=${runtimeConfig.sessionStartUTC}-${runtimeConfig.sessionEndUTC} UTC | regime=${runtimeConfig.regimeFilterEnabled ? `ATR p${runtimeConfig.regimeAtrPercentile} (${runtimeConfig.regimeAtrLookback})` : "OFF"} | v2=${runtimeConfig.v2Enabled} closeConfirm=${runtimeConfig.breakoutUseCloseConfirm} ATR(${runtimeConfig.atrPeriod}) stop=${runtimeConfig.atrStopMult} target=${runtimeConfig.atrTargetMult} trail=${runtimeConfig.trailingEnabled}`
+          : runtimeConfig.strategy === "hybrid"
+            ? `Config         : strategy=hybrid | long=pullback(vol>=${runtimeConfig.minVolumeRatio}x trend=${runtimeConfig.trendPeriod} pullbackEMA=${runtimeConfig.pullbackEmaPeriod} lookback=${runtimeConfig.pullbackLookback} maxDist=${runtimeConfig.pullbackMaxDistancePct}% RSI=${runtimeConfig.rsiLongMin}-${runtimeConfig.rsiLongMax}) | short=breakout(vol>=${runtimeConfig.shortMinVolumeRatio}x trend=${runtimeConfig.shortTrendPeriod} breakout=${runtimeConfig.shortBreakoutPeriod} range>=${runtimeConfig.shortMinRangePercent}% RSI=${runtimeConfig.rsiShortMin}-${runtimeConfig.rsiShortMax}) | session=${runtimeConfig.sessionStartUTC}-${runtimeConfig.sessionEndUTC} UTC | regime=${runtimeConfig.regimeFilterEnabled ? `ATR p${runtimeConfig.regimeAtrPercentile} (${runtimeConfig.regimeAtrLookback})` : "OFF"} | v2=${runtimeConfig.v2Enabled} closeConfirm=${runtimeConfig.breakoutUseCloseConfirm} ATR(${runtimeConfig.atrPeriod}) stop=${runtimeConfig.atrStopMult} target=${runtimeConfig.atrTargetMult} trail=${runtimeConfig.trailingEnabled}`
+            : `Config         : strategy=breakout | vol>=${runtimeConfig.minVolumeRatio}x | breakout=${runtimeConfig.breakoutPeriod} | trend=${runtimeConfig.trendPeriod} | TP=${runtimeConfig.targetProfitUSDT} | range>=${runtimeConfig.minRangePercent}% | session=${runtimeConfig.sessionStartUTC}-${runtimeConfig.sessionEndUTC} UTC | regime=${runtimeConfig.regimeFilterEnabled ? `ATR p${runtimeConfig.regimeAtrPercentile} (${runtimeConfig.regimeAtrLookback})` : "OFF"} | v2=${runtimeConfig.v2Enabled} closeConfirm=${runtimeConfig.breakoutUseCloseConfirm} ATR(${runtimeConfig.atrPeriod}) stop=${runtimeConfig.atrStopMult} target=${runtimeConfig.atrTargetMult} trail=${runtimeConfig.trailingEnabled}`
       );
       console.log(`Candles        : ${result.candles}`);
       console.log(`Trades         : ${result.trades}`);
