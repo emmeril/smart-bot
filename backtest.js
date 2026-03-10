@@ -26,8 +26,10 @@ const DEFAULTS = {
     sessionEndUTC: 23,
     volumePeriod: 20,
     minVolumeRatio: 1.4,
+    shortMinVolumeRatio: 1.4,
     trendEnabled: true,
     trendPeriod: 120,
+    shortTrendPeriod: 120,
     v2Enabled: true,
     breakoutUseCloseConfirm: true,
     atrPeriod: 14,
@@ -46,6 +48,8 @@ const DEFAULTS = {
     pullbackMaxDistancePct: 0.6,
     rsiLongMin: 52,
     rsiLongMax: 68,
+    rsiShortMin: 25,
+    rsiShortMax: 50,
   },
 };
 
@@ -117,7 +121,9 @@ const buildRuntimeConfig = () => {
     "sessionEndUTC",
     "volumePeriod",
     "minVolumeRatio",
+    "shortMinVolumeRatio",
     "trendPeriod",
+    "shortTrendPeriod",
     "atrPeriod",
     "atrStopMult",
     "atrTargetMult",
@@ -130,6 +136,8 @@ const buildRuntimeConfig = () => {
     "pullbackMaxDistancePct",
     "rsiLongMin",
     "rsiLongMax",
+    "rsiShortMin",
+    "rsiShortMax",
   ];
   for (const key of numKeys) {
     const raw = getArg(key, null);
@@ -164,6 +172,8 @@ const buildRuntimeConfig = () => {
   cfg.pullbackMaxDistancePct = Math.max(0.05, cfg.pullbackMaxDistancePct);
   cfg.rsiLongMin = clamp(cfg.rsiLongMin, 1, 99);
   cfg.rsiLongMax = clamp(cfg.rsiLongMax, cfg.rsiLongMin + 1, 99);
+  cfg.rsiShortMin = clamp(cfg.rsiShortMin, 1, 99);
+  cfg.rsiShortMax = clamp(cfg.rsiShortMax, cfg.rsiShortMin + 1, 99);
   cfg.atrStopMult = Math.max(0.2, cfg.atrStopMult);
   cfg.atrTargetMult = Math.max(0.2, cfg.atrTargetMult);
   cfg.trailingActivateATR = Math.max(0.2, cfg.trailingActivateATR);
@@ -213,14 +223,18 @@ const extractApprovedConfig = (strategy, candidate) => {
     return {
       strategy: "pullback",
       allowLong: true,
-      allowShort: false,
+      allowShort: true,
       minVolumeRatio: candidate.minVolumeRatio,
+      shortMinVolumeRatio: candidate.shortMinVolumeRatio ?? DEFAULTS.config.shortMinVolumeRatio,
       trendPeriod: candidate.trendPeriod,
+      shortTrendPeriod: candidate.shortTrendPeriod ?? DEFAULTS.config.shortTrendPeriod,
       pullbackEmaPeriod: candidate.pullbackEmaPeriod,
       pullbackLookback: candidate.pullbackLookback,
       pullbackMaxDistancePct: candidate.pullbackMaxDistancePct,
       rsiLongMin: candidate.rsiLongMin,
       rsiLongMax: candidate.rsiLongMax,
+      rsiShortMin: candidate.rsiShortMin ?? DEFAULTS.config.rsiShortMin,
+      rsiShortMax: candidate.rsiShortMax ?? DEFAULTS.config.rsiShortMax,
       sessionStartUTC: candidate.sessionStartUTC,
       sessionEndUTC: candidate.sessionEndUTC,
     };
@@ -267,7 +281,10 @@ const evaluateApprovalCandidate = (candles, strategy) => {
     ...extractApprovedConfig(strategy, best),
   };
   const result = backtest(candles, approvedConfig, DEFAULTS.feeRate, DEFAULTS.slippageRate);
-  const score = result.netPnlUSDT - Math.abs(result.maxDrawdownUSDT) * 0.3 + result.winRate * 0.02;
+  const profitableDaysForScore = result.daily.filter((d) => d.pnl > 0).length;
+  const score = strategy === "pullback"
+    ? result.netPnlUSDT - Math.abs(result.maxDrawdownUSDT) * 0.3 + result.winRate * 0.02 + profitableDaysForScore * 0.05
+    : result.netPnlUSDT - Math.abs(result.maxDrawdownUSDT) * 0.3 + result.winRate * 0.02;
   const thresholds = buildApprovalThresholds(strategy);
   const evaluation = buildApprovalEvaluation(result, thresholds, score);
 
@@ -284,6 +301,10 @@ const evaluateApprovalCandidate = (candles, strategy) => {
       avgPnlUSDT: Number(result.avgPnlUSDT.toFixed(4)),
       maxDrawdownUSDT: Number(result.maxDrawdownUSDT.toFixed(4)),
       score: Number(score.toFixed(4)),
+      longTrades: result.longTrades ?? 0,
+      shortTrades: result.shortTrades ?? 0,
+      longNetPnlUSDT: Number(toNum(result.longNetPnlUSDT, 0).toFixed(4)),
+      shortNetPnlUSDT: Number(toNum(result.shortNetPnlUSDT, 0).toFixed(4)),
       profitableDays: evaluation.profitableDays,
       losingDays: evaluation.losingDays,
     },
@@ -410,6 +431,7 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
 
   const rsiAligned = calcRSI(closes, 7);
   const emaAligned = calcEMA(closes, cfg.trendPeriod);
+  const shortEmaAligned = calcEMA(closes, cfg.shortTrendPeriod ?? cfg.trendPeriod);
   const pullbackEmaAligned = calcEMA(closes, cfg.pullbackEmaPeriod);
   const atrAligned = calcATR(highs, lows, closes, cfg.atrPeriod);
 
@@ -426,6 +448,10 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
 
   const trades = [];
   const daily = new Map();
+  let longTrades = 0;
+  let shortTrades = 0;
+  let longNetPnlUSDT = 0;
+  let shortNetPnlUSDT = 0;
 
   const addDaily = (ts, pnl) => {
     const key = formatDateKey(ts);
@@ -523,6 +549,13 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
           pnl: netPnl,
           reason,
         });
+        if (position.side === "buy") {
+          longTrades++;
+          longNetPnlUSDT += netPnl;
+        } else {
+          shortTrades++;
+          shortNetPnlUSDT += netPnl;
+        }
         position = null;
       }
       continue;
@@ -558,6 +591,7 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
     const avgVolume = volumes.slice(i - cfg.volumePeriod, i).reduce((a, b) => a + b, 0) / cfg.volumePeriod;
     const safeAvgVol = avgVolume > 0 ? avgVolume : Number.EPSILON;
     const volumeOk = volumes[i] > safeAvgVol * cfg.minVolumeRatio;
+    const shortVolumeOk = volumes[i] > safeAvgVol * (cfg.shortMinVolumeRatio ?? cfg.minVolumeRatio);
 
     const currentRSI = rsiAligned[i] ?? 50;
     const prevRSI = rsiAligned[i - 1] ?? currentRSI;
@@ -565,9 +599,10 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
     let canShort = false;
     if (cfg.strategy === "pullback") {
       const trendEma = emaAligned[i];
+      const shortTrendEma = shortEmaAligned[i];
       const pullbackEma = pullbackEmaAligned[i];
       const prevPullbackEma = pullbackEmaAligned[i - 1];
-      if (!Number.isFinite(trendEma) || !Number.isFinite(pullbackEma) || !Number.isFinite(prevPullbackEma)) continue;
+      if (!Number.isFinite(trendEma) || !Number.isFinite(shortTrendEma) || !Number.isFinite(pullbackEma) || !Number.isFinite(prevPullbackEma)) continue;
       const recentLow = Math.min(...lows.slice(i - cfg.pullbackLookback, i + 1));
       const touchDistancePct = Math.abs((recentLow - pullbackEma) / pullbackEma) * 100;
       const touchedPullbackZone = recentLow <= pullbackEma && touchDistancePct <= cfg.pullbackMaxDistancePct;
@@ -584,7 +619,23 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
         currentRSI >= cfg.rsiLongMin &&
         currentRSI <= cfg.rsiLongMax &&
         momentumOk;
-      canShort = false;
+
+      const recentHigh = Math.max(...highs.slice(i - cfg.pullbackLookback, i + 1));
+      const shortTouchDistancePct = Math.abs((recentHigh - pullbackEma) / pullbackEma) * 100;
+      const shortTouchedPullbackZone = recentHigh >= pullbackEma && shortTouchDistancePct <= cfg.pullbackMaxDistancePct;
+      const shortReclaim = closes[i - 1] >= prevPullbackEma && price < pullbackEma;
+      const shortTrendOk = price < shortTrendEma && pullbackEma < shortTrendEma;
+      const shortMomentumOk = price < open && price < closes[i - 1] && currentRSI < prevRSI;
+      canShort =
+        shortTrendOk &&
+        shortTouchedPullbackZone &&
+        shortReclaim &&
+        shortVolumeOk &&
+        sessionOk &&
+        regimeOk &&
+        currentRSI >= (cfg.rsiShortMin ?? 25) &&
+        currentRSI <= (cfg.rsiShortMax ?? 50) &&
+        shortMomentumOk;
     } else {
       const prevHighs = highs.slice(i - cfg.breakoutPeriod, i);
       const prevLows = lows.slice(i - cfg.breakoutPeriod, i);
@@ -617,7 +668,7 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
         bearishBreakout &&
         currentRSI > 25 &&
         currentRSI < 50 &&
-        volumeOk &&
+        shortVolumeOk &&
         rangeOk &&
         sessionOk &&
         regimeOk &&
@@ -628,7 +679,7 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
 
     if (cfg.trendEnabled && Number.isFinite(emaAligned[i])) {
       if (price <= emaAligned[i]) canLong = false;
-      if (price >= emaAligned[i]) canShort = false;
+      if (price >= (shortEmaAligned[i] ?? emaAligned[i])) canShort = false;
     }
 
     if (!canLong && !canShort) continue;
@@ -679,6 +730,10 @@ const backtest = (candles, cfg, feeRate, slippageRate) => {
     netPnlUSDT: net,
     avgPnlUSDT: avg,
     maxDrawdownUSDT: maxDrawdown,
+    longTrades,
+    shortTrades,
+    longNetPnlUSDT,
+    shortNetPnlUSDT,
     daily: [...daily.entries()].map(([day, pnl]) => ({ day, pnl })),
     sampleTrades: trades.slice(0, 5),
   };
@@ -787,7 +842,7 @@ const runPullbackGridSearch = (candles) => {
                     ...baseConfig,
                     strategy: "pullback",
                     allowLong: true,
-                    allowShort: false,
+                    allowShort: true,
                     minVolumeRatio,
                     trendPeriod,
                     pullbackEmaPeriod,
@@ -799,7 +854,8 @@ const runPullbackGridSearch = (candles) => {
                     sessionEndUTC: win.end,
                   };
                   const r = backtest(candles, cfg, DEFAULTS.feeRate, DEFAULTS.slippageRate);
-                  const score = r.netPnlUSDT - Math.abs(r.maxDrawdownUSDT) * 0.3 + r.winRate * 0.02;
+                  const profitableDays = r.daily.filter((d) => d.pnl > 0).length;
+                  const score = r.netPnlUSDT - Math.abs(r.maxDrawdownUSDT) * 0.3 + r.winRate * 0.02 + profitableDays * 0.05;
                   results.push({
                     minVolumeRatio,
                     trendPeriod,

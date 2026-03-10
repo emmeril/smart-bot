@@ -46,14 +46,16 @@ const Config = sequelize.define('Config', {
     shortMinRangePercent: { type: DataTypes.FLOAT, defaultValue: 0.8 },
     pullbackEmaPeriod: { type: DataTypes.INTEGER, defaultValue: 5 },
     pullbackLookback: { type: DataTypes.INTEGER, defaultValue: 2 },
-    pullbackMaxDistancePct: { type: DataTypes.FLOAT, defaultValue: 0.5 },
-    rsiLongMin: { type: DataTypes.FLOAT, defaultValue: 52 },
-    rsiLongMax: { type: DataTypes.FLOAT, defaultValue: 72 },
-    atrPeriod: { type: DataTypes.INTEGER, defaultValue: 14 },
-    atrStopMult: { type: DataTypes.FLOAT, defaultValue: 0.8 },
-    atrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
-    shortAtrStopMult: { type: DataTypes.FLOAT, defaultValue: 1.4 },
-    shortAtrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
+	    pullbackMaxDistancePct: { type: DataTypes.FLOAT, defaultValue: 0.5 },
+	    rsiLongMin: { type: DataTypes.FLOAT, defaultValue: 52 },
+	    rsiLongMax: { type: DataTypes.FLOAT, defaultValue: 72 },
+	    rsiShortMin: { type: DataTypes.FLOAT, defaultValue: 25 },
+	    rsiShortMax: { type: DataTypes.FLOAT, defaultValue: 50 },
+	    atrPeriod: { type: DataTypes.INTEGER, defaultValue: 14 },
+	    atrStopMult: { type: DataTypes.FLOAT, defaultValue: 0.8 },
+	    atrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
+	    shortAtrStopMult: { type: DataTypes.FLOAT, defaultValue: 1.4 },
+	    shortAtrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
     regimeFilterEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
     regimeAtrLookback: { type: DataTypes.INTEGER, defaultValue: 288 },
     regimeAtrPercentile: { type: DataTypes.FLOAT, defaultValue: 60 },
@@ -137,21 +139,25 @@ const BOOLEAN_CONFIG_KEYS = [
     "autoBacktestEnabled"
 ];
 const APPROVAL_APPLY_KEYS = [
-    "strategy",
-    "allowLong",
-    "allowShort",
-    "minVolumeRatio",
-    "breakoutPeriod",
-    "trendPeriod",
-    "targetProfitUSDT",
-    "minRangePercent",
-    "sessionStartUTC",
-    "sessionEndUTC",
-    "pullbackEmaPeriod",
-    "pullbackLookback",
-    "pullbackMaxDistancePct",
-    "rsiLongMin",
-    "rsiLongMax"
+	    "strategy",
+	    "allowLong",
+	    "allowShort",
+	    "minVolumeRatio",
+	    "shortMinVolumeRatio",
+	    "breakoutPeriod",
+	    "trendPeriod",
+	    "shortTrendPeriod",
+	    "targetProfitUSDT",
+	    "minRangePercent",
+	    "sessionStartUTC",
+	    "sessionEndUTC",
+	    "pullbackEmaPeriod",
+	    "pullbackLookback",
+	    "pullbackMaxDistancePct",
+	    "rsiLongMin",
+	    "rsiLongMax",
+	    "rsiShortMin",
+	    "rsiShortMax"
 ];
 const DEFAULT_CONFIG = {
     strategy: "hybrid",
@@ -187,14 +193,16 @@ const DEFAULT_CONFIG = {
     shortMinRangePercent: 0.8,
     pullbackEmaPeriod: 5,
     pullbackLookback: 2,
-    pullbackMaxDistancePct: 0.5,
-    rsiLongMin: 52,
-    rsiLongMax: 72,
-    atrPeriod: 14,
-    atrStopMult: 0.8,
-    atrTargetMult: 1.6,
-    shortAtrStopMult: 1.4,
-    shortAtrTargetMult: 1.6,
+	    pullbackMaxDistancePct: 0.5,
+	    rsiLongMin: 52,
+	    rsiLongMax: 72,
+	    rsiShortMin: 25,
+	    rsiShortMax: 50,
+	    atrPeriod: 14,
+	    atrStopMult: 0.8,
+	    atrTargetMult: 1.6,
+	    shortAtrStopMult: 1.4,
+	    shortAtrTargetMult: 1.6,
     regimeFilterEnabled: false,
     regimeAtrLookback: 288,
     regimeAtrPercentile: 60,
@@ -691,71 +699,111 @@ const getRegimeState = (snapshot, params) => {
 };
 
 const evaluatePullbackSignal = (snapshot, params, regimeState, strategyMode) => {
-    const trendOk = Number.isFinite(snapshot.currentLongTrendEma) ? snapshot.currentPrice > snapshot.currentLongTrendEma : true;
-    const recentLow = Math.min(...snapshot.low.slice(Math.max(0, snapshot.lastIndex - params.pullbackLookback), snapshot.lastIndex + 1));
-    const touchDistancePct = Number.isFinite(snapshot.currentPullbackEma) && snapshot.currentPullbackEma > 0
-        ? Math.abs((recentLow - snapshot.currentPullbackEma) / snapshot.currentPullbackEma) * 100
-        : Number.POSITIVE_INFINITY;
-    const touchedPullbackZone = Number.isFinite(snapshot.currentPullbackEma) &&
-        recentLow <= snapshot.currentPullbackEma &&
-        touchDistancePct <= db.pullbackMaxDistancePct;
-    const prevClose = snapshot.close[snapshot.lastIndex - 1];
-    const reclaim = Number.isFinite(snapshot.prevPullbackEma) &&
-        prevClose <= snapshot.prevPullbackEma &&
-        snapshot.currentPrice > snapshot.currentPullbackEma;
-    const momentumLongOk = snapshot.currentPrice > snapshot.currentOpen &&
-        snapshot.currentPrice > prevClose &&
-        snapshot.currentRSI > snapshot.prevRSI;
+	    const trendOk = Number.isFinite(snapshot.currentLongTrendEma) ? snapshot.currentPrice > snapshot.currentLongTrendEma : true;
+	    const shortTrendOk = Number.isFinite(snapshot.currentShortTrendEma) ? snapshot.currentPrice < snapshot.currentShortTrendEma : true;
+	    const recentLow = Math.min(...snapshot.low.slice(Math.max(0, snapshot.lastIndex - params.pullbackLookback), snapshot.lastIndex + 1));
+	    const recentHigh = Math.max(...snapshot.high.slice(Math.max(0, snapshot.lastIndex - params.pullbackLookback), snapshot.lastIndex + 1));
+	    const touchDistancePct = Number.isFinite(snapshot.currentPullbackEma) && snapshot.currentPullbackEma > 0
+	        ? Math.abs((recentLow - snapshot.currentPullbackEma) / snapshot.currentPullbackEma) * 100
+	        : Number.POSITIVE_INFINITY;
+	    const shortTouchDistancePct = Number.isFinite(snapshot.currentPullbackEma) && snapshot.currentPullbackEma > 0
+	        ? Math.abs((recentHigh - snapshot.currentPullbackEma) / snapshot.currentPullbackEma) * 100
+	        : Number.POSITIVE_INFINITY;
+	    const touchedPullbackZone = Number.isFinite(snapshot.currentPullbackEma) &&
+	        recentLow <= snapshot.currentPullbackEma &&
+	        touchDistancePct <= db.pullbackMaxDistancePct;
+	    const shortTouchedPullbackZone = Number.isFinite(snapshot.currentPullbackEma) &&
+	        recentHigh >= snapshot.currentPullbackEma &&
+	        shortTouchDistancePct <= db.pullbackMaxDistancePct;
+	    const prevClose = snapshot.close[snapshot.lastIndex - 1];
+	    const reclaim = Number.isFinite(snapshot.prevPullbackEma) &&
+	        prevClose <= snapshot.prevPullbackEma &&
+	        snapshot.currentPrice > snapshot.currentPullbackEma;
+	    const shortReclaim = Number.isFinite(snapshot.prevPullbackEma) &&
+	        prevClose >= snapshot.prevPullbackEma &&
+	        snapshot.currentPrice < snapshot.currentPullbackEma;
+	    const momentumLongOk = snapshot.currentPrice > snapshot.currentOpen &&
+	        snapshot.currentPrice > prevClose &&
+	        snapshot.currentRSI > snapshot.prevRSI;
+	    const momentumShortOk = snapshot.currentPrice < snapshot.currentOpen &&
+	        snapshot.currentPrice < prevClose &&
+	        snapshot.currentRSI < snapshot.prevRSI;
+	    const rsiRangeOk =
+	        snapshot.currentRSI >= toFiniteNumber(db.rsiLongMin, 50) &&
+	        snapshot.currentRSI <= toFiniteNumber(db.rsiLongMax, 72);
+	    const rsiShortRangeOk =
+	        snapshot.currentRSI >= toFiniteNumber(db.rsiShortMin, 25) &&
+	        snapshot.currentRSI <= toFiniteNumber(db.rsiShortMax, 50);
+	    const shortVolumeOk = snapshot.volumeRatio >= toFiniteNumber(db.shortMinVolumeRatio, db.minVolumeRatio);
 
-    let canShort = false;
-    let setupDetected = touchedPullbackZone || reclaim;
-    let detailTitle = "PULLBACK MOMENTUM ANALYSIS";
-    const extraDetailLines = [
-        `   Pullback EMA (${params.pullbackEmaPeriod}): ${Number.isFinite(snapshot.currentPullbackEma) ? snapshot.currentPullbackEma.toFixed(6) : "n/a"}`,
-        `   Recent Low (${params.pullbackLookback}): ${recentLow.toFixed(6)}`,
-        `   Pullback Distance: ${Number.isFinite(touchDistancePct) ? touchDistancePct.toFixed(2) : "n/a"}% (max ${db.pullbackMaxDistancePct}%)`,
-        `   Pullback Touched: ${touchedPullbackZone ? "[OK]" : "[NO]"}`,
-        `   Reclaim EMA: ${reclaim ? "[OK]" : "[NO]"}`,
-        `   RSI Momentum: ${momentumLongOk ? "[OK]" : "[NO]"} (${snapshot.currentRSI.toFixed(2)} vs prev ${snapshot.prevRSI.toFixed(2)})`,
-        `   Trend EMA Long: ${snapshot.currentLongTrendEma} → Long trend ok: ${trendOk}`
-    ];
+	    let canShort = false;
+	    let setupDetected = touchedPullbackZone || reclaim;
+	    let detailTitle = "PULLBACK MOMENTUM ANALYSIS";
+	    const extraDetailLines = [
+	        `   Pullback EMA (${params.pullbackEmaPeriod}): ${Number.isFinite(snapshot.currentPullbackEma) ? snapshot.currentPullbackEma.toFixed(6) : "n/a"}`,
+	        `   Recent Low (${params.pullbackLookback}): ${recentLow.toFixed(6)}`,
+	        `   Pullback Distance: ${Number.isFinite(touchDistancePct) ? touchDistancePct.toFixed(2) : "n/a"}% (max ${db.pullbackMaxDistancePct}%)`,
+	        `   Pullback Touched: ${touchedPullbackZone ? "[OK]" : "[NO]"}`,
+	        `   Reclaim EMA: ${reclaim ? "[OK]" : "[NO]"}`,
+	        `   RSI Momentum: ${momentumLongOk ? "[OK]" : "[NO]"} (${snapshot.currentRSI.toFixed(2)} vs prev ${snapshot.prevRSI.toFixed(2)})`,
+	        `   RSI Range: ${rsiRangeOk ? "[OK]" : "[NO]"} (${snapshot.currentRSI.toFixed(2)} vs ${db.rsiLongMin}-${db.rsiLongMax})`,
+	        `   Trend EMA Long: ${snapshot.currentLongTrendEma} → Long trend ok: ${trendOk}`
+	    ];
 
-    const canLong =
-        trendOk &&
-        touchedPullbackZone &&
-        reclaim &&
-        snapshot.volumeOk &&
-        snapshot.sessionOk &&
-        regimeState.regimeOk &&
-        regimeState.marketRegimeOkLong &&
-        momentumLongOk &&
-        snapshot.currentRSI >= db.rsiLongMin &&
-        snapshot.currentRSI <= db.rsiLongMax;
+	    const canLong =
+	        trendOk &&
+	        touchedPullbackZone &&
+	        reclaim &&
+	        snapshot.volumeOk &&
+	        snapshot.sessionOk &&
+	        regimeState.regimeOk &&
+	        regimeState.marketRegimeOkLong &&
+	        momentumLongOk &&
+	        rsiRangeOk;
 
-    if (strategyMode === "hybrid") {
-        const shortTrendOk = Number.isFinite(snapshot.currentShortTrendEma) ? snapshot.currentPrice < snapshot.currentShortTrendEma : true;
-        const shortVolumeOk = snapshot.volumeRatio >= toFiniteNumber(db.shortMinVolumeRatio, 1.4);
-        const shortMomentumOk = snapshot.currentPrice < snapshot.currentOpen;
-        canShort =
-            snapshot.bearishBreakout &&
-            shortVolumeOk &&
-            snapshot.shortRangeOk &&
-            snapshot.sessionOk &&
-            regimeState.regimeOk &&
-            shortTrendOk &&
-            regimeState.marketRegimeOkShort &&
-            shortMomentumOk &&
-            snapshot.currentRSI > 25 &&
-            snapshot.currentRSI < 50;
-        setupDetected = setupDetected || snapshot.bearishBreakout;
-        detailTitle = "HYBRID PULLBACK/BREAKOUT ANALYSIS";
-        extraDetailLines.push(`   Short Breakout (${params.shortBreakoutPeriod}): ${snapshot.bearishBreakout ? "[OK]" : "[NO]"}`);
-        extraDetailLines.push(`   Short Volume OK: ${shortVolumeOk ? "[OK]" : "[NO]"} (min ${db.shortMinVolumeRatio}x)`);
-        extraDetailLines.push(`   Short Range OK: ${snapshot.shortRangeOk ? "[OK]" : "[NO]"} (min ${db.shortMinRangePercent}%)`);
-        extraDetailLines.push(`   Trend EMA Short: ${snapshot.currentShortTrendEma} → Short trend ok: ${shortTrendOk}`);
-    }
+	    if (strategyMode === "pullback") {
+	        canShort =
+	            shortTrendOk &&
+	            shortTouchedPullbackZone &&
+	            shortReclaim &&
+	            shortVolumeOk &&
+	            snapshot.sessionOk &&
+	            regimeState.regimeOk &&
+	            regimeState.marketRegimeOkShort &&
+	            momentumShortOk &&
+	            rsiShortRangeOk;
+	        setupDetected = setupDetected || shortTouchedPullbackZone || shortReclaim;
+	        extraDetailLines.push(`   Short Recent High (${params.pullbackLookback}): ${recentHigh.toFixed(6)}`);
+	        extraDetailLines.push(`   Short Pullback Distance: ${Number.isFinite(shortTouchDistancePct) ? shortTouchDistancePct.toFixed(2) : "n/a"}% (max ${db.pullbackMaxDistancePct}%)`);
+	        extraDetailLines.push(`   Short Pullback Touched: ${shortTouchedPullbackZone ? "[OK]" : "[NO]"}`);
+	        extraDetailLines.push(`   Short Reclaim EMA: ${shortReclaim ? "[OK]" : "[NO]"}`);
+	        extraDetailLines.push(`   Short Volume OK: ${shortVolumeOk ? "[OK]" : "[NO]"} (min ${db.shortMinVolumeRatio}x)`);
+	        extraDetailLines.push(`   Short RSI Momentum: ${momentumShortOk ? "[OK]" : "[NO]"} (${snapshot.currentRSI.toFixed(2)} vs prev ${snapshot.prevRSI.toFixed(2)})`);
+	        extraDetailLines.push(`   Short RSI Range: ${rsiShortRangeOk ? "[OK]" : "[NO]"} (${snapshot.currentRSI.toFixed(2)} vs ${db.rsiShortMin}-${db.rsiShortMax})`);
+	        extraDetailLines.push(`   Trend EMA Short: ${snapshot.currentShortTrendEma} → Short trend ok: ${shortTrendOk}`);
+	    } else if (strategyMode === "hybrid") {
+	        const shortVolumeOkHybrid = snapshot.volumeRatio >= toFiniteNumber(db.shortMinVolumeRatio, 1.4);
+	        const shortMomentumOkHybrid = snapshot.currentPrice < snapshot.currentOpen;
+	        canShort =
+	            snapshot.bearishBreakout &&
+	            shortVolumeOkHybrid &&
+	            snapshot.shortRangeOk &&
+	            snapshot.sessionOk &&
+	            regimeState.regimeOk &&
+	            shortTrendOk &&
+	            regimeState.marketRegimeOkShort &&
+	            shortMomentumOkHybrid &&
+	            snapshot.currentRSI > 25 &&
+	            snapshot.currentRSI < 50;
+	        setupDetected = setupDetected || snapshot.bearishBreakout;
+	        detailTitle = "HYBRID PULLBACK/BREAKOUT ANALYSIS";
+	        extraDetailLines.push(`   Short Breakout (${params.shortBreakoutPeriod}): ${snapshot.bearishBreakout ? "[OK]" : "[NO]"}`);
+	        extraDetailLines.push(`   Short Volume OK: ${shortVolumeOkHybrid ? "[OK]" : "[NO]"} (min ${db.shortMinVolumeRatio}x)`);
+	        extraDetailLines.push(`   Short Range OK: ${snapshot.shortRangeOk ? "[OK]" : "[NO]"} (min ${db.shortMinRangePercent}%)`);
+	        extraDetailLines.push(`   Trend EMA Short: ${snapshot.currentShortTrendEma} → Short trend ok: ${shortTrendOk}`);
+	    }
 
-    return { canLong, canShort, setupDetected, detailTitle, extraDetailLines };
+	    return { canLong, canShort, setupDetected, detailTitle, extraDetailLines };
 };
 
 const evaluateBreakoutSignal = (snapshot, regimeState) => ({
@@ -1553,22 +1601,47 @@ const normalizeConfig = (config) => {
 
     BOOLEAN_CONFIG_KEYS.forEach(normalizeBoolean);
 
-    normalized.regimeAtrPercentile = clamp(toFiniteNumber(normalized.regimeAtrPercentile, defaults.regimeAtrPercentile), 10, 95);
-    normalized.rsiLongMin = clamp(toFiniteNumber(normalized.rsiLongMin, defaults.rsiLongMin), 1, 99);
-    normalized.rsiLongMax = clamp(toFiniteNumber(normalized.rsiLongMax, defaults.rsiLongMax), normalized.rsiLongMin + 1, 99);
-    normalized.sessionStartUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionStartUTC, defaults.sessionStartUTC)), 0, 23);
-    normalized.sessionEndUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionEndUTC, defaults.sessionEndUTC)), 0, 23);
-    normalized.marketRegimeSymbol = typeof normalized.marketRegimeSymbol === "string" && normalized.marketRegimeSymbol.trim()
-        ? normalized.marketRegimeSymbol.trim()
-        : defaults.marketRegimeSymbol;
+	    normalized.regimeAtrPercentile = clamp(toFiniteNumber(normalized.regimeAtrPercentile, defaults.regimeAtrPercentile), 10, 95);
+	    normalized.rsiLongMin = clamp(toFiniteNumber(normalized.rsiLongMin, defaults.rsiLongMin), 1, 99);
+	    normalized.rsiLongMax = clamp(toFiniteNumber(normalized.rsiLongMax, defaults.rsiLongMax), normalized.rsiLongMin + 1, 99);
+	    normalized.rsiShortMin = clamp(toFiniteNumber(normalized.rsiShortMin, defaults.rsiShortMin), 1, 99);
+	    normalized.rsiShortMax = clamp(toFiniteNumber(normalized.rsiShortMax, defaults.rsiShortMax), normalized.rsiShortMin + 1, 99);
+	    normalized.sessionStartUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionStartUTC, defaults.sessionStartUTC)), 0, 23);
+	    normalized.sessionEndUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionEndUTC, defaults.sessionEndUTC)), 0, 23);
+	    normalized.marketRegimeSymbol = typeof normalized.marketRegimeSymbol === "string" && normalized.marketRegimeSymbol.trim()
+	        ? normalized.marketRegimeSymbol.trim()
+	        : defaults.marketRegimeSymbol;
 
     return normalized;
 };
 
 // -------------------- INITIALIZE DATABASE --------------------
+const ensureConfigSchema = async () => {
+    try {
+        const queryInterface = sequelize.getQueryInterface();
+        const tableName = Config.getTableName();
+        const desc = await queryInterface.describeTable(tableName);
+        if (!desc.rsiShortMin) {
+            await queryInterface.addColumn(tableName, "rsiShortMin", {
+                type: DataTypes.FLOAT,
+                defaultValue: 25
+            });
+        }
+        if (!desc.rsiShortMax) {
+            await queryInterface.addColumn(tableName, "rsiShortMax", {
+                type: DataTypes.FLOAT,
+                defaultValue: 50
+            });
+        }
+    } catch (error) {
+        console.error("[WARN] Failed to ensure config schema:", error.message);
+    }
+};
+
 const initializeDB = async () => {
     try {
         await sequelize.sync();
+        await ensureConfigSchema();
         console.log("[OK] Database synced");
 
         const configRow = await ensureConfigRow();
