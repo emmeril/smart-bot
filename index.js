@@ -372,12 +372,22 @@ const getSignalParameters = () => {
 
 // New signal evaluation function for EMA crossover
 const evaluateCrossoverSignal = (snapshot, params) => {
-    const { close, currentPrice, currentVolume, avgVolume, hourUTC } = snapshot;
+    const { close, lastIndex, currentPrice, currentVolume, avgVolume, hourUTC } = snapshot;
+    const signalClose = Array.isArray(close) ? close.slice(0, lastIndex + 1) : [];
+    if (signalClose.length < Math.max(params.slowEMAPeriod, params.trendEMAPeriod, params.rsiPeriod) + 2) {
+        return {
+            canLong: false,
+            canShort: false,
+            setupDetected: false,
+            detailTitle: "EMA CROSSOVER ANALYSIS",
+            extraDetailLines: ["   Not enough candle data to evaluate."]
+        };
+    }
     
     // Calculate EMAs
-    const fastEMA = EMA.calculate({ values: close, period: params.fastEMAPeriod });
-    const slowEMA = EMA.calculate({ values: close, period: params.slowEMAPeriod });
-    const trendEMA = EMA.calculate({ values: close, period: params.trendEMAPeriod });
+    const fastEMA = EMA.calculate({ values: signalClose, period: params.fastEMAPeriod });
+    const slowEMA = EMA.calculate({ values: signalClose, period: params.slowEMAPeriod });
+    const trendEMA = EMA.calculate({ values: signalClose, period: params.trendEMAPeriod });
     
     // Get current and previous values
     const currentFast = fastEMA[fastEMA.length - 1];
@@ -387,7 +397,7 @@ const evaluateCrossoverSignal = (snapshot, params) => {
     const currentTrend = trendEMA[trendEMA.length - 1];
     
     // RSI
-    const rsiValues = RSI.calculate({ values: close, period: params.rsiPeriod });
+    const rsiValues = RSI.calculate({ values: signalClose, period: params.rsiPeriod });
     const currentRSI = rsiValues.length > 0 ? rsiValues[rsiValues.length - 1] : 50;
     
     // Volume ratio
@@ -429,8 +439,8 @@ const evaluateCrossoverSignal = (snapshot, params) => {
             `   Trend EMA (${params.trendEMAPeriod}): ${currentTrend.toFixed(6)}`,
             `   Bullish Crossover: ${bullishCrossover ? "[OK]" : "[NO]"}`,
             `   Bearish Crossover: ${bearishCrossover ? "[OK]" : "[NO]"}`,
-            `   Volume Ratio: ${volumeRatio.toFixed(2)}x (min ${db.minVolumeRatio}x) → ${volumeOk ? "[OK]" : "[NO]"}`,
-            `   RSI (${params.rsiPeriod}): ${currentRSI.toFixed(2)} → Long OK: ${rsiOkLong}, Short OK: ${rsiOkShort}`,
+            `   Volume Ratio: ${volumeRatio.toFixed(2)}x (min ${db.minVolumeRatio}x) -> ${volumeOk ? "[OK]" : "[NO]"}`,
+            `   RSI (${params.rsiPeriod}): ${currentRSI.toFixed(2)} -> Long OK: ${rsiOkLong}, Short OK: ${rsiOkShort}`,
             `   Trend Filter: Long ${trendOkLong ? "[OK]" : "[NO]"}, Short ${trendOkShort ? "[OK]" : "[NO]"}`
         ]
     };
@@ -1498,7 +1508,7 @@ const buildSignalSnapshot = (ohlcv, params) => {
     }
 
     // RSI (for logging)
-    const rsi = RSI.calculate({ values: close, period: 7 }); // temporary, will be recalculated in evaluate
+    const rsi = RSI.calculate({ values: close.slice(0, lastIndex + 1), period: params.rsiPeriod });
     const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1] : 50;
 
     return {
@@ -1516,7 +1526,7 @@ const buildSignalSnapshot = (ohlcv, params) => {
         volumeRatio,
         hourUTC,
         currentATR,
-        currentRSI // temporary
+        currentRSI
     };
 };
 
