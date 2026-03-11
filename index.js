@@ -54,13 +54,13 @@ const Config = sequelize.define('Config', {
     trailingActivateATR: { type: DataTypes.FLOAT, defaultValue: 1.2 },
     trailingOffsetATR: { type: DataTypes.FLOAT, defaultValue: 0.6 },
     shortTrailingActivateATR: { type: DataTypes.FLOAT, defaultValue: 1.0 },
-    shortTrailingOffsetATR: { type: DataTypes.FLOAT, defaultValue: 0.8 },
-    allowLong: { type: DataTypes.BOOLEAN, defaultValue: true },
-    allowShort: { type: DataTypes.BOOLEAN, defaultValue: true },
+	    shortTrailingOffsetATR: { type: DataTypes.FLOAT, defaultValue: 0.8 },
+	    allowLong: { type: DataTypes.BOOLEAN, defaultValue: true },
+	    allowShort: { type: DataTypes.BOOLEAN, defaultValue: true },
 
-    lastDailyReset: { type: DataTypes.BIGINT, defaultValue: Date.now() },
-    lastUpdated: { type: DataTypes.BIGINT, defaultValue: Date.now() }
-}, { timestamps: false });
+	    lastDailyReset: { type: DataTypes.BIGINT, defaultValue: () => Date.now() },
+	    lastUpdated: { type: DataTypes.BIGINT, defaultValue: () => Date.now() }
+	}, { timestamps: false });
 
 // -------------------- GLOBAL VARIABLES --------------------
 let isProcessing = false;
