@@ -154,6 +154,20 @@ let metrics = {
     trades: { opened: 0, closed: 0, wins: 0, losses: 0 }
 };
 
+// -------------------- RETRY HELPER (NEW) --------------------
+const retry = async (fn, retries = 3, delay = 1000) => {
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fn();
+        } catch (error) {
+            if (i === retries - 1) throw error;
+            console.log(`[RETRY] Attempt ${i + 1} failed, retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            delay *= 2; // exponential backoff
+        }
+    }
+};
+
 // -------------------- ENSURE LOG FILE EXISTS --------------------
 const ensureFileExists = (filePath, defaultContent = "{}") => {
     try {
@@ -1020,8 +1034,11 @@ const syncPositionWithExchange = async () => {
 const initializeExchange = async () => {
     try {
         exchange = new ccxt.binance({
-            apiKey: process.env.API_KEY, secret: process.env.API_SECRET,
-            options: { defaultType: "future" }, enableRateLimit: true,
+            apiKey: process.env.API_KEY,
+            secret: process.env.API_SECRET,
+            options: { defaultType: "future" },
+            enableRateLimit: true,
+            timeout: 20000 // Increased timeout to 20s (FIX)
         });
         await exchange.loadMarkets();
         console.log("[OK] Exchange connected");
@@ -1143,7 +1160,7 @@ const placeOrder = async (side, signalData = {}) => {
 };
 
 // -------------------- CLOSE POSITION --------------------
-const closePosition = async (reason, profitUSDT, profitPercent) => {
+const closePosition = async (reason, netProfitUSDT, profitPercent) => { // FIX: parameter renamed to netProfitUSDT
     try {
         if (!db || !db.activePosition || isClosingPosition) return;
         isClosingPosition = true;
@@ -1153,13 +1170,57 @@ const closePosition = async (reason, profitUSDT, profitPercent) => {
             console.error("[ERROR] Invalid position quantity. Resetting activePosition.");
             await resetActivePosition(); return;
         }
+
+        // NEW: Check current position on exchange before attempting reduce-only
+        const currentPos = await fetchTrackedExchangePosition();
+        if (!currentPos) {
+            console.log("[INFO] No open position on exchange. Resetting activePosition.");
+            await resetActivePosition();
+            return;
+        }
+        // Optionally sync quantity if it changed (e.g., partial fills)
+        const actualQuantity = Math.abs(getExchangePositionContracts(currentPos));
+        if (Math.abs(actualQuantity - quantity) > POSITION_SYNC_QTY_TOLERANCE) {
+            console.log("[INFO] Position size changed on exchange. Updating local record.");
+            position.quantity = actualQuantity;
+            position.entryPrice = getExchangePositionEntryPrice(currentPos, position.entryPrice);
+            db.activePosition = position;
+            await saveDB();
+        }
+
         const closeSide = side === "buy" ? "sell" : "buy";
         console.log(`\n[CLOSE] Closing position...`);
-        const closeOrder = await exchange.createOrder(db.pair, "market", closeSide, quantity, undefined, {
-            reduceOnly: true, marginMode: (db.marginMode || "isolated").toLowerCase()
-        });
-        metrics.api.orders++;
-        const closeFillSnapshot = getOrderFillSnapshot(closeOrder, await getPrice(true), quantity);
+
+        let closeOrder;
+        try {
+            closeOrder = await exchange.createOrder(db.pair, "market", closeSide, position.quantity, undefined, {
+                reduceOnly: true,
+                marginMode: (db.marginMode || "isolated").toLowerCase()
+            });
+            metrics.api.orders++;
+        } catch (error) {
+            // Handle reduce-only rejection
+            if (error.code === -2022 || error.message.includes("ReduceOnly Order is rejected")) {
+                console.warn("[WARN] Reduce-only order rejected. Syncing position with exchange...");
+                const openPosition = await fetchTrackedExchangePosition();
+                if (!openPosition) {
+                    console.log("[INFO] No open position on exchange. Resetting activePosition.");
+                    await resetActivePosition();
+                    return;
+                } else {
+                    // Position still exists – update from exchange and retry later
+                    const entryPrice = getExchangePositionEntryPrice(openPosition, await getPrice());
+                    db.activePosition = buildSyncedActivePosition(openPosition, entryPrice);
+                    await saveDB();
+                    console.log("[INFO] Updated activePosition from exchange data. Will retry close on next cycle.");
+                    return;
+                }
+            } else {
+                throw error; // rethrow other errors
+            }
+        }
+
+        const closeFillSnapshot = getOrderFillSnapshot(closeOrder, await getPrice(true), position.quantity);
         const remainingPosition = await fetchTrackedExchangePosition();
         if (remainingPosition) {
             const remainingContracts = Math.abs(getExchangePositionContracts(remainingPosition));
@@ -1172,7 +1233,7 @@ const closePosition = async (reason, profitUSDT, profitPercent) => {
             }
         }
         const realizedPnL = calculatePositionPnL(position, closeFillSnapshot.price);
-        await finalizeClosedPosition(position, realizedPnL.profitUSDT, realizedPnL.profitPercent, reason, closeFillSnapshot.price);
+        await finalizeClosedPosition(position, realizedPnL.netProfitUSDT, realizedPnL.profitPercent, reason, closeFillSnapshot.price); // FIX: use netProfitUSDT
     } catch (error) { console.error("[ERROR] Close position failed:", error.message); }
     finally { isClosingPosition = false; }
 };
@@ -1182,12 +1243,16 @@ const getPrice = async (forceRefresh = false) => {
     try {
         const now = Date.now();
         if (!forceRefresh && now - tickerCache.lastUpdate < TICKER_CACHE_TTL) return tickerCache.price;
-        const ticker = await exchange.fetchTicker(db.pair);
+        // Use retry
+        const ticker = await retry(() => exchange.fetchTicker(db.pair));
         metrics.api.ticker++;
         const latestPrice = toFiniteNumber(ticker?.last, null);
         if (latestPrice) { tickerCache.price = latestPrice; tickerCache.lastUpdate = now; }
         return latestPrice;
-    } catch (error) { console.error("[ERROR] Failed to get price:", error.message); return tickerCache.price; }
+    } catch (error) {
+        console.error("[ERROR] Failed to get price after retries:", error.message);
+        return tickerCache.price; // return stale price if available
+    }
 };
 
 const getOHLCV = async (limit = 100, forceRefresh = false) => {
@@ -1197,10 +1262,16 @@ const getOHLCV = async (limit = 100, forceRefresh = false) => {
     if (!forceRefresh && ohlcvCache.key === cacheKey && now - ohlcvCache.lastUpdate < OHLCV_CACHE_TTL && Array.isArray(ohlcvCache.data)) {
         return ohlcvCache.data;
     }
-    const ohlcv = await exchange.fetchOHLCV(db.pair, timeframe, undefined, limit);
-    metrics.api.ohlcv++;
-    ohlcvCache = { key: cacheKey, data: ohlcv, lastUpdate: now };
-    return ohlcv;
+    try {
+        // Use retry
+        const ohlcv = await retry(() => exchange.fetchOHLCV(db.pair, timeframe, undefined, limit));
+        metrics.api.ohlcv++;
+        ohlcvCache = { key: cacheKey, data: ohlcv, lastUpdate: now };
+        return ohlcv;
+    } catch (error) {
+        console.error("[ERROR] Failed to fetch OHLCV after retries:", error.message);
+        return ohlcvCache.data || []; // fallback to stale cache or empty array
+    }
 };
 
 const buildSignalSnapshot = (ohlcv, params) => {
@@ -1298,13 +1369,12 @@ const startPnLMonitoring = () => {
 
             if (exitState.shouldClose) {
                 console.log(exitState.message);
-                await closePosition(exitState.reason, pnlState.profitUSDT, pnlState.profitPercent);
+                await closePosition(exitState.reason, pnlState.netProfitUSDT, pnlState.profitPercent); // FIX: pass netProfitUSDT
                 return;
             }
 
             maybeLogPositionPnL(pnlState, exitState);
         } catch (error) {
-            // PERBAIKAN: Tangkap exception agar script tidak crash
             console.error("[ERROR] PnL Monitoring failed:", error.message);
         } finally {
             isMonitoringPnL = false;
