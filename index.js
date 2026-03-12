@@ -145,6 +145,7 @@ const DEFAULT_CONFIG = {
     allowLong: true,
     allowShort: true
 };
+const TAKER_FEE_RATE = 0.0005;
 
 let metrics = {
     windowStart: Date.now(),
@@ -647,15 +648,22 @@ const applyTrailingStopUpdate = (position) => {
 };
 
 const calculatePositionPnL = (position, currentPrice) => {
-    const profitUSDT = position.side === "buy"
+    const entryValue = position.entryPrice * position.quantity;
+    const exitValue = currentPrice * position.quantity;
+    
+    // Biaya buka posisi (sudah terjadi) + estimasi biaya tutup posisi (akan terjadi)
+    const entryFee = entryValue * TAKER_FEE_RATE;
+    const exitFee = exitValue * TAKER_FEE_RATE;
+    const totalEstimatedFee = entryFee + exitFee;
+
+    const grossProfitUSDT = position.side === "buy"
         ? (currentPrice - position.entryPrice) * position.quantity
         : (position.entryPrice - currentPrice) * position.quantity;
-        
-    // PERBAIKAN: Hitung profitPercent dengan Leverage (ROE)
-    const marginUsed = (position.entryPrice * position.quantity) / (db.leverage || 10);
-    const profitPercent = marginUsed > 0 ? (profitUSDT / marginUsed) * 100 : 0;
+    
+    const netProfitUSDT = grossProfitUSDT - totalEstimatedFee;
+    const profitPercent = (netProfitUSDT / (entryValue / db.leverage)) * 100;
 
-    return { profitUSDT, profitPercent };
+    return { grossProfitUSDT, netProfitUSDT, profitPercent, totalEstimatedFee };
 };
 
 const getPositionExitTargets = (position) => {
@@ -684,38 +692,50 @@ const getPositionExitTargets = (position) => {
 
 const evaluatePositionExit = (position, currentPrice, pnlState) => {
     const { effectiveTargetProfitUSDT, effectiveStopLossUSDT, effectiveStopLossPrice } = getPositionExitTargets(position);
+    
     const targetHit = Number.isFinite(position.targetPrice) &&
         (position.side === "buy" ? currentPrice >= position.targetPrice : currentPrice <= position.targetPrice);
+    
     const stopHit = Number.isFinite(effectiveStopLossPrice) &&
         (position.side === "buy" ? currentPrice <= effectiveStopLossPrice : currentPrice >= effectiveStopLossPrice);
 
-    if (targetHit || pnlState.profitUSDT >= effectiveTargetProfitUSDT) {
+    // Sekarang kita cek Net Profit, bukan Gross
+    if (targetHit || pnlState.netProfitUSDT >= effectiveTargetProfitUSDT) {
         return {
-            shouldClose: true, reason: "PROFIT_TARGET",
-            message: `\n[PROFIT] Target hit (+${effectiveTargetProfitUSDT.toFixed(4)} USDT)! Closing...`,
-            effectiveTargetProfitUSDT, effectiveStopLossUSDT
+            shouldClose: true,
+            reason: "PROFIT_TARGET",
+            message: `\n[PROFIT] Net Target hit (+${pnlState.netProfitUSDT.toFixed(4)} USDT)! Closing...`,
+            effectiveTargetProfitUSDT,
+            effectiveStopLossUSDT
         };
     }
 
-    if (stopHit || pnlState.profitUSDT <= effectiveStopLossUSDT) {
+    if (stopHit || pnlState.netProfitUSDT <= effectiveStopLossUSDT) {
         return {
-            shouldClose: true, reason: "STOP_LOSS",
-            message: `\n[STOP] Stop loss hit (${effectiveStopLossUSDT.toFixed(4)} USDT)! Closing...`,
-            effectiveTargetProfitUSDT, effectiveStopLossUSDT
+            shouldClose: true,
+            reason: "STOP_LOSS",
+            message: `\n[STOP] Stop loss hit (${pnlState.netProfitUSDT.toFixed(4)} USDT)! Closing...`,
+            effectiveTargetProfitUSDT,
+            effectiveStopLossUSDT
         };
     }
 
-    return { shouldClose: false, effectiveTargetProfitUSDT, effectiveStopLossUSDT };
+    return {
+        shouldClose: false,
+        effectiveTargetProfitUSDT,
+        effectiveStopLossUSDT
+    };
 };
 
 const maybeLogPositionPnL = (pnlState, exitState) => {
+    // Gunakan netProfitUSDT untuk menentukan interval log
     const nearExit =
-        pnlState.profitUSDT >= (exitState.effectiveTargetProfitUSDT * 0.7) ||
-        pnlState.profitUSDT <= (exitState.effectiveStopLossUSDT * 0.7);
+        pnlState.netProfitUSDT >= (exitState.effectiveTargetProfitUSDT * 0.7) ||
+        pnlState.netProfitUSDT <= (exitState.effectiveStopLossUSDT * 0.7);
     const pnlLogInterval = nearExit ? 2000 : 5000;
 
     if (Date.now() - lastPnlLog > pnlLogInterval) {
-        console.log(`\n[PNL] Real-time P&L: ${pnlState.profitUSDT.toFixed(4)} USDT (${pnlState.profitPercent.toFixed(2)}%)`);
+        console.log(`\n[PNL] Gross: ${pnlState.grossProfitUSDT.toFixed(4)} | Fee: ${pnlState.totalEstimatedFee.toFixed(4)} | NET: ${pnlState.netProfitUSDT.toFixed(4)} USDT (${pnlState.profitPercent.toFixed(2)}%)`);
         lastPnlLog = Date.now();
     }
 };
@@ -725,21 +745,24 @@ const resetActivePosition = async () => {
     await saveDB();
 };
 
-const finalizeClosedPosition = async (position, profitUSDT, profitPercent, reason, exitPrice = null) => {
-    db.dailyPnL += profitUSDT;
+const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, reason, exitPrice = null) => {
+    db.dailyPnL += netProfitUSDT; // Mencatat profit bersih ke database
     db.dailyTrades++;
+
     const resolvedExitPrice = Number.isFinite(exitPrice) && exitPrice > 0 ? exitPrice : await getPrice(true);
-    logTrade(position.side === "buy" ? "LONG" : "SHORT", position.entryPrice, resolvedExitPrice, "CLOSE", profitUSDT);
+    
+    // Log ke CSV juga menggunakan netProfit
+    logTrade(position.side === "buy" ? "LONG" : "SHORT", position.entryPrice, resolvedExitPrice, "CLOSE", netProfitUSDT);
 
     console.log(`\n[OK] POSITION CLOSED: ${reason}`);
-    console.log(`   P&L: ${profitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
-    console.log(`   Daily P&L: ${db.dailyPnL.toFixed(2)} USDT / ${db.dailyTrades} trades`);
+    console.log(`   Net P&L: ${netProfitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
+    console.log(`   Daily Total Net P&L: ${db.dailyPnL.toFixed(4)} USDT / ${db.dailyTrades} trades`);
 
     db.activePosition = null;
     await saveDB();
     metrics.trades.closed++;
-    if (profitUSDT > 0) metrics.trades.wins++;
-    else if (profitUSDT < 0) metrics.trades.losses++;
+    if (netProfitUSDT > 0) metrics.trades.wins++;
+    else if (netProfitUSDT < 0) metrics.trades.losses++;
 };
 
 const mergeRuntimeConfig = (nextConfig) => {
