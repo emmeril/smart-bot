@@ -1186,17 +1186,20 @@ const syncPositionWithExchange = async () => {
 // -------------------- INIT EXCHANGE --------------------
 const initializeExchange = async () => {
     try {
-        exchange = new ccxt.binance({
+        exchange = new ccxt.binanceusdm({
             apiKey: process.env.API_KEY,
             secret: process.env.API_SECRET,
-            options: { defaultType: "future", adjustForTimeDifference: true },
+            options: { defaultType: "future" },
             enableRateLimit: true,
-            timeout: 20000 // Increased timeout to 20s (FIX)
+            timeout: 20000 // Increased timeout to 20s
         });
         await exchange.loadMarkets();
         console.log("[OK] Exchange connected");
         return exchange;
-    } catch (error) { console.error("[ERROR] Exchange connection failed:", error.message); throw error; }
+    } catch (error) { 
+        console.error("[ERROR] Exchange connection failed:", error.message); 
+        throw error; 
+    }
 };
 
 const detectPositionMode = async () => {
