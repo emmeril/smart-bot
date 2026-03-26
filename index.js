@@ -2,7 +2,6 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const ccxt = require("ccxt");
-const { SMA } = require("technicalindicators");
 const { Sequelize, DataTypes } = require('sequelize');
 
 // -------------------- DATABASE SETUP --------------------
@@ -15,11 +14,11 @@ const sequelize = new Sequelize({
 const Config = sequelize.define('Config', {
     strategy: { type: DataTypes.STRING, defaultValue: "futures_grid" },
     pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
-    usdtPerTrade: { type: DataTypes.FLOAT, defaultValue: 2 },
+    gridOrderSizeUsdt: { type: DataTypes.FLOAT, defaultValue: 2 },
     leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
-    targetProfitUSDT: { type: DataTypes.FLOAT, defaultValue: 0.5 },
-    targetDailyProfit: { type: DataTypes.FLOAT, defaultValue: 1.0 },
-    maxDailyLossPercent: { type: DataTypes.FLOAT, defaultValue: 10 },
+    gridTargetProfitUsdt: { type: DataTypes.FLOAT, defaultValue: 0.5 },
+    dailyProfitTargetUsdt: { type: DataTypes.FLOAT, defaultValue: 1.0 },
+    dailyMaxLossPercent: { type: DataTypes.FLOAT, defaultValue: 10 },
     maxTradesPerDay: { type: DataTypes.INTEGER, defaultValue: 20 },
     coolingPeriod: { type: DataTypes.INTEGER, defaultValue: 3000 },
     activePosition: { type: DataTypes.TEXT, defaultValue: null },
@@ -27,7 +26,7 @@ const Config = sequelize.define('Config', {
     dailyTrades: { type: DataTypes.INTEGER, defaultValue: 0 },
     marginMode: { type: DataTypes.STRING, defaultValue: "isolated" },
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: 500 },
-    stopLossPercent: { type: DataTypes.FLOAT, defaultValue: 5 },
+    gridStopLossPercent: { type: DataTypes.FLOAT, defaultValue: 5 },
 
     // Binance-style futures grid parameters
     gridLevels: { type: DataTypes.INTEGER, defaultValue: 8 },
@@ -38,32 +37,16 @@ const Config = sequelize.define('Config', {
     gridOrdersPerSide: { type: DataTypes.INTEGER, defaultValue: 3 },
     gridStopLossLevels: { type: DataTypes.FLOAT, defaultValue: 1.2 },
 
-    // Legacy SMA parameters kept for backward compatibility
-    fastEMAPeriod: { type: DataTypes.INTEGER, defaultValue: 7 },
-    slowEMAPeriod: { type: DataTypes.INTEGER, defaultValue: 25 },
-    trendEMAPeriod: { type: DataTypes.INTEGER, defaultValue: 99 },
-    rsiPeriod: { type: DataTypes.INTEGER, defaultValue: 14 },
-    rsiOverbought: { type: DataTypes.FLOAT, defaultValue: 70 },
-    rsiOversold: { type: DataTypes.FLOAT, defaultValue: 30 },
-    useTrendFilter: { type: DataTypes.BOOLEAN, defaultValue: true },
-
-    // Additional parameters (still used)
-    breakoutTimeframe: { type: DataTypes.STRING, defaultValue: "5m" },
+    // Additional parameters
+    gridTimeframe: { type: DataTypes.STRING, defaultValue: "5m" },
     sessionStartUTC: { type: DataTypes.INTEGER, defaultValue: 0 },
     sessionEndUTC: { type: DataTypes.INTEGER, defaultValue: 23 },
     volumePeriod: { type: DataTypes.INTEGER, defaultValue: 20 },
     minVolumeRatio: { type: DataTypes.FLOAT, defaultValue: 1.3 },
-    maxPriceDeviationPercent: { type: DataTypes.FLOAT, defaultValue: 0.5 },
     atrPeriod: { type: DataTypes.INTEGER, defaultValue: 14 },
-    atrStopMult: { type: DataTypes.FLOAT, defaultValue: 1.4 },
-    atrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
-    shortAtrStopMult: { type: DataTypes.FLOAT, defaultValue: 1.4 },
-    shortAtrTargetMult: { type: DataTypes.FLOAT, defaultValue: 1.6 },
     trailingEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
     trailingActivateATR: { type: DataTypes.FLOAT, defaultValue: 1.2 },
     trailingOffsetATR: { type: DataTypes.FLOAT, defaultValue: 0.6 },
-    shortTrailingActivateATR: { type: DataTypes.FLOAT, defaultValue: 1.0 },
-    shortTrailingOffsetATR: { type: DataTypes.FLOAT, defaultValue: 0.8 },
     allowLong: { type: DataTypes.BOOLEAN, defaultValue: true },
     allowShort: { type: DataTypes.BOOLEAN, defaultValue: true },
 
@@ -109,20 +92,15 @@ const METRICS_LOG_INTERVAL = 60000;
 const POSITION_RUNTIME_PERSIST_TTL = 2000;
 const POSITION_SYNC_QTY_TOLERANCE = 0.001;
 const POSITION_SYNC_ENTRY_TOLERANCE_PCT = 0.05;
-const BOOLEAN_CONFIG_KEYS = [
-    "useTrendFilter",
-    "trailingEnabled",
-    "allowLong",
-    "allowShort"
-];
+const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort"];
 const DEFAULT_CONFIG = {
     strategy: "futures_grid",
     pair: "DOGE/USDT:USDT",
-    usdtPerTrade: 2,
+    gridOrderSizeUsdt: 2,
     leverage: 10,
-    targetProfitUSDT: 0.5,
-    targetDailyProfit: 1.0,
-    maxDailyLossPercent: 10,
+    gridTargetProfitUsdt: 0.5,
+    dailyProfitTargetUsdt: 1.0,
+    dailyMaxLossPercent: 10,
     maxTradesPerDay: 20,
     coolingPeriod: 3000,
     activePosition: null,
@@ -130,7 +108,7 @@ const DEFAULT_CONFIG = {
     dailyTrades: 0,
     marginMode: "isolated",
     monitoringInterval: 500,
-    stopLossPercent: 5,
+    gridStopLossPercent: 5,
     gridLevels: 8,
     gridLookbackCandles: 120,
     gridRangePercent: 3.5,
@@ -138,29 +116,15 @@ const DEFAULT_CONFIG = {
     gridTakeProfitLevels: 1,
     gridOrdersPerSide: 3,
     gridStopLossLevels: 1.2,
-    fastEMAPeriod: 7,
-    slowEMAPeriod: 25,
-    trendEMAPeriod: 99,
-    rsiPeriod: 14,
-    rsiOverbought: 70,
-    rsiOversold: 30,
-    useTrendFilter: true,
-    breakoutTimeframe: "5m",
+    gridTimeframe: "5m",
     sessionStartUTC: 0,
     sessionEndUTC: 23,
     volumePeriod: 20,
     minVolumeRatio: 1.3,
-    maxPriceDeviationPercent: 0.5,
     atrPeriod: 14,
-    atrStopMult: 1.4,
-    atrTargetMult: 1.6,
-    shortAtrStopMult: 1.4,
-    shortAtrTargetMult: 1.6,
     trailingEnabled: true,
     trailingActivateATR: 1.2,
     trailingOffsetATR: 0.6,
-    shortTrailingActivateATR: 1.0,
-    shortTrailingOffsetATR: 0.8,
     allowLong: true,
     allowShort: true
 };
@@ -284,20 +248,45 @@ const printStartupBanner = (totalUSDT) => {
     console.log("=".repeat(70));
     console.log(`Balance: $${totalUSDT.toFixed(2)}`);
     console.log(`Pair: ${db.pair}`);
-    console.log(`Strategy: ${String(db.strategy || "futures_grid").toUpperCase()} on ${db.breakoutTimeframe}`);
+    console.log(`Strategy: ${String(db.strategy || "futures_grid").toUpperCase()} on ${db.gridTimeframe}`);
     console.log(`Position Mode: ${accountPositionMode.label}`);
     console.log(`Grid: ${db.gridLevels} levels | lookback ${db.gridLookbackCandles} candles | range ${db.gridRangePercent}%`);
     console.log(`Grid TP/SL: ${db.gridTakeProfitLevels} level(s) / ${db.gridStopLossLevels} step(s) | ${db.gridOrdersPerSide} order(s) per side`);
+    console.log(`Grid Order Size: ${db.gridOrderSizeUsdt} USDT`);
     console.log(`Volume filter: ${db.minVolumeRatio}x over ${db.volumePeriod} periods`);
     console.log(`Session: ${db.sessionStartUTC}-${db.sessionEndUTC} UTC`);
-    console.log(`ATR: stop ${db.atrStopMult}x, target ${db.atrTargetMult}x, trailing ${db.trailingEnabled ? `${db.trailingActivateATR}/${db.trailingOffsetATR}x` : "OFF"}`);
+    console.log(`Trailing ATR: ${db.trailingEnabled ? `${db.trailingActivateATR}/${db.trailingOffsetATR}x` : "OFF"}`);
     console.log(`Leverage: ${db.leverage}x`);
-    console.log(`Daily target: $${db.targetDailyProfit} (max ${db.maxTradesPerDay} trades)`);
+    console.log(`Daily target: $${db.dailyProfitTargetUsdt} (max ${db.maxTradesPerDay} trades)`);
     console.log("=".repeat(70) + "\n");
 };
 
 const hydrateConfig = (config) => {
     const hydrated = { ...config };
+    if (hydrated.gridOrderSizeUsdt === undefined && hydrated.usdtPerTrade !== undefined) {
+        hydrated.gridOrderSizeUsdt = hydrated.usdtPerTrade;
+    }
+    delete hydrated.usdtPerTrade;
+    if (hydrated.gridTargetProfitUsdt === undefined && hydrated.targetProfitUSDT !== undefined) {
+        hydrated.gridTargetProfitUsdt = hydrated.targetProfitUSDT;
+    }
+    delete hydrated.targetProfitUSDT;
+    if (hydrated.gridStopLossPercent === undefined && hydrated.stopLossPercent !== undefined) {
+        hydrated.gridStopLossPercent = hydrated.stopLossPercent;
+    }
+    delete hydrated.stopLossPercent;
+    if (hydrated.gridTimeframe === undefined && typeof hydrated.breakoutTimeframe === "string") {
+        hydrated.gridTimeframe = hydrated.breakoutTimeframe;
+    }
+    delete hydrated.breakoutTimeframe;
+    if (hydrated.dailyProfitTargetUsdt === undefined && hydrated.targetDailyProfit !== undefined) {
+        hydrated.dailyProfitTargetUsdt = hydrated.targetDailyProfit;
+    }
+    delete hydrated.targetDailyProfit;
+    if (hydrated.dailyMaxLossPercent === undefined && hydrated.maxDailyLossPercent !== undefined) {
+        hydrated.dailyMaxLossPercent = hydrated.maxDailyLossPercent;
+    }
+    delete hydrated.maxDailyLossPercent;
     hydrated.activePosition = safeParseJSON(hydrated.activePosition, null);
     if (hydrated.activePosition && isLegacySinglePosition(hydrated.activePosition)) {
         const legacyKey = toPositionMapKey(hydrated.activePosition.positionSide || "BOTH");
@@ -313,6 +302,54 @@ const serializeConfigForSave = (config) => ({
 });
 
 const getConfigRow = async () => Config.findOne();
+
+const ensureConfigSchema = async () => {
+    await sequelize.sync();
+    const tableInfo = await sequelize.query("PRAGMA table_info('Configs');", { type: sequelize.QueryTypes.SELECT });
+    const columnNames = new Set(tableInfo.map((column) => String(column.name)));
+    if (!columnNames.has("gridOrderSizeUsdt")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN gridOrderSizeUsdt FLOAT DEFAULT 2;");
+        if (columnNames.has("usdtPerTrade")) {
+            await sequelize.query("UPDATE Configs SET gridOrderSizeUsdt = COALESCE(usdtPerTrade, 2) WHERE gridOrderSizeUsdt IS NULL OR gridOrderSizeUsdt = '';");
+        }
+        console.log("[INFO] Added config column: gridOrderSizeUsdt");
+    }
+    if (!columnNames.has("gridTargetProfitUsdt")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN gridTargetProfitUsdt FLOAT DEFAULT 0.5;");
+        if (columnNames.has("targetProfitUSDT")) {
+            await sequelize.query("UPDATE Configs SET gridTargetProfitUsdt = COALESCE(targetProfitUSDT, 0.5) WHERE gridTargetProfitUsdt IS NULL OR gridTargetProfitUsdt = '';");
+        }
+        console.log("[INFO] Added config column: gridTargetProfitUsdt");
+    }
+    if (!columnNames.has("gridStopLossPercent")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN gridStopLossPercent FLOAT DEFAULT 5;");
+        if (columnNames.has("stopLossPercent")) {
+            await sequelize.query("UPDATE Configs SET gridStopLossPercent = COALESCE(stopLossPercent, 5) WHERE gridStopLossPercent IS NULL OR gridStopLossPercent = '';");
+        }
+        console.log("[INFO] Added config column: gridStopLossPercent");
+    }
+    if (!columnNames.has("gridTimeframe")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN gridTimeframe VARCHAR(255) DEFAULT '5m';");
+        if (columnNames.has("breakoutTimeframe")) {
+            await sequelize.query("UPDATE Configs SET gridTimeframe = COALESCE(breakoutTimeframe, '5m') WHERE gridTimeframe IS NULL OR gridTimeframe = '';");
+        }
+        console.log("[INFO] Added config column: gridTimeframe");
+    }
+    if (!columnNames.has("dailyProfitTargetUsdt")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN dailyProfitTargetUsdt FLOAT DEFAULT 1;");
+        if (columnNames.has("targetDailyProfit")) {
+            await sequelize.query("UPDATE Configs SET dailyProfitTargetUsdt = COALESCE(targetDailyProfit, 1) WHERE dailyProfitTargetUsdt IS NULL OR dailyProfitTargetUsdt = '';");
+        }
+        console.log("[INFO] Added config column: dailyProfitTargetUsdt");
+    }
+    if (!columnNames.has("dailyMaxLossPercent")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN dailyMaxLossPercent FLOAT DEFAULT 10;");
+        if (columnNames.has("maxDailyLossPercent")) {
+            await sequelize.query("UPDATE Configs SET dailyMaxLossPercent = COALESCE(maxDailyLossPercent, 10) WHERE dailyMaxLossPercent IS NULL OR dailyMaxLossPercent = '';");
+        }
+        console.log("[INFO] Added config column: dailyMaxLossPercent");
+    }
+};
 
 const loadPersistedConfig = async () => {
     const configRow = await getConfigRow();
@@ -349,37 +386,25 @@ const persistConfig = async (config) => {
 };
 
 const getSignalParameters = () => {
-    const strategy = String(db?.strategy || "futures_grid").toLowerCase();
     const volumePeriod = Math.max(2, Math.trunc(db.volumePeriod || 20));
     const atrPeriod = Math.max(2, Math.trunc(db.atrPeriod || 14));
-    if (strategy === "futures_grid") {
-        const gridLookbackCandles = Math.max(20, Math.trunc(db.gridLookbackCandles || 120));
-        const gridLevels = Math.max(4, Math.trunc(db.gridLevels || 8));
-        const gridTakeProfitLevels = Math.max(1, Math.trunc(db.gridTakeProfitLevels || 1));
-        const neededCandles = Math.max(gridLookbackCandles + 5, volumePeriod + 10, atrPeriod + 10, 150);
-        return {
-            strategy,
-            volumePeriod,
-            atrPeriod,
-            neededCandles,
-            gridLookbackCandles,
-            gridLevels,
-            gridTakeProfitLevels,
-            gridOrdersPerSide: Math.max(1, Math.trunc(db.gridOrdersPerSide || 3)),
-            gridRangePercent: Math.max(0.5, toFiniteNumber(db.gridRangePercent, 3.5)),
-            gridEntryBufferPercent: Math.max(0.02, toFiniteNumber(db.gridEntryBufferPercent, 0.15)),
-            gridStopLossLevels: Math.max(0.5, toFiniteNumber(db.gridStopLossLevels, 1.2))
-        };
-    }
-
-    const fastEMAPeriod = 7;
-    const slowEMAPeriod = 25;
-    const trendEMAPeriod = 99;
-    const neededCandles = Math.max(
-        slowEMAPeriod + 10, trendEMAPeriod + 10, volumePeriod + 10, atrPeriod + 10, 100
-    );
-
-    return { strategy, fastEMAPeriod, slowEMAPeriod, trendEMAPeriod, volumePeriod, atrPeriod, neededCandles };
+    const gridLookbackCandles = Math.max(20, Math.trunc(db.gridLookbackCandles || 120));
+    const gridLevels = Math.max(4, Math.trunc(db.gridLevels || 8));
+    const gridTakeProfitLevels = Math.max(1, Math.trunc(db.gridTakeProfitLevels || 1));
+    const neededCandles = Math.max(gridLookbackCandles + 5, volumePeriod + 10, atrPeriod + 10, 150);
+    return {
+        strategy: "futures_grid",
+        volumePeriod,
+        atrPeriod,
+        neededCandles,
+        gridLookbackCandles,
+        gridLevels,
+        gridTakeProfitLevels,
+        gridOrdersPerSide: Math.max(1, Math.trunc(db.gridOrdersPerSide || 3)),
+        gridRangePercent: Math.max(0.5, toFiniteNumber(db.gridRangePercent, 3.5)),
+        gridEntryBufferPercent: Math.max(0.02, toFiniteNumber(db.gridEntryBufferPercent, 0.15)),
+        gridStopLossLevels: Math.max(0.5, toFiniteNumber(db.gridStopLossLevels, 1.2))
+    };
 };
 
 const buildGridLevels = (lowerBound, upperBound, gridLevels) => {
@@ -567,76 +592,13 @@ const evaluateGridSignal = (snapshot, params) => {
     };
 };
 
-const evaluateCrossoverSignal = (snapshot, params) => {
-    const { close, lastIndex, currentPrice, currentVolume, avgVolume, hourUTC } = snapshot;
-    const signalClose = Array.isArray(close) ? close.slice(0, lastIndex + 1) : [];
-    if (signalClose.length < Math.max(params.slowEMAPeriod, params.trendEMAPeriod) + 2) {
-        return {
-            canLong: false, canShort: false, setupDetected: false,
-            detailTitle: "SMA AUTO ANALYSIS", extraDetailLines: ["   Not enough candle data to evaluate."]
-        };
-    }
-
-    const fastSMA = SMA.calculate({ values: signalClose, period: params.fastEMAPeriod });
-    const slowSMA = SMA.calculate({ values: signalClose, period: params.slowEMAPeriod });
-    const trendSMA = SMA.calculate({ values: signalClose, period: params.trendEMAPeriod });
-
-    const currentFast = fastSMA[fastSMA.length - 1];
-    const prevFast = fastSMA[fastSMA.length - 2];
-    const currentSlow = slowSMA[slowSMA.length - 1];
-    const prevSlow = slowSMA[slowSMA.length - 2];
-    const currentTrend = trendSMA[trendSMA.length - 1];
-    
-    // Volume ratio
-    const volumeRatio = currentVolume / (avgVolume || 1);
-    const volumeOk = volumeRatio >= db.minVolumeRatio;
-    
-    // Session filter
-    const sessionOk = db.sessionStartUTC <= db.sessionEndUTC
-        ? hourUTC >= db.sessionStartUTC && hourUTC <= db.sessionEndUTC
-        : hourUTC >= db.sessionStartUTC || hourUTC <= db.sessionEndUTC;
-    
-    const bullishCrossover = currentFast > currentSlow && prevFast <= prevSlow;
-    const bearishCrossover = currentFast < currentSlow && prevFast >= prevSlow;
-    const structureOkLong = currentFast > currentTrend && currentSlow > currentTrend;
-    const structureOkShort = currentFast < currentTrend && currentSlow < currentTrend;
-
-    const canLong = db.allowLong && bullishCrossover && volumeOk && sessionOk && structureOkLong;
-    const canShort = db.allowShort && bearishCrossover && volumeOk && sessionOk && structureOkShort;
-    
-    const setupDetected = bullishCrossover || bearishCrossover;
-    
-    return {
-        canLong,
-        canShort,
-        setupDetected,
-        detailTitle: "SMA AUTO ANALYSIS",
-        extraDetailLines: [
-            `   SMA Fast (${params.fastEMAPeriod}): ${currentFast.toFixed(6)} (prev ${prevFast.toFixed(6)})`,
-            `   SMA Mid (${params.slowEMAPeriod}): ${currentSlow.toFixed(6)} (prev ${prevSlow.toFixed(6)})`,
-            `   SMA Trend (${params.trendEMAPeriod}): ${currentTrend.toFixed(6)}`,
-            `   Bullish Cross (SMA ${params.fastEMAPeriod} > SMA ${params.slowEMAPeriod}): ${bullishCrossover ? "[OK]" : "[NO]"}`,
-            `   Bearish Cross (SMA ${params.fastEMAPeriod} < SMA ${params.slowEMAPeriod}): ${bearishCrossover ? "[OK]" : "[NO]"}`,
-            `   Volume Ratio: ${volumeRatio.toFixed(2)}x (min ${db.minVolumeRatio}x) -> ${volumeOk ? "[OK]" : "[NO]"}`,
-            `   Structure Long: SMA ${params.fastEMAPeriod} & SMA ${params.slowEMAPeriod} above SMA ${params.trendEMAPeriod} -> ${structureOkLong ? "[OK]" : "[NO]"}`,
-            `   Structure Short: SMA ${params.fastEMAPeriod} & SMA ${params.slowEMAPeriod} below SMA ${params.trendEMAPeriod} -> ${structureOkShort ? "[OK]" : "[NO]"}`
-        ]
-    };
-};
-
 const applySignalGuards = (signalState, snapshot) => {
-    if (String(db?.strategy || "futures_grid").toLowerCase() === "futures_grid") {
-        return signalState;
-    }
-    let { canLong, canShort } = signalState;
-    if (snapshot.currentPrice <= snapshot.currentOpen) canLong = false;
-    if (snapshot.currentPrice >= snapshot.currentOpen) canShort = false;
-    return { ...signalState, canLong, canShort };
+    return signalState;
 };
 
 const logSignalDetails = (params, snapshot, signalState) => {
     console.log("\n" + "=".repeat(50));
-    console.log(`${signalState.detailTitle} (${db.breakoutTimeframe}):`);
+    console.log(`${signalState.detailTitle} (${db.gridTimeframe}):`);
     console.log(`   Current Price: ${snapshot.currentPrice}`);
     console.log(`   Current Volume: ${snapshot.currentVolume.toFixed(2)}`);
     console.log(`   Avg Volume (${params.volumePeriod}): ${snapshot.avgVolume.toFixed(2)}`);
@@ -659,19 +621,10 @@ const logGridSyncStatus = (desiredOrders, openGridOrders) => {
     lastGridSyncLogAt = now;
 };
 
-const buildRiskOverrides = (useShortProfile) => useShortProfile
-    ? {
-        atrStopMult: toFiniteNumber(db.shortAtrStopMult, db.atrStopMult),
-        atrTargetMult: toFiniteNumber(db.shortAtrTargetMult, db.atrTargetMult),
-        trailingActivateATR: toFiniteNumber(db.shortTrailingActivateATR, db.trailingActivateATR),
-        trailingOffsetATR: toFiniteNumber(db.shortTrailingOffsetATR, db.trailingOffsetATR)
-    }
-    : {
-        atrStopMult: toFiniteNumber(db.atrStopMult, 0.8),
-        atrTargetMult: toFiniteNumber(db.atrTargetMult, 1.6),
-        trailingActivateATR: toFiniteNumber(db.trailingActivateATR, 1.2),
-        trailingOffsetATR: toFiniteNumber(db.trailingOffsetATR, 0.6)
-    };
+const buildRiskOverrides = () => ({
+    trailingActivateATR: toFiniteNumber(db.trailingActivateATR, 1.2),
+    trailingOffsetATR: toFiniteNumber(db.trailingOffsetATR, 0.6)
+});
 
 const parseSignalOrderData = (signalData) => {
     if (typeof signalData !== "object" || signalData === null) {
@@ -788,28 +741,19 @@ const validateOrderSize = (market, quantity, referencePrice) => {
 };
 
 const buildOrderPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides, explicitTargets = {}) => {
-    const atrStopMult = toFiniteNumber(riskOverrides.atrStopMult, db.atrStopMult);
-    const atrTargetMult = toFiniteNumber(riskOverrides.atrTargetMult, db.atrTargetMult);
     const trailingActivateATR = toFiniteNumber(riskOverrides.trailingActivateATR, db.trailingActivateATR);
     const trailingOffsetATR = toFiniteNumber(riskOverrides.trailingOffsetATR, db.trailingOffsetATR);
     const explicitTargetPrice = toFiniteNumber(explicitTargets.targetPrice, null);
     const explicitStopLossPrice = toFiniteNumber(explicitTargets.stopLossPrice, null);
 
-    let targetProfitUSDT = db.targetProfitUSDT;
-    let stopLossUSDT = -db.usdtPerTrade * (db.stopLossPercent / 100);
+    let targetProfitUSDT = db.gridTargetProfitUsdt;
+    let stopLossUSDT = -db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100);
     let targetPrice;
     let stopLossPrice;
 
     if (Number.isFinite(explicitTargetPrice) && Number.isFinite(explicitStopLossPrice)) {
         targetPrice = explicitTargetPrice;
         stopLossPrice = explicitStopLossPrice;
-        targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
-        stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
-    } else if (signalATR && signalATR > 0) {
-        const stopDistance = signalATR * atrStopMult;
-        const targetDistance = signalATR * atrTargetMult;
-        targetPrice = side === "buy" ? entryPrice + targetDistance : entryPrice - targetDistance;
-        stopLossPrice = side === "buy" ? entryPrice - stopDistance : entryPrice + stopDistance;
         targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
         stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
     } else {
@@ -822,7 +766,7 @@ const buildOrderPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides,
     }
 
     return {
-        atrStopMult, atrTargetMult, trailingActivateATR, trailingOffsetATR,
+        trailingActivateATR, trailingOffsetATR,
         targetProfitUSDT, stopLossUSDT,
         targetPrice: formatPriceToMarketPrecision(db.pair, targetPrice),
         stopLossPrice: formatPriceToMarketPrecision(db.pair, stopLossPrice)
@@ -831,7 +775,7 @@ const buildOrderPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides,
 
 const logOrderPlan = (strategyName, entryPrice, adjustedQty, orderPlan) => {
     console.log("   Order Details:");
-    console.log(`   - Amount: ${db.usdtPerTrade} USDT × ${db.leverage}x = ${(db.usdtPerTrade * db.leverage).toFixed(2)} USDT`);
+    console.log(`   - Amount: ${db.gridOrderSizeUsdt} USDT × ${db.leverage}x = ${(db.gridOrderSizeUsdt * db.leverage).toFixed(2)} USDT`);
     console.log(`   - Quantity: ${adjustedQty} ${db.pair.split('/')[0]}`);
     console.log(`   - Entry Price: ${entryPrice}`);
     console.log(`   - Strategy: ${strategyName}`);
@@ -839,12 +783,12 @@ const logOrderPlan = (strategyName, entryPrice, adjustedQty, orderPlan) => {
     console.log(`   - Target Price: ${orderPlan.targetPrice}`);
     console.log(`   - Stop Loss: ${orderPlan.stopLossUSDT.toFixed(4)} USDT`);
     console.log(`   - Stop Loss Price: ${orderPlan.stopLossPrice}`);
-    console.log(`   - ATR Risk: stop ${orderPlan.atrStopMult}x | target ${orderPlan.atrTargetMult}x | trail ${orderPlan.trailingActivateATR}/${orderPlan.trailingOffsetATR}x`);
+    console.log(`   - Trailing ATR: ${orderPlan.trailingActivateATR}/${orderPlan.trailingOffsetATR}x`);
 };
 
 const placeGridEntryOrder = async (gridOrder) => {
     const market = exchange.markets[db.pair];
-    const rawQty = (db.usdtPerTrade * db.leverage) / gridOrder.price;
+    const rawQty = (db.gridOrderSizeUsdt * db.leverage) / gridOrder.price;
     const quantity = formatAmountToMarketPrecision(db.pair, rawQty);
     const sizeValidation = validateOrderSize(market, quantity, gridOrder.price);
     if (!sizeValidation.valid) {
@@ -1092,19 +1036,19 @@ const buildSyncedActivePosition = (openPosition, entryPrice) => {
     const side = getExchangePositionSide(openPosition) || "buy";
     const positionSide = getExchangePositionModeSide(openPosition);
     const targetPrice = side === "buy"
-        ? formatPriceToMarketPrecision(db.pair, entryPrice + (db.targetProfitUSDT / Math.max(contracts, 1e-8)))
-        : formatPriceToMarketPrecision(db.pair, entryPrice - (db.targetProfitUSDT / Math.max(contracts, 1e-8)));
+        ? formatPriceToMarketPrecision(db.pair, entryPrice + (db.gridTargetProfitUsdt / Math.max(contracts, 1e-8)))
+        : formatPriceToMarketPrecision(db.pair, entryPrice - (db.gridTargetProfitUsdt / Math.max(contracts, 1e-8)));
     const stopLossPrice = side === "buy"
-        ? formatPriceToMarketPrecision(db.pair, entryPrice - (Math.abs(db.usdtPerTrade * (db.stopLossPercent / 100)) / Math.max(contracts, 1e-8)))
-        : formatPriceToMarketPrecision(db.pair, entryPrice + (Math.abs(db.usdtPerTrade * (db.stopLossPercent / 100)) / Math.max(contracts, 1e-8)));
+        ? formatPriceToMarketPrecision(db.pair, entryPrice - (Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8)))
+        : formatPriceToMarketPrecision(db.pair, entryPrice + (Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8)));
     return {
         side, entryPrice, targetPrice, stopLossPrice,
-        stopLossUSDT: -db.usdtPerTrade * (db.stopLossPercent / 100),
+        stopLossUSDT: -db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100),
         orderId: `SYNC_${Date.now()}`, quantity: contracts,
         entryTime: Date.now() - 300000, highestSinceEntry: entryPrice, lowestSinceEntry: entryPrice,
         marginMode: (db.marginMode || "isolated").toLowerCase(),
         positionSide,
-        targetProfitUSDT: db.targetProfitUSDT, strategy: "SYNC_ONLY",
+        targetProfitUSDT: db.gridTargetProfitUsdt, strategy: "SYNC_ONLY",
         tpOrderId: null, tpClientOrderId: null, slOrderId: null, slClientOrderId: null
     };
 };
@@ -1214,8 +1158,8 @@ const calculatePositionPnL = (position, currentPrice) => {
 const getPositionExitTargets = (position) => {
     const effectiveTargetProfitUSDT = Number.isFinite(position.targetProfitUSDT) && position.targetProfitUSDT > 0
         ? position.targetProfitUSDT
-        : db.targetProfitUSDT;
-    const fallbackStopLossUSDT = -Math.abs(db.usdtPerTrade * (db.stopLossPercent / 100));
+        : db.gridTargetProfitUsdt;
+    const fallbackStopLossUSDT = -Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100));
     const rawStopLossUSDT = Number.isFinite(position.stopLossUSDT) ? position.stopLossUSDT : fallbackStopLossUSDT;
     const effectiveStopLossUSDT = -Math.abs(rawStopLossUSDT);
 
@@ -1397,12 +1341,12 @@ const resetDailyStateIfNeeded = async (now) => {
 const getDailyRiskLimit = async () => {
     const totalUSDT = await getTotalUSDTBalance();
     if (!Number.isFinite(totalUSDT) || totalUSDT <= 0) return null;
-    return totalUSDT * db.maxDailyLossPercent / 100;
+    return totalUSDT * db.dailyMaxLossPercent / 100;
 };
 
 const getTradingPauseReason = async () => {
     const maxDailyLoss = await getDailyRiskLimit();
-    if (db.dailyPnL >= db.targetDailyProfit) return `[PAUSE] Daily target reached: $${db.dailyPnL.toFixed(2)}. Trading paused.`;
+    if (db.dailyPnL >= db.dailyProfitTargetUsdt) return `[PAUSE] Daily target reached: $${db.dailyPnL.toFixed(2)}. Trading paused.`;
     if (Number.isFinite(maxDailyLoss) && db.dailyPnL <= -maxDailyLoss) return `[PAUSE] Daily loss limit reached: $${db.dailyPnL.toFixed(2)}. Trading paused.`;
     if (db.dailyTrades >= db.maxTradesPerDay) return `[PAUSE] Max trades per day (${db.maxTradesPerDay}) reached.`;
     return null;
@@ -1493,25 +1437,20 @@ const normalizeConfig = (config) => {
 
     const normalized = { ...config };
     const numericRules = {
-        usdtPerTrade: { min: 0, allowZero: false }, leverage: { min: 0, allowZero: false, integer: true },
-        targetProfitUSDT: { min: 0, allowZero: false }, targetDailyProfit: { min: 0, allowZero: false },
-        maxDailyLossPercent: { min: 0, allowZero: false }, maxTradesPerDay: { min: 0, allowZero: false, integer: true },
+        gridOrderSizeUsdt: { min: 0, allowZero: false }, leverage: { min: 0, allowZero: false, integer: true },
+        gridTargetProfitUsdt: { min: 0, allowZero: false }, dailyProfitTargetUsdt: { min: 0, allowZero: false },
+        dailyMaxLossPercent: { min: 0, allowZero: false }, maxTradesPerDay: { min: 0, allowZero: false, integer: true },
         coolingPeriod: { min: 0, allowZero: true, integer: true }, monitoringInterval: { min: 200, allowZero: false, integer: true },
-        stopLossPercent: { min: 0, allowZero: false }, gridLevels: { min: 4, allowZero: false, integer: true },
+        gridStopLossPercent: { min: 0, allowZero: false }, gridLevels: { min: 4, allowZero: false, integer: true },
         gridLookbackCandles: { min: 20, allowZero: false, integer: true }, gridRangePercent: { min: 0.5, allowZero: false },
         gridEntryBufferPercent: { min: 0.02, allowZero: false }, gridTakeProfitLevels: { min: 1, allowZero: false, integer: true },
         gridOrdersPerSide: { min: 1, allowZero: false, integer: true },
-        gridStopLossLevels: { min: 0.5, allowZero: false }, fastEMAPeriod: { min: 2, allowZero: false, integer: true },
-        slowEMAPeriod: { min: 3, allowZero: false, integer: true }, trendEMAPeriod: { min: 2, allowZero: false, integer: true },
-        rsiPeriod: { min: 2, allowZero: false, integer: true }, rsiOverbought: { min: 50, allowZero: false },
-        rsiOversold: { min: 1, allowZero: false }, sessionStartUTC: { min: 0, allowZero: true, integer: true },
+        gridStopLossLevels: { min: 0.5, allowZero: false }, sessionStartUTC: { min: 0, allowZero: true, integer: true },
         sessionEndUTC: { min: 0, allowZero: true, integer: true }, volumePeriod: { min: 2, allowZero: false, integer: true },
-        minVolumeRatio: { min: 1, allowZero: false }, maxPriceDeviationPercent: { min: 0, allowZero: true },
-        atrPeriod: { min: 2, allowZero: false, integer: true }, atrStopMult: { min: 0.2, allowZero: false },
-        atrTargetMult: { min: 0.2, allowZero: false }, shortAtrStopMult: { min: 0.2, allowZero: false },
-        shortAtrTargetMult: { min: 0.2, allowZero: false }, trailingActivateATR: { min: 0.2, allowZero: false },
-        trailingOffsetATR: { min: 0.1, allowZero: false }, shortTrailingActivateATR: { min: 0.2, allowZero: false },
-        shortTrailingOffsetATR: { min: 0.1, allowZero: false }
+        minVolumeRatio: { min: 1, allowZero: false },
+        atrPeriod: { min: 2, allowZero: false, integer: true },
+        trailingActivateATR: { min: 0.2, allowZero: false },
+        trailingOffsetATR: { min: 0.1, allowZero: false }
     };
 
     Object.entries(numericRules).forEach(([key, rule]) => {
@@ -1535,7 +1474,11 @@ const normalizeConfig = (config) => {
     normalized.strategy = "futures_grid";
     const rawMarginMode = typeof normalized.marginMode === "string" ? normalized.marginMode.trim().toLowerCase() : "";
     normalized.marginMode = rawMarginMode === "isolated" || rawMarginMode === "cross" ? rawMarginMode : defaults.marginMode;
-    normalized.breakoutTimeframe = isValidTimeframe(normalized.breakoutTimeframe) ? normalized.breakoutTimeframe.trim() : defaults.breakoutTimeframe;
+    const rawGridTimeframe = typeof normalized.gridTimeframe === "string"
+        ? normalized.gridTimeframe
+        : normalized.breakoutTimeframe;
+    normalized.gridTimeframe = isValidTimeframe(rawGridTimeframe) ? rawGridTimeframe.trim() : defaults.gridTimeframe;
+    delete normalized.breakoutTimeframe;
 
     const normalizeBoolean = (key) => {
         if (typeof normalized[key] === "boolean") return;
@@ -1554,9 +1497,6 @@ const normalizeConfig = (config) => {
     BOOLEAN_CONFIG_KEYS.forEach(normalizeBoolean);
     normalized.sessionStartUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionStartUTC, defaults.sessionStartUTC)), 0, 23);
     normalized.sessionEndUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionEndUTC, defaults.sessionEndUTC)), 0, 23);
-    normalized.fastEMAPeriod = 7;
-    normalized.slowEMAPeriod = 25;
-    normalized.trendEMAPeriod = 99;
     normalized.gridTakeProfitLevels = clamp(normalized.gridTakeProfitLevels, 1, Math.max(1, normalized.gridLevels - 1));
     normalized.gridOrdersPerSide = clamp(normalized.gridOrdersPerSide, 1, Math.max(1, normalized.gridLevels - 1));
 
@@ -1566,7 +1506,7 @@ const normalizeConfig = (config) => {
 // -------------------- INITIALIZE DATABASE --------------------
 const initializeDB = async () => {
     try {
-        await sequelize.sync();
+        await ensureConfigSchema();
         console.log("[OK] Database synced");
         const configRow = await ensureConfigRow();
         const persisted = configRow.toJSON();
@@ -1702,7 +1642,7 @@ const analyzeSignal = async () => {
         const strategy = String(db.strategy || "futures_grid").toLowerCase();
         const now = Date.now();
         if (now - lastLogTime > 5000) {
-            console.log(`\n[SIGNAL #${signalCount}] Analyzing ${strategy.toUpperCase()} setup (${db.breakoutTimeframe})...`);
+            console.log(`\n[SIGNAL #${signalCount}] Analyzing ${strategy.toUpperCase()} setup (${db.gridTimeframe})...`);
             lastLogTime = now;
         }
 
@@ -1733,8 +1673,8 @@ const analyzeSignal = async () => {
         return {
             canLong: finalState.canLong, canShort: finalState.canShort, price: snapshot.currentPrice,
             atr: snapshot.currentATR, hasSignal: finalState.setupDetected,
-            strategy: signalState.strategyName || (strategy === "futures_grid" ? "FUTURES_GRID" : "SMA_CROSSOVER"),
-            riskOverrides: buildRiskOverrides(finalState.canShort),
+            strategy: "FUTURES_GRID",
+            riskOverrides: buildRiskOverrides(),
             targetPrice: finalState.canLong ? signalState.longPlan?.targetPrice : (finalState.canShort ? signalState.shortPlan?.targetPrice : null),
             stopLossPrice: finalState.canLong ? signalState.longPlan?.stopLossPrice : (finalState.canShort ? signalState.shortPlan?.stopLossPrice : null)
         };
@@ -1884,15 +1824,7 @@ const placeOrder = async (side, signalData = {}) => {
         const { signalPrice, signalATR, strategyName, riskOverrides, signalTargetPrice, signalStopLossPrice } = parseSignalOrderData(signalData);
         const hasSignalPrice = Number(signalPrice) > 0;
         const entryPrice = hasSignalPrice ? Number(signalPrice) : tickerPrice;
-        const maxDeviationPercent = Number(db.maxPriceDeviationPercent ?? 0.5);
-        if (hasSignalPrice && maxDeviationPercent > 0) {
-            const deviationPercent = Math.abs((entryPrice - tickerPrice) / tickerPrice) * 100;
-            if (deviationPercent > maxDeviationPercent) {
-                console.warn(`[WARN] Price deviation too high (${deviationPercent.toFixed(3)}% > ${maxDeviationPercent}%). Order skipped.`);
-                return;
-            }
-        }
-        const qty = (db.usdtPerTrade * db.leverage) / entryPrice;
+        const qty = (db.gridOrderSizeUsdt * db.leverage) / entryPrice;
         const market = exchange.markets[db.pair];
         const adjustedQty = formatAmountToMarketPrecision(db.pair, qty);
         const sizeValidation = validateOrderSize(market, adjustedQty, tickerPrice);
@@ -2069,7 +2001,7 @@ const getPrice = async (forceRefresh = false) => {
 };
 
 const getOHLCV = async (limit = 100, forceRefresh = false) => {
-    const timeframe = db?.breakoutTimeframe || "5m";
+    const timeframe = db?.gridTimeframe || "5m";
     const cacheKey = `${db?.pair || ""}:${timeframe}:${limit}`;
     const now = Date.now();
     if (!forceRefresh && ohlcvCache.key === cacheKey && now - ohlcvCache.lastUpdate < OHLCV_CACHE_TTL && Array.isArray(ohlcvCache.data)) {
@@ -2115,8 +2047,8 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         const parsedTime = Date.parse(timestamp);
         lastTradeAt = Number.isFinite(parsedTime) ? parsedTime : Date.now();
         const marginMode = (db.marginMode || "isolated").toUpperCase();
-        const strategy = getPrimaryActivePosition()?.strategy || `SMA_CROSSOVER_${String(db.breakoutTimeframe || "5m").toUpperCase()}`;
-        const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},${marginMode},${db.stopLossPercent},${strategy}\n`;
+        const strategy = getPrimaryActivePosition()?.strategy || `FUTURES_GRID_${String(db.gridTimeframe || "5m").toUpperCase()}`;
+        const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},${marginMode},${db.gridStopLossPercent},${strategy}\n`;
         fs.appendFileSync(logPath, line);
     } catch (error) { console.error("[ERROR] Failed to log trade:", error.message); }
 };

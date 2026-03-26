@@ -8,16 +8,16 @@ const { Sequelize, DataTypes } = require("sequelize");
 
 const DB_PATH = path.join(__dirname, "..", "database.sqlite");
 
-const BOOLEAN_CONFIG_KEYS = ["useTrendFilter", "trailingEnabled", "allowLong", "allowShort"];
+const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort"];
 
 const DEFAULT_CONFIG = {
   strategy: "futures_grid",
   pair: "DOGE/USDT:USDT",
-  usdtPerTrade: 2,
+  gridOrderSizeUsdt: 2,
   leverage: 10,
-  targetProfitUSDT: 0.5,
-  targetDailyProfit: 1.0,
-  maxDailyLossPercent: 10,
+  gridTargetProfitUsdt: 0.5,
+  dailyProfitTargetUsdt: 1.0,
+  dailyMaxLossPercent: 10,
   maxTradesPerDay: 20,
   coolingPeriod: 3000,
   activePosition: null,
@@ -25,7 +25,7 @@ const DEFAULT_CONFIG = {
   dailyTrades: 0,
   marginMode: "isolated",
   monitoringInterval: 500,
-  stopLossPercent: 5,
+  gridStopLossPercent: 5,
   gridLevels: 8,
   gridLookbackCandles: 120,
   gridRangePercent: 3.5,
@@ -33,29 +33,15 @@ const DEFAULT_CONFIG = {
   gridTakeProfitLevels: 1,
   gridOrdersPerSide: 3,
   gridStopLossLevels: 1.2,
-  fastEMAPeriod: 7,
-  slowEMAPeriod: 25,
-  trendEMAPeriod: 99,
-  rsiPeriod: 14,
-  rsiOverbought: 70,
-  rsiOversold: 30,
-  useTrendFilter: true,
-  breakoutTimeframe: "5m",
+  gridTimeframe: "5m",
   sessionStartUTC: 0,
   sessionEndUTC: 23,
   volumePeriod: 20,
   minVolumeRatio: 1.3,
-  maxPriceDeviationPercent: 0.5,
   atrPeriod: 14,
-  atrStopMult: 1.4,
-  atrTargetMult: 1.6,
-  shortAtrStopMult: 1.4,
-  shortAtrTargetMult: 1.6,
   trailingEnabled: true,
   trailingActivateATR: 1.2,
   trailingOffsetATR: 0.6,
-  shortTrailingActivateATR: 1.0,
-  shortTrailingOffsetATR: 0.8,
   allowLong: true,
   allowShort: true,
 };
@@ -71,11 +57,11 @@ const Config = sequelize.define(
   {
     strategy: { type: DataTypes.STRING, defaultValue: DEFAULT_CONFIG.strategy },
     pair: { type: DataTypes.STRING, defaultValue: DEFAULT_CONFIG.pair },
-    usdtPerTrade: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.usdtPerTrade },
+    gridOrderSizeUsdt: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.gridOrderSizeUsdt },
     leverage: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.leverage },
-    targetProfitUSDT: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.targetProfitUSDT },
-    targetDailyProfit: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.targetDailyProfit },
-    maxDailyLossPercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.maxDailyLossPercent },
+    gridTargetProfitUsdt: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.gridTargetProfitUsdt },
+    dailyProfitTargetUsdt: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.dailyProfitTargetUsdt },
+    dailyMaxLossPercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.dailyMaxLossPercent },
     maxTradesPerDay: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.maxTradesPerDay },
     coolingPeriod: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.coolingPeriod },
     activePosition: { type: DataTypes.TEXT, defaultValue: null },
@@ -83,7 +69,7 @@ const Config = sequelize.define(
     dailyTrades: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.dailyTrades },
     marginMode: { type: DataTypes.STRING, defaultValue: DEFAULT_CONFIG.marginMode },
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.monitoringInterval },
-    stopLossPercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.stopLossPercent },
+    gridStopLossPercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.gridStopLossPercent },
     gridLevels: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.gridLevels },
     gridLookbackCandles: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.gridLookbackCandles },
     gridRangePercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.gridRangePercent },
@@ -91,29 +77,15 @@ const Config = sequelize.define(
     gridTakeProfitLevels: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.gridTakeProfitLevels },
     gridOrdersPerSide: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.gridOrdersPerSide },
     gridStopLossLevels: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.gridStopLossLevels },
-    fastEMAPeriod: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.fastEMAPeriod },
-    slowEMAPeriod: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.slowEMAPeriod },
-    trendEMAPeriod: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.trendEMAPeriod },
-    rsiPeriod: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.rsiPeriod },
-    rsiOverbought: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.rsiOverbought },
-    rsiOversold: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.rsiOversold },
-    useTrendFilter: { type: DataTypes.BOOLEAN, defaultValue: DEFAULT_CONFIG.useTrendFilter },
-    breakoutTimeframe: { type: DataTypes.STRING, defaultValue: DEFAULT_CONFIG.breakoutTimeframe },
+    gridTimeframe: { type: DataTypes.STRING, defaultValue: DEFAULT_CONFIG.gridTimeframe },
     sessionStartUTC: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.sessionStartUTC },
     sessionEndUTC: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.sessionEndUTC },
     volumePeriod: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.volumePeriod },
     minVolumeRatio: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.minVolumeRatio },
-    maxPriceDeviationPercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.maxPriceDeviationPercent },
     atrPeriod: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.atrPeriod },
-    atrStopMult: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.atrStopMult },
-    atrTargetMult: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.atrTargetMult },
-    shortAtrStopMult: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.shortAtrStopMult },
-    shortAtrTargetMult: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.shortAtrTargetMult },
     trailingEnabled: { type: DataTypes.BOOLEAN, defaultValue: DEFAULT_CONFIG.trailingEnabled },
     trailingActivateATR: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.trailingActivateATR },
     trailingOffsetATR: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.trailingOffsetATR },
-    shortTrailingActivateATR: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.shortTrailingActivateATR },
-    shortTrailingOffsetATR: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.shortTrailingOffsetATR },
     allowLong: { type: DataTypes.BOOLEAN, defaultValue: DEFAULT_CONFIG.allowLong },
     allowShort: { type: DataTypes.BOOLEAN, defaultValue: DEFAULT_CONFIG.allowShort },
     lastDailyReset: { type: DataTypes.BIGINT, defaultValue: () => Date.now() },
@@ -135,9 +107,12 @@ const printUsage = () => {
       "Examples:",
       "  node scripts/config.js set leverage 20",
       "  node scripts/config.js set pair BTC/USDT:USDT",
-      "  node scripts/config.js set gridLevels 10",
-      "  node scripts/config.js set gridOrdersPerSide 4",
-      "  node scripts/config.js set gridRangePercent 4.5",
+      "  node scripts/config.js set gridOrderSizeUsdt 5",
+      "  node scripts/config.js set gridTargetProfitUsdt 0.8",
+      "  node scripts/config.js set gridStopLossPercent 4",
+      "  node scripts/config.js set gridTimeframe 15m",
+      "  node scripts/config.js set dailyProfitTargetUsdt 3",
+      "  node scripts/config.js set dailyMaxLossPercent 8",
     ].join("\n"),
   );
 };
@@ -206,8 +181,82 @@ const parseValueForKey = (key, rawValue) => {
   return String(rawValue);
 };
 
-const ensureConfigRow = async () => {
+const ensureConfigSchema = async () => {
   await withSqliteBusyRetry(() => sequelize.sync());
+  const tableInfo = await withSqliteBusyRetry(() =>
+    sequelize.query("PRAGMA table_info('Configs');", { type: sequelize.QueryTypes.SELECT }),
+  );
+  const columnNames = new Set(tableInfo.map((column) => String(column.name)));
+
+  if (!columnNames.has("gridOrderSizeUsdt")) {
+    await withSqliteBusyRetry(() =>
+      sequelize.query("ALTER TABLE Configs ADD COLUMN gridOrderSizeUsdt FLOAT DEFAULT 2;"),
+    );
+    if (columnNames.has("usdtPerTrade")) {
+      await withSqliteBusyRetry(() =>
+        sequelize.query("UPDATE Configs SET gridOrderSizeUsdt = COALESCE(usdtPerTrade, 2) WHERE gridOrderSizeUsdt IS NULL OR gridOrderSizeUsdt = '';"),
+      );
+    }
+  }
+
+  if (!columnNames.has("gridTargetProfitUsdt")) {
+    await withSqliteBusyRetry(() =>
+      sequelize.query("ALTER TABLE Configs ADD COLUMN gridTargetProfitUsdt FLOAT DEFAULT 0.5;"),
+    );
+    if (columnNames.has("targetProfitUSDT")) {
+      await withSqliteBusyRetry(() =>
+        sequelize.query("UPDATE Configs SET gridTargetProfitUsdt = COALESCE(targetProfitUSDT, 0.5) WHERE gridTargetProfitUsdt IS NULL OR gridTargetProfitUsdt = '';"),
+      );
+    }
+  }
+
+  if (!columnNames.has("gridStopLossPercent")) {
+    await withSqliteBusyRetry(() =>
+      sequelize.query("ALTER TABLE Configs ADD COLUMN gridStopLossPercent FLOAT DEFAULT 5;"),
+    );
+    if (columnNames.has("stopLossPercent")) {
+      await withSqliteBusyRetry(() =>
+        sequelize.query("UPDATE Configs SET gridStopLossPercent = COALESCE(stopLossPercent, 5) WHERE gridStopLossPercent IS NULL OR gridStopLossPercent = '';"),
+      );
+    }
+  }
+
+  if (!columnNames.has("gridTimeframe")) {
+    await withSqliteBusyRetry(() =>
+      sequelize.query("ALTER TABLE Configs ADD COLUMN gridTimeframe VARCHAR(255) DEFAULT '5m';"),
+    );
+    if (columnNames.has("breakoutTimeframe")) {
+      await withSqliteBusyRetry(() =>
+        sequelize.query("UPDATE Configs SET gridTimeframe = COALESCE(breakoutTimeframe, '5m') WHERE gridTimeframe IS NULL OR gridTimeframe = '';"),
+      );
+    }
+  }
+
+  if (!columnNames.has("dailyProfitTargetUsdt")) {
+    await withSqliteBusyRetry(() =>
+      sequelize.query("ALTER TABLE Configs ADD COLUMN dailyProfitTargetUsdt FLOAT DEFAULT 1;"),
+    );
+    if (columnNames.has("targetDailyProfit")) {
+      await withSqliteBusyRetry(() =>
+        sequelize.query("UPDATE Configs SET dailyProfitTargetUsdt = COALESCE(targetDailyProfit, 1) WHERE dailyProfitTargetUsdt IS NULL OR dailyProfitTargetUsdt = '';"),
+      );
+    }
+  }
+
+  if (!columnNames.has("dailyMaxLossPercent")) {
+    await withSqliteBusyRetry(() =>
+      sequelize.query("ALTER TABLE Configs ADD COLUMN dailyMaxLossPercent FLOAT DEFAULT 10;"),
+    );
+    if (columnNames.has("maxDailyLossPercent")) {
+      await withSqliteBusyRetry(() =>
+        sequelize.query("UPDATE Configs SET dailyMaxLossPercent = COALESCE(maxDailyLossPercent, 10) WHERE dailyMaxLossPercent IS NULL OR dailyMaxLossPercent = '';"),
+      );
+    }
+  }
+};
+
+const ensureConfigRow = async () => {
+  await ensureConfigSchema();
   let row = await withSqliteBusyRetry(() => Config.findOne());
   if (row) return row;
   row = await withSqliteBusyRetry(() =>
@@ -218,6 +267,37 @@ const ensureConfigRow = async () => {
 
 const hydrateForOutput = (row) => {
   const json = row.toJSON();
+
+  if (json.gridOrderSizeUsdt === undefined && json.usdtPerTrade !== undefined) {
+    json.gridOrderSizeUsdt = json.usdtPerTrade;
+  }
+  delete json.usdtPerTrade;
+
+  if (json.gridTargetProfitUsdt === undefined && json.targetProfitUSDT !== undefined) {
+    json.gridTargetProfitUsdt = json.targetProfitUSDT;
+  }
+  delete json.targetProfitUSDT;
+
+  if (json.gridStopLossPercent === undefined && json.stopLossPercent !== undefined) {
+    json.gridStopLossPercent = json.stopLossPercent;
+  }
+  delete json.stopLossPercent;
+
+  if (json.gridTimeframe === undefined && typeof json.breakoutTimeframe === "string") {
+    json.gridTimeframe = json.breakoutTimeframe;
+  }
+  delete json.breakoutTimeframe;
+
+  if (json.dailyProfitTargetUsdt === undefined && json.targetDailyProfit !== undefined) {
+    json.dailyProfitTargetUsdt = json.targetDailyProfit;
+  }
+  delete json.targetDailyProfit;
+
+  if (json.dailyMaxLossPercent === undefined && json.maxDailyLossPercent !== undefined) {
+    json.dailyMaxLossPercent = json.maxDailyLossPercent;
+  }
+  delete json.maxDailyLossPercent;
+
   json.activePosition = safeParseJSON(json.activePosition, null);
   return json;
 };

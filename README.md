@@ -6,7 +6,7 @@ Bot trading otomatis Binance Futures berbasis Node.js dan `ccxt` dengan gaya ker
 
 Bot sekarang memakai pendekatan `Binance-style Futures Grid`:
 
-- Membentuk range harga dari candle recent sesuai `gridLookbackCandles`
+- Membentuk range harga dari candle recent sesuai `gridLookbackCandles` pada `gridTimeframe`
 - Membagi range menjadi beberapa level grid sesuai `gridLevels`
 - `LONG` saat harga turun ke area grid bawah untuk entry mean reversion
 - `SHORT` saat harga naik ke area grid atas untuk entry mean reversion
@@ -81,6 +81,9 @@ Default strategi yang dipakai:
 - `gridTakeProfitLevels`: `1`
 - `gridOrdersPerSide`: `3`
 - `gridStopLossLevels`: `1.2`
+- `gridTimeframe`: `5m`
+- `dailyProfitTargetUsdt`: `1`
+- `dailyMaxLossPercent`: `10`
 
 Contoh pengaturan cepat:
 
@@ -89,6 +92,7 @@ node scripts/config.js set gridLevels 10
 node scripts/config.js set gridOrdersPerSide 4
 node scripts/config.js set gridRangePercent 4.5
 node scripts/config.js set gridLookbackCandles 150
+node scripts/config.js set dailyProfitTargetUsdt 3
 ```
 
 ## Logging
@@ -124,6 +128,4 @@ Script lain yang tersedia:
 - Saat ada posisi aktif, ladder entry order yang tersisa akan dibersihkan dulu agar bot tidak menumpuk posisi di luar engine manajemen risiko saat ini.
 - Pada Hedge Mode, bot mengirim `positionSide` sesuai dokumentasi Binance dan dapat menyimpan dua leg aktif lokal sekaligus: `LONG` dan `SHORT`.
 - Pada One-way Mode, bot memakai perilaku single-position dengan `positionSide=BOTH` dan `reduceOnly` untuk penutupan posisi.
-
-
 
