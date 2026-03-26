@@ -815,6 +815,7 @@ const placeGridEntryOrder = async (gridOrder) => {
     return true;
 };
 
+// -------------------- MODIFIED: placeReduceOnlyTakeProfitOrder with duplicate handling --------------------
 const placeReduceOnlyTakeProfitOrder = async (position) => {
     if (!Number.isFinite(position?.targetPrice) || position.targetPrice <= 0) return null;
     if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
@@ -832,21 +833,44 @@ const placeReduceOnlyTakeProfitOrder = async (position) => {
         reduceOnly: true,
         positionSide: getClosePositionSide(position)
     });
-    params.newClientOrderId = getTpClientOrderId(position);
+    const clientOrderId = getTpClientOrderId(position);
+    params.newClientOrderId = clientOrderId;
 
-    const order = await exchange.createOrder(
-        db.pair,
-        "limit",
-        closeSide,
-        quantity,
-        position.targetPrice,
-        params
-    );
-    metrics.api.orders++;
-    console.log(`[TP] Placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
-    return order;
+    try {
+        const order = await exchange.createOrder(
+            db.pair,
+            "limit",
+            closeSide,
+            quantity,
+            position.targetPrice,
+            params
+        );
+        metrics.api.orders++;
+        console.log(`[TP] Placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
+        return order;
+    } catch (error) {
+        if (error.code === -4116 && error.message.includes("duplicated")) {
+            console.warn(`[TP] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
+            const cancelled = await cancelOrderByClientOrderId(clientOrderId, db.pair);
+            if (cancelled) {
+                const retryOrder = await exchange.createOrder(
+                    db.pair,
+                    "limit",
+                    closeSide,
+                    quantity,
+                    position.targetPrice,
+                    params
+                );
+                metrics.api.orders++;
+                console.log(`[TP] Retry succeeded: placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
+                return retryOrder;
+            }
+        }
+        throw error;
+    }
 };
 
+// -------------------- MODIFIED: placeReduceOnlyStopLossOrder with duplicate handling --------------------
 const placeReduceOnlyStopLossOrder = async (position) => {
     if (!Number.isFinite(position?.stopLossPrice) || position.stopLossPrice <= 0) return null;
     if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
@@ -864,21 +888,56 @@ const placeReduceOnlyStopLossOrder = async (position) => {
         reduceOnly: true,
         positionSide: getClosePositionSide(position)
     });
-    params.newClientOrderId = getSlClientOrderId(position);
+    const clientOrderId = getSlClientOrderId(position);
+    params.newClientOrderId = clientOrderId;
     params.stopPrice = formatPriceToMarketPrecision(db.pair, position.stopLossPrice);
     params.workingType = "MARK_PRICE";
 
-    const order = await exchange.createOrder(
-        db.pair,
-        "STOP_MARKET",
-        closeSide,
-        quantity,
-        undefined,
-        params
-    );
-    metrics.api.orders++;
-    console.log(`[SL] Placed reduce-only STOP_MARKET ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${quantity}`);
-    return order;
+    try {
+        const order = await exchange.createOrder(
+            db.pair,
+            "STOP_MARKET",
+            closeSide,
+            quantity,
+            undefined,
+            params
+        );
+        metrics.api.orders++;
+        console.log(`[SL] Placed reduce-only STOP_MARKET ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${quantity}`);
+        return order;
+    } catch (error) {
+        if (error.code === -4116 && error.message.includes("duplicated")) {
+            console.warn(`[SL] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
+            const cancelled = await cancelOrderByClientOrderId(clientOrderId, db.pair);
+            if (cancelled) {
+                const retryOrder = await exchange.createOrder(
+                    db.pair,
+                    "STOP_MARKET",
+                    closeSide,
+                    quantity,
+                    undefined,
+                    params
+                );
+                metrics.api.orders++;
+                console.log(`[SL] Retry succeeded: placed reduce-only STOP_MARKET ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${quantity}`);
+                return retryOrder;
+            }
+        }
+        throw error;
+    }
+};
+
+// -------------------- NEW: Helper to cancel order by clientOrderId --------------------
+const cancelOrderByClientOrderId = async (clientOrderId, symbol) => {
+    const openOrders = await exchange.fetchOpenOrders(symbol);
+    const order = openOrders.find(o => getExchangeClientOrderId(o) === clientOrderId);
+    if (order) {
+        await exchange.cancelOrder(order.id, symbol);
+        metrics.api.orders++;
+        console.log(`[CANCEL] Cancelled order with clientOrderId ${clientOrderId}`);
+        return true;
+    }
+    return false;
 };
 
 const normalizeSymbol = (symbol) => String(symbol || "").toUpperCase().trim();
@@ -1190,7 +1249,6 @@ const evaluatePositionExit = (position, currentPrice, pnlState) => {
     const stopHit = Number.isFinite(effectiveStopLossPrice) &&
         (position.side === "buy" ? currentPrice <= effectiveStopLossPrice : currentPrice >= effectiveStopLossPrice);
 
-    // Sekarang kita cek Net Profit, bukan Gross
     if (!hasExchangeTpOrder && (targetHit || pnlState.netProfitUSDT >= effectiveTargetProfitUSDT)) {
         return {
             shouldClose: true,
@@ -1219,7 +1277,6 @@ const evaluatePositionExit = (position, currentPrice, pnlState) => {
 };
 
 const maybeLogPositionPnL = (pnlState, exitState) => {
-    // Gunakan netProfitUSDT untuk menentukan interval log
     const nearExit =
         pnlState.netProfitUSDT >= (exitState.effectiveTargetProfitUSDT * 0.7) ||
         pnlState.netProfitUSDT <= (exitState.effectiveStopLossUSDT * 0.7);
@@ -1271,12 +1328,11 @@ const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, re
         const matchingSlOrders = slOrders.filter((order) => matchesOrderToTrackedPosition(order, position));
         if (matchingSlOrders.length > 0) await cancelSlOrders(matchingSlOrders, "POSITION_CLOSED");
     }
-    db.dailyPnL += netProfitUSDT; // Mencatat profit bersih ke database
+    db.dailyPnL += netProfitUSDT;
     db.dailyTrades++;
 
     const resolvedExitPrice = Number.isFinite(exitPrice) && exitPrice > 0 ? exitPrice : await getPrice(true);
     
-    // Log ke CSV juga menggunakan netProfit
     logTrade(position.side === "buy" ? "LONG" : "SHORT", position.entryPrice, resolvedExitPrice, "CLOSE", netProfitUSDT);
 
     console.log(`\n[OK] POSITION CLOSED: ${reason}`);
@@ -1320,7 +1376,6 @@ const configureRecurringTask = (currentTimer, currentInterval, desiredInterval, 
     return nextTimer;
 };
 
-// PERBAIKAN: Gunakan ISOString untuk konsistensi reset dengan zona waktu UTC
 const isNewTradingDay = (timestamp) => {
     const todayUTC = new Date(timestamp).toISOString().split('T')[0];
     const lastResetUTC = new Date(db.lastDailyReset || 0).toISOString().split('T')[0];
@@ -1595,7 +1650,7 @@ const initializeExchange = async () => {
             secret: process.env.API_SECRET,
             options: { defaultType: "future" },
             enableRateLimit: true,
-            timeout: 20000 // Increased timeout to 20s
+            timeout: 20000
         });
         await exchange.loadMarkets();
         console.log("[OK] Exchange connected");
@@ -1905,7 +1960,6 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
             await saveDB();
             return;
         }
-        // Optionally sync quantity if it changed (e.g., partial fills)
         const actualQuantity = Math.abs(getExchangePositionContracts(currentPos));
         if (Math.abs(actualQuantity - quantity) > POSITION_SYNC_QTY_TOLERANCE) {
             console.log("[INFO] Position size changed on exchange. Updating local record.");
@@ -1940,7 +1994,6 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
             );
             metrics.api.orders++;
         } catch (error) {
-            // Handle reduce-only rejection
             if (error.code === -2022 || error.message.includes("ReduceOnly Order is rejected")) {
                 console.warn("[WARN] Reduce-only order rejected. Syncing position with exchange...");
                 const openPosition = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
@@ -1950,7 +2003,6 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
                     await saveDB();
                     return;
                 } else {
-                    // Position still exists – update from exchange and retry later
                     const entryPrice = getExchangePositionEntryPrice(openPosition, await getPrice());
                     upsertActivePosition(buildSyncedActivePosition(openPosition, entryPrice));
                     await saveDB();
@@ -1958,7 +2010,7 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
                     return;
                 }
             } else {
-                throw error; // rethrow other errors
+                throw error;
             }
         }
 
@@ -1978,7 +2030,7 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
             }
         }
         const realizedPnL = calculatePositionPnL(position, closeFillSnapshot.price);
-        await finalizeClosedPosition(position, realizedPnL.netProfitUSDT, realizedPnL.profitPercent, reason, closeFillSnapshot.price); // FIX: use netProfitUSDT
+        await finalizeClosedPosition(position, realizedPnL.netProfitUSDT, realizedPnL.profitPercent, reason, closeFillSnapshot.price);
     } catch (error) { console.error("[ERROR] Close position failed:", error.message); }
     finally { isClosingPosition = false; }
 };
@@ -1988,7 +2040,6 @@ const getPrice = async (forceRefresh = false) => {
     try {
         const now = Date.now();
         if (!forceRefresh && now - tickerCache.lastUpdate < TICKER_CACHE_TTL) return tickerCache.price;
-        // Use retry
         const ticker = await retry(() => exchange.fetchTicker(db.pair));
         metrics.api.ticker++;
         const latestPrice = toFiniteNumber(ticker?.last, null);
@@ -1996,7 +2047,7 @@ const getPrice = async (forceRefresh = false) => {
         return latestPrice;
     } catch (error) {
         console.error("[ERROR] Failed to get price after retries:", error.message);
-        return tickerCache.price; // return stale price if available
+        return tickerCache.price;
     }
 };
 
@@ -2008,14 +2059,13 @@ const getOHLCV = async (limit = 100, forceRefresh = false) => {
         return ohlcvCache.data;
     }
     try {
-        // Use retry
         const ohlcv = await retry(() => exchange.fetchOHLCV(db.pair, timeframe, undefined, limit));
         metrics.api.ohlcv++;
         ohlcvCache = { key: cacheKey, data: ohlcv, lastUpdate: now };
         return ohlcv;
     } catch (error) {
         console.error("[ERROR] Failed to fetch OHLCV after retries:", error.message);
-        return ohlcvCache.data || []; // fallback to stale cache or empty array
+        return ohlcvCache.data || [];
     }
 };
 
