@@ -13,7 +13,7 @@ const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort"];
 const DEFAULT_CONFIG = {
   strategy: "futures_grid",
   pair: "DOGE/USDT:USDT",
-  gridOrderSizeUsdt: 2,
+  gridOrderSizeUsdt: 1.5,
   leverage: 10,
   gridTargetProfitUsdt: 0.5,
   dailyProfitTargetUsdt: 1.0,
@@ -31,7 +31,7 @@ const DEFAULT_CONFIG = {
   gridRangePercent: 3.5,
   gridEntryBufferPercent: 0.15,
   gridTakeProfitLevels: 1,
-  gridOrdersPerSide: 3,
+  gridOrdersPerSide: 1,
   gridStopLossLevels: 1.2,
   gridTimeframe: "5m",
   sessionStartUTC: 0,
@@ -107,7 +107,7 @@ const printUsage = () => {
       "Examples:",
       "  node scripts/config.js set leverage 20",
       "  node scripts/config.js set pair BTC/USDT:USDT",
-      "  node scripts/config.js set gridOrderSizeUsdt 5",
+      "  node scripts/config.js set gridOrderSizeUsdt 1.5",
       "  node scripts/config.js set gridTargetProfitUsdt 0.8",
       "  node scripts/config.js set gridStopLossPercent 4",
       "  node scripts/config.js set gridTimeframe 15m",
@@ -190,11 +190,11 @@ const ensureConfigSchema = async () => {
 
   if (!columnNames.has("gridOrderSizeUsdt")) {
     await withSqliteBusyRetry(() =>
-      sequelize.query("ALTER TABLE Configs ADD COLUMN gridOrderSizeUsdt FLOAT DEFAULT 2;"),
+      sequelize.query("ALTER TABLE Configs ADD COLUMN gridOrderSizeUsdt FLOAT DEFAULT 1.5;"),
     );
     if (columnNames.has("usdtPerTrade")) {
       await withSqliteBusyRetry(() =>
-        sequelize.query("UPDATE Configs SET gridOrderSizeUsdt = COALESCE(usdtPerTrade, 2) WHERE gridOrderSizeUsdt IS NULL OR gridOrderSizeUsdt = '';"),
+        sequelize.query("UPDATE Configs SET gridOrderSizeUsdt = COALESCE(usdtPerTrade, 1.5) WHERE gridOrderSizeUsdt IS NULL OR gridOrderSizeUsdt = '';"),
       );
     }
   }
@@ -371,3 +371,4 @@ main()
       // ignore
     }
   });
+

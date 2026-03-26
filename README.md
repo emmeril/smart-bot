@@ -75,11 +75,12 @@ node scripts/config.js set pair BTC/USDT:USDT
 Default strategi yang dipakai:
 
 - `strategy`: `futures_grid`
+- `gridOrderSizeUsdt`: `1.5`
 - `gridLevels`: `8`
 - `gridLookbackCandles`: `120`
 - `gridRangePercent`: `3.5`
 - `gridTakeProfitLevels`: `1`
-- `gridOrdersPerSide`: `3`
+- `gridOrdersPerSide`: `1`
 - `gridStopLossLevels`: `1.2`
 - `gridTimeframe`: `5m`
 - `dailyProfitTargetUsdt`: `1`

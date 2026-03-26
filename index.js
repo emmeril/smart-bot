@@ -14,7 +14,7 @@ const sequelize = new Sequelize({
 const Config = sequelize.define('Config', {
     strategy: { type: DataTypes.STRING, defaultValue: "futures_grid" },
     pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
-    gridOrderSizeUsdt: { type: DataTypes.FLOAT, defaultValue: 2 },
+    gridOrderSizeUsdt: { type: DataTypes.FLOAT, defaultValue: 1.5 },
     leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
     gridTargetProfitUsdt: { type: DataTypes.FLOAT, defaultValue: 0.5 },
     dailyProfitTargetUsdt: { type: DataTypes.FLOAT, defaultValue: 1.0 },
@@ -34,7 +34,7 @@ const Config = sequelize.define('Config', {
     gridRangePercent: { type: DataTypes.FLOAT, defaultValue: 3.5 },
     gridEntryBufferPercent: { type: DataTypes.FLOAT, defaultValue: 0.15 },
     gridTakeProfitLevels: { type: DataTypes.INTEGER, defaultValue: 1 },
-    gridOrdersPerSide: { type: DataTypes.INTEGER, defaultValue: 3 },
+    gridOrdersPerSide: { type: DataTypes.INTEGER, defaultValue: 1 },
     gridStopLossLevels: { type: DataTypes.FLOAT, defaultValue: 1.2 },
 
     // Additional parameters
@@ -96,7 +96,7 @@ const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort"];
 const DEFAULT_CONFIG = {
     strategy: "futures_grid",
     pair: "DOGE/USDT:USDT",
-    gridOrderSizeUsdt: 2,
+    gridOrderSizeUsdt: 1.5,
     leverage: 10,
     gridTargetProfitUsdt: 0.5,
     dailyProfitTargetUsdt: 1.0,
@@ -114,7 +114,7 @@ const DEFAULT_CONFIG = {
     gridRangePercent: 3.5,
     gridEntryBufferPercent: 0.15,
     gridTakeProfitLevels: 1,
-    gridOrdersPerSide: 3,
+    gridOrdersPerSide: 1,
     gridStopLossLevels: 1.2,
     gridTimeframe: "5m",
     sessionStartUTC: 0,
@@ -308,9 +308,9 @@ const ensureConfigSchema = async () => {
     const tableInfo = await sequelize.query("PRAGMA table_info('Configs');", { type: sequelize.QueryTypes.SELECT });
     const columnNames = new Set(tableInfo.map((column) => String(column.name)));
     if (!columnNames.has("gridOrderSizeUsdt")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN gridOrderSizeUsdt FLOAT DEFAULT 2;");
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN gridOrderSizeUsdt FLOAT DEFAULT 1.5;");
         if (columnNames.has("usdtPerTrade")) {
-            await sequelize.query("UPDATE Configs SET gridOrderSizeUsdt = COALESCE(usdtPerTrade, 2) WHERE gridOrderSizeUsdt IS NULL OR gridOrderSizeUsdt = '';");
+            await sequelize.query("UPDATE Configs SET gridOrderSizeUsdt = COALESCE(usdtPerTrade, 1.5) WHERE gridOrderSizeUsdt IS NULL OR gridOrderSizeUsdt = '';");
         }
         console.log("[INFO] Added config column: gridOrderSizeUsdt");
     }
