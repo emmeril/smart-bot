@@ -11,7 +11,7 @@ const DB_PATH = path.join(__dirname, "..", "database.sqlite");
 const BOOLEAN_CONFIG_KEYS = ["useTrendFilter", "trailingEnabled", "allowLong", "allowShort"];
 
 const DEFAULT_CONFIG = {
-  strategy: "ema_crossover",
+  strategy: "sma_crossover",
   pair: "DOGE/USDT:USDT",
   usdtPerTrade: 2,
   leverage: 10,
@@ -26,9 +26,9 @@ const DEFAULT_CONFIG = {
   marginMode: "isolated",
   monitoringInterval: 500,
   stopLossPercent: 5,
-  fastEMAPeriod: 9,
-  slowEMAPeriod: 21,
-  trendEMAPeriod: 200,
+  fastEMAPeriod: 7,
+  slowEMAPeriod: 25,
+  trendEMAPeriod: 99,
   rsiPeriod: 14,
   rsiOverbought: 70,
   rsiOversold: 30,

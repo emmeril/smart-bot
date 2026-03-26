@@ -2,7 +2,7 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const ccxt = require("ccxt");
-const { RSI, EMA } = require("technicalindicators");
+const { SMA } = require("technicalindicators");
 const { Sequelize, DataTypes } = require('sequelize');
 
 // -------------------- DATABASE SETUP --------------------
@@ -13,7 +13,7 @@ const sequelize = new Sequelize({
 });
 
 const Config = sequelize.define('Config', {
-    strategy: { type: DataTypes.STRING, defaultValue: "ema_crossover" },
+    strategy: { type: DataTypes.STRING, defaultValue: "sma_crossover" },
     pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
     usdtPerTrade: { type: DataTypes.FLOAT, defaultValue: 2 },
     leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
@@ -29,10 +29,10 @@ const Config = sequelize.define('Config', {
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: 500 },
     stopLossPercent: { type: DataTypes.FLOAT, defaultValue: 5 },
 
-    // EMA Crossover parameters
-    fastEMAPeriod: { type: DataTypes.INTEGER, defaultValue: 9 },
-    slowEMAPeriod: { type: DataTypes.INTEGER, defaultValue: 21 },
-    trendEMAPeriod: { type: DataTypes.INTEGER, defaultValue: 200 },
+    // SMA Crossover parameters
+    fastEMAPeriod: { type: DataTypes.INTEGER, defaultValue: 7 },
+    slowEMAPeriod: { type: DataTypes.INTEGER, defaultValue: 25 },
+    trendEMAPeriod: { type: DataTypes.INTEGER, defaultValue: 99 },
     rsiPeriod: { type: DataTypes.INTEGER, defaultValue: 14 },
     rsiOverbought: { type: DataTypes.FLOAT, defaultValue: 70 },
     rsiOversold: { type: DataTypes.FLOAT, defaultValue: 30 },
@@ -86,6 +86,7 @@ let metricsTimer = null;
 let lastSignalDetailLogAt = 0;
 let lastSyncLogAt = 0;
 let isShuttingDown = false;
+let accountPositionMode = { hedged: false, label: "ONE_WAY" };
 const logPath = path.join(__dirname, 'trades.csv');
 let db = null;
 const BALANCE_CACHE_TTL = 15000;
@@ -104,7 +105,7 @@ const BOOLEAN_CONFIG_KEYS = [
     "allowShort"
 ];
 const DEFAULT_CONFIG = {
-    strategy: "ema_crossover",
+    strategy: "sma_crossover",
     pair: "DOGE/USDT:USDT",
     usdtPerTrade: 2,
     leverage: 10,
@@ -119,9 +120,9 @@ const DEFAULT_CONFIG = {
     marginMode: "isolated",
     monitoringInterval: 500,
     stopLossPercent: 5,
-    fastEMAPeriod: 9,
-    slowEMAPeriod: 21,
-    trendEMAPeriod: 200,
+    fastEMAPeriod: 7,
+    slowEMAPeriod: 25,
+    trendEMAPeriod: 99,
     rsiPeriod: 14,
     rsiOverbought: 70,
     rsiOversold: 30,
@@ -258,12 +259,12 @@ const clearRuntimeTimers = () => {
 
 const printStartupBanner = (totalUSDT) => {
     console.log("\n" + "=".repeat(70));
-    console.log("EMA CROSSOVER + RSI BOT");
+    console.log("SMA AUTO ANALYSIS BOT");
     console.log("=".repeat(70));
     console.log(`Balance: $${totalUSDT.toFixed(2)}`);
     console.log(`Pair: ${db.pair}`);
-    console.log(`Strategy: EMA Crossover (fast ${db.fastEMAPeriod}, slow ${db.slowEMAPeriod}, trend ${db.trendEMAPeriod}) on ${db.breakoutTimeframe}`);
-    console.log(`RSI: period ${db.rsiPeriod}, overbought ${db.rsiOverbought}, oversold ${db.rsiOversold}`);
+    console.log(`Strategy: SMA Auto Analysis (${db.fastEMAPeriod}/${db.slowEMAPeriod}/${db.trendEMAPeriod}) on ${db.breakoutTimeframe}`);
+    console.log(`Position Mode: ${accountPositionMode.label}`);
     console.log(`Volume filter: ${db.minVolumeRatio}x over ${db.volumePeriod} periods`);
     console.log(`Session: ${db.sessionStartUTC}-${db.sessionEndUTC} UTC`);
     console.log(`ATR: stop ${db.atrStopMult}x, target ${db.atrTargetMult}x, trailing ${db.trailingEnabled ? `${db.trailingActivateATR}/${db.trailingOffsetATR}x` : "OFF"}`);
@@ -275,6 +276,10 @@ const printStartupBanner = (totalUSDT) => {
 const hydrateConfig = (config) => {
     const hydrated = { ...config };
     hydrated.activePosition = safeParseJSON(hydrated.activePosition, null);
+    if (hydrated.activePosition && isLegacySinglePosition(hydrated.activePosition)) {
+        const legacyKey = toPositionMapKey(hydrated.activePosition.positionSide || "BOTH");
+        hydrated.activePosition = { [legacyKey]: hydrated.activePosition };
+    }
     return normalizeConfig(hydrated);
 };
 
@@ -321,43 +326,37 @@ const persistConfig = async (config) => {
 };
 
 const getSignalParameters = () => {
-    const fastEMAPeriod = Math.max(2, Math.trunc(db.fastEMAPeriod || 9));
-    const slowEMAPeriod = Math.max(fastEMAPeriod + 1, Math.trunc(db.slowEMAPeriod || 21));
-    const trendEMAPeriod = Math.max(2, Math.trunc(db.trendEMAPeriod || 200));
-    const rsiPeriod = Math.max(2, Math.trunc(db.rsiPeriod || 14));
+    const fastEMAPeriod = 7;
+    const slowEMAPeriod = 25;
+    const trendEMAPeriod = 99;
     const volumePeriod = Math.max(2, Math.trunc(db.volumePeriod || 20));
     const atrPeriod = Math.max(2, Math.trunc(db.atrPeriod || 14));
     const neededCandles = Math.max(
-        slowEMAPeriod + 10, trendEMAPeriod + 10, rsiPeriod + 10, volumePeriod + 10, atrPeriod + 10, 100
+        slowEMAPeriod + 10, trendEMAPeriod + 10, volumePeriod + 10, atrPeriod + 10, 100
     );
 
-    return { fastEMAPeriod, slowEMAPeriod, trendEMAPeriod, rsiPeriod, volumePeriod, atrPeriod, neededCandles };
+    return { fastEMAPeriod, slowEMAPeriod, trendEMAPeriod, volumePeriod, atrPeriod, neededCandles };
 };
 
 const evaluateCrossoverSignal = (snapshot, params) => {
     const { close, lastIndex, currentPrice, currentVolume, avgVolume, hourUTC } = snapshot;
     const signalClose = Array.isArray(close) ? close.slice(0, lastIndex + 1) : [];
-    if (signalClose.length < Math.max(params.slowEMAPeriod, params.trendEMAPeriod, params.rsiPeriod) + 2) {
+    if (signalClose.length < Math.max(params.slowEMAPeriod, params.trendEMAPeriod) + 2) {
         return {
             canLong: false, canShort: false, setupDetected: false,
-            detailTitle: "EMA CROSSOVER ANALYSIS", extraDetailLines: ["   Not enough candle data to evaluate."]
+            detailTitle: "SMA AUTO ANALYSIS", extraDetailLines: ["   Not enough candle data to evaluate."]
         };
     }
-    
-    // Calculate EMAs
-    const fastEMA = EMA.calculate({ values: signalClose, period: params.fastEMAPeriod });
-    const slowEMA = EMA.calculate({ values: signalClose, period: params.slowEMAPeriod });
-    const trendEMA = EMA.calculate({ values: signalClose, period: params.trendEMAPeriod });
-    
-    // Get current and previous values
-    const currentFast = fastEMA[fastEMA.length - 1];
-    const prevFast = fastEMA[fastEMA.length - 2];
-    const currentSlow = slowEMA[slowEMA.length - 1];
-    const prevSlow = slowEMA[slowEMA.length - 2];
-    const currentTrend = trendEMA[trendEMA.length - 1];
-    
-    // Gunakan RSI yang sudah di-cache dari snapshot
-    const currentRSI = snapshot.currentRSI;
+
+    const fastSMA = SMA.calculate({ values: signalClose, period: params.fastEMAPeriod });
+    const slowSMA = SMA.calculate({ values: signalClose, period: params.slowEMAPeriod });
+    const trendSMA = SMA.calculate({ values: signalClose, period: params.trendEMAPeriod });
+
+    const currentFast = fastSMA[fastSMA.length - 1];
+    const prevFast = fastSMA[fastSMA.length - 2];
+    const currentSlow = slowSMA[slowSMA.length - 1];
+    const prevSlow = slowSMA[slowSMA.length - 2];
+    const currentTrend = trendSMA[trendSMA.length - 1];
     
     // Volume ratio
     const volumeRatio = currentVolume / (avgVolume || 1);
@@ -368,21 +367,13 @@ const evaluateCrossoverSignal = (snapshot, params) => {
         ? hourUTC >= db.sessionStartUTC && hourUTC <= db.sessionEndUTC
         : hourUTC >= db.sessionStartUTC || hourUTC <= db.sessionEndUTC;
     
-    // Crossover detection
     const bullishCrossover = currentFast > currentSlow && prevFast <= prevSlow;
     const bearishCrossover = currentFast < currentSlow && prevFast >= prevSlow;
-    
-    // Trend filter
-    const trendOkLong = !db.useTrendFilter || currentPrice > currentTrend;
-    const trendOkShort = !db.useTrendFilter || currentPrice < currentTrend;
-    
-    // RSI filter
-    const rsiOkLong = currentRSI < db.rsiOverbought;
-    const rsiOkShort = currentRSI > db.rsiOversold;
-    
-    // Final signals
-    const canLong = db.allowLong && bullishCrossover && volumeOk && sessionOk && trendOkLong && rsiOkLong;
-    const canShort = db.allowShort && bearishCrossover && volumeOk && sessionOk && trendOkShort && rsiOkShort;
+    const structureOkLong = currentFast > currentTrend && currentSlow > currentTrend;
+    const structureOkShort = currentFast < currentTrend && currentSlow < currentTrend;
+
+    const canLong = db.allowLong && bullishCrossover && volumeOk && sessionOk && structureOkLong;
+    const canShort = db.allowShort && bearishCrossover && volumeOk && sessionOk && structureOkShort;
     
     const setupDetected = bullishCrossover || bearishCrossover;
     
@@ -390,16 +381,16 @@ const evaluateCrossoverSignal = (snapshot, params) => {
         canLong,
         canShort,
         setupDetected,
-        detailTitle: "EMA CROSSOVER ANALYSIS",
+        detailTitle: "SMA AUTO ANALYSIS",
         extraDetailLines: [
-            `   Fast EMA (${params.fastEMAPeriod}): ${currentFast.toFixed(6)} (prev ${prevFast.toFixed(6)})`,
-            `   Slow EMA (${params.slowEMAPeriod}): ${currentSlow.toFixed(6)} (prev ${prevSlow.toFixed(6)})`,
-            `   Trend EMA (${params.trendEMAPeriod}): ${currentTrend.toFixed(6)}`,
-            `   Bullish Crossover: ${bullishCrossover ? "[OK]" : "[NO]"}`,
-            `   Bearish Crossover: ${bearishCrossover ? "[OK]" : "[NO]"}`,
+            `   SMA Fast (${params.fastEMAPeriod}): ${currentFast.toFixed(6)} (prev ${prevFast.toFixed(6)})`,
+            `   SMA Mid (${params.slowEMAPeriod}): ${currentSlow.toFixed(6)} (prev ${prevSlow.toFixed(6)})`,
+            `   SMA Trend (${params.trendEMAPeriod}): ${currentTrend.toFixed(6)}`,
+            `   Bullish Cross (SMA ${params.fastEMAPeriod} > SMA ${params.slowEMAPeriod}): ${bullishCrossover ? "[OK]" : "[NO]"}`,
+            `   Bearish Cross (SMA ${params.fastEMAPeriod} < SMA ${params.slowEMAPeriod}): ${bearishCrossover ? "[OK]" : "[NO]"}`,
             `   Volume Ratio: ${volumeRatio.toFixed(2)}x (min ${db.minVolumeRatio}x) -> ${volumeOk ? "[OK]" : "[NO]"}`,
-            `   RSI (${params.rsiPeriod}): ${currentRSI.toFixed(2)} -> Long OK: ${rsiOkLong}, Short OK: ${rsiOkShort}`,
-            `   Trend Filter: Long ${trendOkLong ? "[OK]" : "[NO]"}, Short ${trendOkShort ? "[OK]" : "[NO]"}`
+            `   Structure Long: SMA ${params.fastEMAPeriod} & SMA ${params.slowEMAPeriod} above SMA ${params.trendEMAPeriod} -> ${structureOkLong ? "[OK]" : "[NO]"}`,
+            `   Structure Short: SMA ${params.fastEMAPeriod} & SMA ${params.slowEMAPeriod} below SMA ${params.trendEMAPeriod} -> ${structureOkShort ? "[OK]" : "[NO]"}`
         ]
     };
 };
@@ -418,7 +409,6 @@ const logSignalDetails = (params, snapshot, signalState) => {
     console.log(`   Current Volume: ${snapshot.currentVolume.toFixed(2)}`);
     console.log(`   Avg Volume (${params.volumePeriod}): ${snapshot.avgVolume.toFixed(2)}`);
     console.log(`   Volume Ratio: ${snapshot.volumeRatio.toFixed(2)}x`);
-    console.log(`   RSI ${params.rsiPeriod}: ${snapshot.currentRSI.toFixed(2)}`);
     console.log(`   ATR ${params.atrPeriod}: ${snapshot.currentATR.toFixed(6)}`);
     console.log("");
     console.log("SETUP CONDITIONS:");
@@ -446,14 +436,27 @@ const buildRiskOverrides = (useShortProfile) => useShortProfile
 
 const parseSignalOrderData = (signalData) => {
     if (typeof signalData !== "object" || signalData === null) {
-        return { signalPrice: signalData, signalATR: null, strategyName: "EMA_CROSSOVER", riskOverrides: {} };
+        return { signalPrice: signalData, signalATR: null, strategyName: "SMA_CROSSOVER", riskOverrides: {} };
     }
     return {
         signalPrice: signalData.price,
         signalATR: toFiniteNumber(signalData.atr, null),
-        strategyName: signalData.strategy ? String(signalData.strategy) : "EMA_CROSSOVER",
+        strategyName: signalData.strategy ? String(signalData.strategy) : "SMA_CROSSOVER",
         riskOverrides: signalData.riskOverrides || {}
     };
+};
+
+const buildExchangeOrderParams = ({ side, reduceOnly = false, positionSide } = {}) => {
+    const params = {
+        newOrderRespType: "RESULT"
+    };
+    if (isHedgeModeEnabled()) {
+        const resolvedPositionSide = positionSide || getOrderPositionSide(side);
+        if (resolvedPositionSide && resolvedPositionSide !== "BOTH") params.positionSide = resolvedPositionSide;
+    } else if (reduceOnly) {
+        params.reduceOnly = true;
+    }
+    return params;
 };
 
 const getOrderFillSnapshot = (order, fallbackPrice, fallbackQuantity) => {
@@ -467,10 +470,18 @@ const getOrderFillSnapshot = (order, fallbackPrice, fallbackQuantity) => {
     return { price: resolvedPrice, quantity: resolvedQuantity };
 };
 
-const fetchTrackedExchangePosition = async () => {
+const fetchOpenExchangePositions = async () => {
     metrics.api.positions++;
-    const positions = await exchange.fetchPositions();
-    return findOpenExchangePosition(positions, db.pair);
+    const positions = await exchange.fetchPositions([db.pair]);
+    return positions.filter((position) => (
+        normalizeSymbol(position.symbol) === normalizeSymbol(db.pair) &&
+        Math.abs(getExchangePositionContracts(position)) > 0
+    ));
+};
+
+const fetchTrackedExchangePosition = async () => {
+    const positions = await fetchOpenExchangePositions();
+    return findOpenExchangePosition(positions, db.pair, getPrimaryActivePosition());
 };
 
 const validateOrderSize = (market, quantity, referencePrice) => {
@@ -538,6 +549,86 @@ const logOrderPlan = (strategyName, entryPrice, adjustedQty, orderPlan) => {
 };
 
 const normalizeSymbol = (symbol) => String(symbol || "").toUpperCase().trim();
+const isHedgeModeEnabled = () => accountPositionMode.hedged === true;
+
+const isLegacySinglePosition = (value) => value && typeof value === "object" && !Array.isArray(value) && ("entryPrice" in value || "quantity" in value || "side" in value);
+
+const toPositionMapKey = (positionSide) => {
+    const normalized = String(positionSide || "").toUpperCase();
+    if (normalized === "LONG" || normalized === "SHORT" || normalized === "BOTH") return normalized;
+    return normalized || "BOTH";
+};
+
+const getActivePositionsMap = (rawActivePosition = db?.activePosition) => {
+    if (!rawActivePosition || typeof rawActivePosition !== "object") return {};
+    if (isLegacySinglePosition(rawActivePosition)) {
+        const fallbackSide = rawActivePosition.positionSide || (isHedgeModeEnabled() ? (rawActivePosition.side === "buy" ? "LONG" : "SHORT") : "BOTH");
+        const key = toPositionMapKey(fallbackSide);
+        return { [key]: rawActivePosition };
+    }
+    const map = {};
+    Object.entries(rawActivePosition).forEach(([key, value]) => {
+        if (value && typeof value === "object") map[toPositionMapKey(key)] = value;
+    });
+    return map;
+};
+
+const getActivePositionEntries = () => Object.entries(getActivePositionsMap());
+const getActivePositionsList = () => Object.values(getActivePositionsMap());
+const hasAnyActivePosition = () => getActivePositionEntries().length > 0;
+const getActivePositionByKey = (key) => getActivePositionsMap()[toPositionMapKey(key)] || null;
+const getPrimaryActivePosition = () => getActivePositionsList()[0] || null;
+
+const setActivePositionsMap = (positionsMap) => {
+    const entries = Object.entries(positionsMap || {}).filter(([, value]) => value && typeof value === "object");
+    if (entries.length === 0) {
+        db.activePosition = null;
+        return;
+    }
+    db.activePosition = Object.fromEntries(entries);
+};
+
+const upsertActivePosition = (position) => {
+    const map = getActivePositionsMap();
+    const key = toPositionMapKey(position?.positionSide || getTrackedPositionSideLabel(position));
+    map[key] = position;
+    setActivePositionsMap(map);
+};
+
+const removeActivePositionByKey = (key) => {
+    const map = getActivePositionsMap();
+    delete map[toPositionMapKey(key)];
+    setActivePositionsMap(map);
+};
+
+const getTrackedPositionSideLabel = (position) => {
+    const rawPositionSide = String(position?.positionSide || position?.info?.positionSide || "").toUpperCase();
+    if (rawPositionSide === "LONG" || rawPositionSide === "SHORT" || rawPositionSide === "BOTH") return rawPositionSide;
+    const side = position?.side;
+    if (side === "buy") return isHedgeModeEnabled() ? "LONG" : "BOTH";
+    if (side === "sell") return isHedgeModeEnabled() ? "SHORT" : "BOTH";
+    return isHedgeModeEnabled() ? null : "BOTH";
+};
+
+const getOrderPositionSide = (side) => {
+    if (!isHedgeModeEnabled()) return "BOTH";
+    return side === "buy" ? "LONG" : "SHORT";
+};
+
+const getClosePositionSide = (position) => {
+    if (!isHedgeModeEnabled()) return "BOTH";
+    const tracked = getTrackedPositionSideLabel(position);
+    if (tracked === "LONG" || tracked === "SHORT") return tracked;
+    return position?.side === "buy" ? "LONG" : "SHORT";
+};
+
+const matchesTrackedPositionSide = (position, trackedPosition) => {
+    if (!isHedgeModeEnabled()) return true;
+    const targetSide = getTrackedPositionSideLabel(trackedPosition);
+    const candidateSide = getTrackedPositionSideLabel(position);
+    if (!targetSide || targetSide === "BOTH") return true;
+    return candidateSide === targetSide;
+};
 
 const getExchangePositionContracts = (position) => {
     const rawContracts = toFiniteNumber(position?.contracts, NaN);
@@ -556,6 +647,14 @@ const getExchangePositionSide = (position) => {
     return null;
 };
 
+const getExchangePositionModeSide = (position) => {
+    const rawPositionSide = String(position?.positionSide || position?.info?.positionSide || "").toUpperCase();
+    if (rawPositionSide === "LONG" || rawPositionSide === "SHORT" || rawPositionSide === "BOTH") return rawPositionSide;
+    if (position?.side === "long") return "LONG";
+    if (position?.side === "short") return "SHORT";
+    return getExchangePositionSide(position) === "buy" ? "LONG" : (getExchangePositionSide(position) === "sell" ? "SHORT" : "BOTH");
+};
+
 const getExchangePositionEntryPrice = (position, fallbackPrice = 0) => {
     const directEntry = toFiniteNumber(position?.entryPrice, NaN);
     if (Number.isFinite(directEntry) && directEntry > 0) return directEntry;
@@ -564,23 +663,33 @@ const getExchangePositionEntryPrice = (position, fallbackPrice = 0) => {
     return fallbackPrice;
 };
 
-const findOpenExchangePosition = (positions, pair) => {
+const findOpenExchangePosition = (positions, pair, trackedPosition = null) => {
     const normalizedPair = normalizeSymbol(pair);
-    return positions.find((position) => (
+    const openPositions = positions.filter((position) => (
         normalizeSymbol(position.symbol) === normalizedPair &&
         Math.abs(getExchangePositionContracts(position)) > 0
-    )) || null;
+    ));
+    if (openPositions.length === 0) return null;
+    if (trackedPosition) {
+        return openPositions.find((position) => matchesTrackedPositionSide(position, trackedPosition)) || null;
+    }
+    if (isHedgeModeEnabled() && openPositions.length > 1) {
+        console.warn("[WARN] Multiple hedge positions detected on the same symbol. Bot will track the first open side only.");
+    }
+    return openPositions[0];
 };
 
 const buildSyncedActivePosition = (openPosition, entryPrice) => {
     const contracts = Math.abs(getExchangePositionContracts(openPosition));
     const side = getExchangePositionSide(openPosition) || "buy";
+    const positionSide = getExchangePositionModeSide(openPosition);
     return {
         side, entryPrice, targetPrice: null, stopLossPrice: null,
         stopLossUSDT: -db.usdtPerTrade * (db.stopLossPercent / 100),
         orderId: `SYNC_${Date.now()}`, quantity: contracts,
         entryTime: Date.now() - 300000, highestSinceEntry: entryPrice, lowestSinceEntry: entryPrice,
         marginMode: (db.marginMode || "isolated").toLowerCase(),
+        positionSide,
         targetProfitUSDT: db.targetProfitUSDT, strategy: "SYNC_ONLY"
     };
 };
@@ -594,7 +703,9 @@ const shouldRefreshSyncedPosition = (activePosition, nextPosition) => {
     const quantityChanged = Math.abs(currentQuantity - nextQuantity) > POSITION_SYNC_QTY_TOLERANCE;
     const entryDeltaPercent = currentEntry > 0 ? Math.abs((currentEntry - nextEntry) / currentEntry) * 100 : 100;
     const entryChanged = entryDeltaPercent > POSITION_SYNC_ENTRY_TOLERANCE_PCT;
-    return activePosition.side !== nextPosition.side || quantityChanged || entryChanged;
+    const currentPositionSide = getTrackedPositionSideLabel(activePosition);
+    const nextPositionSide = getTrackedPositionSideLabel(nextPosition);
+    return activePosition.side !== nextPosition.side || currentPositionSide !== nextPositionSide || quantityChanged || entryChanged;
 };
 
 const isSameTrackedPosition = (currentPosition, nextPosition) => {
@@ -605,7 +716,12 @@ const isSameTrackedPosition = (currentPosition, nextPosition) => {
     const nextEntry = toFiniteNumber(nextPosition.entryPrice, 0);
     const quantityChanged = Math.abs(currentQuantity - nextQuantity) > POSITION_SYNC_QTY_TOLERANCE;
     const entryDeltaPercent = currentEntry > 0 ? Math.abs((currentEntry - nextEntry) / currentEntry) * 100 : 100;
-    return (currentPosition.side === nextPosition.side && !quantityChanged && entryDeltaPercent <= POSITION_SYNC_ENTRY_TOLERANCE_PCT);
+    return (
+        currentPosition.side === nextPosition.side &&
+        getTrackedPositionSideLabel(currentPosition) === getTrackedPositionSideLabel(nextPosition) &&
+        !quantityChanged &&
+        entryDeltaPercent <= POSITION_SYNC_ENTRY_TOLERANCE_PCT
+    );
 };
 
 const snapshotPositionRuntimeState = (position) => ({
@@ -754,8 +870,26 @@ const maybeLogPositionPnL = (pnlState, exitState) => {
     }
 };
 
+const printDetailedStatus = async () => {
+    if (!db) return;
+    const currentPrice = await getPrice();
+    const activeEntries = getActivePositionEntries();
+    console.log(`\n[STATUS] Mode=${accountPositionMode.label} | Pair=${db.pair} | Price=${Number.isFinite(currentPrice) ? currentPrice : "N/A"} | Active=${activeEntries.length}`);
+    console.log(`[STATUS] Daily P&L=${db.dailyPnL.toFixed(2)} USDT | Trades=${db.dailyTrades}`);
+    if (activeEntries.length === 0) {
+        console.log("[STATUS] No active positions.");
+        return;
+    }
+    activeEntries.forEach(([positionKey, position]) => {
+        const pnlState = Number.isFinite(currentPrice) ? calculatePositionPnL(position, currentPrice) : null;
+        console.log(`   [${positionKey}] side=${String(position.side || "").toUpperCase()} qty=${position.quantity} entry=${position.entryPrice}`);
+        console.log(`   [${positionKey}] tp=${position.targetPrice ?? "N/A"} sl=${position.stopLossPrice ?? "N/A"} strategy=${position.strategy || "N/A"}`);
+        if (pnlState) console.log(`   [${positionKey}] unrealized=${pnlState.netProfitUSDT.toFixed(4)} USDT (${pnlState.profitPercent.toFixed(2)}%)`);
+    });
+};
+
 const resetActivePosition = async () => {
-    db.activePosition = null;
+    setActivePositionsMap({});
     await saveDB();
 };
 
@@ -772,7 +906,7 @@ const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, re
     console.log(`   Net P&L: ${netProfitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
     console.log(`   Daily Total Net P&L: ${db.dailyPnL.toFixed(4)} USDT / ${db.dailyTrades} trades`);
 
-    db.activePosition = null;
+    removeActivePositionByKey(getTrackedPositionSideLabel(position));
     await saveDB();
     metrics.trades.closed++;
     if (netProfitUSDT > 0) metrics.trades.wins++;
@@ -780,11 +914,17 @@ const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, re
 };
 
 const mergeRuntimeConfig = (nextConfig) => {
-    if (db.activePosition && !nextConfig.activePosition) {
-        nextConfig.activePosition = db.activePosition;
-    }
-    if (isSameTrackedPosition(db.activePosition, nextConfig.activePosition)) {
-        nextConfig.activePosition = { ...nextConfig.activePosition, ...db.activePosition };
+    const currentPositionsMap = getActivePositionsMap(db.activePosition);
+    const nextPositionsMap = getActivePositionsMap(nextConfig.activePosition);
+    if (Object.keys(currentPositionsMap).length > 0 && Object.keys(nextPositionsMap).length === 0) {
+        nextConfig.activePosition = currentPositionsMap;
+    } else {
+        Object.entries(currentPositionsMap).forEach(([key, currentPosition]) => {
+            const nextPosition = nextPositionsMap[key];
+            if (!nextPosition) nextPositionsMap[key] = currentPosition;
+            else if (isSameTrackedPosition(currentPosition, nextPosition)) nextPositionsMap[key] = { ...nextPosition, ...currentPosition };
+        });
+        nextConfig.activePosition = Object.keys(nextPositionsMap).length > 0 ? nextPositionsMap : null;
     }
     if (db.dailyTrades > nextConfig.dailyTrades) {
         nextConfig.dailyPnL = db.dailyPnL;
@@ -843,10 +983,13 @@ const isCoolingDown = () => {
 
 const refreshRuntimeSchedulers = () => { startPnLMonitoring(); startPositionSync(); };
 
-const handleRuntimeCommand = (input) => {
+const handleRuntimeCommand = async (input) => {
     const cmd = input.toString().trim().toLowerCase();
     if (cmd === "sync") { syncPositionWithExchange(); return; }
-    if (cmd === "status") { console.log(`\n[STATUS] Active=${!!db.activePosition}, Daily P&L=${db.dailyPnL.toFixed(2)} USDT, Trades=${db.dailyTrades}`); }
+    if (cmd === "status") {
+        try { await printDetailedStatus(); }
+        catch (error) { console.error("[ERROR] Failed to print status:", error.message); }
+    }
 };
 
 const registerRuntimeCommands = () => {
@@ -857,6 +1000,7 @@ const registerRuntimeCommands = () => {
 
 const bootstrapRuntime = async () => {
     await initializeExchange();
+    await detectPositionMode();
     await setMarginMode();
     await syncPositionWithExchange();
     startPnLMonitoring();
@@ -875,11 +1019,12 @@ const runTradingCycle = async () => {
 
     const pauseReason = await getTradingPauseReason();
     if (pauseReason) { console.log(pauseReason); return; }
-    if (db.activePosition || isCoolingDown()) return;
+    const coolingBlocked = isCoolingDown() && (!isHedgeModeEnabled() || !hasAnyActivePosition());
+    if ((!isHedgeModeEnabled() && hasAnyActivePosition()) || coolingBlocked) return;
 
     const signal = await analyzeSignal();
-    if (signal.canLong) await placeOrder("buy", signal);
-    else if (signal.canShort) await placeOrder("sell", signal);
+    if (signal.canLong && !getActivePositionByKey(isHedgeModeEnabled() ? "LONG" : "BOTH")) await placeOrder("buy", signal);
+    if (signal.canShort && !getActivePositionByKey(isHedgeModeEnabled() ? "SHORT" : "BOTH")) await placeOrder("sell", signal);
 };
 
 const startMetricsReporting = () => {
@@ -936,7 +1081,7 @@ const normalizeConfig = (config) => {
     const isValidTimeframe = (value) => typeof value === "string" && /^[1-9]\d*[mhdwM]$/.test(value.trim());
     const rawPair = typeof normalized.pair === "string" ? normalized.pair.trim() : "";
     normalized.pair = rawPair || defaults.pair;
-    normalized.strategy = typeof normalized.strategy === "string" && normalized.strategy.trim() ? normalized.strategy.trim().toLowerCase() : defaults.strategy;
+    normalized.strategy = "sma_crossover";
     const rawMarginMode = typeof normalized.marginMode === "string" ? normalized.marginMode.trim().toLowerCase() : "";
     normalized.marginMode = rawMarginMode === "isolated" || rawMarginMode === "cross" ? rawMarginMode : defaults.marginMode;
     normalized.breakoutTimeframe = isValidTimeframe(normalized.breakoutTimeframe) ? normalized.breakoutTimeframe.trim() : defaults.breakoutTimeframe;
@@ -958,9 +1103,9 @@ const normalizeConfig = (config) => {
     BOOLEAN_CONFIG_KEYS.forEach(normalizeBoolean);
     normalized.sessionStartUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionStartUTC, defaults.sessionStartUTC)), 0, 23);
     normalized.sessionEndUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionEndUTC, defaults.sessionEndUTC)), 0, 23);
-    if (normalized.slowEMAPeriod <= normalized.fastEMAPeriod) {
-        normalized.slowEMAPeriod = normalized.fastEMAPeriod + 1;
-    }
+    normalized.fastEMAPeriod = 7;
+    normalized.slowEMAPeriod = 25;
+    normalized.trendEMAPeriod = 99;
 
     return normalized;
 };
@@ -1010,22 +1155,30 @@ const syncPositionWithExchange = async () => {
             console.log(`[SYNC] Checking positions for ${db.pair}...`);
             lastSyncLogAt = now;
         }
-        const openPosition = await fetchTrackedExchangePosition();
-        if (!openPosition) {
-            if (db.activePosition) {
-                console.log("[WARN] DB has activePosition but exchange doesn't. Resetting...");
-                await resetActivePosition();
-            }
-            return;
+        const openPositions = await fetchOpenExchangePositions();
+        const currentPrice = await getPrice();
+        const nextPositionsMap = {};
+        openPositions.forEach((openPosition) => {
+            const entryPrice = getExchangePositionEntryPrice(openPosition, currentPrice);
+            const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice);
+            nextPositionsMap[toPositionMapKey(syncedPosition.positionSide)] = syncedPosition;
+        });
+
+        const currentPositionsMap = getActivePositionsMap();
+        const currentKeys = Object.keys(currentPositionsMap).sort().join(",");
+        const nextKeys = Object.keys(nextPositionsMap).sort().join(",");
+        let shouldPersist = currentKeys !== nextKeys;
+
+        if (!shouldPersist) {
+            shouldPersist = Object.keys(nextPositionsMap).some((key) => shouldRefreshSyncedPosition(currentPositionsMap[key], nextPositionsMap[key]));
         }
-        const entryPrice = getExchangePositionEntryPrice(openPosition, await getPrice());
-        const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice);
-        if (shouldRefreshSyncedPosition(db.activePosition, syncedPosition)) {
-            const wasTrackingPosition = !!db.activePosition;
-            db.activePosition = syncedPosition;
-            await saveDB();
-            console.log(wasTrackingPosition ? "[OK] Refreshed activePosition from exchange data" : "[OK] Created activePosition from exchange data");
-        }
+
+        if (!shouldPersist) return;
+
+        setActivePositionsMap(nextPositionsMap);
+        await saveDB();
+        if (Object.keys(nextPositionsMap).length === 0) console.log("[OK] Cleared local active positions from exchange state");
+        else console.log(`[OK] Synced active positions: ${Object.keys(nextPositionsMap).join(", ")}`);
     } catch (error) { console.error("[ERROR] Sync position failed:", error.message); }
     finally { isSyncingPosition = false; }
 };
@@ -1036,7 +1189,7 @@ const initializeExchange = async () => {
         exchange = new ccxt.binance({
             apiKey: process.env.API_KEY,
             secret: process.env.API_SECRET,
-            options: { defaultType: "future" },
+            options: { defaultType: "future", adjustForTimeDifference: true },
             enableRateLimit: true,
             timeout: 20000 // Increased timeout to 20s (FIX)
         });
@@ -1044,6 +1197,20 @@ const initializeExchange = async () => {
         console.log("[OK] Exchange connected");
         return exchange;
     } catch (error) { console.error("[ERROR] Exchange connection failed:", error.message); throw error; }
+};
+
+const detectPositionMode = async () => {
+    try {
+        const result = await exchange.fetchPositionMode(db?.pair, { subType: "linear" });
+        const hedged = result?.hedged === true;
+        accountPositionMode = { hedged, label: hedged ? "HEDGE" : "ONE_WAY" };
+        console.log(`[OK] Position mode detected: ${accountPositionMode.label}`);
+        return accountPositionMode;
+    } catch (error) {
+        accountPositionMode = { hedged: false, label: "ONE_WAY" };
+        console.warn(`[WARN] Failed to detect position mode. Falling back to ONE_WAY. ${error.message}`);
+        return accountPositionMode;
+    }
 };
 
 // -------------------- SET MARGIN MODE --------------------
@@ -1067,7 +1234,7 @@ const analyzeSignal = async () => {
         signalCount++; metrics.signals.analyzed++;
         const now = Date.now();
         if (now - lastLogTime > 5000) {
-            console.log(`\n[SIGNAL #${signalCount}] Analyzing EMA crossover setup (${db.breakoutTimeframe})...`);
+            console.log(`\n[SIGNAL #${signalCount}] Analyzing SMA auto setup (${db.breakoutTimeframe})...`);
             lastLogTime = now;
         }
 
@@ -1095,8 +1262,8 @@ const analyzeSignal = async () => {
 
         return {
             canLong: finalState.canLong, canShort: finalState.canShort, price: snapshot.currentPrice,
-            rsi: snapshot.currentRSI, atr: snapshot.currentATR, hasSignal: finalState.setupDetected,
-            strategy: "EMA_CROSSOVER", riskOverrides: buildRiskOverrides(finalState.canShort)
+            atr: snapshot.currentATR, hasSignal: finalState.setupDetected,
+            strategy: "SMA_CROSSOVER", riskOverrides: buildRiskOverrides(finalState.canShort)
         };
     } catch (error) { console.error("[ERROR] Signal analysis failed:", error.message); return {}; }
 };
@@ -1104,7 +1271,9 @@ const analyzeSignal = async () => {
 // -------------------- PLACE ORDER --------------------
 const placeOrder = async (side, signalData = {}) => {
     try {
-        if (!db || db.activePosition || isPlacingOrder || isClosingPosition) return;
+        if (!db || isPlacingOrder || isClosingPosition) return;
+        const targetPositionKey = getOrderPositionSide(side);
+        if (getActivePositionByKey(targetPositionKey)) return;
         isPlacingOrder = true;
         console.log(`\n[ORDER] Attempting to place ${side.toUpperCase()} order...`);
         await setMarginMode();
@@ -1133,23 +1302,29 @@ const placeOrder = async (side, signalData = {}) => {
         const orderPlan = buildOrderPlan(side, entryPrice, adjustedQty, signalATR, riskOverrides);
         logOrderPlan(strategyName, entryPrice, adjustedQty, orderPlan);
 
-        const order = await exchange.createOrder(db.pair, "market", side, adjustedQty, undefined, {
-            marginMode: (db.marginMode || "isolated").toLowerCase()
-        });
+        const order = await exchange.createOrder(
+            db.pair,
+            "market",
+            side,
+            adjustedQty,
+            undefined,
+            buildExchangeOrderParams({ side, positionSide: getOrderPositionSide(side) })
+        );
         metrics.api.orders++;
         const fillSnapshot = getOrderFillSnapshot(order, tickerPrice, adjustedQty);
         const actualEntryPrice = fillSnapshot.price;
         const actualQuantity = fillSnapshot.quantity;
         const actualOrderPlan = buildOrderPlan(side, actualEntryPrice, actualQuantity, signalATR, riskOverrides);
 
-        db.activePosition = {
+        upsertActivePosition({
             side: side, entryPrice: actualEntryPrice, targetPrice: actualOrderPlan.targetPrice,
             stopLossPrice: actualOrderPlan.stopLossPrice, stopLossUSDT: actualOrderPlan.stopLossUSDT,
             orderId: order.id, quantity: actualQuantity, entryTime: Date.now(), highestSinceEntry: actualEntryPrice,
             lowestSinceEntry: actualEntryPrice, marginMode: (db.marginMode || "isolated").toLowerCase(),
+            positionSide: getOrderPositionSide(side),
             targetProfitUSDT: actualOrderPlan.targetProfitUSDT, atrAtEntry: signalATR, strategy: strategyName,
             trailingActivateATR: actualOrderPlan.trailingActivateATR, trailingOffsetATR: actualOrderPlan.trailingOffsetATR
-        };
+        });
 
         await saveDB();
         logTrade(side === "buy" ? "LONG" : "SHORT", actualEntryPrice, null, "OPEN");
@@ -1160,22 +1335,26 @@ const placeOrder = async (side, signalData = {}) => {
 };
 
 // -------------------- CLOSE POSITION --------------------
-const closePosition = async (reason, netProfitUSDT, profitPercent) => { // FIX: parameter renamed to netProfitUSDT
+const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) => {
     try {
-        if (!db || !db.activePosition || isClosingPosition) return;
+        if (!db || !hasAnyActivePosition() || isClosingPosition) return;
         isClosingPosition = true;
-        const position = { ...db.activePosition };
+        const trackedPosition = getActivePositionByKey(positionKey);
+        if (!trackedPosition) return;
+        const position = { ...trackedPosition };
         const { side, quantity } = position;
         if (!Number.isFinite(quantity) || quantity <= 0) {
-            console.error("[ERROR] Invalid position quantity. Resetting activePosition.");
-            await resetActivePosition(); return;
+            console.error("[ERROR] Invalid position quantity. Removing local active position.");
+            removeActivePositionByKey(positionKey);
+            await saveDB();
+            return;
         }
 
-        // NEW: Check current position on exchange before attempting reduce-only
-        const currentPos = await fetchTrackedExchangePosition();
+        const currentPos = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
         if (!currentPos) {
-            console.log("[INFO] No open position on exchange. Resetting activePosition.");
-            await resetActivePosition();
+            console.log("[INFO] No matching open position on exchange. Removing local active position.");
+            removeActivePositionByKey(positionKey);
+            await saveDB();
             return;
         }
         // Optionally sync quantity if it changed (e.g., partial fills)
@@ -1184,33 +1363,38 @@ const closePosition = async (reason, netProfitUSDT, profitPercent) => { // FIX: 
             console.log("[INFO] Position size changed on exchange. Updating local record.");
             position.quantity = actualQuantity;
             position.entryPrice = getExchangePositionEntryPrice(currentPos, position.entryPrice);
-            db.activePosition = position;
+            upsertActivePosition(position);
             await saveDB();
         }
 
         const closeSide = side === "buy" ? "sell" : "buy";
-        console.log(`\n[CLOSE] Closing position...`);
+        console.log(`\n[CLOSE] Closing position ${positionKey}...`);
 
         let closeOrder;
         try {
-            closeOrder = await exchange.createOrder(db.pair, "market", closeSide, position.quantity, undefined, {
-                reduceOnly: true,
-                marginMode: (db.marginMode || "isolated").toLowerCase()
-            });
+            closeOrder = await exchange.createOrder(
+                db.pair,
+                "market",
+                closeSide,
+                position.quantity,
+                undefined,
+                buildExchangeOrderParams({ side: closeSide, reduceOnly: true, positionSide: getClosePositionSide(position) })
+            );
             metrics.api.orders++;
         } catch (error) {
             // Handle reduce-only rejection
             if (error.code === -2022 || error.message.includes("ReduceOnly Order is rejected")) {
                 console.warn("[WARN] Reduce-only order rejected. Syncing position with exchange...");
-                const openPosition = await fetchTrackedExchangePosition();
+                const openPosition = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
                 if (!openPosition) {
-                    console.log("[INFO] No open position on exchange. Resetting activePosition.");
-                    await resetActivePosition();
+                    console.log("[INFO] No matching open position on exchange. Removing local active position.");
+                    removeActivePositionByKey(positionKey);
+                    await saveDB();
                     return;
                 } else {
                     // Position still exists – update from exchange and retry later
                     const entryPrice = getExchangePositionEntryPrice(openPosition, await getPrice());
-                    db.activePosition = buildSyncedActivePosition(openPosition, entryPrice);
+                    upsertActivePosition(buildSyncedActivePosition(openPosition, entryPrice));
                     await saveDB();
                     console.log("[INFO] Updated activePosition from exchange data. Will retry close on next cycle.");
                     return;
@@ -1221,12 +1405,12 @@ const closePosition = async (reason, netProfitUSDT, profitPercent) => { // FIX: 
         }
 
         const closeFillSnapshot = getOrderFillSnapshot(closeOrder, await getPrice(true), position.quantity);
-        const remainingPosition = await fetchTrackedExchangePosition();
+        const remainingPosition = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
         if (remainingPosition) {
             const remainingContracts = Math.abs(getExchangePositionContracts(remainingPosition));
             if (remainingContracts > POSITION_SYNC_QTY_TOLERANCE) {
                 const remainingEntryPrice = getExchangePositionEntryPrice(remainingPosition, position.entryPrice);
-                db.activePosition = buildSyncedActivePosition(remainingPosition, remainingEntryPrice);
+                upsertActivePosition(buildSyncedActivePosition(remainingPosition, remainingEntryPrice));
                 await saveDB();
                 console.warn(`[WARN] Close order partially filled. Remaining quantity on exchange: ${remainingContracts}`);
                 return;
@@ -1292,10 +1476,7 @@ const buildSignalSnapshot = (ohlcv, params) => {
     const currentATR = atrSeries[lastIndex];
     if (!Number.isFinite(currentATR) || currentATR <= 0) return { invalidAtr: true };
 
-    const rsi = RSI.calculate({ values: close.slice(0, lastIndex + 1), period: params.rsiPeriod });
-    const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1] : 50;
-
-    return { ohlcv, open, high, low, close, volume, lastIndex, currentOpen, currentPrice, currentVolume, avgVolume, volumeRatio, hourUTC, currentATR, currentRSI };
+    return { ohlcv, open, high, low, close, volume, lastIndex, currentOpen, currentPrice, currentVolume, avgVolume, volumeRatio, hourUTC, currentATR };
 };
 
 const logTrade = (side, entry, exit, status, pnl = 0) => {
@@ -1305,7 +1486,7 @@ const logTrade = (side, entry, exit, status, pnl = 0) => {
         const parsedTime = Date.parse(timestamp);
         lastTradeAt = Number.isFinite(parsedTime) ? parsedTime : Date.now();
         const marginMode = (db.marginMode || "isolated").toUpperCase();
-        const strategy = db?.activePosition?.strategy || `EMA_CROSSOVER_${String(db.breakoutTimeframe || "5m").toUpperCase()}`;
+        const strategy = getPrimaryActivePosition()?.strategy || `SMA_CROSSOVER_${String(db.breakoutTimeframe || "5m").toUpperCase()}`;
         const line = `${timestamp},${db.pair},${side},${entry},${exit || ""},${status},${pnl.toFixed(4)},${db.leverage},${marginMode},${db.stopLossPercent},${strategy}\n`;
         fs.appendFileSync(logPath, line);
     } catch (error) { console.error("[ERROR] Failed to log trade:", error.message); }
@@ -1347,33 +1528,37 @@ const startPnLMonitoring = () => {
         if (isMonitoringPnL) return;
         isMonitoringPnL = true;
         try {
-            if (!db || !db.activePosition || isClosingPosition) return;
+            if (!db || !hasAnyActivePosition() || isClosingPosition) return;
             const currentPrice = await getPrice();
             if (!currentPrice) return;
 
-            const position = db.activePosition;
-            if (!Number.isFinite(position.entryPrice) || position.entryPrice <= 0 || !Number.isFinite(position.quantity) || position.quantity <= 0) {
-                console.error("[ERROR] Invalid active position data for P&L monitoring.");
-                return;
+            const activeEntries = getActivePositionEntries();
+            for (const [positionKey, sourcePosition] of activeEntries) {
+                const position = { ...sourcePosition };
+                if (!Number.isFinite(position.entryPrice) || position.entryPrice <= 0 || !Number.isFinite(position.quantity) || position.quantity <= 0) {
+                    console.error(`[ERROR] Invalid active position data for P&L monitoring (${positionKey}).`);
+                    continue;
+                }
+
+                const previousRuntimeState = snapshotPositionRuntimeState(position);
+                updateActivePositionExtremes(position, currentPrice);
+                applyTrailingStopUpdate(position);
+                if (didPositionRuntimeStateChange(previousRuntimeState, position)) {
+                    upsertActivePosition(position);
+                    await maybePersistActivePositionRuntimeState();
+                }
+
+                const pnlState = calculatePositionPnL(position, currentPrice);
+                const exitState = evaluatePositionExit(position, currentPrice, pnlState);
+
+                if (exitState.shouldClose) {
+                    console.log(`[${positionKey}] ${exitState.message.trim()}`);
+                    await closePosition(positionKey, exitState.reason, pnlState.netProfitUSDT, pnlState.profitPercent);
+                    continue;
+                }
+
+                maybeLogPositionPnL(pnlState, exitState);
             }
-
-            const previousRuntimeState = snapshotPositionRuntimeState(position);
-            updateActivePositionExtremes(position, currentPrice);
-            applyTrailingStopUpdate(position);
-            if (didPositionRuntimeStateChange(previousRuntimeState, position)) {
-                await maybePersistActivePositionRuntimeState();
-            }
-
-            const pnlState = calculatePositionPnL(position, currentPrice);
-            const exitState = evaluatePositionExit(position, currentPrice, pnlState);
-
-            if (exitState.shouldClose) {
-                console.log(exitState.message);
-                await closePosition(exitState.reason, pnlState.netProfitUSDT, pnlState.profitPercent); // FIX: pass netProfitUSDT
-                return;
-            }
-
-            maybeLogPositionPnL(pnlState, exitState);
         } catch (error) {
             console.error("[ERROR] PnL Monitoring failed:", error.message);
         } finally {
@@ -1390,7 +1575,7 @@ const startPnLMonitoring = () => {
 
 const startPositionSync = () => {
     if (!db) return;
-    const desiredInterval = db.activePosition ? 5000 : 15000;
+    const desiredInterval = hasAnyActivePosition() ? 5000 : 15000;
     configureRecurringTask(
         positionSyncTimer, currentPositionSyncInterval, desiredInterval,
         "[SYNC] Position sync interval: ", async () => { await syncPositionWithExchange(); },
