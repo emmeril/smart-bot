@@ -11,7 +11,7 @@ const DB_PATH = path.join(__dirname, "..", "database.sqlite");
 const BOOLEAN_CONFIG_KEYS = ["useTrendFilter", "trailingEnabled", "allowLong", "allowShort"];
 
 const DEFAULT_CONFIG = {
-  strategy: "sma_crossover",
+  strategy: "futures_grid",
   pair: "DOGE/USDT:USDT",
   usdtPerTrade: 2,
   leverage: 10,
@@ -26,6 +26,13 @@ const DEFAULT_CONFIG = {
   marginMode: "isolated",
   monitoringInterval: 500,
   stopLossPercent: 5,
+  gridLevels: 8,
+  gridLookbackCandles: 120,
+  gridRangePercent: 3.5,
+  gridEntryBufferPercent: 0.15,
+  gridTakeProfitLevels: 1,
+  gridOrdersPerSide: 3,
+  gridStopLossLevels: 1.2,
   fastEMAPeriod: 7,
   slowEMAPeriod: 25,
   trendEMAPeriod: 99,
@@ -77,6 +84,13 @@ const Config = sequelize.define(
     marginMode: { type: DataTypes.STRING, defaultValue: DEFAULT_CONFIG.marginMode },
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.monitoringInterval },
     stopLossPercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.stopLossPercent },
+    gridLevels: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.gridLevels },
+    gridLookbackCandles: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.gridLookbackCandles },
+    gridRangePercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.gridRangePercent },
+    gridEntryBufferPercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.gridEntryBufferPercent },
+    gridTakeProfitLevels: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.gridTakeProfitLevels },
+    gridOrdersPerSide: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.gridOrdersPerSide },
+    gridStopLossLevels: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.gridStopLossLevels },
     fastEMAPeriod: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.fastEMAPeriod },
     slowEMAPeriod: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.slowEMAPeriod },
     trendEMAPeriod: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.trendEMAPeriod },
@@ -121,7 +135,9 @@ const printUsage = () => {
       "Examples:",
       "  node scripts/config.js set leverage 20",
       "  node scripts/config.js set pair BTC/USDT:USDT",
-      "  node scripts/config.js set allowShort false",
+      "  node scripts/config.js set gridLevels 10",
+      "  node scripts/config.js set gridOrdersPerSide 4",
+      "  node scripts/config.js set gridRangePercent 4.5",
     ].join("\n"),
   );
 };

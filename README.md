@@ -1,27 +1,26 @@
-# Binance Futures Auto Trading Bot
+# Binance-Style Futures Grid Bot
 
-Bot trading otomatis Binance Futures berbasis Node.js dan `ccxt` dengan fokus pada strategi sederhana, stabil, dan mudah dipantau.
+Bot trading otomatis Binance Futures berbasis Node.js dan `ccxt` dengan gaya kerja yang lebih mirip bot bawaan Binance, terutama mode Futures Grid yang netral dan adaptif.
 
 ## Strategi
 
-Bot menggunakan analisis teknis otomatis berbasis:
+Bot sekarang memakai pendekatan `Binance-style Futures Grid`:
 
-- `SMA(7)`
-- `SMA(25)`
-- `SMA(99)`
+- Membentuk range harga dari candle recent sesuai `gridLookbackCandles`
+- Membagi range menjadi beberapa level grid sesuai `gridLevels`
+- `LONG` saat harga turun ke area grid bawah untuk entry mean reversion
+- `SHORT` saat harga naik ke area grid atas untuk entry mean reversion
+- Take profit diarahkan ke level grid berikutnya
+- Bot memasang beberapa order `limit` buy dan sell sekaligus seperti ladder grid
+- Stop loss dipasang beberapa langkah di luar level entry
 
-Aturan sinyal:
-
-- `LONG`: `SMA(7)` menembus ke atas `SMA(25)` dan keduanya berada di atas `SMA(99)`.
-- `SHORT`: `SMA(7)` menembus ke bawah `SMA(25)` dan keduanya berada di bawah `SMA(99)`.
-
-Manajemen risiko dan exit tetap menggunakan ATR untuk stop loss, target, dan trailing stop.
+Manajemen risiko inti tetap memakai engine posisi yang sudah ada: sinkronisasi posisi exchange, recovery state, dan monitoring real-time.
 
 ## Fitur Utama
 
-- Analisis sinyal otomatis `LONG` dan `SHORT`
-- Entry market otomatis
-- ATR-based stop loss, take profit, dan trailing stop
+- Analisis level grid otomatis `LONG` dan `SHORT`
+- Ladder order `limit` buy/sell yang dibangun ulang otomatis
+- Take profit dan stop loss berbasis level grid
 - Sinkronisasi posisi aktif dengan exchange
 - Recovery state setelah restart
 - Konfigurasi tersimpan di SQLite
@@ -60,6 +59,8 @@ API_SECRET=your_api_secret_here
 node index.js
 ```
 
+Saat bot berjalan, kamu bisa ketik `status` di terminal untuk melihat posisi aktif serta order grid, TP, dan SL yang masih terbuka di exchange.
+
 ## Konfigurasi
 
 Konfigurasi runtime disimpan di `database.sqlite` dan dapat dikelola lewat helper:
@@ -73,12 +74,22 @@ node scripts/config.js set pair BTC/USDT:USDT
 
 Default strategi yang dipakai:
 
-- `strategy`: `sma_crossover`
-- `fastEMAPeriod`: `7`
-- `slowEMAPeriod`: `25`
-- `trendEMAPeriod`: `99`
+- `strategy`: `futures_grid`
+- `gridLevels`: `8`
+- `gridLookbackCandles`: `120`
+- `gridRangePercent`: `3.5`
+- `gridTakeProfitLevels`: `1`
+- `gridOrdersPerSide`: `3`
+- `gridStopLossLevels`: `1.2`
 
-Catatan: nama key config masih memakai nama historis `fastEMAPeriod`, `slowEMAPeriod`, dan `trendEMAPeriod` untuk menjaga kompatibilitas data lama, tetapi logika runtime sekarang membaca nilai tersebut sebagai `SMA 7/25/99`.
+Contoh pengaturan cepat:
+
+```bash
+node scripts/config.js set gridLevels 10
+node scripts/config.js set gridOrdersPerSide 4
+node scripts/config.js set gridRangePercent 4.5
+node scripts/config.js set gridLookbackCandles 150
+```
 
 ## Logging
 
@@ -110,5 +121,9 @@ Script lain yang tersedia:
 - Sangat disarankan uji dulu di akun testnet atau akun kecil.
 - Jangan aktifkan izin withdraw pada API key.
 - Bot sekarang mendeteksi mode akun Binance Futures saat startup dan menyesuaikan parameter order untuk One-way atau Hedge Mode.
+- Saat ada posisi aktif, ladder entry order yang tersisa akan dibersihkan dulu agar bot tidak menumpuk posisi di luar engine manajemen risiko saat ini.
 - Pada Hedge Mode, bot mengirim `positionSide` sesuai dokumentasi Binance dan dapat menyimpan dua leg aktif lokal sekaligus: `LONG` dan `SHORT`.
 - Pada One-way Mode, bot memakai perilaku single-position dengan `positionSide=BOTH` dan `reduceOnly` untuk penutupan posisi.
+
+
+
