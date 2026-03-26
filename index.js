@@ -140,7 +140,7 @@ let metrics = {
     trades: { opened: 0, closed: 0, wins: 0, losses: 0 }
 };
 
-// -------------------- RETRY HELPER (NEW) --------------------
+// -------------------- RETRY HELPER --------------------
 const retry = async (fn, retries = 3, delay = 1000) => {
     for (let i = 0; i < retries; i++) {
         try {
@@ -149,7 +149,7 @@ const retry = async (fn, retries = 3, delay = 1000) => {
             if (i === retries - 1) throw error;
             console.log(`[RETRY] Attempt ${i + 1} failed, retrying in ${delay}ms...`);
             await new Promise(resolve => setTimeout(resolve, delay));
-            delay *= 2; // exponential backoff
+            delay *= 2;
         }
     }
 };
@@ -196,9 +196,7 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const calcATR = (highs, lows, closes, period) => {
     const out = Array(closes.length).fill(null);
-    if (!Array.isArray(highs) || !Array.isArray(lows) || !Array.isArray(closes) || closes.length <= period) {
-        return out;
-    }
+    if (!Array.isArray(highs) || !Array.isArray(lows) || !Array.isArray(closes) || closes.length <= period) return out;
 
     const tr = Array(closes.length).fill(0);
     for (let i = 1; i < closes.length; i++) {
@@ -234,7 +232,6 @@ const clearRuntimeTimers = () => {
         [mainLoopTimer, () => { mainLoopTimer = null; }],
         [metricsTimer, () => { metricsTimer = null; }]
     ];
-
     for (const [timer, resetTimer] of timers) {
         if (!timer) continue;
         clearInterval(timer);
@@ -815,7 +812,7 @@ const placeGridEntryOrder = async (gridOrder) => {
     return true;
 };
 
-// -------------------- MODIFIED: placeReduceOnlyTakeProfitOrder with duplicate handling --------------------
+// -------------------- MODIFIED: placeReduceOnlyTakeProfitOrder with duplicate handling & sync --------------------
 const placeReduceOnlyTakeProfitOrder = async (position) => {
     if (!Number.isFinite(position?.targetPrice) || position.targetPrice <= 0) return null;
     if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
@@ -864,13 +861,17 @@ const placeReduceOnlyTakeProfitOrder = async (position) => {
                 metrics.api.orders++;
                 console.log(`[TP] Retry succeeded: placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
                 return retryOrder;
+            } else {
+                console.warn(`[TP] Could not cancel order with clientOrderId ${clientOrderId} (not found). Assuming order already executed. Syncing position...`);
+                await syncPositionWithExchange();
+                return null;
             }
         }
         throw error;
     }
 };
 
-// -------------------- MODIFIED: placeReduceOnlyStopLossOrder with duplicate handling --------------------
+// -------------------- MODIFIED: placeReduceOnlyStopLossOrder with duplicate handling & sync --------------------
 const placeReduceOnlyStopLossOrder = async (position) => {
     if (!Number.isFinite(position?.stopLossPrice) || position.stopLossPrice <= 0) return null;
     if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
@@ -921,13 +922,17 @@ const placeReduceOnlyStopLossOrder = async (position) => {
                 metrics.api.orders++;
                 console.log(`[SL] Retry succeeded: placed reduce-only STOP_MARKET ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${quantity}`);
                 return retryOrder;
+            } else {
+                console.warn(`[SL] Could not cancel order with clientOrderId ${clientOrderId} (not found). Assuming order already executed. Syncing position...`);
+                await syncPositionWithExchange();
+                return null;
             }
         }
         throw error;
     }
 };
 
-// -------------------- NEW: Helper to cancel order by clientOrderId --------------------
+// -------------------- Helper to cancel order by clientOrderId --------------------
 const cancelOrderByClientOrderId = async (clientOrderId, symbol) => {
     const openOrders = await exchange.fetchOpenOrders(symbol);
     const order = openOrders.find(o => getExchangeClientOrderId(o) === clientOrderId);
@@ -1199,7 +1204,6 @@ const calculatePositionPnL = (position, currentPrice) => {
     const entryValue = position.entryPrice * position.quantity;
     const exitValue = currentPrice * position.quantity;
     
-    // Biaya buka posisi (sudah terjadi) + estimasi biaya tutup posisi (akan terjadi)
     const entryFee = entryValue * TAKER_FEE_RATE;
     const exitFee = exitValue * TAKER_FEE_RATE;
     const totalEstimatedFee = entryFee + exitFee;
