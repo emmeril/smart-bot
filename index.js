@@ -642,6 +642,12 @@ const resolveEffectiveGridOrderSizeUsdt = ({
     };
 };
 
+const resolveGridOrderSizeForPrice = (baseOrderSizeUsdt, price, market) => {
+    const configuredBaseSize = Math.max(0, toFiniteNumber(baseOrderSizeUsdt, 0));
+    const minimumValidatedSize = getMinimumValidatedGridOrderSizeUsdt(market, price);
+    return Math.max(configuredBaseSize, minimumValidatedSize);
+};
+
 const resolveEffectiveGridOrdersPerSide = ({
     availableUsdt,
     configuredOrdersPerSide,
@@ -903,6 +909,7 @@ const buildGridEntryOrders = (snapshot, params, gridState = null) => {
     const levels = resolvedGridState?.levels || [];
     const step = toFiniteNumber(resolvedGridState?.step, NaN);
     if (!Number.isFinite(step) || step <= 0) return [];
+    const market = exchange?.markets?.[db?.pair];
 
     const minBuyPrice = snapshot.currentPrice * (1 - (params.gridEntryBufferPercent / 100));
     const maxSellPrice = snapshot.currentPrice * (1 + (params.gridEntryBufferPercent / 100));
@@ -922,6 +929,7 @@ const buildGridEntryOrders = (snapshot, params, gridState = null) => {
         });
         const targetPrice = exitPlan.targetPrice;
         const stopLossPrice = exitPlan.stopLossPrice;
+        const orderSizeUsdt = resolveGridOrderSizeForPrice(params.gridOrderSizeUsdt, price, market);
         const orderPlan = { targetPrice, stopLossPrice };
         if (Number.isFinite(price) && price > 0 && price < minBuyPrice) {
             if (!isDirectionalOrderPlanValid("buy", price, orderPlan)) {
@@ -931,7 +939,7 @@ const buildGridEntryOrders = (snapshot, params, gridState = null) => {
             buyOrders.push({
                 side: "buy",
                 price,
-                orderSizeUsdt: params.gridOrderSizeUsdt,
+                orderSizeUsdt,
                 targetPrice,
                 stopLossPrice,
                 levelIndex: i,
@@ -953,6 +961,7 @@ const buildGridEntryOrders = (snapshot, params, gridState = null) => {
         });
         const targetPrice = exitPlan.targetPrice;
         const stopLossPrice = exitPlan.stopLossPrice;
+        const orderSizeUsdt = resolveGridOrderSizeForPrice(params.gridOrderSizeUsdt, price, market);
         const orderPlan = { targetPrice, stopLossPrice };
         if (Number.isFinite(price) && price > 0 && price > maxSellPrice) {
             if (!isDirectionalOrderPlanValid("sell", price, orderPlan)) {
@@ -962,7 +971,7 @@ const buildGridEntryOrders = (snapshot, params, gridState = null) => {
             sellOrders.push({
                 side: "sell",
                 price,
-                orderSizeUsdt: params.gridOrderSizeUsdt,
+                orderSizeUsdt,
                 targetPrice,
                 stopLossPrice,
                 levelIndex: i,
