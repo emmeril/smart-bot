@@ -22,6 +22,7 @@ const Config = sequelize.define('Config', {
     maxTradesPerDay: { type: DataTypes.INTEGER, defaultValue: 20 },
     coolingPeriod: { type: DataTypes.INTEGER, defaultValue: 3000 },
     activePosition: { type: DataTypes.TEXT, defaultValue: null },
+    activeGridState: { type: DataTypes.TEXT, defaultValue: null },
     dailyPnL: { type: DataTypes.FLOAT, defaultValue: 0 },
     dailyTrades: { type: DataTypes.INTEGER, defaultValue: 0 },
     marginMode: { type: DataTypes.STRING, defaultValue: "isolated" },
@@ -106,6 +107,7 @@ const DEFAULT_CONFIG = {
     maxTradesPerDay: 20,
     coolingPeriod: 3000,
     activePosition: null,
+    activeGridState: null,
     dailyPnL: 0,
     dailyTrades: 0,
     marginMode: "isolated",
@@ -242,16 +244,22 @@ const clearRuntimeTimers = () => {
 };
 
 const printStartupBanner = (totalUSDT) => {
+    const gridSummary = getGridRuntimeSummary();
     console.log("\n" + "=".repeat(70));
     console.log("BINANCE-STYLE FUTURES GRID BOT");
     console.log("=".repeat(70));
     console.log(`Balance: $${totalUSDT.toFixed(2)}`);
     console.log(`Pair: ${db.pair}`);
     console.log(`Strategy: ${String(db.strategy || "futures_grid").toUpperCase()} on ${db.gridTimeframe}`);
+    console.log(`Preset Profile: ${gridSummary.presetName.toUpperCase()}`);
     console.log(`Position Mode: ${accountPositionMode.label}`);
     console.log(`Grid: ${db.gridLevels} levels | lookback ${db.gridLookbackCandles} candles | range ${db.gridRangePercent}%`);
     console.log(`Grid TP/SL: ${db.gridTakeProfitLevels} level(s) / ${db.gridStopLossLevels} step(s) | ${db.gridOrdersPerSide} order(s) per side`);
     console.log(`Grid Order Size: ${db.gridOrderSizeUsdt} USDT`);
+    if (gridSummary.hasLockedGrid) {
+        console.log(`Locked Grid Range: ${gridSummary.lockedRangeLabel}`);
+        console.log(`Grid Step: ${gridSummary.stepLabel}`);
+    }
     console.log(`Volume filter: ${db.minVolumeRatio}x over ${db.volumePeriod} periods`);
     console.log(`Session: ${db.sessionStartUTC}-${db.sessionEndUTC} UTC`);
     console.log(`Trailing ATR: ${db.trailingEnabled ? `${db.trailingActivateATR}/${db.trailingOffsetATR}x` : "OFF"}`);
@@ -287,6 +295,7 @@ const hydrateConfig = (config) => {
     }
     delete hydrated.maxDailyLossPercent;
     hydrated.activePosition = safeParseJSON(hydrated.activePosition, null);
+    hydrated.activeGridState = safeParseJSON(hydrated.activeGridState, null);
     if (hydrated.activePosition && isLegacySinglePosition(hydrated.activePosition)) {
         const legacyPositionSide = String(hydrated.activePosition.positionSide || "").toUpperCase();
         const legacySideValue = String(hydrated.activePosition.side || "").toLowerCase();
@@ -300,10 +309,12 @@ const hydrateConfig = (config) => {
 const serializeConfigForSave = (config) => ({
     ...config,
     activePosition: config.activePosition ? JSON.stringify(config.activePosition) : null,
+    activeGridState: config.activeGridState ? JSON.stringify(config.activeGridState) : null,
     lastUpdated: Date.now()
 });
 
 const getConfigRow = async () => Config.findOne();
+const OBSOLETE_CONFIG_COLUMNS = ["autoRiskEnabled", "atrTargetMult", "atrStopMult"];
 
 const ensureConfigSchema = async () => {
     await sequelize.sync();
@@ -336,6 +347,10 @@ const ensureConfigSchema = async () => {
             await sequelize.query("UPDATE Configs SET gridTimeframe = COALESCE(breakoutTimeframe, '5m') WHERE gridTimeframe IS NULL OR gridTimeframe = '';");
         }
         console.log("[INFO] Added config column: gridTimeframe");
+    }
+    if (!columnNames.has("activeGridState")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN activeGridState TEXT DEFAULT NULL;");
+        console.log("[INFO] Added config column: activeGridState");
     }
     if (!columnNames.has("dailyProfitTargetUsdt")) {
         await sequelize.query("ALTER TABLE Configs ADD COLUMN dailyProfitTargetUsdt FLOAT DEFAULT 1;");
@@ -394,6 +409,16 @@ const ensureConfigSchema = async () => {
     if (!columnNames.has("allowShort")) {
         await sequelize.query("ALTER TABLE Configs ADD COLUMN allowShort BOOLEAN DEFAULT 1;");
         console.log("[INFO] Added config column: allowShort");
+    }
+
+    for (const obsoleteColumn of OBSOLETE_CONFIG_COLUMNS) {
+        if (!columnNames.has(obsoleteColumn)) continue;
+        try {
+            await sequelize.query(`ALTER TABLE Configs DROP COLUMN ${obsoleteColumn};`);
+            console.log(`[INFO] Dropped obsolete config column: ${obsoleteColumn}`);
+        } catch (error) {
+            console.warn(`[WARN] Could not drop obsolete config column ${obsoleteColumn}: ${error.message}`);
+        }
     }
 };
 
@@ -461,6 +486,88 @@ const buildGridLevels = (lowerBound, upperBound, gridLevels) => {
     const levels = [];
     for (let i = 0; i <= safeLevels; i++) levels.push(lowerBound + (step * i));
     return { levels, step };
+};
+
+const getGridStateFingerprint = (params) => ([
+    normalizeSymbol(db?.pair),
+    params?.gridTimeframe || db?.gridTimeframe || "",
+    params?.gridLevels,
+    params?.gridLookbackCandles,
+    params?.gridRangePercent,
+    params?.gridTakeProfitLevels,
+    params?.gridStopLossLevels
+].join("|"));
+
+const sanitizeGridState = (state, params) => {
+    if (!state || typeof state !== "object") return null;
+    const lowerBound = toFiniteNumber(state.lowerBound, NaN);
+    const upperBound = toFiniteNumber(state.upperBound, NaN);
+    const step = toFiniteNumber(state.step, NaN);
+    const levels = Array.isArray(state.levels) ? state.levels.map((level) => toFiniteNumber(level, NaN)) : [];
+    const expectedLevels = Math.max(2, Math.trunc(toFiniteNumber(params?.gridLevels, NaN)));
+    if (!Number.isFinite(lowerBound) || !Number.isFinite(upperBound) || !Number.isFinite(step)) return null;
+    if (!(upperBound > lowerBound) || step <= 0) return null;
+    if (levels.length !== expectedLevels + 1 || levels.some((level) => !Number.isFinite(level))) return null;
+    if (String(state.fingerprint || "") !== getGridStateFingerprint(params)) return null;
+    return {
+        lowerBound,
+        upperBound,
+        step,
+        levels,
+        referencePrice: toFiniteNumber(state.referencePrice, (lowerBound + upperBound) / 2),
+        createdAt: toFiniteNumber(state.createdAt, Date.now()),
+        fingerprint: state.fingerprint
+    };
+};
+
+const createLockedGridState = (snapshot, params) => {
+    const recentHigh = Math.max(...snapshot.high.slice(-(params.gridLookbackCandles)));
+    const recentLow = Math.min(...snapshot.low.slice(-(params.gridLookbackCandles)));
+    const referencePrice = (recentHigh + recentLow) / 2;
+    const lowerBound = Math.min(referencePrice * (1 - (params.gridRangePercent / 100)), recentLow);
+    const upperBound = Math.max(referencePrice * (1 + (params.gridRangePercent / 100)), recentHigh);
+    const { levels, step } = buildGridLevels(lowerBound, upperBound, params.gridLevels);
+    if (!Number.isFinite(step) || step <= 0) return null;
+    return {
+        fingerprint: getGridStateFingerprint(params),
+        referencePrice,
+        lowerBound,
+        upperBound,
+        step,
+        levels,
+        createdAt: Date.now()
+    };
+};
+
+const hasGridStateChanged = (currentState, nextState) => {
+    if (!currentState || !nextState) return true;
+    return currentState.fingerprint !== nextState.fingerprint ||
+        currentState.lowerBound !== nextState.lowerBound ||
+        currentState.upperBound !== nextState.upperBound ||
+        currentState.step !== nextState.step;
+};
+
+const resolveActiveGridState = async (snapshot, params) => {
+    const persistedState = sanitizeGridState(db?.activeGridState, params);
+    const price = toFiniteNumber(snapshot?.currentPrice, NaN);
+    const priceInsideLockedRange = persistedState
+        ? Number.isFinite(price) && price >= persistedState.lowerBound && price <= persistedState.upperBound
+        : false;
+    if (persistedState && priceInsideLockedRange) return persistedState;
+
+    const nextState = createLockedGridState(snapshot, params);
+    if (!nextState) return null;
+
+    const rebuildReason = !persistedState
+        ? "INIT"
+        : (!priceInsideLockedRange ? "PRICE_OUT_OF_RANGE" : "PARAM_CHANGE");
+    console.log(`[GRID] ${rebuildReason}: locking range ${nextState.lowerBound.toFixed(6)} - ${nextState.upperBound.toFixed(6)} | step ${nextState.step.toFixed(6)}`);
+
+    if (hasGridStateChanged(persistedState, nextState)) {
+        db.activeGridState = nextState;
+        await saveDB();
+    }
+    return nextState;
 };
 
 const getGridClientOrderId = (side, levelIndex, price) => {
@@ -603,13 +710,10 @@ const cancelDuplicateManagedOrders = async (orders, cancelReason, label = "ORDER
     return uniqueOrders;
 };
 
-const buildGridEntryOrders = (snapshot, params) => {
-    const recentHigh = Math.max(...snapshot.high.slice(-(params.gridLookbackCandles)));
-    const recentLow = Math.min(...snapshot.low.slice(-(params.gridLookbackCandles)));
-    const referencePrice = (recentHigh + recentLow) / 2;
-    const lowerBound = Math.min(referencePrice * (1 - (params.gridRangePercent / 100)), recentLow);
-    const upperBound = Math.max(referencePrice * (1 + (params.gridRangePercent / 100)), recentHigh);
-    const { levels, step } = buildGridLevels(lowerBound, upperBound, params.gridLevels);
+const buildGridEntryOrders = (snapshot, params, gridState = null) => {
+    const resolvedGridState = sanitizeGridState(gridState, params) || createLockedGridState(snapshot, params);
+    const levels = resolvedGridState?.levels || [];
+    const step = toFiniteNumber(resolvedGridState?.step, NaN);
     if (!Number.isFinite(step) || step <= 0) return [];
 
     const minBuyPrice = snapshot.currentPrice * (1 - (params.gridEntryBufferPercent / 100));
@@ -685,7 +789,7 @@ const buildGridEntryOrders = (snapshot, params) => {
     return deduped;
 };
 
-const evaluateGridSignal = (snapshot, params) => {
+const evaluateGridSignal = (snapshot, params, gridState = null) => {
     const recentClose = snapshot.close.slice(-(params.gridLookbackCandles));
     if (recentClose.length < params.gridLookbackCandles) {
         return {
@@ -695,12 +799,12 @@ const evaluateGridSignal = (snapshot, params) => {
         };
     }
 
-    const recentHigh = Math.max(...snapshot.high.slice(-(params.gridLookbackCandles)));
-    const recentLow = Math.min(...snapshot.low.slice(-(params.gridLookbackCandles)));
-    const referencePrice = (recentHigh + recentLow) / 2;
-    const lowerBound = Math.min(referencePrice * (1 - (params.gridRangePercent / 100)), recentLow);
-    const upperBound = Math.max(referencePrice * (1 + (params.gridRangePercent / 100)), recentHigh);
-    const { levels, step } = buildGridLevels(lowerBound, upperBound, params.gridLevels);
+    const resolvedGridState = sanitizeGridState(gridState, params) || createLockedGridState(snapshot, params);
+    const referencePrice = toFiniteNumber(resolvedGridState?.referencePrice, NaN);
+    const lowerBound = toFiniteNumber(resolvedGridState?.lowerBound, NaN);
+    const upperBound = toFiniteNumber(resolvedGridState?.upperBound, NaN);
+    const levels = resolvedGridState?.levels || [];
+    const step = toFiniteNumber(resolvedGridState?.step, NaN);
     if (!Number.isFinite(step) || step <= 0) {
         return {
             canLong: false, canShort: false, setupDetected: false,
@@ -1745,12 +1849,17 @@ const printDetailedStatus = async () => {
     } catch (error) {
         console.warn(`[STATUS] Failed to fetch managed open orders: ${error.message}`);
     }
+    const gridSummary = getGridRuntimeSummary(currentPrice, managedOrders);
 
     console.log(`\n[STATUS] Mode=${accountPositionMode.label} | Pair=${db.pair} | Price=${Number.isFinite(currentPrice) ? currentPrice : "N/A"} | LocalActive=${activeEntries.length} | ExchangePos=${openExchangePositions.length}`);
+    console.log(`[STATUS] Profile=${gridSummary.presetName.toUpperCase()} | Grid Slot=${gridSummary.slotLabel} | Ladder=${gridSummary.ladderLabel}`);
     console.log(`[STATUS] Daily P&L=${db.dailyPnL.toFixed(2)} USDT | Trades=${db.dailyTrades}`);
     console.log(`[STATUS] Runtime | placing=${isPlacingOrder ? "Y" : "N"} closing=${isClosingPosition ? "Y" : "N"} posSync=${isSyncingPosition ? "Y" : "N"} gridSync=${isSyncingGridOrders ? "Y" : "N"}`);
     console.log(`[STATUS] Last trade=${lastTradeAt > 0 ? new Date(lastTradeAt).toISOString() : "N/A"} | Daily reset=${new Date(toFiniteNumber(db.lastDailyReset, Date.now())).toISOString()}`);
     console.log(`[STATUS] Open Orders | Grid=${managedOrders.grid.length} | TP=${managedOrders.tp.length} | SL=${managedOrders.sl.length}`);
+    if (gridSummary.hasLockedGrid) {
+        console.log(`[STATUS] Locked Grid=${gridSummary.lockedRangeLabel} | Step=${gridSummary.stepLabel}`);
+    }
     if (openExchangePositions.length !== activeEntries.length) {
         console.warn(`[STATUS] Position mismatch detected: local=${activeEntries.length} vs exchange=${openExchangePositions.length}`);
     }
@@ -1961,6 +2070,148 @@ const startMetricsReporting = () => {
 
 const getDefaultConfig = () => ({ ...DEFAULT_CONFIG, lastDailyReset: Date.now(), lastUpdated: Date.now() });
 
+const AUTO_PAIR_GRID_PRESETS = {
+    binance: {
+        strategy: "futures_grid",
+        marginMode: "isolated",
+        leverage: 10,
+        gridLevels: 10,
+        gridLookbackCandles: 144,
+        gridRangePercent: 4.0,
+        gridEntryBufferPercent: 0.12,
+        gridTakeProfitLevels: 1,
+        gridOrdersPerSide: 3,
+        gridStopLossLevels: 1.5,
+        gridTimeframe: "5m",
+        minVolumeRatio: 1.1,
+        volumePeriod: 20,
+        atrPeriod: 14,
+        trailingEnabled: true,
+        trailingActivateATR: 1.2,
+        trailingOffsetATR: 0.6,
+        allowLong: true,
+        allowShort: true
+    },
+    volatile: {
+        strategy: "futures_grid",
+        marginMode: "isolated",
+        leverage: 8,
+        gridLevels: 12,
+        gridLookbackCandles: 180,
+        gridRangePercent: 6.5,
+        gridEntryBufferPercent: 0.18,
+        gridTakeProfitLevels: 1,
+        gridOrdersPerSide: 4,
+        gridStopLossLevels: 2.0,
+        gridTimeframe: "5m",
+        minVolumeRatio: 1.05,
+        volumePeriod: 20,
+        atrPeriod: 14,
+        trailingEnabled: true,
+        trailingActivateATR: 1.4,
+        trailingOffsetATR: 0.8,
+        allowLong: true,
+        allowShort: true
+    },
+    doge: {
+        strategy: "futures_grid",
+        marginMode: "isolated",
+        leverage: 8,
+        gridLevels: 12,
+        gridLookbackCandles: 180,
+        gridRangePercent: 5.5,
+        gridEntryBufferPercent: 0.16,
+        gridTakeProfitLevels: 1,
+        gridOrdersPerSide: 4,
+        gridStopLossLevels: 1.8,
+        gridTimeframe: "5m",
+        minVolumeRatio: 1.05,
+        volumePeriod: 20,
+        atrPeriod: 14,
+        trailingEnabled: true,
+        trailingActivateATR: 1.3,
+        trailingOffsetATR: 0.7,
+        allowLong: true,
+        allowShort: true
+    }
+};
+
+const resolveAutoPairPresetName = (pair) => {
+    const normalizedPair = String(pair || "").trim().toUpperCase();
+    if (!normalizedPair) return "binance";
+    if (normalizedPair.includes("DOGE")) return "doge";
+    if (/(PEPE|BONK|FLOKI|SHIB|MEME|1000)/i.test(normalizedPair)) return "volatile";
+    return "binance";
+};
+
+const getActiveAutoPairPresetName = () => resolveAutoPairPresetName(db?.pair);
+
+const getGridRuntimeSummary = (currentPrice = NaN, managedOrders = null) => {
+    const presetName = getActiveAutoPairPresetName();
+    const gridState = db?.activeGridState;
+    const lowerBound = toFiniteNumber(gridState?.lowerBound, NaN);
+    const upperBound = toFiniteNumber(gridState?.upperBound, NaN);
+    const step = toFiniteNumber(gridState?.step, NaN);
+    const levels = Array.isArray(gridState?.levels) ? gridState.levels : [];
+    const hasLockedGrid = Number.isFinite(lowerBound) && Number.isFinite(upperBound) && upperBound > lowerBound && Number.isFinite(step) && step > 0;
+    const insideRange = hasLockedGrid && Number.isFinite(currentPrice) ? currentPrice >= lowerBound && currentPrice <= upperBound : false;
+
+    let slotLabel = "N/A";
+    if (hasLockedGrid && Number.isFinite(currentPrice)) {
+        const rawIndex = (currentPrice - lowerBound) / step;
+        const clampedIndex = clamp(rawIndex, 0, Math.max(0, levels.length - 1));
+        const lowerIndex = clamp(Math.floor(clampedIndex), 0, Math.max(0, levels.length - 2));
+        const upperIndex = clamp(lowerIndex + 1, 1, Math.max(1, levels.length - 1));
+        slotLabel = `${lowerIndex}/${Math.max(1, db.gridLevels)}${insideRange ? "" : " OUT"}`;
+        if (Number.isFinite(levels[lowerIndex]) && Number.isFinite(levels[upperIndex])) {
+            slotLabel += ` (${levels[lowerIndex].toFixed(6)} - ${levels[upperIndex].toFixed(6)})`;
+        }
+    }
+
+    const gridOrders = Array.isArray(managedOrders?.grid) ? managedOrders.grid : [];
+    const buyOrders = gridOrders.filter((order) => String(order?.side || "").toLowerCase() === "buy").length;
+    const sellOrders = gridOrders.filter((order) => String(order?.side || "").toLowerCase() === "sell").length;
+
+    return {
+        presetName,
+        hasLockedGrid,
+        lockedRangeLabel: hasLockedGrid ? `${lowerBound.toFixed(6)} - ${upperBound.toFixed(6)}` : "N/A",
+        stepLabel: hasLockedGrid ? step.toFixed(6) : "N/A",
+        slotLabel,
+        ladderLabel: `${buyOrders} buy / ${sellOrders} sell`
+    };
+};
+
+const applyAutoPairGridPreset = (config) => {
+    if (!config || typeof config !== "object") return { config, changed: false, presetName: null };
+    const strategy = String(config.strategy || "").toLowerCase();
+    if (strategy && strategy !== "futures_grid") return { config, changed: false, presetName: null };
+
+    const presetName = resolveAutoPairPresetName(config.pair);
+    const preset = AUTO_PAIR_GRID_PRESETS[presetName];
+    if (!preset) return { config, changed: false, presetName: null };
+
+    const gridKeys = Object.keys(preset);
+    let changed = false;
+    const nextConfig = { ...config };
+
+    for (const key of gridKeys) {
+        if (nextConfig[key] !== preset[key]) {
+            nextConfig[key] = preset[key];
+            changed = true;
+        }
+    }
+
+    const activeGridFingerprint = String(nextConfig.activeGridState?.fingerprint || "");
+    if (!activeGridFingerprint.includes(String(nextConfig.gridLevels)) || changed) {
+        if (nextConfig.activeGridState !== null) changed = true;
+        nextConfig.activeGridState = null;
+    }
+
+    nextConfig.strategy = "futures_grid";
+    return { config: nextConfig, changed, presetName };
+};
+
 const normalizeConfig = (config) => {
     const defaults = getDefaultConfig();
     if (!config || typeof config !== "object") return { ...defaults };
@@ -2010,6 +2261,11 @@ const normalizeConfig = (config) => {
         : normalized.breakoutTimeframe;
     normalized.gridTimeframe = isValidTimeframe(rawGridTimeframe) ? rawGridTimeframe.trim() : defaults.gridTimeframe;
     delete normalized.breakoutTimeframe;
+    if (typeof normalized.activeGridState === "string") {
+        normalized.activeGridState = safeParseJSON(normalized.activeGridState, null);
+    } else if (!normalized.activeGridState || typeof normalized.activeGridState !== "object") {
+        normalized.activeGridState = null;
+    }
 
     const normalizeBoolean = (key) => {
         if (typeof normalized[key] === "boolean") return;
@@ -2041,7 +2297,14 @@ const initializeDB = async () => {
         console.log("[OK] Database synced");
         const configRow = await ensureConfigRow();
         const persisted = configRow.toJSON();
-        db = hydrateConfig(persisted);
+        let hydrated = hydrateConfig(persisted);
+        const autoPresetResult = applyAutoPairGridPreset(hydrated);
+        hydrated = normalizeConfig(autoPresetResult.config);
+        db = hydrated;
+        if (autoPresetResult.changed) {
+            await saveDB();
+            console.log(`[PRESET] Auto-applied ${autoPresetResult.presetName} profile for ${db.pair}`);
+        }
         console.log("[OK] DB initialized successfully");
         return true;
     } catch (error) {
@@ -2055,9 +2318,15 @@ const initializeDB = async () => {
 const reloadConfig = async () => {
     try {
         if (!db) return false;
-        const normalizedConfig = await loadPersistedConfig();
+        let normalizedConfig = await loadPersistedConfig();
         if (!normalizedConfig) return false;
+        const autoPresetResult = applyAutoPairGridPreset(normalizedConfig);
+        normalizedConfig = normalizeConfig(autoPresetResult.config);
         mergeRuntimeConfig(normalizedConfig);
+        if (autoPresetResult.changed && !hasAnyActivePosition()) {
+            await saveDB();
+            console.log(`[PRESET] Auto-refreshed ${autoPresetResult.presetName} profile for ${db.pair}`);
+        }
         return true;
     } catch (error) { console.error("[ERROR] Failed to reload config:", error.message); return false; }
 };
@@ -2282,7 +2551,13 @@ const syncGridOrders = async () => {
             return;
         }
 
-        const desiredOrdersRaw = buildGridEntryOrders(snapshot, params);
+        const lockedGridState = await resolveActiveGridState(snapshot, params);
+        if (!lockedGridState) {
+            console.log("[GRID] Unable to resolve locked grid state. Ladder sync skipped.");
+            return;
+        }
+
+        const desiredOrdersRaw = buildGridEntryOrders(snapshot, params, lockedGridState);
         const desiredOrderMap = new Map();
         const duplicateDesiredOrders = [];
         for (const order of desiredOrdersRaw) {

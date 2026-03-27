@@ -8,7 +8,84 @@ const { Sequelize, DataTypes } = require("sequelize");
 
 const DB_PATH = path.join(__dirname, "..", "database.sqlite");
 
-const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort", "autoRiskEnabled"];
+const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort"];
+const OBSOLETE_CONFIG_COLUMNS = ["autoRiskEnabled", "atrTargetMult", "atrStopMult"];
+
+const GRID_PRESETS = {
+  binance: {
+    strategy: "futures_grid",
+    marginMode: "isolated",
+    leverage: 10,
+    gridLevels: 10,
+    gridLookbackCandles: 144,
+    gridRangePercent: 4.0,
+    gridEntryBufferPercent: 0.12,
+    gridTakeProfitLevels: 1,
+    gridOrdersPerSide: 3,
+    gridStopLossLevels: 1.5,
+    gridTimeframe: "5m",
+    minVolumeRatio: 1.1,
+    volumePeriod: 20,
+    atrPeriod: 14,
+    trailingEnabled: true,
+    trailingActivateATR: 1.2,
+    trailingOffsetATR: 0.6,
+    allowLong: true,
+    allowShort: true,
+    activeGridState: null,
+  },
+  volatile: {
+    strategy: "futures_grid",
+    marginMode: "isolated",
+    leverage: 8,
+    gridLevels: 12,
+    gridLookbackCandles: 180,
+    gridRangePercent: 6.5,
+    gridEntryBufferPercent: 0.18,
+    gridTakeProfitLevels: 1,
+    gridOrdersPerSide: 4,
+    gridStopLossLevels: 2.0,
+    gridTimeframe: "5m",
+    minVolumeRatio: 1.05,
+    volumePeriod: 20,
+    atrPeriod: 14,
+    trailingEnabled: true,
+    trailingActivateATR: 1.4,
+    trailingOffsetATR: 0.8,
+    allowLong: true,
+    allowShort: true,
+    activeGridState: null,
+  },
+  doge: {
+    strategy: "futures_grid",
+    pair: "DOGE/USDT:USDT",
+    marginMode: "isolated",
+    leverage: 8,
+    gridOrderSizeUsdt: 1.5,
+    gridLevels: 12,
+    gridLookbackCandles: 180,
+    gridRangePercent: 5.5,
+    gridEntryBufferPercent: 0.16,
+    gridTakeProfitLevels: 1,
+    gridOrdersPerSide: 4,
+    gridStopLossLevels: 1.8,
+    gridTimeframe: "5m",
+    minVolumeRatio: 1.05,
+    volumePeriod: 20,
+    atrPeriod: 14,
+    trailingEnabled: true,
+    trailingActivateATR: 1.3,
+    trailingOffsetATR: 0.7,
+    allowLong: true,
+    allowShort: true,
+    activeGridState: null,
+  },
+};
+
+const AUTO_PRESET_RULES = [
+  { match: /DOGE/i, preset: "doge" },
+  { match: /(PEPE|BONK|FLOKI|SHIB|MEME|1000)/i, preset: "volatile" },
+];
 
 const DEFAULT_CONFIG = {
   strategy: "futures_grid",
@@ -21,14 +98,12 @@ const DEFAULT_CONFIG = {
   maxTradesPerDay: 20,
   coolingPeriod: 3000,
   activePosition: null,
+  activeGridState: null,
   dailyPnL: 0,
   dailyTrades: 0,
   marginMode: "isolated",
   monitoringInterval: 500,
   gridStopLossPercent: 5,
-  autoRiskEnabled: true,
-  atrTargetMult: 2.0,
-  atrStopMult: 1.2,
   gridLevels: 8,
   gridLookbackCandles: 120,
   gridRangePercent: 3.5,
@@ -68,14 +143,12 @@ const Config = sequelize.define(
     maxTradesPerDay: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.maxTradesPerDay },
     coolingPeriod: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.coolingPeriod },
     activePosition: { type: DataTypes.TEXT, defaultValue: null },
+    activeGridState: { type: DataTypes.TEXT, defaultValue: null },
     dailyPnL: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.dailyPnL },
     dailyTrades: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.dailyTrades },
     marginMode: { type: DataTypes.STRING, defaultValue: DEFAULT_CONFIG.marginMode },
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.monitoringInterval },
     gridStopLossPercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.gridStopLossPercent },
-    autoRiskEnabled: { type: DataTypes.BOOLEAN, defaultValue: DEFAULT_CONFIG.autoRiskEnabled },
-    atrTargetMult: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.atrTargetMult },
-    atrStopMult: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.atrStopMult },
     gridLevels: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.gridLevels },
     gridLookbackCandles: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.gridLookbackCandles },
     gridRangePercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.gridRangePercent },
@@ -108,6 +181,8 @@ const printUsage = () => {
       "  node scripts/config.js get <key>",
       "  node scripts/config.js set <key> <value>",
       "  node scripts/config.js reset <key>",
+      "  node scripts/config.js preset <name>",
+      "  node scripts/config.js autopreset [pair]",
       "  node scripts/config.js defaults",
       "",
       "Examples:",
@@ -116,12 +191,13 @@ const printUsage = () => {
       "  node scripts/config.js set gridOrderSizeUsdt 1.5",
       "  node scripts/config.js set gridTargetProfitUsdt 0.8",
       "  node scripts/config.js set gridStopLossPercent 4",
-      "  node scripts/config.js set autoRiskEnabled true",
-      "  node scripts/config.js set atrTargetMult 2.2",
-      "  node scripts/config.js set atrStopMult 1.1",
       "  node scripts/config.js set gridTimeframe 15m",
       "  node scripts/config.js set dailyProfitTargetUsdt 3",
       "  node scripts/config.js set dailyMaxLossPercent 8",
+      "  node scripts/config.js preset binance",
+      "  node scripts/config.js preset volatile",
+      "  node scripts/config.js preset doge",
+      "  node scripts/config.js autopreset DOGE/USDT:USDT",
     ].join("\n"),
   );
 };
@@ -162,15 +238,15 @@ const coerceBoolean = (raw) => {
 };
 
 const parseValueForKey = (key, rawValue) => {
-  if (!(key in DEFAULT_CONFIG) && key !== "activePosition") {
+  if (!(key in DEFAULT_CONFIG) && key !== "activePosition" && key !== "activeGridState") {
     throw new Error(`Unknown config key: ${key}`);
   }
 
-  if (key === "activePosition") {
+  if (key === "activePosition" || key === "activeGridState") {
     const trimmed = String(rawValue).trim();
     if (trimmed === "" || trimmed.toLowerCase() === "null") return null;
     const parsed = safeParseJSON(trimmed, undefined);
-    if (parsed === undefined) throw new Error("activePosition must be valid JSON or 'null'");
+    if (parsed === undefined) throw new Error(`${key} must be valid JSON or 'null'`);
     return JSON.stringify(parsed);
   }
 
@@ -188,6 +264,23 @@ const parseValueForKey = (key, rawValue) => {
   }
 
   return String(rawValue);
+};
+
+const getPresetNames = () => Object.keys(GRID_PRESETS).sort();
+
+const buildPresetPayload = (name) => {
+  const preset = GRID_PRESETS[String(name || "").trim().toLowerCase()];
+  if (!preset) {
+    throw new Error(`Unknown preset: ${name}. Available presets: ${getPresetNames().join(", ")}`);
+  }
+  return { ...preset };
+};
+
+const resolveAutoPresetName = (pair) => {
+  const normalizedPair = String(pair || "").trim().toUpperCase();
+  if (!normalizedPair) return "binance";
+  const matchedRule = AUTO_PRESET_RULES.find((rule) => rule.match.test(normalizedPair));
+  return matchedRule ? matchedRule.preset : "binance";
 };
 
 const ensureConfigSchema = async () => {
@@ -230,24 +323,6 @@ const ensureConfigSchema = async () => {
     }
   }
 
-  if (!columnNames.has("autoRiskEnabled")) {
-    await withSqliteBusyRetry(() =>
-      sequelize.query("ALTER TABLE Configs ADD COLUMN autoRiskEnabled BOOLEAN DEFAULT 1;"),
-    );
-  }
-
-  if (!columnNames.has("atrTargetMult")) {
-    await withSqliteBusyRetry(() =>
-      sequelize.query("ALTER TABLE Configs ADD COLUMN atrTargetMult FLOAT DEFAULT 2;"),
-    );
-  }
-
-  if (!columnNames.has("atrStopMult")) {
-    await withSqliteBusyRetry(() =>
-      sequelize.query("ALTER TABLE Configs ADD COLUMN atrStopMult FLOAT DEFAULT 1.2;"),
-    );
-  }
-
   if (!columnNames.has("gridTimeframe")) {
     await withSqliteBusyRetry(() =>
       sequelize.query("ALTER TABLE Configs ADD COLUMN gridTimeframe VARCHAR(255) DEFAULT '5m';"),
@@ -257,6 +332,12 @@ const ensureConfigSchema = async () => {
         sequelize.query("UPDATE Configs SET gridTimeframe = COALESCE(breakoutTimeframe, '5m') WHERE gridTimeframe IS NULL OR gridTimeframe = '';"),
       );
     }
+  }
+
+  if (!columnNames.has("activeGridState")) {
+    await withSqliteBusyRetry(() =>
+      sequelize.query("ALTER TABLE Configs ADD COLUMN activeGridState TEXT DEFAULT NULL;"),
+    );
   }
 
   if (!columnNames.has("dailyProfitTargetUsdt")) {
@@ -278,6 +359,17 @@ const ensureConfigSchema = async () => {
       await withSqliteBusyRetry(() =>
         sequelize.query("UPDATE Configs SET dailyMaxLossPercent = COALESCE(maxDailyLossPercent, 10) WHERE dailyMaxLossPercent IS NULL OR dailyMaxLossPercent = '';"),
       );
+    }
+  }
+
+  for (const obsoleteColumn of OBSOLETE_CONFIG_COLUMNS) {
+    if (!columnNames.has(obsoleteColumn)) continue;
+    try {
+      await withSqliteBusyRetry(() =>
+        sequelize.query(`ALTER TABLE Configs DROP COLUMN ${obsoleteColumn};`),
+      );
+    } catch (error) {
+      console.warn(`[WARN] Could not drop obsolete config column ${obsoleteColumn}: ${error.message}`);
     }
   }
 };
@@ -310,16 +402,6 @@ const hydrateForOutput = (row) => {
   }
   delete json.stopLossPercent;
 
-  if (json.autoRiskEnabled === undefined) {
-    json.autoRiskEnabled = DEFAULT_CONFIG.autoRiskEnabled;
-  }
-  if (json.atrTargetMult === undefined) {
-    json.atrTargetMult = DEFAULT_CONFIG.atrTargetMult;
-  }
-  if (json.atrStopMult === undefined) {
-    json.atrStopMult = DEFAULT_CONFIG.atrStopMult;
-  }
-
   if (json.gridTimeframe === undefined && typeof json.breakoutTimeframe === "string") {
     json.gridTimeframe = json.breakoutTimeframe;
   }
@@ -336,6 +418,7 @@ const hydrateForOutput = (row) => {
   delete json.maxDailyLossPercent;
 
   json.activePosition = safeParseJSON(json.activePosition, null);
+  json.activeGridState = safeParseJSON(json.activeGridState, null);
   return json;
 };
 
@@ -356,6 +439,29 @@ const main = async () => {
   const row = await ensureConfigRow();
 
   if (cmd === "show") {
+    console.log(JSON.stringify(hydrateForOutput(row), null, 2));
+    return;
+  }
+
+  if (cmd === "preset") {
+    const name = args[0];
+    if (!name) throw new Error(`Missing <name>. Available presets: ${getPresetNames().join(", ")}`);
+    const presetPayload = buildPresetPayload(name);
+    await withSqliteBusyRetry(() => row.update({ ...presetPayload, lastUpdated: Date.now() }));
+    console.log(`[OK] Applied preset ${String(name).trim().toLowerCase()}`);
+    await row.reload();
+    console.log(JSON.stringify(hydrateForOutput(row), null, 2));
+    return;
+  }
+
+  if (cmd === "autopreset") {
+    const inputPair = args.join(" ").trim();
+    const targetPair = inputPair || hydrateForOutput(row).pair || DEFAULT_CONFIG.pair;
+    const presetName = resolveAutoPresetName(targetPair);
+    const presetPayload = { ...buildPresetPayload(presetName), pair: targetPair, activeGridState: null };
+    await withSqliteBusyRetry(() => row.update({ ...presetPayload, lastUpdated: Date.now() }));
+    console.log(`[OK] Applied autopreset ${presetName} for ${targetPair}`);
+    await row.reload();
     console.log(JSON.stringify(hydrateForOutput(row), null, 2));
     return;
   }
@@ -385,8 +491,8 @@ const main = async () => {
   if (cmd === "reset") {
     const key = args[0];
     if (!key) throw new Error("Missing <key>");
-    if (!(key in DEFAULT_CONFIG) && key !== "activePosition") throw new Error(`Unknown config key: ${key}`);
-    const nextValue = key === "activePosition" ? null : DEFAULT_CONFIG[key];
+    if (!(key in DEFAULT_CONFIG) && key !== "activePosition" && key !== "activeGridState") throw new Error(`Unknown config key: ${key}`);
+    const nextValue = key === "activePosition" || key === "activeGridState" ? null : DEFAULT_CONFIG[key];
     await withSqliteBusyRetry(() => row.update({ [key]: nextValue, lastUpdated: Date.now() }));
     console.log(`[OK] Reset ${key}`);
     return;
