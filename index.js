@@ -593,6 +593,28 @@ const getMinimumGridOrderSizeUsdt = (market, referencePrice) => {
     return Math.max(costFloorUsdt, amountFloorUsdt, 0);
 };
 
+const getMinimumValidatedGridOrderSizeUsdt = (market, referencePrice) => {
+    const safeReferencePrice = toFiniteNumber(referencePrice, NaN);
+    const baseMinimum = getMinimumGridOrderSizeUsdt(market, safeReferencePrice);
+    if (!Number.isFinite(baseMinimum) || baseMinimum <= 0 || !market || !Number.isFinite(safeReferencePrice) || safeReferencePrice <= 0) {
+        return Math.max(0, baseMinimum);
+    }
+
+    const leverage = Math.max(1, toFiniteNumber(db.leverage, 1));
+    let candidate = baseMinimum;
+    const increment = Math.max(baseMinimum * 0.01, 0.01);
+
+    for (let attempt = 0; attempt < 25; attempt++) {
+        const rawQty = (candidate * leverage) / safeReferencePrice;
+        const quantity = formatAmountToMarketPrecision(db.pair, rawQty);
+        const sizeValidation = validateOrderSize(market, quantity, safeReferencePrice);
+        if (sizeValidation.valid) return candidate;
+        candidate += increment;
+    }
+
+    return candidate;
+};
+
 const resolveEffectiveGridOrderSizeUsdt = ({
     availableUsdt,
     configuredOrderSizeUsdt,
@@ -605,7 +627,7 @@ const resolveEffectiveGridOrderSizeUsdt = ({
     const safeAvailableUsdt = toFiniteNumber(availableUsdt, 0);
     const capitalBufferRatio = 0.9;
     const usableUsdt = safeAvailableUsdt * capitalBufferRatio;
-    const minOrderSizeUsdt = getMinimumGridOrderSizeUsdt(market, referencePrice);
+    const minOrderSizeUsdt = getMinimumValidatedGridOrderSizeUsdt(market, referencePrice);
     const configuredSize = toFiniteNumber(configuredOrderSizeUsdt, 0);
     const isFullAutoSize = configuredSize <= 0;
     const derivedAutoSize = maxConfiguredOrders > 0 ? usableUsdt / Math.max(maxConfiguredOrders * 2, 1) : 0;
