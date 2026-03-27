@@ -83,6 +83,7 @@ let lastSyncLogAt = 0;
 let lastGridSyncLogAt = 0;
 let lastGridSizingSkipLogAt = 0;
 let lastGridSizingSkipReason = "";
+const gridSizingStateLogCache = new Map();
 let isShuttingDown = false;
 let accountPositionMode = { hedged: false, label: "ONE_WAY" };
 const logPath = path.join(__dirname, 'trades.csv');
@@ -94,6 +95,7 @@ const SYNC_LOG_TTL = 15000;
 const SIGNAL_DETAIL_LOG_TTL = 10000;
 const GRID_SYNC_LOG_TTL = 15000;
 const GRID_SIZING_SKIP_LOG_TTL = 30000;
+const GRID_SIZING_STATE_LOG_TTL = 30000;
 const METRICS_LOG_INTERVAL = 60000;
 const POSITION_RUNTIME_PERSIST_TTL = 2000;
 const POSITION_SYNC_QTY_TOLERANCE = 0.001;
@@ -1160,6 +1162,15 @@ const logGridSyncStatus = (desiredOrders, openGridOrders) => {
     if (now - lastGridSyncLogAt < GRID_SYNC_LOG_TTL) return;
     console.log(`[GRID] Desired ladder=${desiredOrders.length} | Open grid orders=${openGridOrders.length}`);
     lastGridSyncLogAt = now;
+};
+
+const maybeLogGridSizingState = (channel, message, stateKey) => {
+    const now = Date.now();
+    const cached = gridSizingStateLogCache.get(channel) || { key: "", at: 0 };
+    if (stateKey !== cached.key || now - cached.at >= GRID_SIZING_STATE_LOG_TTL) {
+        console.log(message);
+        gridSizingStateLogCache.set(channel, { key: stateKey, at: now });
+    }
 };
 
 const buildRiskOverrides = () => ({
@@ -2866,10 +2877,18 @@ const syncGridOrders = async () => {
         lastGridSizingSkipReason = "";
 
         if (effectiveSizeMeta.mode === "FULL_AUTO") {
-            console.log(`[GRID] Auto-sized order amount: ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT per order | available ${availableUsdt.toFixed(2)} USDT`);
+            maybeLogGridSizingState(
+                "SIZE",
+                `[GRID] Auto-sized order amount: ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT per order | available ${availableUsdt.toFixed(2)} USDT`,
+                `SIZE:${effectiveSizeMeta.orderSizeUsdt.toFixed(4)}:${availableUsdt.toFixed(2)}`
+            );
         }
         if (effectiveOrdersMeta.count < effectiveOrdersMeta.maxConfigured) {
-            console.log(`[GRID] Auto-adjusted side orders: ${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured} per side | mode ${effectiveOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`);
+            maybeLogGridSizingState(
+                "COUNT",
+                `[GRID] Auto-adjusted side orders: ${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured} per side | mode ${effectiveOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
+                `COUNT:${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured}:${effectiveOrdersMeta.mode}:${availableUsdt.toFixed(2)}`
+            );
         }
 
         const openPositions = await fetchOpenExchangePositions();
