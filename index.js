@@ -1250,13 +1250,49 @@ const matchesOrderToTrackedPosition = (order, position) => {
     return !orderPositionSide || orderPositionSide === getClosePositionSide(position);
 };
 
+const getOrderQuantity = (order) => {
+    const directAmount = toFiniteNumber(order?.amount, NaN);
+    if (Number.isFinite(directAmount) && directAmount > 0) return Math.abs(directAmount);
+
+    const directRemaining = toFiniteNumber(order?.remaining, NaN);
+    const directFilled = toFiniteNumber(order?.filled, NaN);
+    if (Number.isFinite(directRemaining) && directRemaining > 0) return Math.abs(directRemaining);
+    if (Number.isFinite(directFilled) && directFilled > 0) return Math.abs(directFilled);
+
+    const infoOrigQty = toFiniteNumber(order?.info?.origQty, NaN);
+    if (Number.isFinite(infoOrigQty) && infoOrigQty > 0) return Math.abs(infoOrigQty);
+
+    const infoQty = toFiniteNumber(order?.info?.qty, NaN);
+    if (Number.isFinite(infoQty) && infoQty > 0) return Math.abs(infoQty);
+
+    const infoExecutedQty = toFiniteNumber(order?.info?.executedQty, NaN);
+    if (Number.isFinite(infoExecutedQty) && infoExecutedQty > 0) return Math.abs(infoExecutedQty);
+
+    return NaN;
+};
+
 const getOrderTriggerPrice = (order) => {
     const directStopPrice = toFiniteNumber(order?.stopPrice, NaN);
     if (Number.isFinite(directStopPrice) && directStopPrice > 0) return directStopPrice;
     const infoStopPrice = toFiniteNumber(order?.info?.stopPrice, NaN);
     if (Number.isFinite(infoStopPrice) && infoStopPrice > 0) return infoStopPrice;
+    const directActivationPrice = toFiniteNumber(order?.activationPrice, NaN);
+    if (Number.isFinite(directActivationPrice) && directActivationPrice > 0) return directActivationPrice;
+    const infoActivatePrice = toFiniteNumber(order?.info?.activatePrice, NaN);
+    if (Number.isFinite(infoActivatePrice) && infoActivatePrice > 0) return infoActivatePrice;
     const triggerPrice = toFiniteNumber(order?.triggerPrice, NaN);
     return Number.isFinite(triggerPrice) && triggerPrice > 0 ? triggerPrice : NaN;
+};
+
+const isManagedOrderPriceMatch = (expectedPrice, actualPrice) => {
+    const normalizedExpected = formatPriceToMarketPrecision(db?.pair, expectedPrice);
+    const normalizedActual = formatPriceToMarketPrecision(db?.pair, actualPrice);
+    if (Number.isFinite(normalizedExpected) && Number.isFinite(normalizedActual)) {
+        return normalizedExpected === normalizedActual;
+    }
+    if (!Number.isFinite(expectedPrice) || !Number.isFinite(actualPrice)) return false;
+    const tolerance = Math.max(1e-8, Math.abs(expectedPrice) * 0.000001);
+    return Math.abs(expectedPrice - actualPrice) <= tolerance;
 };
 
 const matchesTrackedPositionSide = (position, trackedPosition) => {
@@ -1285,6 +1321,7 @@ const getExchangePositionSide = (position) => {
 };
 
 const getExchangePositionModeSide = (position) => {
+    if (!isHedgeModeEnabled()) return "BOTH";
     const rawPositionSide = String(position?.positionSide || position?.info?.positionSide || "").toUpperCase();
     if (rawPositionSide === "LONG" || rawPositionSide === "SHORT" || rawPositionSide === "BOTH") return rawPositionSide;
     if (position?.side === "long") return "LONG";
@@ -2088,7 +2125,7 @@ const syncGridOrders = async () => {
 
 const formatOrderSummary = (order, typeLabel) => {
     const side = String(order?.side || "").toUpperCase();
-    const amount = toFiniteNumber(order?.amount, NaN);
+    const amount = getOrderQuantity(order);
     const price = typeLabel === "SL" ? getOrderTriggerPrice(order) : toFiniteNumber(order?.price, NaN);
     const clientId = getExchangeClientOrderId(order) || "N/A";
     return `${typeLabel} ${side} qty=${Number.isFinite(amount) ? amount : "N/A"} price=${Number.isFinite(price) ? price : "N/A"} id=${clientId}`;
@@ -2101,8 +2138,8 @@ const ensureReduceOnlyTakeProfitOrder = async (positionKey, sourcePosition) => {
     const matchingTpOrders = openTpOrders.filter((order) => matchesOrderToTrackedPosition(order, position));
     const matchingOrder = matchingTpOrders.find((order) => {
         const orderPrice = toFiniteNumber(order.price, NaN);
-        const orderAmount = Math.abs(toFiniteNumber(order.amount, NaN));
-        return orderPrice === position.targetPrice && Math.abs(orderAmount - position.quantity) <= POSITION_SYNC_QTY_TOLERANCE;
+        const orderAmount = getOrderQuantity(order);
+        return isManagedOrderPriceMatch(position.targetPrice, orderPrice) && Math.abs(orderAmount - position.quantity) <= POSITION_SYNC_QTY_TOLERANCE;
     });
     if (matchingOrder) {
         if (matchingTpOrders.length > 1) {
@@ -2146,8 +2183,8 @@ const ensureReduceOnlyStopLossOrder = async (positionKey, sourcePosition) => {
     const matchingSlOrders = openSlOrders.filter((order) => matchesOrderToTrackedPosition(order, position));
     const matchingOrder = matchingSlOrders.find((order) => {
         const orderStopPrice = getOrderTriggerPrice(order);
-        const orderAmount = Math.abs(toFiniteNumber(order.amount, NaN));
-        return orderStopPrice === position.stopLossPrice && Math.abs(orderAmount - position.quantity) <= POSITION_SYNC_QTY_TOLERANCE;
+        const orderAmount = getOrderQuantity(order);
+        return isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice) && Math.abs(orderAmount - position.quantity) <= POSITION_SYNC_QTY_TOLERANCE;
     });
     if (matchingOrder) {
         if (matchingSlOrders.length > 1) {
