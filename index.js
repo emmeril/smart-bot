@@ -439,6 +439,20 @@ const buildReplacementClientOrderId = (baseClientOrderId) => {
     return `${base}_${suffix}`.slice(0, 36);
 };
 
+const extractExchangeErrorCode = (error) => {
+    const directCode = toFiniteNumber(error?.code, NaN);
+    if (Number.isFinite(directCode)) return directCode;
+    const payload = String(error?.message || error || "");
+    const match = payload.match(/"code"\s*:\s*(-?\d+)/);
+    return match ? Number(match[1]) : NaN;
+};
+
+const isDuplicateClientOrderIdError = (error) => {
+    const payload = String(error?.message || error || "");
+    const code = extractExchangeErrorCode(error);
+    return code === -4116 || /clientorderid is duplicated|duplicated/i.test(payload);
+};
+
 const getExchangeClientOrderId = (order) => (
     String(order?.clientOrderId || order?.info?.clientOrderId || order?.info?.origClientOrderId || "")
 );
@@ -982,7 +996,7 @@ const placeGridEntryOrder = async (gridOrder) => {
         console.log(`[GRID] Placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price} -> TP ${gridOrder.targetPrice} | SL ${gridOrder.stopLossPrice}`);
         return true;
     } catch (error) {
-        if (error.code === -4116 && String(error.message || "").includes("duplicated")) {
+        if (isDuplicateClientOrderIdError(error)) {
             console.warn(`[GRID] Duplicate clientOrderId ${gridOrder.clientOrderId}. Attempting to cancel existing order and retry.`);
             const existingDuplicate = await findOpenGridOrderByClientOrderId(gridOrder.clientOrderId);
             if (existingDuplicate) {
@@ -1074,7 +1088,7 @@ const placeReduceOnlyTakeProfitOrder = async (position) => {
         console.log(`[TP] Placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
         return order;
     } catch (error) {
-        if (error.code === -4116 && error.message.includes("duplicated")) {
+        if (isDuplicateClientOrderIdError(error)) {
             console.warn(`[TP] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
             const duplicateOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
             if (duplicateOrder) {
@@ -1168,7 +1182,7 @@ const placeReduceOnlyStopLossOrder = async (position) => {
         console.log(`[SL] Placed reduce-only STOP_MARKET ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${quantity}`);
         return order;
     } catch (error) {
-        if (error.code === -4116 && error.message.includes("duplicated")) {
+        if (isDuplicateClientOrderIdError(error)) {
             console.warn(`[SL] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
             const duplicateOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
             if (duplicateOrder) {
