@@ -288,7 +288,10 @@ const hydrateConfig = (config) => {
     delete hydrated.maxDailyLossPercent;
     hydrated.activePosition = safeParseJSON(hydrated.activePosition, null);
     if (hydrated.activePosition && isLegacySinglePosition(hydrated.activePosition)) {
-        const legacyKey = toPositionMapKey(hydrated.activePosition.positionSide || "BOTH");
+        const legacyPositionSide = String(hydrated.activePosition.positionSide || "").toUpperCase();
+        const legacySideValue = String(hydrated.activePosition.side || "").toLowerCase();
+        const legacySide = legacyPositionSide || (legacySideValue === "buy" ? "LONG" : (legacySideValue === "sell" ? "SHORT" : "BOTH"));
+        const legacyKey = toPositionMapKey(legacySide);
         hydrated.activePosition = { [legacyKey]: hydrated.activePosition };
     }
     return normalizeConfig(hydrated);
@@ -348,6 +351,50 @@ const ensureConfigSchema = async () => {
         }
         console.log("[INFO] Added config column: dailyMaxLossPercent");
     }
+    if (!columnNames.has("strategy")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN strategy VARCHAR(255) DEFAULT 'futures_grid';");
+        console.log("[INFO] Added config column: strategy");
+    }
+    if (!columnNames.has("sessionStartUTC")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN sessionStartUTC INTEGER DEFAULT 0;");
+        console.log("[INFO] Added config column: sessionStartUTC");
+    }
+    if (!columnNames.has("sessionEndUTC")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN sessionEndUTC INTEGER DEFAULT 23;");
+        console.log("[INFO] Added config column: sessionEndUTC");
+    }
+    if (!columnNames.has("volumePeriod")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN volumePeriod INTEGER DEFAULT 20;");
+        console.log("[INFO] Added config column: volumePeriod");
+    }
+    if (!columnNames.has("minVolumeRatio")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN minVolumeRatio FLOAT DEFAULT 1.3;");
+        console.log("[INFO] Added config column: minVolumeRatio");
+    }
+    if (!columnNames.has("atrPeriod")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN atrPeriod INTEGER DEFAULT 14;");
+        console.log("[INFO] Added config column: atrPeriod");
+    }
+    if (!columnNames.has("trailingEnabled")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN trailingEnabled BOOLEAN DEFAULT 1;");
+        console.log("[INFO] Added config column: trailingEnabled");
+    }
+    if (!columnNames.has("trailingActivateATR")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN trailingActivateATR FLOAT DEFAULT 1.2;");
+        console.log("[INFO] Added config column: trailingActivateATR");
+    }
+    if (!columnNames.has("trailingOffsetATR")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN trailingOffsetATR FLOAT DEFAULT 0.6;");
+        console.log("[INFO] Added config column: trailingOffsetATR");
+    }
+    if (!columnNames.has("allowLong")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN allowLong BOOLEAN DEFAULT 1;");
+        console.log("[INFO] Added config column: allowLong");
+    }
+    if (!columnNames.has("allowShort")) {
+        await sequelize.query("ALTER TABLE Configs ADD COLUMN allowShort BOOLEAN DEFAULT 1;");
+        console.log("[INFO] Added config column: allowShort");
+    }
 };
 
 const loadPersistedConfig = async () => {
@@ -366,20 +413,22 @@ const ensureConfigRow = async () => {
 
 const persistConfig = async (config) => {
     const toSave = serializeConfigForSave(config);
+    const createPayload = { ...toSave };
+    delete createPayload.id;
 
     if (config.id) {
-        await Config.update(toSave, { where: { id: config.id } });
-        return config.id;
+        const [affectedRows] = await Config.update(toSave, { where: { id: config.id } });
+        if (affectedRows > 0) return config.id;
     }
 
     const firstRow = await getConfigRow();
     if (firstRow) {
         config.id = firstRow.id;
-        await Config.update(toSave, { where: { id: firstRow.id } });
-        return firstRow.id;
+        const [fallbackAffectedRows] = await Config.update(toSave, { where: { id: firstRow.id } });
+        if (fallbackAffectedRows > 0) return firstRow.id;
     }
 
-    const created = await Config.create(toSave);
+    const created = await Config.create(createPayload);
     config.id = created.id;
     return created.id;
 };
@@ -463,8 +512,8 @@ const isSlReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWit
 const isTriggerManagedOrder = (order, label = "") => label === "SL" || isSlReduceOnlyOrder(order) || String(order?.type || "").toUpperCase().includes("STOP");
 
 const fetchOpenGridOrders = async () => {
-    metrics.api.orders++;
-    const openOrders = await exchange.fetchOpenOrders(db.pair);
+    const { regularOrders } = await fetchOpenOrdersSnapshot(db.pair);
+    const openOrders = regularOrders;
     return openOrders.filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(db.pair) && isGridEntryOrder(order));
 };
 
@@ -475,34 +524,29 @@ const findOpenGridOrderByClientOrderId = async (clientOrderId) => {
 };
 
 const fetchOpenTpOrders = async () => {
-    metrics.api.orders++;
-    const openOrders = await exchange.fetchOpenOrders(db.pair);
+    const { regularOrders } = await fetchOpenOrdersSnapshot(db.pair);
+    const openOrders = regularOrders;
     return openOrders.filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(db.pair) && isTpReduceOnlyOrder(order));
 };
 
 const fetchOpenSlOrders = async () => {
-    metrics.api.orders++;
-    const openOrders = await exchange.fetchOpenOrders(db.pair, undefined, undefined, { trigger: true });
+    const { triggerOrders } = await fetchOpenOrdersSnapshot(db.pair);
+    const openOrders = triggerOrders;
     return openOrders.filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(db.pair) && isSlReduceOnlyOrder(order));
 };
 
 const findOpenOrderByClientOrderId = async (clientOrderId, symbol = db?.pair) => {
     if (!clientOrderId || !symbol) return null;
-    metrics.api.orders++;
-    const openOrders = await exchange.fetchOpenOrders(symbol);
+    const { regularOrders, triggerOrders } = await fetchOpenOrdersSnapshot(symbol);
+    const openOrders = regularOrders;
     const regularMatch = openOrders.find((order) => getExchangeClientOrderId(order) === clientOrderId);
     if (regularMatch) return regularMatch;
 
-    metrics.api.orders++;
-    const triggerOrders = await exchange.fetchOpenOrders(symbol, undefined, undefined, { trigger: true });
     return triggerOrders.find((order) => getExchangeClientOrderId(order) === clientOrderId) || null;
 };
 
 const fetchManagedOpenOrdersSnapshot = async () => {
-    metrics.api.orders++;
-    const regularOrders = await exchange.fetchOpenOrders(db.pair);
-    metrics.api.orders++;
-    const triggerOrders = await exchange.fetchOpenOrders(db.pair, undefined, undefined, { trigger: true });
+    const { regularOrders, triggerOrders } = await fetchOpenOrdersSnapshot(db.pair);
     const managedOrders = [...regularOrders, ...triggerOrders].filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(db.pair));
     return {
         grid: managedOrders.filter(isGridEntryOrder),
@@ -573,41 +617,41 @@ const buildGridEntryOrders = (snapshot, params) => {
     const buyOrders = [];
     const sellOrders = [];
 
-	for (let i = levels.length - 2; i >= 0; i--) {
-	    const price = formatPriceToMarketPrecision(db.pair, levels[i]);
-	    const targetPrice = formatPriceToMarketPrecision(db.pair, levels[i + 1]);
-	    const stopLossPrice = formatPriceToMarketPrecision(db.pair, levels[i] - (step * params.gridStopLossLevels));
-	    const orderPlan = { targetPrice, stopLossPrice };
-	    if (Number.isFinite(price) && price > 0 && price < minBuyPrice) {
-	        if (!isDirectionalOrderPlanValid("buy", price, orderPlan)) {
-	            console.warn(`[GRID] Skipping BUY level ${i} @ ${price} because TP/SL would be invalid after precision rounding.`);
-	            continue;
-	        }
-	        buyOrders.push({
-	            side: "buy",
-	            price,
-	            targetPrice,
-	            stopLossPrice,
+    for (let i = levels.length - 2; i >= 0; i--) {
+        const price = formatPriceToMarketPrecision(db.pair, levels[i]);
+        const targetPrice = formatPriceToMarketPrecision(db.pair, levels[i + 1]);
+        const stopLossPrice = formatPriceToMarketPrecision(db.pair, levels[i] - (step * params.gridStopLossLevels));
+        const orderPlan = { targetPrice, stopLossPrice };
+        if (Number.isFinite(price) && price > 0 && price < minBuyPrice) {
+            if (!isDirectionalOrderPlanValid("buy", price, orderPlan)) {
+                console.warn(`[GRID] Skipping BUY level ${i} @ ${price} because TP/SL would be invalid after precision rounding.`);
+                continue;
+            }
+            buyOrders.push({
+                side: "buy",
+                price,
+                targetPrice,
+                stopLossPrice,
                 levelIndex: i,
                 clientOrderId: getGridClientOrderId("buy", i, price)
             });
         }
     }
 
-	for (let i = 1; i < levels.length; i++) {
-	    const price = formatPriceToMarketPrecision(db.pair, levels[i]);
-	    const targetPrice = formatPriceToMarketPrecision(db.pair, levels[i - 1]);
-	    const stopLossPrice = formatPriceToMarketPrecision(db.pair, levels[i] + (step * params.gridStopLossLevels));
-	    const orderPlan = { targetPrice, stopLossPrice };
-	    if (Number.isFinite(price) && price > 0 && price > maxSellPrice) {
-	        if (!isDirectionalOrderPlanValid("sell", price, orderPlan)) {
-	            console.warn(`[GRID] Skipping SELL level ${i} @ ${price} because TP/SL would be invalid after precision rounding.`);
-	            continue;
-	        }
-	        sellOrders.push({
-	            side: "sell",
-	            price,
-	            targetPrice,
+    for (let i = 1; i < levels.length; i++) {
+        const price = formatPriceToMarketPrecision(db.pair, levels[i]);
+        const targetPrice = formatPriceToMarketPrecision(db.pair, levels[i - 1]);
+        const stopLossPrice = formatPriceToMarketPrecision(db.pair, levels[i] + (step * params.gridStopLossLevels));
+        const orderPlan = { targetPrice, stopLossPrice };
+        if (Number.isFinite(price) && price > 0 && price > maxSellPrice) {
+            if (!isDirectionalOrderPlanValid("sell", price, orderPlan)) {
+                console.warn(`[GRID] Skipping SELL level ${i} @ ${price} because TP/SL would be invalid after precision rounding.`);
+                continue;
+            }
+            sellOrders.push({
+                side: "sell",
+                price,
+                targetPrice,
                 stopLossPrice,
                 levelIndex: i,
                 clientOrderId: getGridClientOrderId("sell", i, price)
@@ -822,50 +866,49 @@ const getOrderFillSnapshot = (order, fallbackPrice, fallbackQuantity) => {
     const filledQuantity = toFiniteNumber(order?.filled, 0);
     const averagePrice = toFiniteNumber(order?.average, 0);
     const orderCost = toFiniteNumber(order?.cost, 0);
+    const directPrice = toFiniteNumber(order?.price, 0);
+    const infoAveragePrice = toFiniteNumber(order?.info?.avgPrice, 0);
+    const infoQuoteQty = toFiniteNumber(order?.info?.cumQuoteQty, 0);
     const resolvedQuantity = filledQuantity > 0 ? filledQuantity : fallbackQuantity;
     const resolvedPrice = averagePrice > 0
         ? averagePrice
-        : (filledQuantity > 0 && orderCost > 0 ? orderCost / filledQuantity : fallbackPrice);
+        : (infoAveragePrice > 0
+            ? infoAveragePrice
+            : (filledQuantity > 0 && orderCost > 0
+                ? orderCost / filledQuantity
+                : (filledQuantity > 0 && infoQuoteQty > 0 ? infoQuoteQty / filledQuantity : (directPrice > 0 ? directPrice : fallbackPrice))));
     return { price: resolvedPrice, quantity: resolvedQuantity };
 };
 
-const cancelGridOrders = async (orders, reason = "SYNC") => {
+const fetchOpenOrdersSnapshot = async (symbol) => {
+    metrics.api.orders++;
+    const regularOrders = await exchange.fetchOpenOrders(symbol);
+    metrics.api.orders++;
+    const triggerOrders = await exchange.fetchOpenOrders(symbol, undefined, undefined, { trigger: true });
+    return { regularOrders, triggerOrders };
+};
+
+const cancelManagedOrders = async (orders, reason, label, cancelOptions = undefined) => {
     if (!Array.isArray(orders) || orders.length === 0) return;
-    console.log(`[GRID] Cancelling ${orders.length} grid order(s) (${reason})...`);
+    console.log(`[${label}] Cancelling ${orders.length} ${label.toLowerCase()} order(s) (${reason})...`);
     for (const order of orders) {
         try {
-            await exchange.cancelOrder(order.id, db.pair);
+            await exchange.cancelOrder(order.id, db.pair, cancelOptions);
             metrics.api.orders++;
         } catch (error) {
-            console.warn(`[WARN] Failed to cancel grid order ${order.id}: ${error.message}`);
+            console.warn(`[WARN] Failed to cancel ${label.toLowerCase()} order ${order.id}: ${error.message}`);
         }
     }
 };
 
+const cancelGridOrders = async (orders, reason = "SYNC") => cancelManagedOrders(orders, reason, "GRID");
+
 const cancelTpOrders = async (orders, reason = "TP_SYNC") => {
-    if (!Array.isArray(orders) || orders.length === 0) return;
-    console.log(`[TP] Cancelling ${orders.length} TP order(s) (${reason})...`);
-    for (const order of orders) {
-        try {
-            await exchange.cancelOrder(order.id, db.pair);
-            metrics.api.orders++;
-        } catch (error) {
-            console.warn(`[WARN] Failed to cancel TP order ${order.id}: ${error.message}`);
-        }
-    }
+    return cancelManagedOrders(orders, reason, "TP");
 };
 
 const cancelSlOrders = async (orders, reason = "SL_SYNC") => {
-    if (!Array.isArray(orders) || orders.length === 0) return;
-    console.log(`[SL] Cancelling ${orders.length} SL order(s) (${reason})...`);
-    for (const order of orders) {
-        try {
-            await exchange.cancelOrder(order.id, db.pair, { trigger: true });
-            metrics.api.orders++;
-        } catch (error) {
-            console.warn(`[WARN] Failed to cancel SL order ${order.id}: ${error.message}`);
-        }
-    }
+    return cancelManagedOrders(orders, reason, "SL", { trigger: true });
 };
 
 const fetchOpenExchangePositions = async () => {
@@ -959,7 +1002,7 @@ const isDirectionalOrderPlanValid = (side, entryPrice, orderPlan) => {
 
 const logOrderPlan = (strategyName, entryPrice, adjustedQty, orderPlan) => {
     console.log("   Order Details:");
-    console.log(`   - Amount: ${db.gridOrderSizeUsdt} USDT × ${db.leverage}x = ${(db.gridOrderSizeUsdt * db.leverage).toFixed(2)} USDT`);
+    console.log(`   - Amount: ${db.gridOrderSizeUsdt} USDT x ${db.leverage}x = ${(db.gridOrderSizeUsdt * db.leverage).toFixed(2)} USDT`);
     console.log(`   - Quantity: ${adjustedQty} ${db.pair.split('/')[0]}`);
     console.log(`   - Entry Price: ${entryPrice}`);
     console.log(`   - Strategy: ${strategyName}`);
@@ -1057,7 +1100,6 @@ const escapeCsvField = (value) => {
     return text;
 };
 
-// -------------------- MODIFIED: placeReduceOnlyTakeProfitOrder with duplicate handling & sync --------------------
 const placeReduceOnlyTakeProfitOrder = async (position) => {
     if (!Number.isFinite(position?.targetPrice) || position.targetPrice <= 0) return null;
     if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
@@ -1149,7 +1191,6 @@ const placeReduceOnlyTakeProfitOrder = async (position) => {
     }
 };
 
-// -------------------- MODIFIED: placeReduceOnlyStopLossOrder with duplicate handling & sync --------------------
 const placeReduceOnlyStopLossOrder = async (position) => {
     if (!Number.isFinite(position?.stopLossPrice) || position.stopLossPrice <= 0) return null;
     if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
@@ -1245,8 +1286,8 @@ const placeReduceOnlyStopLossOrder = async (position) => {
 
 // -------------------- Helper to cancel order by clientOrderId --------------------
 const cancelOrderByClientOrderId = async (clientOrderId, symbol) => {
-    const openOrders = await exchange.fetchOpenOrders(symbol);
-    const order = openOrders.find(o => getExchangeClientOrderId(o) === clientOrderId);
+    const { regularOrders, triggerOrders } = await fetchOpenOrdersSnapshot(symbol);
+    const order = regularOrders.find(o => getExchangeClientOrderId(o) === clientOrderId);
     if (order) {
         await exchange.cancelOrder(order.id, symbol);
         metrics.api.orders++;
@@ -1254,7 +1295,6 @@ const cancelOrderByClientOrderId = async (clientOrderId, symbol) => {
         return true;
     }
 
-    const triggerOrders = await exchange.fetchOpenOrders(symbol, undefined, undefined, { trigger: true });
     const triggerOrder = triggerOrders.find(o => getExchangeClientOrderId(o) === clientOrderId);
     if (triggerOrder) {
         await exchange.cancelOrder(triggerOrder.id, symbol, { trigger: true });
@@ -1280,7 +1320,9 @@ const toPositionMapKey = (positionSide) => {
 const getActivePositionsMap = (rawActivePosition = db?.activePosition) => {
     if (!rawActivePosition || typeof rawActivePosition !== "object") return {};
     if (isLegacySinglePosition(rawActivePosition)) {
-        const fallbackSide = rawActivePosition.positionSide || (isHedgeModeEnabled() ? (rawActivePosition.side === "buy" ? "LONG" : "SHORT") : "BOTH");
+        const rawPositionSide = String(rawActivePosition.positionSide || "").toUpperCase();
+        const rawSide = String(rawActivePosition.side || "").toLowerCase();
+        const fallbackSide = rawPositionSide || (rawSide === "buy" ? "LONG" : (rawSide === "sell" ? "SHORT" : "BOTH"));
         const key = toPositionMapKey(fallbackSide);
         return { [key]: rawActivePosition };
     }
@@ -1322,7 +1364,7 @@ const removeActivePositionByKey = (key) => {
 const getTrackedPositionSideLabel = (position) => {
     const rawPositionSide = String(position?.positionSide || position?.info?.positionSide || "").toUpperCase();
     if (rawPositionSide === "LONG" || rawPositionSide === "SHORT" || rawPositionSide === "BOTH") return rawPositionSide;
-    const side = position?.side;
+    const side = String(position?.side || "").toLowerCase();
     if (side === "buy") return isHedgeModeEnabled() ? "LONG" : "BOTH";
     if (side === "sell") return isHedgeModeEnabled() ? "SHORT" : "BOTH";
     return isHedgeModeEnabled() ? null : "BOTH";
@@ -1330,20 +1372,25 @@ const getTrackedPositionSideLabel = (position) => {
 
 const getOrderPositionSide = (side) => {
     if (!isHedgeModeEnabled()) return "BOTH";
-    return side === "buy" ? "LONG" : "SHORT";
+    return String(side || "").toLowerCase() === "buy" ? "LONG" : "SHORT";
 };
 
 const getClosePositionSide = (position) => {
     if (!isHedgeModeEnabled()) return "BOTH";
     const tracked = getTrackedPositionSideLabel(position);
     if (tracked === "LONG" || tracked === "SHORT") return tracked;
-    return position?.side === "buy" ? "LONG" : "SHORT";
+    return String(position?.side || "").toLowerCase() === "buy" ? "LONG" : "SHORT";
 };
 
 const matchesOrderToTrackedPosition = (order, position) => {
     const orderClientId = getExchangeClientOrderId(order);
     if (!orderClientId) return false;
-    const expectedCloseSide = position?.side === "buy" ? "sell" : "buy";
+    const positionSide = String(position?.side || "").toLowerCase();
+    const trackedSide = getTrackedPositionSideLabel(position);
+    const expectedCloseSide = positionSide === "buy" || trackedSide === "LONG"
+        ? "sell"
+        : (positionSide === "sell" || trackedSide === "SHORT" ? "buy" : null);
+    if (!expectedCloseSide) return false;
     if (String(order?.side || "").toLowerCase() !== expectedCloseSide) return false;
     if (!isHedgeModeEnabled()) return true;
     const orderPositionSide = String(order?.info?.positionSide || order?.positionSide || "").toUpperCase();
@@ -1412,8 +1459,9 @@ const getExchangePositionContracts = (position) => {
 };
 
 const getExchangePositionSide = (position) => {
-    if (position?.side === "long") return "buy";
-    if (position?.side === "short") return "sell";
+    const side = String(position?.side || "").toLowerCase();
+    if (side === "long") return "buy";
+    if (side === "short") return "sell";
     const contracts = getExchangePositionContracts(position);
     if (contracts > 0) return "buy";
     if (contracts < 0) return "sell";
@@ -1424,8 +1472,9 @@ const getExchangePositionModeSide = (position) => {
     if (!isHedgeModeEnabled()) return "BOTH";
     const rawPositionSide = String(position?.positionSide || position?.info?.positionSide || "").toUpperCase();
     if (rawPositionSide === "LONG" || rawPositionSide === "SHORT" || rawPositionSide === "BOTH") return rawPositionSide;
-    if (position?.side === "long") return "LONG";
-    if (position?.side === "short") return "SHORT";
+    const side = String(position?.side || "").toLowerCase();
+    if (side === "long") return "LONG";
+    if (side === "short") return "SHORT";
     return getExchangePositionSide(position) === "buy" ? "LONG" : (getExchangePositionSide(position) === "sell" ? "SHORT" : "BOTH");
 };
 
@@ -1453,29 +1502,40 @@ const findOpenExchangePosition = (positions, pair, trackedPosition = null) => {
     return openPositions[0];
 };
 
-const buildSyncedActivePosition = (openPosition, entryPrice) => {
+const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = null) => {
     const contracts = Math.abs(getExchangePositionContracts(openPosition));
     const side = getExchangePositionSide(openPosition) || "buy";
     const positionSide = getExchangePositionModeSide(openPosition);
+    const preservedStrategy = existingPosition?.strategy || "SYNC_ONLY";
+    const preservedTrailingEnabled = existingPosition?.trailingEnabled ?? Boolean(db.trailingEnabled);
+    const preservedTrailingActivateATR = existingPosition?.trailingActivateATR ?? toFiniteNumber(db.trailingActivateATR, 1.2);
+    const preservedTrailingOffsetATR = existingPosition?.trailingOffsetATR ?? toFiniteNumber(db.trailingOffsetATR, 0.6);
+    const preservedEntryTime = Number.isFinite(existingPosition?.entryTime) ? existingPosition.entryTime : Date.now() - 300000;
+    const preservedHighestSinceEntry = Number.isFinite(existingPosition?.highestSinceEntry) ? existingPosition.highestSinceEntry : entryPrice;
+    const preservedLowestSinceEntry = Number.isFinite(existingPosition?.lowestSinceEntry) ? existingPosition.lowestSinceEntry : entryPrice;
     const targetPrice = side === "buy"
         ? formatPriceToMarketPrecision(db.pair, entryPrice + (db.gridTargetProfitUsdt / Math.max(contracts, 1e-8)))
         : formatPriceToMarketPrecision(db.pair, entryPrice - (db.gridTargetProfitUsdt / Math.max(contracts, 1e-8)));
     const stopLossPrice = side === "buy"
         ? formatPriceToMarketPrecision(db.pair, entryPrice - (Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8)))
         : formatPriceToMarketPrecision(db.pair, entryPrice + (Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8)));
+    const preservedTargetPrice = Number.isFinite(existingPosition?.targetPrice) ? existingPosition.targetPrice : targetPrice;
+    const preservedStopLossPrice = Number.isFinite(existingPosition?.stopLossPrice) ? existingPosition.stopLossPrice : stopLossPrice;
+    const preservedTargetProfitUSDT = Number.isFinite(existingPosition?.targetProfitUSDT) ? existingPosition.targetProfitUSDT : db.gridTargetProfitUsdt;
+    const preservedStopLossUSDT = Number.isFinite(existingPosition?.stopLossUSDT) ? existingPosition.stopLossUSDT : -db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100);
     return {
-        side, entryPrice, targetPrice, stopLossPrice,
-        stopLossUSDT: -db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100),
+        side, entryPrice, targetPrice: preservedTargetPrice, stopLossPrice: preservedStopLossPrice,
+        stopLossUSDT: preservedStopLossUSDT,
         orderId: `SYNC_${Date.now()}`, quantity: contracts,
-        entryTime: Date.now() - 300000, highestSinceEntry: entryPrice, lowestSinceEntry: entryPrice,
+        entryTime: preservedEntryTime, highestSinceEntry: preservedHighestSinceEntry, lowestSinceEntry: preservedLowestSinceEntry,
         marginMode: (db.marginMode || "isolated").toLowerCase(),
         positionSide,
-        targetProfitUSDT: db.gridTargetProfitUsdt,
+        targetProfitUSDT: preservedTargetProfitUSDT,
         leverageAtEntry: toFiniteNumber(db.leverage, 1),
-        trailingEnabled: Boolean(db.trailingEnabled),
-        trailingActivateATR: toFiniteNumber(db.trailingActivateATR, 1.2),
-        trailingOffsetATR: toFiniteNumber(db.trailingOffsetATR, 0.6),
-        strategy: "SYNC_ONLY",
+        trailingEnabled: preservedTrailingEnabled,
+        trailingActivateATR: preservedTrailingActivateATR,
+        trailingOffsetATR: preservedTrailingOffsetATR,
+        strategy: preservedStrategy,
         tpOrderId: null, tpClientOrderId: null, slOrderId: null, slClientOrderId: null
     };
 };
@@ -1486,12 +1546,14 @@ const shouldRefreshSyncedPosition = (activePosition, nextPosition) => {
     const nextQuantity = toFiniteNumber(nextPosition.quantity, 0);
     const currentEntry = toFiniteNumber(activePosition.entryPrice, 0);
     const nextEntry = toFiniteNumber(nextPosition.entryPrice, 0);
+    const currentSide = String(activePosition.side || "").toLowerCase();
+    const nextSide = String(nextPosition.side || "").toLowerCase();
     const quantityChanged = Math.abs(currentQuantity - nextQuantity) > POSITION_SYNC_QTY_TOLERANCE;
     const entryDeltaPercent = currentEntry > 0 ? Math.abs((currentEntry - nextEntry) / currentEntry) * 100 : 100;
     const entryChanged = entryDeltaPercent > POSITION_SYNC_ENTRY_TOLERANCE_PCT;
     const currentPositionSide = getTrackedPositionSideLabel(activePosition);
     const nextPositionSide = getTrackedPositionSideLabel(nextPosition);
-    return activePosition.side !== nextPosition.side || currentPositionSide !== nextPositionSide || quantityChanged || entryChanged;
+    return currentSide !== nextSide || currentPositionSide !== nextPositionSide || quantityChanged || entryChanged;
 };
 
 const isSameTrackedPosition = (currentPosition, nextPosition) => {
@@ -1500,10 +1562,12 @@ const isSameTrackedPosition = (currentPosition, nextPosition) => {
     const nextQuantity = toFiniteNumber(nextPosition.quantity, 0);
     const currentEntry = toFiniteNumber(currentPosition.entryPrice, 0);
     const nextEntry = toFiniteNumber(nextPosition.entryPrice, 0);
+    const currentSide = String(currentPosition.side || "").toLowerCase();
+    const nextSide = String(nextPosition.side || "").toLowerCase();
     const quantityChanged = Math.abs(currentQuantity - nextQuantity) > POSITION_SYNC_QTY_TOLERANCE;
     const entryDeltaPercent = currentEntry > 0 ? Math.abs((currentEntry - nextEntry) / currentEntry) * 100 : 100;
     return (
-        currentPosition.side === nextPosition.side &&
+        currentSide === nextSide &&
         getTrackedPositionSideLabel(currentPosition) === getTrackedPositionSideLabel(nextPosition) &&
         !quantityChanged &&
         entryDeltaPercent <= POSITION_SYNC_ENTRY_TOLERANCE_PCT
@@ -1711,20 +1775,27 @@ const resetActivePosition = async () => {
     await saveDB();
 };
 
-const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, reason, exitPrice = null) => {
+const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, reason, exitPrice = null, positionKey = null) => {
     await cancelManagedOrdersForPosition(position, "POSITION_CLOSED");
     db.dailyPnL += netProfitUSDT;
     db.dailyTrades++;
 
     const resolvedExitPrice = Number.isFinite(exitPrice) && exitPrice > 0 ? exitPrice : await getPrice(true);
     
-    logTrade(position.side === "buy" ? "LONG" : "SHORT", position.entryPrice, resolvedExitPrice, `CLOSE:${reason}`, netProfitUSDT);
+    logTrade(
+        position.side === "buy" ? "LONG" : "SHORT",
+        position.entryPrice,
+        resolvedExitPrice,
+        `CLOSE:${reason}`,
+        netProfitUSDT,
+        position.strategy || null
+    );
 
     console.log(`\n[OK] POSITION CLOSED: ${reason}`);
     console.log(`   Net P&L: ${netProfitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
     console.log(`   Daily Total Net P&L: ${db.dailyPnL.toFixed(4)} USDT / ${db.dailyTrades} trades`);
 
-    removeActivePositionByKey(getTrackedPositionSideLabel(position));
+    removeActivePositionByKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position));
     await saveDB();
     metrics.trades.closed++;
     if (netProfitUSDT > 0) metrics.trades.wins++;
@@ -1735,6 +1806,7 @@ const mergeRuntimeConfig = (nextConfig) => {
     const currentPositionsMap = getActivePositionsMap(db.activePosition);
     const nextPositionsMap = getActivePositionsMap(nextConfig.activePosition);
     const hasActiveTradeState = Object.keys(currentPositionsMap).length > 0;
+
     if (Object.keys(currentPositionsMap).length > 0 && Object.keys(nextPositionsMap).length === 0) {
         nextConfig.activePosition = currentPositionsMap;
     } else {
@@ -1745,8 +1817,9 @@ const mergeRuntimeConfig = (nextConfig) => {
         });
         nextConfig.activePosition = Object.keys(nextPositionsMap).length > 0 ? nextPositionsMap : null;
     }
+
     if (hasActiveTradeState) {
-        const protectedKeys = ["pair", "leverage", "marginMode", "gridTimeframe"];
+        const protectedKeys = ["pair", "leverage", "marginMode", "gridTimeframe", "strategy"];
         protectedKeys.forEach((key) => {
             if (nextConfig[key] !== db[key]) {
                 console.warn(`[WARN] Preserving runtime ${key}=${db[key]} while positions are active.`);
@@ -1754,10 +1827,12 @@ const mergeRuntimeConfig = (nextConfig) => {
             }
         });
     }
+
     if (db.dailyTrades > nextConfig.dailyTrades) {
         nextConfig.dailyPnL = db.dailyPnL;
         nextConfig.dailyTrades = db.dailyTrades;
     }
+
     Object.keys(nextConfig).forEach((key) => { db[key] = nextConfig[key]; });
 };
 
@@ -1926,7 +2001,8 @@ const normalizeConfig = (config) => {
     const isValidTimeframe = (value) => typeof value === "string" && /^[1-9]\d*[mhdwM]$/.test(value.trim());
     const rawPair = typeof normalized.pair === "string" ? normalized.pair.trim() : "";
     normalized.pair = rawPair || defaults.pair;
-    normalized.strategy = "futures_grid";
+    const rawStrategy = typeof normalized.strategy === "string" ? normalized.strategy.trim().toLowerCase() : "";
+    normalized.strategy = rawStrategy || defaults.strategy;
     const rawMarginMode = typeof normalized.marginMode === "string" ? normalized.marginMode.trim().toLowerCase() : "";
     normalized.marginMode = rawMarginMode === "isolated" || rawMarginMode === "cross" ? rawMarginMode : defaults.marginMode;
     const rawGridTimeframe = typeof normalized.gridTimeframe === "string"
@@ -1970,8 +2046,8 @@ const initializeDB = async () => {
         return true;
     } catch (error) {
         console.error("[ERROR] Error initializing DB:", error.message);
-        db = getDefaultConfig();
-        return true;
+        db = null;
+        return false;
     }
 };
 
@@ -2005,14 +2081,14 @@ const syncPositionWithExchange = async () => {
         }
         const openPositions = await fetchOpenExchangePositions();
         const currentPrice = await getPrice();
+        const currentPositionsMap = getActivePositionsMap();
         const nextPositionsMap = {};
         openPositions.forEach((openPosition) => {
             const entryPrice = getExchangePositionEntryPrice(openPosition, currentPrice);
-            const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice);
+            const existingPosition = currentPositionsMap[toPositionMapKey(getExchangePositionModeSide(openPosition))] || null;
+            const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, existingPosition);
             nextPositionsMap[toPositionMapKey(syncedPosition.positionSide)] = syncedPosition;
         });
-
-        const currentPositionsMap = getActivePositionsMap();
         const currentKeys = Object.keys(currentPositionsMap).sort().join(",");
         const nextKeys = Object.keys(nextPositionsMap).sort().join(",");
         let shouldPersist = currentKeys !== nextKeys;
@@ -2030,9 +2106,8 @@ const syncPositionWithExchange = async () => {
         }
 
         const removedPositions = Object.entries(currentPositionsMap)
-            .filter(([key]) => !nextPositionsMap[key])
-            .map(([, position]) => position);
-        for (const removedPosition of removedPositions) {
+            .filter(([key]) => !nextPositionsMap[key]);
+        for (const [removedKey, removedPosition] of removedPositions) {
             if (Number.isFinite(currentPrice) && currentPrice > 0) {
                 const pnlState = calculatePositionPnL(removedPosition, currentPrice);
                 await finalizeClosedPosition(
@@ -2040,7 +2115,8 @@ const syncPositionWithExchange = async () => {
                     pnlState.netProfitUSDT,
                     pnlState.profitPercent,
                     "POSITION_SYNC_REMOVED",
-                    currentPrice
+                    currentPrice,
+                    removedKey
                 );
             } else {
                 await cancelManagedOrdersForPosition(removedPosition, "POSITION_SYNC_REMOVED");
@@ -2170,7 +2246,7 @@ const analyzeSignal = async () => {
         return {
             canLong: finalState.canLong, canShort: finalState.canShort, price: snapshot.currentPrice,
             atr: snapshot.currentATR, hasSignal: finalState.setupDetected,
-            strategy: "FUTURES_GRID",
+            strategy: signalState.strategyName || strategy.toUpperCase(),
             riskOverrides: buildRiskOverrides(),
             targetPrice: finalState.canLong ? signalState.longPlan?.targetPrice : (finalState.canShort ? signalState.shortPlan?.targetPrice : null),
             stopLossPrice: finalState.canLong ? signalState.longPlan?.stopLossPrice : (finalState.canShort ? signalState.shortPlan?.stopLossPrice : null)
@@ -2246,6 +2322,60 @@ const formatOrderSummary = (order, typeLabel) => {
     return `${typeLabel} ${side} qty=${Number.isFinite(amount) ? amount : "N/A"} price=${Number.isFinite(price) ? price : "N/A"} id=${clientId}`;
 };
 
+const syncManagedReduceOnlyOrder = async ({
+    positionKey,
+    position,
+    matchingOrders,
+    matchingOrder,
+    priceKey,
+    orderIdKey,
+    clientIdKey,
+    label,
+    syncPrice,
+    placeReplacement,
+    buildClientOrderId,
+    cancelDuplicates,
+    cancelReason,
+    syncLogPrefix,
+    attachLogPrefix
+}) => {
+    if (matchingOrder) {
+        if (matchingOrders.length > 1) {
+            const duplicateOrders = matchingOrders.filter((order) => order !== matchingOrder);
+            if (duplicateOrders.length > 0) await cancelDuplicates(duplicateOrders, cancelReason);
+        }
+
+        const nextClientOrderId = getExchangeClientOrderId(matchingOrder) || position[clientIdKey] || buildClientOrderId(position);
+        const nextOrderId = matchingOrder.id || position[orderIdKey] || null;
+        const nextPrice = syncPrice(matchingOrder);
+
+        if (position[orderIdKey] !== nextOrderId || position[clientIdKey] !== nextClientOrderId || position[priceKey] !== nextPrice) {
+            console.log(`${syncLogPrefix} Synced existing ${label} order for ${positionKey} @ ${nextPrice}`);
+            position[orderIdKey] = nextOrderId;
+            position[clientIdKey] = nextClientOrderId;
+            position[priceKey] = nextPrice;
+            upsertActivePosition(position);
+            await saveDB();
+        }
+        return;
+    }
+
+    if (matchingOrders.length > 0) {
+        console.log(`${syncLogPrefix} Existing ${label} order for ${positionKey} no longer matches target. Replacing...`);
+        await cancelDuplicates(matchingOrders, cancelReason.replace("_DUPLICATE", "_REPLACE"));
+    } else {
+        console.log(`${syncLogPrefix} No exchange ${label} found for ${positionKey}. Creating replacement...`);
+    }
+
+    const placedOrder = await placeReplacement(position);
+    if (!placedOrder) return;
+    position[orderIdKey] = placedOrder.id || null;
+    position[clientIdKey] = getExchangeClientOrderId(placedOrder) || buildClientOrderId(position);
+    upsertActivePosition(position);
+    await saveDB();
+    console.log(`${attachLogPrefix} Attached exchange ${label} to ${positionKey}`);
+};
+
 const ensureReduceOnlyTakeProfitOrder = async (positionKey, sourcePosition) => {
     const position = { ...sourcePosition };
     if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
@@ -2256,39 +2386,23 @@ const ensureReduceOnlyTakeProfitOrder = async (positionKey, sourcePosition) => {
         const orderAmount = getOrderQuantity(order);
         return isManagedOrderPriceMatch(position.targetPrice, orderPrice) && Math.abs(orderAmount - position.quantity) <= POSITION_SYNC_QTY_TOLERANCE;
     });
-    if (matchingOrder) {
-        if (matchingTpOrders.length > 1) {
-            const duplicateTpOrders = matchingTpOrders.filter((order) => order !== matchingOrder);
-            if (duplicateTpOrders.length > 0) await cancelTpOrders(duplicateTpOrders, "TP_DUPLICATE");
-        }
-        const nextClientOrderId = getExchangeClientOrderId(matchingOrder) || position.tpClientOrderId || getTpClientOrderId(position);
-        const nextOrderId = matchingOrder.id || position.tpOrderId || null;
-        const nextPrice = toFiniteNumber(matchingOrder.price, position.targetPrice);
-        if (position.tpOrderId !== nextOrderId || position.tpClientOrderId !== nextClientOrderId || position.targetPrice !== nextPrice) {
-            console.log(`[TP] Synced existing TP order for ${positionKey} @ ${nextPrice}`);
-            position.tpOrderId = nextOrderId;
-            position.tpClientOrderId = nextClientOrderId;
-            position.targetPrice = nextPrice;
-            upsertActivePosition(position);
-            await saveDB();
-        }
-        return;
-    }
-
-    if (matchingTpOrders.length > 0) {
-        console.log(`[TP] Existing TP order for ${positionKey} no longer matches target. Replacing...`);
-        await cancelTpOrders(matchingTpOrders, "TP_REPLACE");
-    } else {
-        console.log(`[TP] No exchange TP found for ${positionKey}. Creating replacement...`);
-    }
-
-    const placedOrder = await placeReduceOnlyTakeProfitOrder(position);
-    if (!placedOrder) return;
-    position.tpOrderId = placedOrder.id || null;
-    position.tpClientOrderId = getExchangeClientOrderId(placedOrder) || getTpClientOrderId(position);
-    upsertActivePosition(position);
-    await saveDB();
-    console.log(`[TP] Attached exchange TP to ${positionKey}`);
+    return syncManagedReduceOnlyOrder({
+        positionKey,
+        position,
+        matchingOrders: matchingTpOrders,
+        matchingOrder,
+        priceKey: "targetPrice",
+        orderIdKey: "tpOrderId",
+        clientIdKey: "tpClientOrderId",
+        label: "TP",
+        syncPrice: (order) => toFiniteNumber(order.price, position.targetPrice),
+        placeReplacement: placeReduceOnlyTakeProfitOrder,
+        buildClientOrderId: getTpClientOrderId,
+        cancelDuplicates: cancelTpOrders,
+        cancelReason: "TP_DUPLICATE",
+        syncLogPrefix: "[TP]",
+        attachLogPrefix: "[TP]"
+    });
 };
 
 const ensureReduceOnlyStopLossOrder = async (positionKey, sourcePosition) => {
@@ -2301,39 +2415,23 @@ const ensureReduceOnlyStopLossOrder = async (positionKey, sourcePosition) => {
         const orderAmount = getOrderQuantity(order);
         return isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice) && Math.abs(orderAmount - position.quantity) <= POSITION_SYNC_QTY_TOLERANCE;
     });
-    if (matchingOrder) {
-        if (matchingSlOrders.length > 1) {
-            const duplicateSlOrders = matchingSlOrders.filter((order) => order !== matchingOrder);
-            if (duplicateSlOrders.length > 0) await cancelSlOrders(duplicateSlOrders, "SL_DUPLICATE");
-        }
-        const nextClientOrderId = getExchangeClientOrderId(matchingOrder) || position.slClientOrderId || getSlClientOrderId(position);
-        const nextOrderId = matchingOrder.id || position.slOrderId || null;
-        const nextStopPrice = getOrderTriggerPrice(matchingOrder);
-        if (position.slOrderId !== nextOrderId || position.slClientOrderId !== nextClientOrderId || position.stopLossPrice !== nextStopPrice) {
-            console.log(`[SL] Synced existing SL order for ${positionKey} @ ${nextStopPrice}`);
-            position.slOrderId = nextOrderId;
-            position.slClientOrderId = nextClientOrderId;
-            position.stopLossPrice = nextStopPrice;
-            upsertActivePosition(position);
-            await saveDB();
-        }
-        return;
-    }
-
-    if (matchingSlOrders.length > 0) {
-        console.log(`[SL] Existing SL order for ${positionKey} no longer matches stop. Replacing...`);
-        await cancelSlOrders(matchingSlOrders, "SL_REPLACE");
-    } else {
-        console.log(`[SL] No exchange SL found for ${positionKey}. Creating replacement...`);
-    }
-
-    const placedOrder = await placeReduceOnlyStopLossOrder(position);
-    if (!placedOrder) return;
-    position.slOrderId = placedOrder.id || null;
-    position.slClientOrderId = getExchangeClientOrderId(placedOrder) || getSlClientOrderId(position);
-    upsertActivePosition(position);
-    await saveDB();
-    console.log(`[SL] Attached exchange SL to ${positionKey}`);
+    return syncManagedReduceOnlyOrder({
+        positionKey,
+        position,
+        matchingOrders: matchingSlOrders,
+        matchingOrder,
+        priceKey: "stopLossPrice",
+        orderIdKey: "slOrderId",
+        clientIdKey: "slClientOrderId",
+        label: "SL",
+        syncPrice: getOrderTriggerPrice,
+        placeReplacement: placeReduceOnlyStopLossOrder,
+        buildClientOrderId: getSlClientOrderId,
+        cancelDuplicates: cancelSlOrders,
+        cancelReason: "SL_DUPLICATE",
+        syncLogPrefix: "[SL]",
+        attachLogPrefix: "[SL]"
+    });
 };
 
 // -------------------- PLACE ORDER --------------------
@@ -2345,6 +2443,20 @@ const placeOrder = async (side, signalData = {}) => {
         isPlacingOrder = true;
         console.log(`\n[ORDER] Attempting to place ${side.toUpperCase()} order...`);
         await setMarginMode();
+        const openExchangePositions = await fetchOpenExchangePositions();
+        const conflictingExchangePosition = isHedgeModeEnabled()
+            ? openExchangePositions.find((position) => matchesTrackedPositionSide(position, { positionSide: targetPositionKey, side }))
+            : openExchangePositions[0] || null;
+        if (conflictingExchangePosition) {
+            console.warn(`[WARN] Skipping ${side.toUpperCase()} order because an exchange position is already open for the same side.`);
+            return;
+        }
+        const managedOrdersSnapshot = await fetchManagedOpenOrdersSnapshot();
+        const managedOrderCount = managedOrdersSnapshot.grid.length + managedOrdersSnapshot.tp.length + managedOrdersSnapshot.sl.length;
+        if (managedOrderCount > 0) {
+            console.warn(`[WARN] Skipping ${side.toUpperCase()} order because ${managedOrderCount} managed order(s) are still open on the exchange.`);
+            return;
+        }
         await exchange.setLeverage(db.leverage, db.pair);
 
         const tickerPrice = await getPrice(true);
@@ -2359,81 +2471,82 @@ const placeOrder = async (side, signalData = {}) => {
         const sizeValidation = validateOrderSize(market, adjustedQty, tickerPrice);
         if (!sizeValidation.valid) { console.error(sizeValidation.reason); return; }
 
-	        const orderPlan = buildOrderPlan(
-	            side,
-	            entryPrice,
-	            adjustedQty,
-	            signalATR,
-	            riskOverrides,
-	            { targetPrice: signalTargetPrice, stopLossPrice: signalStopLossPrice }
-	        );
-	        logOrderPlan(strategyName, entryPrice, adjustedQty, orderPlan);
-	        if (!isDirectionalOrderPlanValid(side, entryPrice, orderPlan)) {
-	            console.warn(`[WARN] Skipping ${side.toUpperCase()} order because TP/SL plan is not directional after rounding.`);
-	            return;
-	        }
+        const orderPlan = buildOrderPlan(
+            side,
+            entryPrice,
+            adjustedQty,
+            signalATR,
+            riskOverrides,
+            { targetPrice: signalTargetPrice, stopLossPrice: signalStopLossPrice }
+        );
+        logOrderPlan(strategyName, entryPrice, adjustedQty, orderPlan);
+        if (!isDirectionalOrderPlanValid(side, entryPrice, orderPlan)) {
+            console.warn(`[WARN] Skipping ${side.toUpperCase()} order because TP/SL plan is not directional after rounding.`);
+            return;
+        }
 
-	        const order = await exchange.createOrder(
-	            db.pair,
-	            "market",
-	            side,
+        const order = await exchange.createOrder(
+            db.pair,
+            "market",
+            side,
             adjustedQty,
             undefined,
             buildExchangeOrderParams({ side, positionSide: getOrderPositionSide(side) })
         );
         metrics.api.orders++;
-        const fillSnapshot = getOrderFillSnapshot(order, tickerPrice, adjustedQty);
-	        const actualEntryPrice = fillSnapshot.price;
-	        const actualQuantity = fillSnapshot.quantity;
-	        const actualOrderPlan = buildOrderPlan(
-	            side,
-	            actualEntryPrice,
-            actualQuantity,
-	            signalATR,
-	            riskOverrides,
-	            { targetPrice: signalTargetPrice, stopLossPrice: signalStopLossPrice }
-	        );
-	        const actualPlanValid = isDirectionalOrderPlanValid(side, actualEntryPrice, actualOrderPlan);
-	        const fallbackPlanValid = isDirectionalOrderPlanValid(side, actualEntryPrice, orderPlan);
-	        const closeSide = side === "buy" ? "sell" : "buy";
-	        let resolvedOrderPlan = actualPlanValid ? actualOrderPlan : (fallbackPlanValid ? orderPlan : null);
-	        if (!resolvedOrderPlan) {
-	            console.error(`[ERROR] Unable to derive a valid TP/SL plan after fill for ${side.toUpperCase()} order. Closing position to avoid unmanaged exposure.`);
-	            try {
-	                await exchange.createOrder(
-	                    db.pair,
-	                    "market",
-	                    closeSide,
-	                    actualQuantity,
-	                    undefined,
-	                    buildExchangeOrderParams({ side: closeSide, reduceOnly: true, positionSide: getOrderPositionSide(closeSide) })
-	                );
-	                metrics.api.orders++;
-	            } catch (closeError) {
-	                console.error(`[ERROR] Failed to immediately close invalid ${side.toUpperCase()} position: ${closeError.message}`);
-	            }
-	            await syncPositionWithExchange();
-	            return;
-	        }
-	        if (!actualPlanValid) {
-	            console.warn(`[WARN] Actual fill produced an invalid directional TP/SL plan for ${side.toUpperCase()} order. Falling back to the pre-fill plan.`);
-	        }
 
-	        upsertActivePosition({
-	            side: side, entryPrice: actualEntryPrice, targetPrice: resolvedOrderPlan.targetPrice,
-	            stopLossPrice: resolvedOrderPlan.stopLossPrice, stopLossUSDT: resolvedOrderPlan.stopLossUSDT,
-	            orderId: order.id, quantity: actualQuantity, entryTime: Date.now(), highestSinceEntry: actualEntryPrice,
-	            lowestSinceEntry: actualEntryPrice, marginMode: (db.marginMode || "isolated").toLowerCase(),
-	            positionSide: getOrderPositionSide(side),
-	            targetProfitUSDT: resolvedOrderPlan.targetProfitUSDT, leverageAtEntry: toFiniteNumber(db.leverage, 1), trailingEnabled: resolvedOrderPlan.trailingEnabled, atrAtEntry: signalATR, strategy: strategyName,
-	            trailingActivateATR: resolvedOrderPlan.trailingActivateATR, trailingOffsetATR: resolvedOrderPlan.trailingOffsetATR,
-	            tpOrderId: null, tpClientOrderId: null, slOrderId: null, slClientOrderId: null
-	        });
+        const fillSnapshot = getOrderFillSnapshot(order, tickerPrice, adjustedQty);
+        const actualEntryPrice = fillSnapshot.price;
+        const actualQuantity = fillSnapshot.quantity;
+        const actualOrderPlan = buildOrderPlan(
+            side,
+            actualEntryPrice,
+            actualQuantity,
+            signalATR,
+            riskOverrides,
+            { targetPrice: signalTargetPrice, stopLossPrice: signalStopLossPrice }
+        );
+        const actualPlanValid = isDirectionalOrderPlanValid(side, actualEntryPrice, actualOrderPlan);
+        const fallbackPlanValid = isDirectionalOrderPlanValid(side, actualEntryPrice, orderPlan);
+        const closeSide = side === "buy" ? "sell" : "buy";
+        let resolvedOrderPlan = actualPlanValid ? actualOrderPlan : (fallbackPlanValid ? orderPlan : null);
+        if (!resolvedOrderPlan) {
+            console.error(`[ERROR] Unable to derive a valid TP/SL plan after fill for ${side.toUpperCase()} order. Closing position to avoid unmanaged exposure.`);
+            try {
+                await exchange.createOrder(
+                    db.pair,
+                    "market",
+                    closeSide,
+                    actualQuantity,
+                    undefined,
+                    buildExchangeOrderParams({ side: closeSide, reduceOnly: true, positionSide: getOrderPositionSide(side) })
+                );
+                metrics.api.orders++;
+            } catch (closeError) {
+                console.error(`[ERROR] Failed to immediately close invalid ${side.toUpperCase()} position: ${closeError.message}`);
+            }
+            await syncPositionWithExchange();
+            return;
+        }
+        if (!actualPlanValid) {
+            console.warn(`[WARN] Actual fill produced an invalid directional TP/SL plan for ${side.toUpperCase()} order. Falling back to the pre-fill plan.`);
+        }
+
+        upsertActivePosition({
+            side: side, entryPrice: actualEntryPrice, targetPrice: resolvedOrderPlan.targetPrice,
+            stopLossPrice: resolvedOrderPlan.stopLossPrice, stopLossUSDT: resolvedOrderPlan.stopLossUSDT,
+            orderId: order.id, quantity: actualQuantity, entryTime: Date.now(), highestSinceEntry: actualEntryPrice,
+            lowestSinceEntry: actualEntryPrice, marginMode: (db.marginMode || "isolated").toLowerCase(),
+            positionSide: getOrderPositionSide(side),
+            targetProfitUSDT: resolvedOrderPlan.targetProfitUSDT, leverageAtEntry: toFiniteNumber(db.leverage, 1), trailingEnabled: resolvedOrderPlan.trailingEnabled, atrAtEntry: signalATR, strategy: strategyName,
+            trailingActivateATR: resolvedOrderPlan.trailingActivateATR, trailingOffsetATR: resolvedOrderPlan.trailingOffsetATR,
+            tpOrderId: null, tpClientOrderId: null, slOrderId: null, slClientOrderId: null
+        });
 
         await saveDB();
         await ensureReduceOnlyTakeProfitOrder(targetPositionKey, getActivePositionByKey(targetPositionKey));
         await ensureReduceOnlyStopLossOrder(targetPositionKey, getActivePositionByKey(targetPositionKey));
-        logTrade(side === "buy" ? "LONG" : "SHORT", actualEntryPrice, null, "OPEN");
+        logTrade(side === "buy" ? "LONG" : "SHORT", actualEntryPrice, null, "OPEN", 0, strategyName);
         metrics.trades.opened++;
         console.log(`\n[OK] ORDER PLACED: ${side.toUpperCase()} at ${actualEntryPrice}`);
     } catch (error) { console.error("[ERROR] Order failed:", error.message); }
@@ -2472,7 +2585,8 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
                     realizedPnL.netProfitUSDT,
                     realizedPnL.profitPercent,
                     "POSITION_MISSING",
-                    fallbackExitPrice
+                    fallbackExitPrice,
+                    positionKey
                 );
             } else {
                 removeActivePositionByKey(positionKey);
@@ -2485,6 +2599,20 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
             console.log("[INFO] Position size changed on exchange. Updating local record.");
             position.quantity = actualQuantity;
             position.entryPrice = getExchangePositionEntryPrice(currentPos, position.entryPrice);
+            const recalculatedPlan = buildOrderPlan(
+                side,
+                position.entryPrice,
+                position.quantity,
+                position.atrAtEntry,
+                {
+                    trailingActivateATR: position.trailingActivateATR,
+                    trailingOffsetATR: position.trailingOffsetATR
+                }
+            );
+            position.targetPrice = recalculatedPlan.targetPrice;
+            position.stopLossPrice = recalculatedPlan.stopLossPrice;
+            position.targetProfitUSDT = recalculatedPlan.targetProfitUSDT;
+            position.stopLossUSDT = recalculatedPlan.stopLossUSDT;
             position.tpOrderId = null;
             position.tpClientOrderId = null;
             position.slOrderId = null;
@@ -2528,7 +2656,8 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
                             realizedPnL.netProfitUSDT,
                             realizedPnL.profitPercent,
                             "POSITION_MISSING",
-                            fallbackExitPrice
+                            fallbackExitPrice,
+                            positionKey
                         );
                     } else {
                         removeActivePositionByKey(positionKey);
@@ -2537,7 +2666,7 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
                     return;
                 } else {
                     const entryPrice = getExchangePositionEntryPrice(openPosition, await getPrice());
-                    const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice);
+                    const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, position);
                     await cancelManagedOrdersForPosition(position, "POSITION_RESYNC");
                     upsertActivePosition(syncedPosition);
                     await saveDB();
@@ -2557,7 +2686,21 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
             const remainingContracts = Math.abs(getExchangePositionContracts(remainingPosition));
             if (remainingContracts > POSITION_SYNC_QTY_TOLERANCE) {
                 const remainingEntryPrice = getExchangePositionEntryPrice(remainingPosition, position.entryPrice);
-                const syncedRemainingPosition = buildSyncedActivePosition(remainingPosition, remainingEntryPrice);
+                const syncedRemainingPosition = buildSyncedActivePosition(remainingPosition, remainingEntryPrice, position);
+                const recalculatedRemainingPlan = buildOrderPlan(
+                    syncedRemainingPosition.side,
+                    syncedRemainingPosition.entryPrice,
+                    syncedRemainingPosition.quantity,
+                    syncedRemainingPosition.atrAtEntry,
+                    {
+                        trailingActivateATR: syncedRemainingPosition.trailingActivateATR,
+                        trailingOffsetATR: syncedRemainingPosition.trailingOffsetATR
+                    }
+                );
+                syncedRemainingPosition.targetPrice = recalculatedRemainingPlan.targetPrice;
+                syncedRemainingPosition.stopLossPrice = recalculatedRemainingPlan.stopLossPrice;
+                syncedRemainingPosition.targetProfitUSDT = recalculatedRemainingPlan.targetProfitUSDT;
+                syncedRemainingPosition.stopLossUSDT = recalculatedRemainingPlan.stopLossUSDT;
                 upsertActivePosition(syncedRemainingPosition);
                 await saveDB();
                 await ensureReduceOnlyTakeProfitOrder(positionKey, syncedRemainingPosition);
@@ -2567,7 +2710,7 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
             }
         }
         const realizedPnL = calculatePositionPnL(position, closeFillSnapshot.price);
-        await finalizeClosedPosition(position, realizedPnL.netProfitUSDT, realizedPnL.profitPercent, reason, closeFillSnapshot.price);
+        await finalizeClosedPosition(position, realizedPnL.netProfitUSDT, realizedPnL.profitPercent, reason, closeFillSnapshot.price, positionKey);
     } catch (error) { console.error("[ERROR] Close position failed:", error.message); }
     finally {
         closingPositionKeys.delete(closeLockKey);
@@ -2630,14 +2773,14 @@ const buildSignalSnapshot = (ohlcv, params) => {
     return { ohlcv, open, high, low, close, volume, lastIndex, currentOpen, currentPrice, currentVolume, avgVolume, volumeRatio, hourUTC, currentATR };
 };
 
-const logTrade = (side, entry, exit, status, pnl = 0) => {
+const logTrade = (side, entry, exit, status, pnl = 0, strategyOverride = null) => {
     try {
         ensureFileExists(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy\n");
         const timestamp = new Date().toISOString();
         const parsedTime = Date.parse(timestamp);
         lastTradeAt = Number.isFinite(parsedTime) ? parsedTime : Date.now();
         const marginMode = (db.marginMode || "isolated").toUpperCase();
-        const strategy = getPrimaryActivePosition()?.strategy || `FUTURES_GRID_${String(db.gridTimeframe || "5m").toUpperCase()}`;
+        const strategy = strategyOverride || getPrimaryActivePosition()?.strategy || `FUTURES_GRID_${String(db.gridTimeframe || "5m").toUpperCase()}`;
         const line = [
             timestamp,
             escapeCsvField(db.pair),
