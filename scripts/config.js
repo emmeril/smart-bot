@@ -8,7 +8,7 @@ const { Sequelize, DataTypes } = require("sequelize");
 
 const DB_PATH = path.join(__dirname, "..", "database.sqlite");
 
-const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort"];
+const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort", "autoRiskEnabled"];
 
 const DEFAULT_CONFIG = {
   strategy: "futures_grid",
@@ -26,6 +26,9 @@ const DEFAULT_CONFIG = {
   marginMode: "isolated",
   monitoringInterval: 500,
   gridStopLossPercent: 5,
+  autoRiskEnabled: true,
+  atrTargetMult: 2.0,
+  atrStopMult: 1.2,
   gridLevels: 8,
   gridLookbackCandles: 120,
   gridRangePercent: 3.5,
@@ -70,6 +73,9 @@ const Config = sequelize.define(
     marginMode: { type: DataTypes.STRING, defaultValue: DEFAULT_CONFIG.marginMode },
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.monitoringInterval },
     gridStopLossPercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.gridStopLossPercent },
+    autoRiskEnabled: { type: DataTypes.BOOLEAN, defaultValue: DEFAULT_CONFIG.autoRiskEnabled },
+    atrTargetMult: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.atrTargetMult },
+    atrStopMult: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.atrStopMult },
     gridLevels: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.gridLevels },
     gridLookbackCandles: { type: DataTypes.INTEGER, defaultValue: DEFAULT_CONFIG.gridLookbackCandles },
     gridRangePercent: { type: DataTypes.FLOAT, defaultValue: DEFAULT_CONFIG.gridRangePercent },
@@ -110,6 +116,9 @@ const printUsage = () => {
       "  node scripts/config.js set gridOrderSizeUsdt 1.5",
       "  node scripts/config.js set gridTargetProfitUsdt 0.8",
       "  node scripts/config.js set gridStopLossPercent 4",
+      "  node scripts/config.js set autoRiskEnabled true",
+      "  node scripts/config.js set atrTargetMult 2.2",
+      "  node scripts/config.js set atrStopMult 1.1",
       "  node scripts/config.js set gridTimeframe 15m",
       "  node scripts/config.js set dailyProfitTargetUsdt 3",
       "  node scripts/config.js set dailyMaxLossPercent 8",
@@ -221,6 +230,24 @@ const ensureConfigSchema = async () => {
     }
   }
 
+  if (!columnNames.has("autoRiskEnabled")) {
+    await withSqliteBusyRetry(() =>
+      sequelize.query("ALTER TABLE Configs ADD COLUMN autoRiskEnabled BOOLEAN DEFAULT 1;"),
+    );
+  }
+
+  if (!columnNames.has("atrTargetMult")) {
+    await withSqliteBusyRetry(() =>
+      sequelize.query("ALTER TABLE Configs ADD COLUMN atrTargetMult FLOAT DEFAULT 2;"),
+    );
+  }
+
+  if (!columnNames.has("atrStopMult")) {
+    await withSqliteBusyRetry(() =>
+      sequelize.query("ALTER TABLE Configs ADD COLUMN atrStopMult FLOAT DEFAULT 1.2;"),
+    );
+  }
+
   if (!columnNames.has("gridTimeframe")) {
     await withSqliteBusyRetry(() =>
       sequelize.query("ALTER TABLE Configs ADD COLUMN gridTimeframe VARCHAR(255) DEFAULT '5m';"),
@@ -282,6 +309,16 @@ const hydrateForOutput = (row) => {
     json.gridStopLossPercent = json.stopLossPercent;
   }
   delete json.stopLossPercent;
+
+  if (json.autoRiskEnabled === undefined) {
+    json.autoRiskEnabled = DEFAULT_CONFIG.autoRiskEnabled;
+  }
+  if (json.atrTargetMult === undefined) {
+    json.atrTargetMult = DEFAULT_CONFIG.atrTargetMult;
+  }
+  if (json.atrStopMult === undefined) {
+    json.atrStopMult = DEFAULT_CONFIG.atrStopMult;
+  }
 
   if (json.gridTimeframe === undefined && typeof json.breakoutTimeframe === "string") {
     json.gridTimeframe = json.breakoutTimeframe;
@@ -371,4 +408,5 @@ main()
       // ignore
     }
   });
+
 
