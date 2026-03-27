@@ -81,6 +81,8 @@ let metricsTimer = null;
 let lastSignalDetailLogAt = 0;
 let lastSyncLogAt = 0;
 let lastGridSyncLogAt = 0;
+let lastGridSizingSkipLogAt = 0;
+let lastGridSizingSkipReason = "";
 let isShuttingDown = false;
 let accountPositionMode = { hedged: false, label: "ONE_WAY" };
 const logPath = path.join(__dirname, 'trades.csv');
@@ -91,6 +93,7 @@ const OHLCV_CACHE_TTL = 1500;
 const SYNC_LOG_TTL = 15000;
 const SIGNAL_DETAIL_LOG_TTL = 10000;
 const GRID_SYNC_LOG_TTL = 15000;
+const GRID_SIZING_SKIP_LOG_TTL = 30000;
 const METRICS_LOG_INTERVAL = 60000;
 const POSITION_RUNTIME_PERSIST_TTL = 2000;
 const POSITION_SYNC_QTY_TOLERANCE = 0.001;
@@ -258,6 +261,7 @@ const printStartupBanner = (totalUSDT) => {
     const slLabel = db.gridStopLossLevels <= 0 ? "AUTO_RANGE" : `${db.gridStopLossLevels} step(s)`;
     console.log(`Grid TP/SL: ${tpLabel} / ${slLabel} | mode ${gridSummary.ordersMode} ${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} order(s) per side`);
     console.log(`Grid Order Size: mode ${gridSummary.sizeMode} ${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT`);
+    console.log(`Min Valid Order Size: ${gridSummary.minOrderSizeUsdt.toFixed(4)} USDT`);
     console.log(`Available USDT: ${gridSummary.availableUsdtLabel}`);
     if (gridSummary.hasLockedGrid) {
         console.log(`Locked Grid Range: ${gridSummary.lockedRangeLabel}`);
@@ -601,7 +605,9 @@ const resolveEffectiveGridOrderSizeUsdt = ({
     const configuredSize = toFiniteNumber(configuredOrderSizeUsdt, 0);
     const isFullAutoSize = configuredSize <= 0;
     const derivedAutoSize = maxConfiguredOrders > 0 ? usableUsdt / Math.max(maxConfiguredOrders * 2, 1) : 0;
-    const orderSizeUsdt = isFullAutoSize ? derivedAutoSize : configuredSize;
+    const orderSizeUsdt = isFullAutoSize
+        ? Math.max(derivedAutoSize, minOrderSizeUsdt)
+        : configuredSize;
     return {
         orderSizeUsdt: Math.max(0, orderSizeUsdt),
         minOrderSizeUsdt,
@@ -2067,7 +2073,7 @@ const printDetailedStatus = async () => {
 
     console.log(`\n[STATUS] Mode=${accountPositionMode.label} | Pair=${db.pair} | Price=${Number.isFinite(currentPrice) ? currentPrice : "N/A"} | LocalActive=${activeEntries.length} | ExchangePos=${openExchangePositions.length}`);
     console.log(`[STATUS] Profile=${gridSummary.presetName.toUpperCase()} | Grid Slot=${gridSummary.slotLabel} | Ladder=${gridSummary.ladderLabel}`);
-    console.log(`[STATUS] Side Orders ${gridSummary.ordersMode}=${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} | Size ${gridSummary.sizeMode}=${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT | Available USDT=${gridSummary.availableUsdtLabel}`);
+    console.log(`[STATUS] Side Orders ${gridSummary.ordersMode}=${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} | Size ${gridSummary.sizeMode}=${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT | Min Valid=${gridSummary.minOrderSizeUsdt.toFixed(4)} USDT | Available USDT=${gridSummary.availableUsdtLabel}`);
     console.log(`[STATUS] Daily P&L=${db.dailyPnL.toFixed(2)} USDT | Trades=${db.dailyTrades}`);
     console.log(`[STATUS] Runtime | placing=${isPlacingOrder ? "Y" : "N"} closing=${isClosingPosition ? "Y" : "N"} posSync=${isSyncingPosition ? "Y" : "N"} gridSync=${isSyncingGridOrders ? "Y" : "N"}`);
     console.log(`[STATUS] Last trade=${lastTradeAt > 0 ? new Date(lastTradeAt).toISOString() : "N/A"} | Daily reset=${new Date(toFiniteNumber(db.lastDailyReset, Date.now())).toISOString()}`);
@@ -2421,6 +2427,7 @@ const getGridRuntimeSummary = (currentPrice = NaN, managedOrders = null) => {
         configuredOrdersPerSideCap: effectiveOrdersMeta.maxConfigured,
         ordersMode: effectiveOrdersMeta.mode,
         effectiveOrderSizeUsdt: effectiveSizeMeta.orderSizeUsdt,
+        minOrderSizeUsdt: effectiveSizeMeta.minOrderSizeUsdt,
         sizeMode: effectiveSizeMeta.mode,
         availableUsdtLabel: Number.isFinite(availableUsdt) ? availableUsdt.toFixed(2) : "N/A"
     };
@@ -2811,9 +2818,17 @@ const syncGridOrders = async () => {
         if (effectiveSizeMeta.orderSizeUsdt <= 0 || effectiveOrdersMeta.count <= 0) {
             if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "INSUFFICIENT_BALANCE");
             const reasonText = effectiveOrdersMeta.reason ? ` Reason: ${effectiveOrdersMeta.reason}` : "";
-            console.log(`[GRID] Auto sizing skipped ladder | size ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT | side orders ${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured} | available ${availableUsdt.toFixed(2)} USDT.${reasonText}`);
+            const skipMessage = `[GRID] Auto sizing skipped ladder | size ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT | side orders ${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured} | available ${availableUsdt.toFixed(2)} USDT.${reasonText}`;
+            const now = Date.now();
+            if (skipMessage !== lastGridSizingSkipReason || now - lastGridSizingSkipLogAt >= GRID_SIZING_SKIP_LOG_TTL) {
+                console.log(skipMessage);
+                lastGridSizingSkipReason = skipMessage;
+                lastGridSizingSkipLogAt = now;
+            }
             return;
         }
+
+        lastGridSizingSkipReason = "";
 
         if (effectiveSizeMeta.mode === "FULL_AUTO") {
             console.log(`[GRID] Auto-sized order amount: ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT per order | available ${availableUsdt.toFixed(2)} USDT`);
