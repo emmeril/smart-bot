@@ -433,6 +433,12 @@ const getSlClientOrderId = (position) => {
     return `${SL_CLIENT_ORDER_PREFIX}_${positionSide}_${side}_${safeStop}`.slice(0, 36);
 };
 
+const buildReplacementClientOrderId = (baseClientOrderId) => {
+    const base = String(baseClientOrderId || "smartord").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 28);
+    const suffix = Date.now().toString(36).slice(-7);
+    return `${base}_${suffix}`.slice(0, 36);
+};
+
 const getExchangeClientOrderId = (order) => (
     String(order?.clientOrderId || order?.info?.clientOrderId || order?.info?.origClientOrderId || "")
 );
@@ -463,6 +469,13 @@ const fetchOpenSlOrders = async () => {
     metrics.api.orders++;
     const openOrders = await exchange.fetchOpenOrders(db.pair);
     return openOrders.filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(db.pair) && isSlReduceOnlyOrder(order));
+};
+
+const findOpenOrderByClientOrderId = async (clientOrderId, symbol = db?.pair) => {
+    if (!clientOrderId || !symbol) return null;
+    metrics.api.orders++;
+    const openOrders = await exchange.fetchOpenOrders(symbol);
+    return openOrders.find((order) => getExchangeClientOrderId(order) === clientOrderId) || null;
 };
 
 const fetchManagedOpenOrdersSnapshot = async () => {
@@ -1039,8 +1052,14 @@ const placeReduceOnlyTakeProfitOrder = async (position) => {
         reduceOnly: true,
         positionSide: getClosePositionSide(position)
     });
-    const clientOrderId = getTpClientOrderId(position);
+    const clientOrderId = position?.tpClientOrderId || getTpClientOrderId(position);
     params.newClientOrderId = clientOrderId;
+
+    const existingOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
+    if (existingOrder) {
+        console.log(`[TP] Existing exchange order already active for ${clientOrderId}. Reusing it.`);
+        return existingOrder;
+    }
 
     try {
         const order = await exchange.createOrder(
@@ -1057,6 +1076,11 @@ const placeReduceOnlyTakeProfitOrder = async (position) => {
     } catch (error) {
         if (error.code === -4116 && error.message.includes("duplicated")) {
             console.warn(`[TP] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
+            const duplicateOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
+            if (duplicateOrder) {
+                console.log(`[TP] Duplicate resolved by existing exchange TP ${clientOrderId}.`);
+                return duplicateOrder;
+            }
             const cancelled = await cancelOrderByClientOrderId(clientOrderId, db.pair);
             if (cancelled) {
                 try {
@@ -1077,9 +1101,25 @@ const placeReduceOnlyTakeProfitOrder = async (position) => {
                     return null;
                 }
             } else {
-                console.warn(`[TP] Could not cancel order with clientOrderId ${clientOrderId} (not found). Assuming order already executed. Syncing position...`);
-                await syncPositionWithExchange();
-                return null;
+                const replacementClientOrderId = buildReplacementClientOrderId(clientOrderId);
+                console.warn(`[TP] Existing clientOrderId ${clientOrderId} is unusable. Retrying with replacement ${replacementClientOrderId}.`);
+                try {
+                    const retryOrder = await exchange.createOrder(
+                        db.pair,
+                        "limit",
+                        closeSide,
+                        quantity,
+                        position.targetPrice,
+                        { ...params, newClientOrderId: replacementClientOrderId }
+                    );
+                    metrics.api.orders++;
+                    console.log(`[TP] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
+                    return retryOrder;
+                } catch (replacementError) {
+                    console.error(`[TP] Replacement retry failed for ${replacementClientOrderId}: ${replacementError.message}`);
+                    await syncPositionWithExchange();
+                    return null;
+                }
             }
         }
         throw error;
@@ -1104,10 +1144,16 @@ const placeReduceOnlyStopLossOrder = async (position) => {
         reduceOnly: true,
         positionSide: getClosePositionSide(position)
     });
-    const clientOrderId = getSlClientOrderId(position);
+    const clientOrderId = position?.slClientOrderId || getSlClientOrderId(position);
     params.newClientOrderId = clientOrderId;
     params.stopPrice = formatPriceToMarketPrecision(db.pair, position.stopLossPrice);
     params.workingType = "MARK_PRICE";
+
+    const existingOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
+    if (existingOrder) {
+        console.log(`[SL] Existing exchange order already active for ${clientOrderId}. Reusing it.`);
+        return existingOrder;
+    }
 
     try {
         const order = await exchange.createOrder(
@@ -1124,6 +1170,11 @@ const placeReduceOnlyStopLossOrder = async (position) => {
     } catch (error) {
         if (error.code === -4116 && error.message.includes("duplicated")) {
             console.warn(`[SL] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
+            const duplicateOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
+            if (duplicateOrder) {
+                console.log(`[SL] Duplicate resolved by existing exchange SL ${clientOrderId}.`);
+                return duplicateOrder;
+            }
             const cancelled = await cancelOrderByClientOrderId(clientOrderId, db.pair);
             if (cancelled) {
                 try {
@@ -1144,9 +1195,25 @@ const placeReduceOnlyStopLossOrder = async (position) => {
                     return null;
                 }
             } else {
-                console.warn(`[SL] Could not cancel order with clientOrderId ${clientOrderId} (not found). Assuming order already executed. Syncing position...`);
-                await syncPositionWithExchange();
-                return null;
+                const replacementClientOrderId = buildReplacementClientOrderId(clientOrderId);
+                console.warn(`[SL] Existing clientOrderId ${clientOrderId} is unusable. Retrying with replacement ${replacementClientOrderId}.`);
+                try {
+                    const retryOrder = await exchange.createOrder(
+                        db.pair,
+                        "STOP_MARKET",
+                        closeSide,
+                        quantity,
+                        undefined,
+                        { ...params, newClientOrderId: replacementClientOrderId }
+                    );
+                    metrics.api.orders++;
+                    console.log(`[SL] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
+                    return retryOrder;
+                } catch (replacementError) {
+                    console.error(`[SL] Replacement retry failed for ${replacementClientOrderId}: ${replacementError.message}`);
+                    await syncPositionWithExchange();
+                    return null;
+                }
             }
         }
         throw error;
