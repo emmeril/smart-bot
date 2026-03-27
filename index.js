@@ -481,7 +481,7 @@ const fetchOpenTpOrders = async () => {
 
 const fetchOpenSlOrders = async () => {
     metrics.api.orders++;
-    const openOrders = await exchange.fetchOpenOrders(db.pair);
+    const openOrders = await exchange.fetchOpenOrders(db.pair, undefined, undefined, { trigger: true });
     return openOrders.filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(db.pair) && isSlReduceOnlyOrder(order));
 };
 
@@ -489,13 +489,20 @@ const findOpenOrderByClientOrderId = async (clientOrderId, symbol = db?.pair) =>
     if (!clientOrderId || !symbol) return null;
     metrics.api.orders++;
     const openOrders = await exchange.fetchOpenOrders(symbol);
-    return openOrders.find((order) => getExchangeClientOrderId(order) === clientOrderId) || null;
+    const regularMatch = openOrders.find((order) => getExchangeClientOrderId(order) === clientOrderId);
+    if (regularMatch) return regularMatch;
+
+    metrics.api.orders++;
+    const triggerOrders = await exchange.fetchOpenOrders(symbol, undefined, undefined, { trigger: true });
+    return triggerOrders.find((order) => getExchangeClientOrderId(order) === clientOrderId) || null;
 };
 
 const fetchManagedOpenOrdersSnapshot = async () => {
     metrics.api.orders++;
-    const openOrders = await exchange.fetchOpenOrders(db.pair);
-    const managedOrders = openOrders.filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(db.pair));
+    const regularOrders = await exchange.fetchOpenOrders(db.pair);
+    metrics.api.orders++;
+    const triggerOrders = await exchange.fetchOpenOrders(db.pair, undefined, undefined, { trigger: true });
+    const managedOrders = [...regularOrders, ...triggerOrders].filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(db.pair));
     return {
         grid: managedOrders.filter(isGridEntryOrder),
         tp: managedOrders.filter(isTpReduceOnlyOrder),
@@ -851,7 +858,7 @@ const cancelSlOrders = async (orders, reason = "SL_SYNC") => {
     console.log(`[SL] Cancelling ${orders.length} SL order(s) (${reason})...`);
     for (const order of orders) {
         try {
-            await exchange.cancelOrder(order.id, db.pair);
+            await exchange.cancelOrder(order.id, db.pair, { trigger: true });
             metrics.api.orders++;
         } catch (error) {
             console.warn(`[WARN] Failed to cancel SL order ${order.id}: ${error.message}`);
@@ -1244,6 +1251,16 @@ const cancelOrderByClientOrderId = async (clientOrderId, symbol) => {
         console.log(`[CANCEL] Cancelled order with clientOrderId ${clientOrderId}`);
         return true;
     }
+
+    const triggerOrders = await exchange.fetchOpenOrders(symbol, undefined, undefined, { trigger: true });
+    const triggerOrder = triggerOrders.find(o => getExchangeClientOrderId(o) === clientOrderId);
+    if (triggerOrder) {
+        await exchange.cancelOrder(triggerOrder.id, symbol, { trigger: true });
+        metrics.api.orders++;
+        console.log(`[CANCEL] Cancelled trigger order with clientOrderId ${clientOrderId}`);
+        return true;
+    }
+
     return false;
 };
 
