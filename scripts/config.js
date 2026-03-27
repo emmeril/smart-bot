@@ -20,9 +20,10 @@ const GRID_PRESETS = {
     gridLookbackCandles: 144,
     gridRangePercent: 4.0,
     gridEntryBufferPercent: 0.12,
-    gridTakeProfitLevels: 1,
-    gridOrdersPerSide: 3,
-    gridStopLossLevels: 1.5,
+    gridOrderSizeUsdt: 0,
+    gridTakeProfitLevels: 0,
+    gridOrdersPerSide: 0,
+    gridStopLossLevels: 0,
     gridTimeframe: "5m",
     minVolumeRatio: 1.1,
     volumePeriod: 20,
@@ -42,9 +43,10 @@ const GRID_PRESETS = {
     gridLookbackCandles: 180,
     gridRangePercent: 6.5,
     gridEntryBufferPercent: 0.18,
-    gridTakeProfitLevels: 1,
-    gridOrdersPerSide: 4,
-    gridStopLossLevels: 2.0,
+    gridOrderSizeUsdt: 0,
+    gridTakeProfitLevels: 0,
+    gridOrdersPerSide: 0,
+    gridStopLossLevels: 0,
     gridTimeframe: "5m",
     minVolumeRatio: 1.05,
     volumePeriod: 20,
@@ -61,14 +63,14 @@ const GRID_PRESETS = {
     pair: "DOGE/USDT:USDT",
     marginMode: "isolated",
     leverage: 8,
-    gridOrderSizeUsdt: 1.5,
+    gridOrderSizeUsdt: 0,
     gridLevels: 12,
     gridLookbackCandles: 180,
     gridRangePercent: 5.5,
     gridEntryBufferPercent: 0.16,
-    gridTakeProfitLevels: 1,
-    gridOrdersPerSide: 4,
-    gridStopLossLevels: 1.8,
+    gridTakeProfitLevels: 0,
+    gridOrdersPerSide: 0,
+    gridStopLossLevels: 0,
     gridTimeframe: "5m",
     minVolumeRatio: 1.05,
     volumePeriod: 20,
@@ -90,7 +92,7 @@ const AUTO_PRESET_RULES = [
 const DEFAULT_CONFIG = {
   strategy: "futures_grid",
   pair: "DOGE/USDT:USDT",
-  gridOrderSizeUsdt: 1.5,
+  gridOrderSizeUsdt: 0,
   leverage: 10,
   gridTargetProfitUsdt: 0.5,
   dailyProfitTargetUsdt: 1.0,
@@ -108,9 +110,9 @@ const DEFAULT_CONFIG = {
   gridLookbackCandles: 120,
   gridRangePercent: 3.5,
   gridEntryBufferPercent: 0.15,
-  gridTakeProfitLevels: 1,
-  gridOrdersPerSide: 1,
-  gridStopLossLevels: 1.2,
+  gridTakeProfitLevels: 0,
+  gridOrdersPerSide: 0,
+  gridStopLossLevels: 0,
   gridTimeframe: "5m",
   sessionStartUTC: 0,
   sessionEndUTC: 23,
@@ -183,6 +185,7 @@ const printUsage = () => {
       "  node scripts/config.js reset <key>",
       "  node scripts/config.js preset <name>",
       "  node scripts/config.js autopreset [pair]",
+      "  node scripts/config.js autoall [pair]",
       "  node scripts/config.js defaults",
       "",
       "Examples:",
@@ -192,6 +195,8 @@ const printUsage = () => {
       "  node scripts/config.js set gridOrderSizeUsdt 0",
       "  node scripts/config.js set gridTargetProfitUsdt 0.8",
       "  node scripts/config.js set gridStopLossPercent 4",
+      "  node scripts/config.js set gridTakeProfitLevels 0",
+      "  node scripts/config.js set gridStopLossLevels 0",
       "  node scripts/config.js set gridOrdersPerSide 0",
       "  node scripts/config.js set gridTimeframe 15m",
       "  node scripts/config.js set dailyProfitTargetUsdt 3",
@@ -200,9 +205,12 @@ const printUsage = () => {
       "  node scripts/config.js preset volatile",
       "  node scripts/config.js preset doge",
       "  node scripts/config.js autopreset DOGE/USDT:USDT",
+      "  node scripts/config.js autoall DOGE/USDT:USDT",
       "",
       "Notes:",
       "  gridOrderSizeUsdt=0 -> full auto by available balance",
+      "  gridTakeProfitLevels=0 -> auto next grid level",
+      "  gridStopLossLevels=0 -> auto stop outside locked grid range",
       "  gridOrdersPerSide=0 -> full auto by available balance",
     ].join("\n"),
   );
@@ -287,6 +295,20 @@ const resolveAutoPresetName = (pair) => {
   if (!normalizedPair) return "binance";
   const matchedRule = AUTO_PRESET_RULES.find((rule) => rule.match.test(normalizedPair));
   return matchedRule ? matchedRule.preset : "binance";
+};
+
+const buildAutoAllPayload = (pair) => {
+  const targetPair = String(pair || "").trim() || DEFAULT_CONFIG.pair;
+  const presetName = resolveAutoPresetName(targetPair);
+  return {
+    ...buildPresetPayload(presetName),
+    pair: targetPair,
+    gridOrderSizeUsdt: 0,
+    gridTakeProfitLevels: 0,
+    gridOrdersPerSide: 0,
+    gridStopLossLevels: 0,
+    activeGridState: null,
+  };
 };
 
 const ensureConfigSchema = async () => {
@@ -467,6 +489,17 @@ const main = async () => {
     const presetPayload = { ...buildPresetPayload(presetName), pair: targetPair, activeGridState: null };
     await withSqliteBusyRetry(() => row.update({ ...presetPayload, lastUpdated: Date.now() }));
     console.log(`[OK] Applied autopreset ${presetName} for ${targetPair}`);
+    await row.reload();
+    console.log(JSON.stringify(hydrateForOutput(row), null, 2));
+    return;
+  }
+
+  if (cmd === "autoall") {
+    const inputPair = args.join(" ").trim();
+    const targetPair = inputPair || hydrateForOutput(row).pair || DEFAULT_CONFIG.pair;
+    const payload = buildAutoAllPayload(targetPair);
+    await withSqliteBusyRetry(() => row.update({ ...payload, lastUpdated: Date.now() }));
+    console.log(`[OK] Applied autoall for ${targetPair}`);
     await row.reload();
     console.log(JSON.stringify(hydrateForOutput(row), null, 2));
     return;

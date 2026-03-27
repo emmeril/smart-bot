@@ -14,7 +14,7 @@ const sequelize = new Sequelize({
 const Config = sequelize.define('Config', {
     strategy: { type: DataTypes.STRING, defaultValue: "futures_grid" },
     pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
-    gridOrderSizeUsdt: { type: DataTypes.FLOAT, defaultValue: 1.5 },
+    gridOrderSizeUsdt: { type: DataTypes.FLOAT, defaultValue: 0 },
     leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
     gridTargetProfitUsdt: { type: DataTypes.FLOAT, defaultValue: 0.5 },
     dailyProfitTargetUsdt: { type: DataTypes.FLOAT, defaultValue: 1.0 },
@@ -34,9 +34,9 @@ const Config = sequelize.define('Config', {
     gridLookbackCandles: { type: DataTypes.INTEGER, defaultValue: 120 },
     gridRangePercent: { type: DataTypes.FLOAT, defaultValue: 3.5 },
     gridEntryBufferPercent: { type: DataTypes.FLOAT, defaultValue: 0.15 },
-    gridTakeProfitLevels: { type: DataTypes.INTEGER, defaultValue: 1 },
-    gridOrdersPerSide: { type: DataTypes.INTEGER, defaultValue: 1 },
-    gridStopLossLevels: { type: DataTypes.FLOAT, defaultValue: 1.2 },
+    gridTakeProfitLevels: { type: DataTypes.INTEGER, defaultValue: 0 },
+    gridOrdersPerSide: { type: DataTypes.INTEGER, defaultValue: 0 },
+    gridStopLossLevels: { type: DataTypes.FLOAT, defaultValue: 0 },
 
     // Additional parameters
     gridTimeframe: { type: DataTypes.STRING, defaultValue: "5m" },
@@ -99,7 +99,7 @@ const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort"];
 const DEFAULT_CONFIG = {
     strategy: "futures_grid",
     pair: "DOGE/USDT:USDT",
-    gridOrderSizeUsdt: 1.5,
+    gridOrderSizeUsdt: 0,
     leverage: 10,
     gridTargetProfitUsdt: 0.5,
     dailyProfitTargetUsdt: 1.0,
@@ -117,9 +117,9 @@ const DEFAULT_CONFIG = {
     gridLookbackCandles: 120,
     gridRangePercent: 3.5,
     gridEntryBufferPercent: 0.15,
-    gridTakeProfitLevels: 1,
-    gridOrdersPerSide: 1,
-    gridStopLossLevels: 1.2,
+    gridTakeProfitLevels: 0,
+    gridOrdersPerSide: 0,
+    gridStopLossLevels: 0,
     gridTimeframe: "5m",
     sessionStartUTC: 0,
     sessionEndUTC: 23,
@@ -254,7 +254,9 @@ const printStartupBanner = (totalUSDT) => {
     console.log(`Preset Profile: ${gridSummary.presetName.toUpperCase()}`);
     console.log(`Position Mode: ${accountPositionMode.label}`);
     console.log(`Grid: ${db.gridLevels} levels | lookback ${db.gridLookbackCandles} candles | range ${db.gridRangePercent}%`);
-    console.log(`Grid TP/SL: ${db.gridTakeProfitLevels} level(s) / ${db.gridStopLossLevels} step(s) | mode ${gridSummary.ordersMode} ${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} order(s) per side`);
+    const tpLabel = db.gridTakeProfitLevels <= 0 ? "AUTO_NEXT_GRID" : `${db.gridTakeProfitLevels} level(s)`;
+    const slLabel = db.gridStopLossLevels <= 0 ? "AUTO_RANGE" : `${db.gridStopLossLevels} step(s)`;
+    console.log(`Grid TP/SL: ${tpLabel} / ${slLabel} | mode ${gridSummary.ordersMode} ${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} order(s) per side`);
     console.log(`Grid Order Size: mode ${gridSummary.sizeMode} ${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT`);
     console.log(`Available USDT: ${gridSummary.availableUsdtLabel}`);
     if (gridSummary.hasLockedGrid) {
@@ -464,7 +466,7 @@ const getSignalParameters = () => {
     const atrPeriod = Math.max(2, Math.trunc(toFiniteNumber(db.atrPeriod, DEFAULT_CONFIG.atrPeriod)));
     const gridLookbackCandles = Math.max(20, Math.trunc(toFiniteNumber(db.gridLookbackCandles, DEFAULT_CONFIG.gridLookbackCandles)));
     const gridLevels = Math.max(4, Math.trunc(toFiniteNumber(db.gridLevels, DEFAULT_CONFIG.gridLevels)));
-    const gridTakeProfitLevels = Math.max(1, Math.trunc(toFiniteNumber(db.gridTakeProfitLevels, DEFAULT_CONFIG.gridTakeProfitLevels)));
+    const gridTakeProfitLevels = Math.max(0, Math.trunc(toFiniteNumber(db.gridTakeProfitLevels, DEFAULT_CONFIG.gridTakeProfitLevels)));
     const neededCandles = Math.max(gridLookbackCandles + 5, volumePeriod + 10, atrPeriod + 10, 150);
     return {
         strategy: "futures_grid",
@@ -478,7 +480,83 @@ const getSignalParameters = () => {
         gridOrderSizeUsdt: Math.max(0, toFiniteNumber(db.gridOrderSizeUsdt, DEFAULT_CONFIG.gridOrderSizeUsdt)),
         gridRangePercent: Math.max(0.5, toFiniteNumber(db.gridRangePercent, DEFAULT_CONFIG.gridRangePercent)),
         gridEntryBufferPercent: Math.max(0.02, toFiniteNumber(db.gridEntryBufferPercent, DEFAULT_CONFIG.gridEntryBufferPercent)),
-        gridStopLossLevels: Math.max(0.5, toFiniteNumber(db.gridStopLossLevels, DEFAULT_CONFIG.gridStopLossLevels))
+        gridStopLossLevels: Math.max(0, toFiniteNumber(db.gridStopLossLevels, DEFAULT_CONFIG.gridStopLossLevels))
+    };
+};
+
+const resolveEffectiveGridTakeProfitLevels = (configuredTakeProfitLevels) => {
+    const configured = Math.trunc(toFiniteNumber(configuredTakeProfitLevels, 0));
+    return configured <= 0 ? 1 : Math.max(1, configured);
+};
+
+const resolveEffectiveGridStopLossSteps = (configuredStopLossLevels, step, atr = null) => {
+    const configured = toFiniteNumber(configuredStopLossLevels, 0);
+    if (configured > 0) return Math.max(0.5, configured);
+    const atrSteps = Number.isFinite(atr) && Number.isFinite(step) && step > 0 ? atr / step : 1.2;
+    return clamp(Math.max(1.2, atrSteps), 1.2, 3.0);
+};
+
+const findNearestGridLevelIndex = (levels, entryPrice) => {
+    if (!Array.isArray(levels) || levels.length === 0 || !Number.isFinite(entryPrice)) return 0;
+    let bestIndex = 0;
+    let bestDistance = Infinity;
+    for (let i = 0; i < levels.length; i++) {
+        const distance = Math.abs(toFiniteNumber(levels[i], NaN) - entryPrice);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIndex = i;
+        }
+    }
+    return bestIndex;
+};
+
+const buildGridExitPlan = ({
+    side,
+    entryIndex,
+    levels,
+    step,
+    params,
+    gridState = null,
+    atr = null
+} = {}) => {
+    const normalizedSide = String(side || "").toLowerCase();
+    const safeLevels = Array.isArray(levels) ? levels : [];
+    const safeStep = toFiniteNumber(step, NaN);
+    if ((normalizedSide !== "buy" && normalizedSide !== "sell") || safeLevels.length < 2 || !Number.isFinite(safeStep) || safeStep <= 0) {
+        return { targetPrice: NaN, stopLossPrice: NaN, takeProfitLevels: 0, stopLossSteps: 0, mode: "INVALID" };
+    }
+
+    const takeProfitLevels = resolveEffectiveGridTakeProfitLevels(params?.gridTakeProfitLevels);
+    const stopLossSteps = resolveEffectiveGridStopLossSteps(params?.gridStopLossLevels, safeStep, atr);
+    const safeEntryIndex = clamp(Math.trunc(toFiniteNumber(entryIndex, 0)), 0, safeLevels.length - 1);
+    const lowerBound = toFiniteNumber(gridState?.lowerBound, safeLevels[0]);
+    const upperBound = toFiniteNumber(gridState?.upperBound, safeLevels[safeLevels.length - 1]);
+    const autoStopMode = !(toFiniteNumber(params?.gridStopLossLevels, 0) > 0);
+
+    if (normalizedSide === "buy") {
+        const targetIndex = clamp(safeEntryIndex + takeProfitLevels, 1, safeLevels.length - 1);
+        const rawStop = autoStopMode
+            ? lowerBound - (safeStep * stopLossSteps)
+            : toFiniteNumber(safeLevels[safeEntryIndex], lowerBound) - (safeStep * stopLossSteps);
+        return {
+            targetPrice: formatPriceToMarketPrecision(db.pair, safeLevels[targetIndex]),
+            stopLossPrice: formatPriceToMarketPrecision(db.pair, rawStop),
+            takeProfitLevels,
+            stopLossSteps,
+            mode: autoStopMode ? "AUTO_RANGE_SL" : "FIXED_STEP_SL"
+        };
+    }
+
+    const targetIndex = clamp(safeEntryIndex - takeProfitLevels, 0, Math.max(0, safeLevels.length - 2));
+    const rawStop = autoStopMode
+        ? upperBound + (safeStep * stopLossSteps)
+        : toFiniteNumber(safeLevels[safeEntryIndex], upperBound) + (safeStep * stopLossSteps);
+    return {
+        targetPrice: formatPriceToMarketPrecision(db.pair, safeLevels[targetIndex]),
+        stopLossPrice: formatPriceToMarketPrecision(db.pair, rawStop),
+        takeProfitLevels,
+        stopLossSteps,
+        mode: autoStopMode ? "AUTO_RANGE_SL" : "FIXED_STEP_SL"
     };
 };
 
@@ -801,8 +879,17 @@ const buildGridEntryOrders = (snapshot, params, gridState = null) => {
 
     for (let i = levels.length - 2; i >= 0; i--) {
         const price = formatPriceToMarketPrecision(db.pair, levels[i]);
-        const targetPrice = formatPriceToMarketPrecision(db.pair, levels[i + 1]);
-        const stopLossPrice = formatPriceToMarketPrecision(db.pair, levels[i] - (step * params.gridStopLossLevels));
+        const exitPlan = buildGridExitPlan({
+            side: "buy",
+            entryIndex: i,
+            levels,
+            step,
+            params,
+            gridState: resolvedGridState,
+            atr: snapshot?.currentATR
+        });
+        const targetPrice = exitPlan.targetPrice;
+        const stopLossPrice = exitPlan.stopLossPrice;
         const orderPlan = { targetPrice, stopLossPrice };
         if (Number.isFinite(price) && price > 0 && price < minBuyPrice) {
             if (!isDirectionalOrderPlanValid("buy", price, orderPlan)) {
@@ -823,8 +910,17 @@ const buildGridEntryOrders = (snapshot, params, gridState = null) => {
 
     for (let i = 1; i < levels.length; i++) {
         const price = formatPriceToMarketPrecision(db.pair, levels[i]);
-        const targetPrice = formatPriceToMarketPrecision(db.pair, levels[i - 1]);
-        const stopLossPrice = formatPriceToMarketPrecision(db.pair, levels[i] + (step * params.gridStopLossLevels));
+        const exitPlan = buildGridExitPlan({
+            side: "sell",
+            entryIndex: i,
+            levels,
+            step,
+            params,
+            gridState: resolvedGridState,
+            atr: snapshot?.currentATR
+        });
+        const targetPrice = exitPlan.targetPrice;
+        const stopLossPrice = exitPlan.stopLossPrice;
         const orderPlan = { targetPrice, stopLossPrice };
         if (Number.isFinite(price) && price > 0 && price > maxSellPrice) {
             if (!isDirectionalOrderPlanValid("sell", price, orderPlan)) {
@@ -910,12 +1006,28 @@ const evaluateGridSignal = (snapshot, params, gridState = null) => {
     const meanReversionShort = db.allowShort && insideRange && distanceFromMidSteps >= 1 && snapshot.currentPrice >= currentLevelHigh - buffer;
     const canLong = meanReversionLong && volumeOk && sessionOk;
     const canShort = meanReversionShort && volumeOk && sessionOk;
-    const longTargetIndex = clamp(lowerIndex + params.gridTakeProfitLevels, 1, levels.length - 1);
-    const shortTargetIndex = clamp(upperIndex - params.gridTakeProfitLevels, 0, levels.length - 2);
-    const longTargetPrice = formatPriceToMarketPrecision(db.pair, levels[longTargetIndex]);
-    const shortTargetPrice = formatPriceToMarketPrecision(db.pair, levels[shortTargetIndex]);
-    const longStopPrice = formatPriceToMarketPrecision(db.pair, currentLevelLow - (step * params.gridStopLossLevels));
-    const shortStopPrice = formatPriceToMarketPrecision(db.pair, currentLevelHigh + (step * params.gridStopLossLevels));
+    const longExitPlan = buildGridExitPlan({
+        side: "buy",
+        entryIndex: lowerIndex,
+        levels,
+        step,
+        params,
+        gridState: resolvedGridState,
+        atr: snapshot.currentATR
+    });
+    const shortExitPlan = buildGridExitPlan({
+        side: "sell",
+        entryIndex: upperIndex,
+        levels,
+        step,
+        params,
+        gridState: resolvedGridState,
+        atr: snapshot.currentATR
+    });
+    const longTargetPrice = longExitPlan.targetPrice;
+    const shortTargetPrice = shortExitPlan.targetPrice;
+    const longStopPrice = longExitPlan.stopLossPrice;
+    const shortStopPrice = shortExitPlan.stopLossPrice;
     const longPlan = canLong ? { targetPrice: longTargetPrice, stopLossPrice: longStopPrice } : null;
     const shortPlan = canShort ? { targetPrice: shortTargetPrice, stopLossPrice: shortStopPrice } : null;
     const longPlanValid = canLong ? isDirectionalOrderPlanValid("buy", currentLevelLow, longPlan) : false;
@@ -941,6 +1053,7 @@ const evaluateGridSignal = (snapshot, params, gridState = null) => {
             `   Reference Price: ${referencePrice.toFixed(6)}`,
             `   Grid Range: ${lowerBound.toFixed(6)} - ${upperBound.toFixed(6)}`,
             `   Grid Levels: ${params.gridLevels} | Step: ${step.toFixed(6)}`,
+            `   TP/SL Mode: TP ${params.gridTakeProfitLevels <= 0 ? "AUTO_NEXT_GRID" : `${resolveEffectiveGridTakeProfitLevels(params.gridTakeProfitLevels)} GRID`} | SL ${params.gridStopLossLevels <= 0 ? `AUTO_RANGE ${longExitPlan.stopLossSteps.toFixed(2)} step` : `${resolveEffectiveGridStopLossSteps(params.gridStopLossLevels, step, snapshot.currentATR).toFixed(2)} step`}`,
             `   Current Slot: ${lowerIndex}/${params.gridLevels} (${currentLevelLow.toFixed(6)} - ${currentLevelHigh.toFixed(6)})`,
             `   Distance From Mid: ${distanceFromMidSteps.toFixed(2)} steps`,
             `   Volume Ratio: ${snapshot.volumeRatio.toFixed(2)}x (min ${db.minVolumeRatio}x) -> ${volumeOk ? "[OK]" : "[NO]"}`,
@@ -1699,16 +1812,35 @@ const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = 
     const preservedEntryTime = Number.isFinite(existingPosition?.entryTime) ? existingPosition.entryTime : Date.now() - 300000;
     const preservedHighestSinceEntry = Number.isFinite(existingPosition?.highestSinceEntry) ? existingPosition.highestSinceEntry : entryPrice;
     const preservedLowestSinceEntry = Number.isFinite(existingPosition?.lowestSinceEntry) ? existingPosition.lowestSinceEntry : entryPrice;
-    const targetPrice = side === "buy"
-        ? formatPriceToMarketPrecision(db.pair, entryPrice + (db.gridTargetProfitUsdt / Math.max(contracts, 1e-8)))
-        : formatPriceToMarketPrecision(db.pair, entryPrice - (db.gridTargetProfitUsdt / Math.max(contracts, 1e-8)));
-    const stopLossPrice = side === "buy"
-        ? formatPriceToMarketPrecision(db.pair, entryPrice - (Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8)))
-        : formatPriceToMarketPrecision(db.pair, entryPrice + (Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8)));
+    const signalParams = getSignalParameters();
+    const gridState = sanitizeGridState(db?.activeGridState, signalParams);
+    const levels = Array.isArray(gridState?.levels) ? gridState.levels : [];
+    const step = toFiniteNumber(gridState?.step, NaN);
+    const derivedGridIndex = findNearestGridLevelIndex(levels, entryPrice);
+    const gridExitPlan = buildGridExitPlan({
+        side,
+        entryIndex: derivedGridIndex,
+        levels,
+        step,
+        params: signalParams,
+        gridState
+    });
+    const targetPrice = Number.isFinite(gridExitPlan.targetPrice)
+        ? gridExitPlan.targetPrice
+        : (side === "buy"
+            ? formatPriceToMarketPrecision(db.pair, entryPrice + (db.gridTargetProfitUsdt / Math.max(contracts, 1e-8)))
+            : formatPriceToMarketPrecision(db.pair, entryPrice - (db.gridTargetProfitUsdt / Math.max(contracts, 1e-8))));
+    const stopLossPrice = Number.isFinite(gridExitPlan.stopLossPrice)
+        ? gridExitPlan.stopLossPrice
+        : (side === "buy"
+            ? formatPriceToMarketPrecision(db.pair, entryPrice - (Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8)))
+            : formatPriceToMarketPrecision(db.pair, entryPrice + (Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8))));
     const preservedTargetPrice = Number.isFinite(existingPosition?.targetPrice) ? existingPosition.targetPrice : targetPrice;
     const preservedStopLossPrice = Number.isFinite(existingPosition?.stopLossPrice) ? existingPosition.stopLossPrice : stopLossPrice;
-    const preservedTargetProfitUSDT = Number.isFinite(existingPosition?.targetProfitUSDT) ? existingPosition.targetProfitUSDT : db.gridTargetProfitUsdt;
-    const preservedStopLossUSDT = Number.isFinite(existingPosition?.stopLossUSDT) ? existingPosition.stopLossUSDT : -db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100);
+    const fallbackTargetProfitUsdt = Math.abs(preservedTargetPrice - entryPrice) * contracts;
+    const fallbackStopLossUsdt = -Math.abs(preservedStopLossPrice - entryPrice) * contracts;
+    const preservedTargetProfitUSDT = Number.isFinite(existingPosition?.targetProfitUSDT) ? existingPosition.targetProfitUSDT : fallbackTargetProfitUsdt;
+    const preservedStopLossUSDT = Number.isFinite(existingPosition?.stopLossUSDT) ? existingPosition.stopLossUSDT : fallbackStopLossUsdt;
     return {
         side, entryPrice, targetPrice: preservedTargetPrice, stopLossPrice: preservedStopLossPrice,
         stopLossUSDT: preservedStopLossUSDT,
@@ -2162,9 +2294,10 @@ const AUTO_PAIR_GRID_PRESETS = {
         gridLookbackCandles: 144,
         gridRangePercent: 4.0,
         gridEntryBufferPercent: 0.12,
-        gridTakeProfitLevels: 1,
-        gridOrdersPerSide: 3,
-        gridStopLossLevels: 1.5,
+        gridOrderSizeUsdt: 0,
+        gridTakeProfitLevels: 0,
+        gridOrdersPerSide: 0,
+        gridStopLossLevels: 0,
         gridTimeframe: "5m",
         minVolumeRatio: 1.1,
         volumePeriod: 20,
@@ -2183,9 +2316,10 @@ const AUTO_PAIR_GRID_PRESETS = {
         gridLookbackCandles: 180,
         gridRangePercent: 6.5,
         gridEntryBufferPercent: 0.18,
-        gridTakeProfitLevels: 1,
-        gridOrdersPerSide: 4,
-        gridStopLossLevels: 2.0,
+        gridOrderSizeUsdt: 0,
+        gridTakeProfitLevels: 0,
+        gridOrdersPerSide: 0,
+        gridStopLossLevels: 0,
         gridTimeframe: "5m",
         minVolumeRatio: 1.05,
         volumePeriod: 20,
@@ -2200,13 +2334,14 @@ const AUTO_PAIR_GRID_PRESETS = {
         strategy: "futures_grid",
         marginMode: "isolated",
         leverage: 8,
+        gridOrderSizeUsdt: 0,
         gridLevels: 12,
         gridLookbackCandles: 180,
         gridRangePercent: 5.5,
         gridEntryBufferPercent: 0.16,
-        gridTakeProfitLevels: 1,
-        gridOrdersPerSide: 4,
-        gridStopLossLevels: 1.8,
+        gridTakeProfitLevels: 0,
+        gridOrdersPerSide: 0,
+        gridStopLossLevels: 0,
         gridTimeframe: "5m",
         minVolumeRatio: 1.05,
         volumePeriod: 20,
@@ -2333,9 +2468,9 @@ const normalizeConfig = (config) => {
         coolingPeriod: { min: 0, allowZero: true, integer: true }, monitoringInterval: { min: 200, allowZero: false, integer: true },
         gridStopLossPercent: { min: 0, allowZero: false }, gridLevels: { min: 4, allowZero: false, integer: true },
         gridLookbackCandles: { min: 20, allowZero: false, integer: true }, gridRangePercent: { min: 0.5, allowZero: false },
-        gridEntryBufferPercent: { min: 0.02, allowZero: false }, gridTakeProfitLevels: { min: 1, allowZero: false, integer: true },
+        gridEntryBufferPercent: { min: 0.02, allowZero: false }, gridTakeProfitLevels: { min: 0, allowZero: true, integer: true },
         gridOrdersPerSide: { min: 0, allowZero: true, integer: true },
-        gridStopLossLevels: { min: 0.5, allowZero: false }, sessionStartUTC: { min: 0, allowZero: true, integer: true },
+        gridStopLossLevels: { min: 0, allowZero: true }, sessionStartUTC: { min: 0, allowZero: true, integer: true },
         sessionEndUTC: { min: 0, allowZero: true, integer: true }, volumePeriod: { min: 2, allowZero: false, integer: true },
         minVolumeRatio: { min: 1, allowZero: false },
         atrPeriod: { min: 2, allowZero: false, integer: true },
@@ -2393,7 +2528,7 @@ const normalizeConfig = (config) => {
     BOOLEAN_CONFIG_KEYS.forEach(normalizeBoolean);
     normalized.sessionStartUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionStartUTC, defaults.sessionStartUTC)), 0, 23);
     normalized.sessionEndUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionEndUTC, defaults.sessionEndUTC)), 0, 23);
-    normalized.gridTakeProfitLevels = clamp(normalized.gridTakeProfitLevels, 1, Math.max(1, normalized.gridLevels - 1));
+    normalized.gridTakeProfitLevels = clamp(normalized.gridTakeProfitLevels, 0, Math.max(1, normalized.gridLevels - 1));
     normalized.gridOrdersPerSide = clamp(normalized.gridOrdersPerSide, 0, Math.max(1, normalized.gridLevels - 1));
 
     return normalized;
