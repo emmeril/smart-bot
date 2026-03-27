@@ -581,12 +581,16 @@ const resolveGridOrdersPerSideCap = (configuredOrdersPerSide, gridLevels = db?.g
 const getMinimumGridOrderSizeUsdt = (market, referencePrice) => {
     const safeReferencePrice = toFiniteNumber(referencePrice, NaN);
     if (!Number.isFinite(safeReferencePrice) || safeReferencePrice <= 0) return 0;
+    const leverage = Math.max(1, toFiniteNumber(db.leverage, 1));
     const minAmount = toFiniteNumber(market?.limits?.amount?.min, 0);
     const minCost = toFiniteNumber(market?.limits?.cost?.min, 0);
     const amountFloorUsdt = Number.isFinite(minAmount) && minAmount > 0
-        ? (minAmount * safeReferencePrice) / Math.max(1, toFiniteNumber(db.leverage, 1))
+        ? (minAmount * safeReferencePrice) / leverage
         : 0;
-    return Math.max(minCost, amountFloorUsdt, 0);
+    const costFloorUsdt = Number.isFinite(minCost) && minCost > 0
+        ? minCost / leverage
+        : 0;
+    return Math.max(costFloorUsdt, amountFloorUsdt, 0);
 };
 
 const resolveEffectiveGridOrderSizeUsdt = ({
