@@ -83,6 +83,8 @@ let lastSyncLogAt = 0;
 let lastGridSyncLogAt = 0;
 let lastGridSizingSkipLogAt = 0;
 let lastGridSizingSkipReason = "";
+let hasLoggedTriggerOrderFetchFallback = false;
+let lastAppliedLeverageState = { symbol: "", leverage: 0 };
 const gridSizingStateLogCache = new Map();
 let isShuttingDown = false;
 let accountPositionMode = { hedged: false, label: "ONE_WAY" };
@@ -1230,11 +1232,51 @@ const getOrderFillSnapshot = (order, fallbackPrice, fallbackQuantity) => {
     return { price: resolvedPrice, quantity: resolvedQuantity };
 };
 
+const dedupeOrdersByIdentity = (orders) => {
+    const seen = new Set();
+    const uniqueOrders = [];
+
+    for (const order of orders || []) {
+        if (!order || typeof order !== "object") continue;
+        const id = String(order.id || order.orderId || order?.info?.orderId || "");
+        const clientOrderId = getExchangeClientOrderId(order);
+        const identity = id || clientOrderId;
+        if (!identity) {
+            uniqueOrders.push(order);
+            continue;
+        }
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        uniqueOrders.push(order);
+    }
+
+    return uniqueOrders;
+};
+
+const isConditionalOpenOrder = (order) => {
+    const orderType = String(order?.type || order?.info?.type || order?.info?.origType || "").toUpperCase();
+    if (orderType.includes("STOP") || orderType.includes("TAKE_PROFIT") || orderType.includes("TRAILING")) return true;
+    return Number.isFinite(getOrderTriggerPrice(order));
+};
+
 const fetchOpenOrdersSnapshot = async (symbol) => {
     metrics.api.orders++;
-    const regularOrders = await exchange.fetchOpenOrders(symbol);
-    metrics.api.orders++;
-    const triggerOrders = await exchange.fetchOpenOrders(symbol, undefined, undefined, { trigger: true });
+    const fetchedRegularOrders = await exchange.fetchOpenOrders(symbol);
+    let fetchedTriggerOrders = [];
+
+    try {
+        metrics.api.orders++;
+        fetchedTriggerOrders = await exchange.fetchOpenOrders(symbol, undefined, undefined, { trigger: true });
+    } catch (error) {
+        if (!hasLoggedTriggerOrderFetchFallback) {
+            console.warn(`[WARN] Failed to fetch trigger open orders separately. Falling back to unified open-order snapshot. ${error.message}`);
+            hasLoggedTriggerOrderFetchFallback = true;
+        }
+    }
+
+    const mergedOrders = dedupeOrdersByIdentity([...(fetchedRegularOrders || []), ...(fetchedTriggerOrders || [])]);
+    const triggerOrders = mergedOrders.filter(isConditionalOpenOrder);
+    const regularOrders = mergedOrders.filter((order) => !isConditionalOpenOrder(order));
     return { regularOrders, triggerOrders };
 };
 
@@ -1998,9 +2040,10 @@ const applyTrailingStopUpdate = (position) => {
     }
 };
 
-const calculatePositionPnL = (position, currentPrice) => {
-    const entryValue = position.entryPrice * position.quantity;
-    const exitValue = currentPrice * position.quantity;
+const calculatePositionPnL = (position, currentPrice, quantityOverride = null) => {
+    const quantity = Number.isFinite(quantityOverride) ? quantityOverride : position.quantity;
+    const entryValue = position.entryPrice * quantity;
+    const exitValue = currentPrice * quantity;
     const leverageAtEntry = Math.max(1, toFiniteNumber(position?.leverageAtEntry, db.leverage));
     
     const entryFee = entryValue * TAKER_FEE_RATE;
@@ -2008,8 +2051,8 @@ const calculatePositionPnL = (position, currentPrice) => {
     const totalEstimatedFee = entryFee + exitFee;
 
     const grossProfitUSDT = position.side === "buy"
-        ? (currentPrice - position.entryPrice) * position.quantity
-        : (position.entryPrice - currentPrice) * position.quantity;
+        ? (currentPrice - position.entryPrice) * quantity
+        : (position.entryPrice - currentPrice) * quantity;
     
     const netProfitUSDT = grossProfitUSDT - totalEstimatedFee;
     const profitPercent = (netProfitUSDT / (entryValue / leverageAtEntry)) * 100;
@@ -2178,6 +2221,23 @@ const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, re
     else if (netProfitUSDT < 0) metrics.trades.losses++;
 };
 
+const recordPartialClose = async (position, exitPrice, closedQuantity, reason) => {
+    if (!Number.isFinite(exitPrice) || exitPrice <= 0) return;
+    if (!Number.isFinite(closedQuantity) || closedQuantity <= 0) return;
+    const partialPnl = calculatePositionPnL(position, exitPrice, closedQuantity);
+    db.dailyPnL += partialPnl.netProfitUSDT;
+    logTrade(
+        position.side === "buy" ? "LONG" : "SHORT",
+        position.entryPrice,
+        exitPrice,
+        `PARTIAL_CLOSE:${reason}`,
+        partialPnl.netProfitUSDT,
+        position.strategy || null
+    );
+    console.log(`[INFO] Recorded partial close of ${closedQuantity} contracts: ${partialPnl.netProfitUSDT.toFixed(4)} USDT`);
+    await saveDB();
+};
+
 const mergeRuntimeConfig = (nextConfig) => {
     const currentPositionsMap = getActivePositionsMap(db.activePosition);
     const nextPositionsMap = getActivePositionsMap(nextConfig.activePosition);
@@ -2285,6 +2345,7 @@ const bootstrapRuntime = async () => {
     await initializeExchange();
     await detectPositionMode();
     await setMarginMode();
+    await setLeverage();
     await syncPositionWithExchange();
     startPnLMonitoring();
     startPositionSync();
@@ -2724,7 +2785,7 @@ const initializeExchange = async () => {
 const detectPositionMode = async () => {
     try {
         const result = await exchange.fetchPositionMode(db?.pair, { subType: "linear" });
-        const hedged = result?.hedged === true;
+        const hedged = result?.hedged === true || result?.dualSidePosition === true;
         accountPositionMode = { hedged, label: hedged ? "HEDGE" : "ONE_WAY" };
         console.log(`[OK] Position mode detected: ${accountPositionMode.label}`);
         return accountPositionMode;
@@ -2759,6 +2820,46 @@ const setMarginMode = async () => {
         const errorMessage = String(error?.message || error || "");
         if (!errorMessage.includes("No need to change margin mode") && errorCode !== -4067) {
             console.warn("[WARN] Margin mode warning:", errorMessage);
+        }
+        return false;
+    }
+};
+
+const setLeverage = async () => {
+    try {
+        if (!db) return false;
+        const symbol = db.pair;
+        const leverage = Math.max(1, Math.trunc(toFiniteNumber(db.leverage, 1)));
+        if (!symbol) return false;
+        if (lastAppliedLeverageState.symbol === symbol && lastAppliedLeverageState.leverage === leverage) return true;
+
+        const openPositions = await fetchOpenExchangePositions();
+        if (openPositions.length > 0) {
+            console.log(`[INFO] Skipping leverage update while ${openPositions.length} position(s) are open on ${symbol}.`);
+            return false;
+        }
+
+        const managedOrders = await fetchManagedOpenOrdersSnapshot();
+        const openOrderCount = managedOrders.grid.length + managedOrders.tp.length + managedOrders.sl.length;
+        if (openOrderCount > 0) {
+            console.log(`[INFO] Skipping leverage update while ${openOrderCount} open managed order(s) exist on ${symbol}.`);
+            return false;
+        }
+
+        await exchange.setLeverage(leverage, symbol);
+        lastAppliedLeverageState = { symbol, leverage };
+        console.log(`[OK] Leverage set to: ${leverage}x`);
+        return true;
+    } catch (error) {
+        const errorCode = extractExchangeErrorCode(error);
+        const errorMessage = String(error?.message || error || "");
+        if (!errorMessage.includes("No need to change leverage") && errorCode !== -4028) {
+            console.warn("[WARN] Leverage warning:", errorMessage);
+        } else {
+            lastAppliedLeverageState = {
+                symbol: db?.pair || "",
+                leverage: Math.max(1, Math.trunc(toFiniteNumber(db?.leverage, 1)))
+            };
         }
         return false;
     }
@@ -3078,7 +3179,10 @@ const placeOrder = async (side, signalData = {}) => {
             console.warn(`[WARN] Skipping ${side.toUpperCase()} order because ${managedOrderCount} managed order(s) are still open on the exchange.`);
             return;
         }
-        await exchange.setLeverage(db.leverage, db.pair);
+        if (!(await setLeverage())) {
+            console.warn(`[WARN] Skipping ${side.toUpperCase()} order because leverage ${db.leverage}x could not be confirmed on ${db.pair}.`);
+            return;
+        }
 
         const tickerPrice = await getPrice(true);
         if (!Number.isFinite(tickerPrice) || tickerPrice <= 0) { console.error("[ERROR] Invalid ticker price. Order skipped."); return; }
@@ -3306,6 +3410,10 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
         if (remainingPosition) {
             const remainingContracts = Math.abs(getExchangePositionContracts(remainingPosition));
             if (remainingContracts > POSITION_SYNC_QTY_TOLERANCE) {
+                const closedQuantity = Math.max(0, position.quantity - remainingContracts);
+                if (closedQuantity > POSITION_SYNC_QTY_TOLERANCE) {
+                    await recordPartialClose(position, closeFillSnapshot.price, closedQuantity, reason);
+                }
                 const remainingEntryPrice = getExchangePositionEntryPrice(remainingPosition, position.entryPrice);
                 const syncedRemainingPosition = buildSyncedActivePosition(remainingPosition, remainingEntryPrice, position);
                 const recalculatedRemainingPlan = buildOrderPlan(
@@ -3419,18 +3527,33 @@ const logTrade = (side, entry, exit, status, pnl = 0, strategyOverride = null) =
     } catch (error) { console.error("[ERROR] Failed to log trade:", error.message); }
 };
 
+const extractUsdtBalanceSnapshot = (balance) => {
+    const usdtAccountEntry = Array.isArray(balance?.info)
+        ? balance.info.find((entry) => String(entry?.asset || "").toUpperCase() === "USDT")
+        : null;
+    const totalUSDT = toFiniteNumber(
+        balance?.total?.USDT,
+        toFiniteNumber(
+            usdtAccountEntry?.balance,
+            toFiniteNumber(usdtAccountEntry?.walletBalance, 0)
+        )
+    );
+    const availableUSDT = toFiniteNumber(
+        balance?.free?.USDT,
+        toFiniteNumber(usdtAccountEntry?.availableBalance, totalUSDT)
+    );
+    return { totalUSDT, availableUSDT };
+};
+
 const getTotalUSDTBalance = async (forceRefresh = false) => {
     try {
         const now = Date.now();
         if (!forceRefresh && now - balanceCache.lastUpdate < BALANCE_CACHE_TTL) return balanceCache.totalUSDT;
         const balance = await exchange.fetchBalance();
         metrics.api.balance++;
-        const totalUSDT = Number(balance?.total?.USDT || 0);
-        const freeUSDT = Number(balance?.free?.USDT || 0);
-        balanceCache.totalUSDT = Number.isFinite(totalUSDT) ? totalUSDT : 0;
-        balanceCache.availableUSDT = Number.isFinite(freeUSDT) && freeUSDT > 0
-            ? freeUSDT
-            : balanceCache.totalUSDT;
+        const { totalUSDT, availableUSDT } = extractUsdtBalanceSnapshot(balance);
+        balanceCache.totalUSDT = totalUSDT;
+        balanceCache.availableUSDT = availableUSDT;
         balanceCache.lastUpdate = now;
         return balanceCache.totalUSDT;
     } catch (error) { console.error("[ERROR] Failed to fetch balance:", error.message); return balanceCache.totalUSDT || 0; }
