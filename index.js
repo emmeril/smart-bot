@@ -65,7 +65,7 @@ let lastLogTime = Date.now();
 let lastPnlLog = Date.now();
 let lastPositionRuntimePersistAt = 0;
 let lastTradeAt = 0;
-let balanceCache = { totalUSDT: 0, lastUpdate: 0 };
+let balanceCache = { totalUSDT: 0, availableUSDT: 0, lastUpdate: 0 };
 let tickerCache = { price: null, lastUpdate: 0 };
 let ohlcvCache = { key: "", data: null, lastUpdate: 0 };
 let pnlMonitorTimer = null;
@@ -254,8 +254,9 @@ const printStartupBanner = (totalUSDT) => {
     console.log(`Preset Profile: ${gridSummary.presetName.toUpperCase()}`);
     console.log(`Position Mode: ${accountPositionMode.label}`);
     console.log(`Grid: ${db.gridLevels} levels | lookback ${db.gridLookbackCandles} candles | range ${db.gridRangePercent}%`);
-    console.log(`Grid TP/SL: ${db.gridTakeProfitLevels} level(s) / ${db.gridStopLossLevels} step(s) | ${db.gridOrdersPerSide} order(s) per side`);
-    console.log(`Grid Order Size: ${db.gridOrderSizeUsdt} USDT`);
+    console.log(`Grid TP/SL: ${db.gridTakeProfitLevels} level(s) / ${db.gridStopLossLevels} step(s) | mode ${gridSummary.ordersMode} ${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} order(s) per side`);
+    console.log(`Grid Order Size: mode ${gridSummary.sizeMode} ${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT`);
+    console.log(`Available USDT: ${gridSummary.availableUsdtLabel}`);
     if (gridSummary.hasLockedGrid) {
         console.log(`Locked Grid Range: ${gridSummary.lockedRangeLabel}`);
         console.log(`Grid Step: ${gridSummary.stepLabel}`);
@@ -473,7 +474,8 @@ const getSignalParameters = () => {
         gridLookbackCandles,
         gridLevels,
         gridTakeProfitLevels,
-        gridOrdersPerSide: Math.max(1, Math.trunc(toFiniteNumber(db.gridOrdersPerSide, DEFAULT_CONFIG.gridOrdersPerSide))),
+        gridOrdersPerSide: Math.max(0, Math.trunc(toFiniteNumber(db.gridOrdersPerSide, DEFAULT_CONFIG.gridOrdersPerSide))),
+        gridOrderSizeUsdt: Math.max(0, toFiniteNumber(db.gridOrderSizeUsdt, DEFAULT_CONFIG.gridOrderSizeUsdt)),
         gridRangePercent: Math.max(0.5, toFiniteNumber(db.gridRangePercent, DEFAULT_CONFIG.gridRangePercent)),
         gridEntryBufferPercent: Math.max(0.02, toFiniteNumber(db.gridEntryBufferPercent, DEFAULT_CONFIG.gridEntryBufferPercent)),
         gridStopLossLevels: Math.max(0.5, toFiniteNumber(db.gridStopLossLevels, DEFAULT_CONFIG.gridStopLossLevels))
@@ -486,6 +488,82 @@ const buildGridLevels = (lowerBound, upperBound, gridLevels) => {
     const levels = [];
     for (let i = 0; i <= safeLevels; i++) levels.push(lowerBound + (step * i));
     return { levels, step };
+};
+
+const resolveGridOrdersPerSideCap = (configuredOrdersPerSide, gridLevels = db?.gridLevels) => {
+    const safeGridLevels = Math.max(2, Math.trunc(toFiniteNumber(gridLevels, 2)));
+    const configured = Math.trunc(toFiniteNumber(configuredOrdersPerSide, 0));
+    return configured <= 0 ? Math.max(1, safeGridLevels - 1) : Math.max(1, configured);
+};
+
+const getMinimumGridOrderSizeUsdt = (market, referencePrice) => {
+    const safeReferencePrice = toFiniteNumber(referencePrice, NaN);
+    if (!Number.isFinite(safeReferencePrice) || safeReferencePrice <= 0) return 0;
+    const minAmount = toFiniteNumber(market?.limits?.amount?.min, 0);
+    const minCost = toFiniteNumber(market?.limits?.cost?.min, 0);
+    const amountFloorUsdt = Number.isFinite(minAmount) && minAmount > 0
+        ? (minAmount * safeReferencePrice) / Math.max(1, toFiniteNumber(db.leverage, 1))
+        : 0;
+    return Math.max(minCost, amountFloorUsdt, 0);
+};
+
+const resolveEffectiveGridOrderSizeUsdt = ({
+    availableUsdt,
+    configuredOrderSizeUsdt,
+    configuredOrdersPerSide,
+    referencePrice,
+    market,
+    gridLevels
+} = {}) => {
+    const maxConfiguredOrders = resolveGridOrdersPerSideCap(configuredOrdersPerSide, gridLevels);
+    const safeAvailableUsdt = toFiniteNumber(availableUsdt, 0);
+    const capitalBufferRatio = 0.9;
+    const usableUsdt = safeAvailableUsdt * capitalBufferRatio;
+    const minOrderSizeUsdt = getMinimumGridOrderSizeUsdt(market, referencePrice);
+    const configuredSize = toFiniteNumber(configuredOrderSizeUsdt, 0);
+    const isFullAutoSize = configuredSize <= 0;
+    const derivedAutoSize = maxConfiguredOrders > 0 ? usableUsdt / Math.max(maxConfiguredOrders * 2, 1) : 0;
+    const orderSizeUsdt = isFullAutoSize ? derivedAutoSize : configuredSize;
+    return {
+        orderSizeUsdt: Math.max(0, orderSizeUsdt),
+        minOrderSizeUsdt,
+        mode: isFullAutoSize ? "FULL_AUTO" : "CAPPED",
+        maxConfiguredOrders
+    };
+};
+
+const resolveEffectiveGridOrdersPerSide = ({
+    availableUsdt,
+    configuredOrdersPerSide,
+    perOrderMargin,
+    referencePrice,
+    market,
+    gridLevels
+} = {}) => {
+    const maxConfigured = resolveGridOrdersPerSideCap(configuredOrdersPerSide, gridLevels);
+    const safeAvailableUsdt = toFiniteNumber(availableUsdt, 0);
+    const safePerOrderMargin = Math.max(0, toFiniteNumber(perOrderMargin, db.gridOrderSizeUsdt));
+    const safeReferencePrice = toFiniteNumber(referencePrice, NaN);
+    if (maxConfigured <= 0 || safePerOrderMargin <= 0 || safeAvailableUsdt <= 0 || !Number.isFinite(safeReferencePrice) || safeReferencePrice <= 0) {
+        return { count: 0, maxConfigured, mode: configuredOrdersPerSide <= 0 ? "FULL_AUTO" : "CAPPED", reason: "INVALID_INPUT" };
+    }
+
+    const rawQty = (safePerOrderMargin * Math.max(1, toFiniteNumber(db.leverage, 1))) / safeReferencePrice;
+    const quantity = formatAmountToMarketPrecision(db.pair, rawQty);
+    const sizeValidation = validateOrderSize(market, quantity, safeReferencePrice);
+    if (!sizeValidation.valid) {
+        return { count: 0, maxConfigured, mode: configuredOrdersPerSide <= 0 ? "FULL_AUTO" : "CAPPED", reason: sizeValidation.reason };
+    }
+
+    const capitalBufferRatio = 0.9;
+    const usableUsdt = safeAvailableUsdt * capitalBufferRatio;
+    const affordablePerSide = Math.floor(usableUsdt / Math.max(safePerOrderMargin * 2, 1e-8));
+    return {
+        count: clamp(affordablePerSide, 0, maxConfigured),
+        maxConfigured,
+        mode: configuredOrdersPerSide <= 0 ? "FULL_AUTO" : "CAPPED",
+        reason: null
+    };
 };
 
 const getGridStateFingerprint = (params) => ([
@@ -734,6 +812,7 @@ const buildGridEntryOrders = (snapshot, params, gridState = null) => {
             buyOrders.push({
                 side: "buy",
                 price,
+                orderSizeUsdt: params.gridOrderSizeUsdt,
                 targetPrice,
                 stopLossPrice,
                 levelIndex: i,
@@ -755,6 +834,7 @@ const buildGridEntryOrders = (snapshot, params, gridState = null) => {
             sellOrders.push({
                 side: "sell",
                 price,
+                orderSizeUsdt: params.gridOrderSizeUsdt,
                 targetPrice,
                 stopLossPrice,
                 levelIndex: i,
@@ -778,9 +858,10 @@ const buildGridEntryOrders = (snapshot, params, gridState = null) => {
         return { deduped, duplicates };
     };
 
+    const effectiveOrdersPerSide = Math.max(0, Math.trunc(toFiniteNumber(params.gridOrdersPerSide, 0)));
     const selectedOrders = [
-        ...buyOrders.slice(0, params.gridOrdersPerSide),
-        ...sellOrders.slice(0, params.gridOrdersPerSide)
+        ...buyOrders.slice(0, effectiveOrdersPerSide),
+        ...sellOrders.slice(0, effectiveOrdersPerSide)
     ];
     const { deduped, duplicates } = dedupeBySideAndPrice(selectedOrders);
     if (duplicates.length > 0) {
@@ -1119,7 +1200,8 @@ const logOrderPlan = (strategyName, entryPrice, adjustedQty, orderPlan) => {
 
 const placeGridEntryOrder = async (gridOrder) => {
     const market = exchange.markets[db.pair];
-    const rawQty = (db.gridOrderSizeUsdt * db.leverage) / gridOrder.price;
+    const orderSizeUsdt = Math.max(0, toFiniteNumber(gridOrder?.orderSizeUsdt, db.gridOrderSizeUsdt));
+    const rawQty = (orderSizeUsdt * db.leverage) / gridOrder.price;
     const quantity = formatAmountToMarketPrecision(db.pair, rawQty);
     const sizeValidation = validateOrderSize(market, quantity, gridOrder.price);
     if (!sizeValidation.valid) {
@@ -1149,7 +1231,7 @@ const placeGridEntryOrder = async (gridOrder) => {
             params
         );
         metrics.api.orders++;
-        console.log(`[GRID] Placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price} -> TP ${gridOrder.targetPrice} | SL ${gridOrder.stopLossPrice}`);
+        console.log(`[GRID] Placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price} size ${orderSizeUsdt.toFixed(4)} USDT -> TP ${gridOrder.targetPrice} | SL ${gridOrder.stopLossPrice}`);
         return true;
     } catch (error) {
         if (isDuplicateClientOrderIdError(error)) {
@@ -1853,6 +1935,7 @@ const printDetailedStatus = async () => {
 
     console.log(`\n[STATUS] Mode=${accountPositionMode.label} | Pair=${db.pair} | Price=${Number.isFinite(currentPrice) ? currentPrice : "N/A"} | LocalActive=${activeEntries.length} | ExchangePos=${openExchangePositions.length}`);
     console.log(`[STATUS] Profile=${gridSummary.presetName.toUpperCase()} | Grid Slot=${gridSummary.slotLabel} | Ladder=${gridSummary.ladderLabel}`);
+    console.log(`[STATUS] Side Orders ${gridSummary.ordersMode}=${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} | Size ${gridSummary.sizeMode}=${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT | Available USDT=${gridSummary.availableUsdtLabel}`);
     console.log(`[STATUS] Daily P&L=${db.dailyPnL.toFixed(2)} USDT | Trades=${db.dailyTrades}`);
     console.log(`[STATUS] Runtime | placing=${isPlacingOrder ? "Y" : "N"} closing=${isClosingPosition ? "Y" : "N"} posSync=${isSyncingPosition ? "Y" : "N"} gridSync=${isSyncingGridOrders ? "Y" : "N"}`);
     console.log(`[STATUS] Last trade=${lastTradeAt > 0 ? new Date(lastTradeAt).toISOString() : "N/A"} | Daily reset=${new Date(toFiniteNumber(db.lastDailyReset, Date.now())).toISOString()}`);
@@ -2171,6 +2254,26 @@ const getGridRuntimeSummary = (currentPrice = NaN, managedOrders = null) => {
     const gridOrders = Array.isArray(managedOrders?.grid) ? managedOrders.grid : [];
     const buyOrders = gridOrders.filter((order) => String(order?.side || "").toLowerCase() === "buy").length;
     const sellOrders = gridOrders.filter((order) => String(order?.side || "").toLowerCase() === "sell").length;
+    const availableUsdt = Number.isFinite(balanceCache.availableUSDT) ? balanceCache.availableUSDT : balanceCache.totalUSDT;
+    const referencePrice = Number.isFinite(currentPrice) && currentPrice > 0
+        ? currentPrice
+        : (hasLockedGrid ? (lowerBound + upperBound) / 2 : tickerCache.price);
+    const effectiveSizeMeta = resolveEffectiveGridOrderSizeUsdt({
+        availableUsdt,
+        configuredOrderSizeUsdt: db.gridOrderSizeUsdt,
+        configuredOrdersPerSide: db.gridOrdersPerSide,
+        referencePrice,
+        market: exchange?.markets?.[db?.pair],
+        gridLevels: db?.gridLevels
+    });
+    const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
+        availableUsdt,
+        configuredOrdersPerSide: db.gridOrdersPerSide,
+        perOrderMargin: effectiveSizeMeta.orderSizeUsdt,
+        referencePrice,
+        market: exchange?.markets?.[db?.pair],
+        gridLevels: db?.gridLevels
+    });
 
     return {
         presetName,
@@ -2178,7 +2281,13 @@ const getGridRuntimeSummary = (currentPrice = NaN, managedOrders = null) => {
         lockedRangeLabel: hasLockedGrid ? `${lowerBound.toFixed(6)} - ${upperBound.toFixed(6)}` : "N/A",
         stepLabel: hasLockedGrid ? step.toFixed(6) : "N/A",
         slotLabel,
-        ladderLabel: `${buyOrders} buy / ${sellOrders} sell`
+        ladderLabel: `${buyOrders} buy / ${sellOrders} sell`,
+        effectiveOrdersPerSide: effectiveOrdersMeta.count,
+        configuredOrdersPerSideCap: effectiveOrdersMeta.maxConfigured,
+        ordersMode: effectiveOrdersMeta.mode,
+        effectiveOrderSizeUsdt: effectiveSizeMeta.orderSizeUsdt,
+        sizeMode: effectiveSizeMeta.mode,
+        availableUsdtLabel: Number.isFinite(availableUsdt) ? availableUsdt.toFixed(2) : "N/A"
     };
 };
 
@@ -2218,14 +2327,14 @@ const normalizeConfig = (config) => {
 
     const normalized = { ...config };
     const numericRules = {
-        gridOrderSizeUsdt: { min: 0, allowZero: false }, leverage: { min: 0, allowZero: false, integer: true },
+        gridOrderSizeUsdt: { min: 0, allowZero: true }, leverage: { min: 0, allowZero: false, integer: true },
         gridTargetProfitUsdt: { min: 0, allowZero: false }, dailyProfitTargetUsdt: { min: 0, allowZero: false },
         dailyMaxLossPercent: { min: 0, allowZero: false }, maxTradesPerDay: { min: 0, allowZero: false, integer: true },
         coolingPeriod: { min: 0, allowZero: true, integer: true }, monitoringInterval: { min: 200, allowZero: false, integer: true },
         gridStopLossPercent: { min: 0, allowZero: false }, gridLevels: { min: 4, allowZero: false, integer: true },
         gridLookbackCandles: { min: 20, allowZero: false, integer: true }, gridRangePercent: { min: 0.5, allowZero: false },
         gridEntryBufferPercent: { min: 0.02, allowZero: false }, gridTakeProfitLevels: { min: 1, allowZero: false, integer: true },
-        gridOrdersPerSide: { min: 1, allowZero: false, integer: true },
+        gridOrdersPerSide: { min: 0, allowZero: true, integer: true },
         gridStopLossLevels: { min: 0.5, allowZero: false }, sessionStartUTC: { min: 0, allowZero: true, integer: true },
         sessionEndUTC: { min: 0, allowZero: true, integer: true }, volumePeriod: { min: 2, allowZero: false, integer: true },
         minVolumeRatio: { min: 1, allowZero: false },
@@ -2285,7 +2394,7 @@ const normalizeConfig = (config) => {
     normalized.sessionStartUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionStartUTC, defaults.sessionStartUTC)), 0, 23);
     normalized.sessionEndUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionEndUTC, defaults.sessionEndUTC)), 0, 23);
     normalized.gridTakeProfitLevels = clamp(normalized.gridTakeProfitLevels, 1, Math.max(1, normalized.gridLevels - 1));
-    normalized.gridOrdersPerSide = clamp(normalized.gridOrdersPerSide, 1, Math.max(1, normalized.gridLevels - 1));
+    normalized.gridOrdersPerSide = clamp(normalized.gridOrdersPerSide, 0, Math.max(1, normalized.gridLevels - 1));
 
     return normalized;
 };
@@ -2542,8 +2651,41 @@ const syncGridOrders = async () => {
             return;
         }
 
+        const availableUsdt = await getAvailableUSDTBalance();
+        const effectiveSizeMeta = resolveEffectiveGridOrderSizeUsdt({
+            availableUsdt,
+            configuredOrderSizeUsdt: params.gridOrderSizeUsdt,
+            configuredOrdersPerSide: params.gridOrdersPerSide,
+            referencePrice: snapshot.currentPrice,
+            market: exchange?.markets?.[db?.pair],
+            gridLevels: params.gridLevels
+        });
+        params.gridOrderSizeUsdt = effectiveSizeMeta.orderSizeUsdt;
+        const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
+            availableUsdt,
+            configuredOrdersPerSide: params.gridOrdersPerSide,
+            perOrderMargin: params.gridOrderSizeUsdt,
+            referencePrice: snapshot.currentPrice,
+            market: exchange?.markets?.[db?.pair],
+            gridLevels: params.gridLevels
+        });
+        params.gridOrdersPerSide = effectiveOrdersMeta.count;
         let openGridOrders = await fetchOpenGridOrders();
         openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
+
+        if (effectiveSizeMeta.orderSizeUsdt <= 0 || effectiveOrdersMeta.count <= 0) {
+            if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "INSUFFICIENT_BALANCE");
+            const reasonText = effectiveOrdersMeta.reason ? ` Reason: ${effectiveOrdersMeta.reason}` : "";
+            console.log(`[GRID] Auto sizing skipped ladder | size ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT | side orders ${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured} | available ${availableUsdt.toFixed(2)} USDT.${reasonText}`);
+            return;
+        }
+
+        if (effectiveSizeMeta.mode === "FULL_AUTO") {
+            console.log(`[GRID] Auto-sized order amount: ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT per order | available ${availableUsdt.toFixed(2)} USDT`);
+        }
+        if (effectiveOrdersMeta.count < effectiveOrdersMeta.maxConfigured) {
+            console.log(`[GRID] Auto-adjusted side orders: ${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured} per side | mode ${effectiveOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`);
+        }
 
         const openPositions = await fetchOpenExchangePositions();
         if (openPositions.length > 0 || hasAnyActivePosition()) {
@@ -3080,10 +3222,28 @@ const getTotalUSDTBalance = async (forceRefresh = false) => {
         const balance = await exchange.fetchBalance();
         metrics.api.balance++;
         const totalUSDT = Number(balance?.total?.USDT || 0);
+        const freeUSDT = Number(balance?.free?.USDT || 0);
         balanceCache.totalUSDT = Number.isFinite(totalUSDT) ? totalUSDT : 0;
+        balanceCache.availableUSDT = Number.isFinite(freeUSDT) && freeUSDT > 0
+            ? freeUSDT
+            : balanceCache.totalUSDT;
         balanceCache.lastUpdate = now;
         return balanceCache.totalUSDT;
     } catch (error) { console.error("[ERROR] Failed to fetch balance:", error.message); return balanceCache.totalUSDT || 0; }
+};
+
+const getAvailableUSDTBalance = async (forceRefresh = false) => {
+    try {
+        const now = Date.now();
+        if (!forceRefresh && now - balanceCache.lastUpdate < BALANCE_CACHE_TTL) {
+            return Number.isFinite(balanceCache.availableUSDT) ? balanceCache.availableUSDT : balanceCache.totalUSDT;
+        }
+        await getTotalUSDTBalance(forceRefresh);
+        return Number.isFinite(balanceCache.availableUSDT) ? balanceCache.availableUSDT : balanceCache.totalUSDT;
+    } catch (error) {
+        console.error("[ERROR] Failed to resolve available balance:", error.message);
+        return Number.isFinite(balanceCache.availableUSDT) ? balanceCache.availableUSDT : 0;
+    }
 };
 
 const getLastTradeTimestampFromLog = () => {

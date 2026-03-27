@@ -189,8 +189,10 @@ const printUsage = () => {
       "  node scripts/config.js set leverage 20",
       "  node scripts/config.js set pair BTC/USDT:USDT",
       "  node scripts/config.js set gridOrderSizeUsdt 1.5",
+      "  node scripts/config.js set gridOrderSizeUsdt 0",
       "  node scripts/config.js set gridTargetProfitUsdt 0.8",
       "  node scripts/config.js set gridStopLossPercent 4",
+      "  node scripts/config.js set gridOrdersPerSide 0",
       "  node scripts/config.js set gridTimeframe 15m",
       "  node scripts/config.js set dailyProfitTargetUsdt 3",
       "  node scripts/config.js set dailyMaxLossPercent 8",
@@ -198,6 +200,10 @@ const printUsage = () => {
       "  node scripts/config.js preset volatile",
       "  node scripts/config.js preset doge",
       "  node scripts/config.js autopreset DOGE/USDT:USDT",
+      "",
+      "Notes:",
+      "  gridOrderSizeUsdt=0 -> full auto by available balance",
+      "  gridOrdersPerSide=0 -> full auto by available balance",
     ].join("\n"),
   );
 };
