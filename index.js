@@ -27,9 +27,6 @@ const Config = sequelize.define('Config', {
     marginMode: { type: DataTypes.STRING, defaultValue: "isolated" },
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: 500 },
     gridStopLossPercent: { type: DataTypes.FLOAT, defaultValue: 5 },
-    autoRiskEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
-    atrTargetMult: { type: DataTypes.FLOAT, defaultValue: 2.0 },
-    atrStopMult: { type: DataTypes.FLOAT, defaultValue: 1.2 },
 
     // Binance-style futures grid parameters
     gridLevels: { type: DataTypes.INTEGER, defaultValue: 8 },
@@ -97,7 +94,7 @@ const METRICS_LOG_INTERVAL = 60000;
 const POSITION_RUNTIME_PERSIST_TTL = 2000;
 const POSITION_SYNC_QTY_TOLERANCE = 0.001;
 const POSITION_SYNC_ENTRY_TOLERANCE_PCT = 0.05;
-const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort", "autoRiskEnabled"];
+const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort"];
 const DEFAULT_CONFIG = {
     strategy: "futures_grid",
     pair: "DOGE/USDT:USDT",
@@ -114,9 +111,6 @@ const DEFAULT_CONFIG = {
     marginMode: "isolated",
     monitoringInterval: 500,
     gridStopLossPercent: 5,
-    autoRiskEnabled: true,
-    atrTargetMult: 2.0,
-    atrStopMult: 1.2,
     gridLevels: 8,
     gridLookbackCandles: 120,
     gridRangePercent: 3.5,
@@ -335,18 +329,6 @@ const ensureConfigSchema = async () => {
             await sequelize.query("UPDATE Configs SET gridStopLossPercent = COALESCE(stopLossPercent, 5) WHERE gridStopLossPercent IS NULL OR gridStopLossPercent = '';");
         }
         console.log("[INFO] Added config column: gridStopLossPercent");
-    }
-    if (!columnNames.has("autoRiskEnabled")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN autoRiskEnabled BOOLEAN DEFAULT 1;");
-        console.log("[INFO] Added config column: autoRiskEnabled");
-    }
-    if (!columnNames.has("atrTargetMult")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN atrTargetMult FLOAT DEFAULT 2;");
-        console.log("[INFO] Added config column: atrTargetMult");
-    }
-    if (!columnNames.has("atrStopMult")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN atrStopMult FLOAT DEFAULT 1.2;");
-        console.log("[INFO] Added config column: atrStopMult");
     }
     if (!columnNames.has("gridTimeframe")) {
         await sequelize.query("ALTER TABLE Configs ADD COLUMN gridTimeframe VARCHAR(255) DEFAULT '5m';");
@@ -842,9 +824,6 @@ const logGridSyncStatus = (desiredOrders, openGridOrders) => {
 };
 
 const buildRiskOverrides = () => ({
-    autoRiskEnabled: db.autoRiskEnabled !== false,
-    atrTargetMult: toFiniteNumber(db.atrTargetMult, 2.0),
-    atrStopMult: toFiniteNumber(db.atrStopMult, 1.2),
     trailingActivateATR: toFiniteNumber(db.trailingActivateATR, 1.2),
     trailingOffsetATR: toFiniteNumber(db.trailingOffsetATR, 0.6)
 });
@@ -962,87 +941,38 @@ const validateOrderSize = (market, quantity, referencePrice) => {
     return { valid: true };
 };
 
-const resolveOrderRiskPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides = {}, explicitTargets = {}) => {
-    const autoRiskEnabled = riskOverrides.autoRiskEnabled ?? (db.autoRiskEnabled !== false);
-    const atrTargetMult = Math.max(0.1, toFiniteNumber(riskOverrides.atrTargetMult, db.atrTargetMult));
-    const atrStopMult = Math.max(0.1, toFiniteNumber(riskOverrides.atrStopMult, db.atrStopMult));
+const buildOrderPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides, explicitTargets = {}) => {
     const trailingActivateATR = toFiniteNumber(riskOverrides.trailingActivateATR, db.trailingActivateATR);
     const trailingOffsetATR = toFiniteNumber(riskOverrides.trailingOffsetATR, db.trailingOffsetATR);
     const explicitTargetPrice = toFiniteNumber(explicitTargets.targetPrice, null);
     const explicitStopLossPrice = toFiniteNumber(explicitTargets.stopLossPrice, null);
-    const atrValue = toFiniteNumber(signalATR, null);
-    const hasAtr = Number.isFinite(atrValue) && atrValue > 0;
 
-    if (autoRiskEnabled && hasAtr) {
-        const targetDistance = atrValue * atrTargetMult;
-        const stopDistance = atrValue * atrStopMult;
-        const rawTargetPrice = side === "buy"
-            ? entryPrice + targetDistance
-            : entryPrice - targetDistance;
-        const rawStopLossPrice = side === "buy"
-            ? entryPrice - stopDistance
-            : entryPrice + stopDistance;
-        const roundedTargetPrice = formatPriceToMarketPrecision(db.pair, rawTargetPrice);
-        const roundedStopLossPrice = formatPriceToMarketPrecision(db.pair, rawStopLossPrice);
-        const targetPrice = Number.isFinite(roundedTargetPrice) ? roundedTargetPrice : rawTargetPrice;
-        const stopLossPrice = Number.isFinite(roundedStopLossPrice) ? roundedStopLossPrice : rawStopLossPrice;
-        return {
-            riskMode: "AUTO_ATR",
-            trailingActivateATR,
-            trailingOffsetATR,
-            targetProfitUSDT: Math.abs(targetPrice - entryPrice) * adjustedQty,
-            stopLossUSDT: -Math.abs(stopLossPrice - entryPrice) * adjustedQty,
-            targetPrice,
-            stopLossPrice,
-            trailingEnabled: Boolean(db.trailingEnabled)
-        };
-    }
+    let targetProfitUSDT = db.gridTargetProfitUsdt;
+    let stopLossUSDT = -db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100);
+    let targetPrice;
+    let stopLossPrice;
 
     if (Number.isFinite(explicitTargetPrice) && Number.isFinite(explicitStopLossPrice)) {
         const roundedTargetPrice = formatPriceToMarketPrecision(db.pair, explicitTargetPrice);
         const roundedStopLossPrice = formatPriceToMarketPrecision(db.pair, explicitStopLossPrice);
-        const targetPrice = Number.isFinite(roundedTargetPrice) ? roundedTargetPrice : explicitTargetPrice;
-        const stopLossPrice = Number.isFinite(roundedStopLossPrice) ? roundedStopLossPrice : explicitStopLossPrice;
-        return {
-            riskMode: "EXPLICIT",
-            trailingActivateATR,
-            trailingOffsetATR,
-            targetProfitUSDT: Math.abs(targetPrice - entryPrice) * adjustedQty,
-            stopLossUSDT: -Math.abs(stopLossPrice - entryPrice) * adjustedQty,
-            targetPrice,
-            stopLossPrice,
-            trailingEnabled: Boolean(db.trailingEnabled)
-        };
+        targetPrice = Number.isFinite(roundedTargetPrice) ? roundedTargetPrice : explicitTargetPrice;
+        stopLossPrice = Number.isFinite(roundedStopLossPrice) ? roundedStopLossPrice : explicitStopLossPrice;
+        targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
+        stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
+    } else {
+        const rawTargetPrice = side === "buy"
+            ? entryPrice + (targetProfitUSDT / adjustedQty)
+            : entryPrice - (targetProfitUSDT / adjustedQty);
+        const rawStopLossPrice = side === "buy"
+            ? entryPrice + (stopLossUSDT / adjustedQty)
+            : entryPrice - (stopLossUSDT / adjustedQty);
+        const roundedTargetPrice = formatPriceToMarketPrecision(db.pair, rawTargetPrice);
+        const roundedStopLossPrice = formatPriceToMarketPrecision(db.pair, rawStopLossPrice);
+        targetPrice = Number.isFinite(roundedTargetPrice) ? roundedTargetPrice : rawTargetPrice;
+        stopLossPrice = Number.isFinite(roundedStopLossPrice) ? roundedStopLossPrice : rawStopLossPrice;
+        targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
+        stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
     }
-
-    const targetProfitUSDT = db.gridTargetProfitUsdt;
-    const stopLossUSDT = -db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100);
-    const rawTargetPrice = side === "buy"
-        ? entryPrice + (targetProfitUSDT / adjustedQty)
-        : entryPrice - (targetProfitUSDT / adjustedQty);
-    const rawStopLossPrice = side === "buy"
-        ? entryPrice + (stopLossUSDT / adjustedQty)
-        : entryPrice - (stopLossUSDT / adjustedQty);
-    const roundedTargetPrice = formatPriceToMarketPrecision(db.pair, rawTargetPrice);
-    const roundedStopLossPrice = formatPriceToMarketPrecision(db.pair, rawStopLossPrice);
-    const targetPrice = Number.isFinite(roundedTargetPrice) ? roundedTargetPrice : rawTargetPrice;
-    const stopLossPrice = Number.isFinite(roundedStopLossPrice) ? roundedStopLossPrice : rawStopLossPrice;
-
-    return {
-        riskMode: "STATIC",
-        trailingActivateATR,
-        trailingOffsetATR,
-        targetProfitUSDT: Math.abs(targetPrice - entryPrice) * adjustedQty,
-        stopLossUSDT: -Math.abs(stopLossPrice - entryPrice) * adjustedQty,
-        targetPrice,
-        stopLossPrice,
-        trailingEnabled: Boolean(db.trailingEnabled)
-    };
-};
-
-const buildOrderPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides, explicitTargets = {}) => {
-    const orderPlan = resolveOrderRiskPlan(side, entryPrice, adjustedQty, signalATR, riskOverrides, explicitTargets);
-    const { riskMode, trailingActivateATR, trailingOffsetATR, targetProfitUSDT, stopLossUSDT, targetPrice, stopLossPrice } = orderPlan;
 
     if (Number.isFinite(entryPrice) && Number.isFinite(targetPrice) && targetPrice === entryPrice) {
         console.warn(`[WARN] Rounded target price equals entry price for ${side} order. Review precision/minimum profit settings.`);
@@ -1052,7 +982,6 @@ const buildOrderPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides,
     }
 
     return {
-        riskMode,
         trailingActivateATR, trailingOffsetATR,
         targetProfitUSDT, stopLossUSDT,
         targetPrice,
@@ -1081,7 +1010,6 @@ const logOrderPlan = (strategyName, entryPrice, adjustedQty, orderPlan) => {
     console.log(`   - Target Price: ${orderPlan.targetPrice}`);
     console.log(`   - Stop Loss: ${orderPlan.stopLossUSDT.toFixed(4)} USDT`);
     console.log(`   - Stop Loss Price: ${orderPlan.stopLossPrice}`);
-    console.log(`   - Risk Mode: ${orderPlan.riskMode || "STATIC"}`);
     console.log(`   - Trailing ATR: ${orderPlan.trailingActivateATR}/${orderPlan.trailingOffsetATR}x`);
 };
 
@@ -1574,7 +1502,7 @@ const findOpenExchangePosition = (positions, pair, trackedPosition = null) => {
     return openPositions[0];
 };
 
-const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = null, atrAtEntry = null) => {
+const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = null) => {
     const contracts = Math.abs(getExchangePositionContracts(openPosition));
     const side = getExchangePositionSide(openPosition) || "buy";
     const positionSide = getExchangePositionModeSide(openPosition);
@@ -1582,32 +1510,31 @@ const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = 
     const preservedTrailingEnabled = existingPosition?.trailingEnabled ?? Boolean(db.trailingEnabled);
     const preservedTrailingActivateATR = existingPosition?.trailingActivateATR ?? toFiniteNumber(db.trailingActivateATR, 1.2);
     const preservedTrailingOffsetATR = existingPosition?.trailingOffsetATR ?? toFiniteNumber(db.trailingOffsetATR, 0.6);
-    const resolvedAtrAtEntry = toFiniteNumber(atrAtEntry, existingPosition?.atrAtEntry ?? null);
     const preservedEntryTime = Number.isFinite(existingPosition?.entryTime) ? existingPosition.entryTime : Date.now() - 300000;
     const preservedHighestSinceEntry = Number.isFinite(existingPosition?.highestSinceEntry) ? existingPosition.highestSinceEntry : entryPrice;
     const preservedLowestSinceEntry = Number.isFinite(existingPosition?.lowestSinceEntry) ? existingPosition.lowestSinceEntry : entryPrice;
-    const riskOverrides = buildRiskOverrides();
-    const plan = resolveOrderRiskPlan(
-        side,
-        entryPrice,
-        contracts,
-        resolvedAtrAtEntry,
-        riskOverrides,
-        {}
-    );
+    const targetPrice = side === "buy"
+        ? formatPriceToMarketPrecision(db.pair, entryPrice + (db.gridTargetProfitUsdt / Math.max(contracts, 1e-8)))
+        : formatPriceToMarketPrecision(db.pair, entryPrice - (db.gridTargetProfitUsdt / Math.max(contracts, 1e-8)));
+    const stopLossPrice = side === "buy"
+        ? formatPriceToMarketPrecision(db.pair, entryPrice - (Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8)))
+        : formatPriceToMarketPrecision(db.pair, entryPrice + (Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8)));
+    const preservedTargetPrice = Number.isFinite(existingPosition?.targetPrice) ? existingPosition.targetPrice : targetPrice;
+    const preservedStopLossPrice = Number.isFinite(existingPosition?.stopLossPrice) ? existingPosition.stopLossPrice : stopLossPrice;
+    const preservedTargetProfitUSDT = Number.isFinite(existingPosition?.targetProfitUSDT) ? existingPosition.targetProfitUSDT : db.gridTargetProfitUsdt;
+    const preservedStopLossUSDT = Number.isFinite(existingPosition?.stopLossUSDT) ? existingPosition.stopLossUSDT : -db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100);
     return {
-        side, entryPrice, targetPrice: plan.targetPrice, stopLossPrice: plan.stopLossPrice,
-        stopLossUSDT: plan.stopLossUSDT,
+        side, entryPrice, targetPrice: preservedTargetPrice, stopLossPrice: preservedStopLossPrice,
+        stopLossUSDT: preservedStopLossUSDT,
         orderId: `SYNC_${Date.now()}`, quantity: contracts,
         entryTime: preservedEntryTime, highestSinceEntry: preservedHighestSinceEntry, lowestSinceEntry: preservedLowestSinceEntry,
         marginMode: (db.marginMode || "isolated").toLowerCase(),
         positionSide,
-        targetProfitUSDT: plan.targetProfitUSDT,
+        targetProfitUSDT: preservedTargetProfitUSDT,
         leverageAtEntry: toFiniteNumber(db.leverage, 1),
         trailingEnabled: preservedTrailingEnabled,
         trailingActivateATR: preservedTrailingActivateATR,
         trailingOffsetATR: preservedTrailingOffsetATR,
-        atrAtEntry: resolvedAtrAtEntry,
         strategy: preservedStrategy,
         tpOrderId: null, tpClientOrderId: null, slOrderId: null, slClientOrderId: null
     };
@@ -2052,8 +1979,6 @@ const normalizeConfig = (config) => {
         sessionEndUTC: { min: 0, allowZero: true, integer: true }, volumePeriod: { min: 2, allowZero: false, integer: true },
         minVolumeRatio: { min: 1, allowZero: false },
         atrPeriod: { min: 2, allowZero: false, integer: true },
-        atrTargetMult: { min: 0.1, allowZero: false },
-        atrStopMult: { min: 0.1, allowZero: false },
         trailingActivateATR: { min: 0.2, allowZero: false },
         trailingOffsetATR: { min: 0.1, allowZero: false }
     };
@@ -2105,7 +2030,6 @@ const normalizeConfig = (config) => {
     normalized.sessionEndUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionEndUTC, defaults.sessionEndUTC)), 0, 23);
     normalized.gridTakeProfitLevels = clamp(normalized.gridTakeProfitLevels, 1, Math.max(1, normalized.gridLevels - 1));
     normalized.gridOrdersPerSide = clamp(normalized.gridOrdersPerSide, 1, Math.max(1, normalized.gridLevels - 1));
-    normalized.autoRiskEnabled = normalized.autoRiskEnabled === true;
 
     return normalized;
 };
@@ -2155,10 +2079,6 @@ const syncPositionWithExchange = async () => {
             console.log(`[SYNC] Checking positions for ${db.pair}...`);
             lastSyncLogAt = now;
         }
-        const syncParams = getSignalParameters();
-        const syncOhlcv = await getOHLCV(syncParams.neededCandles);
-        const syncSnapshot = buildSignalSnapshot(syncOhlcv, syncParams);
-        const runtimeAtr = syncSnapshot && !syncSnapshot.invalidAtr ? syncSnapshot.currentATR : null;
         const openPositions = await fetchOpenExchangePositions();
         const currentPrice = await getPrice();
         const currentPositionsMap = getActivePositionsMap();
@@ -2166,7 +2086,7 @@ const syncPositionWithExchange = async () => {
         openPositions.forEach((openPosition) => {
             const entryPrice = getExchangePositionEntryPrice(openPosition, currentPrice);
             const existingPosition = currentPositionsMap[toPositionMapKey(getExchangePositionModeSide(openPosition))] || null;
-            const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, existingPosition, runtimeAtr);
+            const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, existingPosition);
             nextPositionsMap[toPositionMapKey(syncedPosition.positionSide)] = syncedPosition;
         });
         const currentKeys = Object.keys(currentPositionsMap).sort().join(",");
@@ -2328,12 +2248,8 @@ const analyzeSignal = async () => {
             atr: snapshot.currentATR, hasSignal: finalState.setupDetected,
             strategy: signalState.strategyName || strategy.toUpperCase(),
             riskOverrides: buildRiskOverrides(),
-            targetPrice: db.autoRiskEnabled === false
-                ? (finalState.canLong ? signalState.longPlan?.targetPrice : (finalState.canShort ? signalState.shortPlan?.targetPrice : null))
-                : null,
-            stopLossPrice: db.autoRiskEnabled === false
-                ? (finalState.canLong ? signalState.longPlan?.stopLossPrice : (finalState.canShort ? signalState.shortPlan?.stopLossPrice : null))
-                : null
+            targetPrice: finalState.canLong ? signalState.longPlan?.targetPrice : (finalState.canShort ? signalState.shortPlan?.targetPrice : null),
+            stopLossPrice: finalState.canLong ? signalState.longPlan?.stopLossPrice : (finalState.canShort ? signalState.shortPlan?.stopLossPrice : null)
         };
     } catch (error) { console.error("[ERROR] Signal analysis failed:", error.message); return {}; }
 };
@@ -2750,7 +2666,7 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
                     return;
                 } else {
                     const entryPrice = getExchangePositionEntryPrice(openPosition, await getPrice());
-                    const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, position, position.atrAtEntry);
+                    const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, position);
                     await cancelManagedOrdersForPosition(position, "POSITION_RESYNC");
                     upsertActivePosition(syncedPosition);
                     await saveDB();
@@ -2770,7 +2686,7 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
             const remainingContracts = Math.abs(getExchangePositionContracts(remainingPosition));
             if (remainingContracts > POSITION_SYNC_QTY_TOLERANCE) {
                 const remainingEntryPrice = getExchangePositionEntryPrice(remainingPosition, position.entryPrice);
-                const syncedRemainingPosition = buildSyncedActivePosition(remainingPosition, remainingEntryPrice, position, position.atrAtEntry);
+                const syncedRemainingPosition = buildSyncedActivePosition(remainingPosition, remainingEntryPrice, position);
                 const recalculatedRemainingPlan = buildOrderPlan(
                     syncedRemainingPosition.side,
                     syncedRemainingPosition.entryPrice,
