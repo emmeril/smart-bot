@@ -460,6 +460,7 @@ const getExchangeClientOrderId = (order) => (
 const isGridEntryOrder = (order) => getExchangeClientOrderId(order).startsWith(GRID_CLIENT_ORDER_PREFIX);
 const isTpReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWith(TP_CLIENT_ORDER_PREFIX);
 const isSlReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWith(SL_CLIENT_ORDER_PREFIX);
+const isTriggerManagedOrder = (order, label = "") => label === "SL" || isSlReduceOnlyOrder(order) || String(order?.type || "").toUpperCase().includes("STOP");
 
 const fetchOpenGridOrders = async () => {
     metrics.api.orders++;
@@ -546,7 +547,8 @@ const cancelDuplicateManagedOrders = async (orders, cancelReason, label = "ORDER
         console.warn(`[${label}] Found ${duplicateOrders.length} duplicate managed order(s) (${cancelReason}). Cancelling extras...`);
         for (const duplicateOrder of duplicateOrders) {
             try {
-                await exchange.cancelOrder(duplicateOrder.id, db.pair);
+                const cancelParams = isTriggerManagedOrder(duplicateOrder, label) ? { trigger: true } : undefined;
+                await exchange.cancelOrder(duplicateOrder.id, db.pair, cancelParams);
                 metrics.api.orders++;
             } catch (error) {
                 console.warn(`[WARN] Failed to cancel duplicate ${label.toLowerCase()} order ${duplicateOrder.id}: ${error.message}`);
@@ -2096,11 +2098,26 @@ const setMarginMode = async () => {
     try {
         if (!db) return false;
         const marginMode = (db.marginMode || "isolated").toLowerCase();
+        const openPositions = await fetchOpenExchangePositions();
+        if (openPositions.length > 0) {
+            console.log(`[INFO] Skipping margin mode update while ${openPositions.length} position(s) are open on ${db.pair}.`);
+            return false;
+        }
+        const managedOrders = await fetchManagedOpenOrdersSnapshot();
+        const openOrderCount = managedOrders.grid.length + managedOrders.tp.length + managedOrders.sl.length;
+        if (openOrderCount > 0) {
+            console.log(`[INFO] Skipping margin mode update while ${openOrderCount} open managed order(s) exist on ${db.pair}.`);
+            return false;
+        }
         await exchange.setMarginMode(marginMode, db.pair);
         console.log(`[OK] Margin mode set to: ${marginMode.toUpperCase()}`);
         return true;
     } catch (error) {
-        if (!error.message.includes("No need to change margin mode")) console.warn("[WARN] Margin mode warning:", error.message);
+        const errorCode = extractExchangeErrorCode(error);
+        const errorMessage = String(error?.message || error || "");
+        if (!errorMessage.includes("No need to change margin mode") && errorCode !== -4067) {
+            console.warn("[WARN] Margin mode warning:", errorMessage);
+        }
         return false;
     }
 };
