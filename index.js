@@ -1907,6 +1907,66 @@ const getExchangePositionEntryPrice = (position, fallbackPrice = 0) => {
     return fallbackPrice;
 };
 
+const getExchangePositionMarkPrice = (position, fallbackPrice = NaN) => {
+    const directMarkPrice = toFiniteNumber(position?.markPrice, NaN);
+    if (Number.isFinite(directMarkPrice) && directMarkPrice > 0) return directMarkPrice;
+    const infoMarkPrice = toFiniteNumber(position?.info?.markPrice, NaN);
+    if (Number.isFinite(infoMarkPrice) && infoMarkPrice > 0) return infoMarkPrice;
+    return fallbackPrice;
+};
+
+const buildExchangePnlSnapshot = (exchangePosition, entryPrice, quantity, fallbackPrice = NaN) => {
+    if (!exchangePosition) return null;
+
+    const normalizedEntryPrice = toFiniteNumber(entryPrice, NaN);
+    const normalizedQuantity = Math.abs(toFiniteNumber(quantity, 0));
+    const normalizedMarkPrice = getExchangePositionMarkPrice(exchangePosition, fallbackPrice);
+    const grossProfitUSDT = toFiniteNumber(exchangePosition?.unrealizedPnl, toFiniteNumber(exchangePosition?.info?.unrealizedPL, NaN));
+    const exchangePercentage = toFiniteNumber(exchangePosition?.percentage, NaN);
+    const initialMargin = Math.abs(toFiniteNumber(exchangePosition?.initialMargin, toFiniteNumber(exchangePosition?.collateral, NaN)));
+    const leverageAtEntry = Math.max(1, Math.abs(toFiniteNumber(exchangePosition?.leverage, db.leverage)));
+
+    const entryValue = normalizedEntryPrice * normalizedQuantity;
+    const exitReferencePrice = Number.isFinite(normalizedMarkPrice) && normalizedMarkPrice > 0
+        ? normalizedMarkPrice
+        : fallbackPrice;
+    const exitValue = Number.isFinite(exitReferencePrice) && exitReferencePrice > 0
+        ? exitReferencePrice * normalizedQuantity
+        : NaN;
+    const entryFee = Number.isFinite(entryValue) && entryValue > 0 ? entryValue * TAKER_FEE_RATE : NaN;
+    const exitFee = Number.isFinite(exitValue) && exitValue > 0 ? exitValue * TAKER_FEE_RATE : NaN;
+    const totalEstimatedFee = Number.isFinite(entryFee) && Number.isFinite(exitFee) ? entryFee + exitFee : NaN;
+    const netProfitUSDT = Number.isFinite(grossProfitUSDT) && Number.isFinite(totalEstimatedFee)
+        ? grossProfitUSDT - totalEstimatedFee
+        : NaN;
+
+    let profitPercent = NaN;
+    if (Number.isFinite(initialMargin) && initialMargin > 0 && Number.isFinite(netProfitUSDT)) {
+        profitPercent = (netProfitUSDT / initialMargin) * 100;
+    } else if (Number.isFinite(exchangePercentage)) {
+        const exchangeRatio = Math.abs(exchangePercentage) > 1 ? exchangePercentage : exchangePercentage * 100;
+        const feePercent = Number.isFinite(initialMargin) && initialMargin > 0 && Number.isFinite(totalEstimatedFee)
+            ? (totalEstimatedFee / initialMargin) * 100
+            : 0;
+        profitPercent = exchangeRatio - feePercent;
+    } else if (Number.isFinite(entryValue) && entryValue > 0 && Number.isFinite(netProfitUSDT)) {
+        profitPercent = (netProfitUSDT / (entryValue / leverageAtEntry)) * 100;
+    }
+
+    return {
+        grossProfitUSDT,
+        netProfitUSDT,
+        profitPercent,
+        totalEstimatedFee,
+        currentPrice: exitReferencePrice,
+        markPrice: normalizedMarkPrice,
+        initialMargin,
+        leverageAtEntry,
+        timestamp: Date.now(),
+        source: "exchange"
+    };
+};
+
 const findOpenExchangePosition = (positions, pair, trackedPosition = null) => {
     const normalizedPair = normalizeSymbol(pair);
     const openPositions = positions.filter((position) => (
@@ -1923,10 +1983,11 @@ const findOpenExchangePosition = (positions, pair, trackedPosition = null) => {
     return openPositions[0];
 };
 
-const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = null) => {
+const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = null, currentPrice = NaN) => {
     const contracts = Math.abs(getExchangePositionContracts(openPosition));
     const side = getExchangePositionSide(openPosition) || "buy";
     const positionSide = getExchangePositionModeSide(openPosition);
+    const exchangePnlSnapshot = buildExchangePnlSnapshot(openPosition, entryPrice, contracts, currentPrice);
     const preservedStrategy = existingPosition?.strategy || "SYNC_ONLY";
     const preservedTrailingEnabled = existingPosition?.trailingEnabled ?? Boolean(db.trailingEnabled);
     const preservedTrailingActivateATR = existingPosition?.trailingActivateATR ?? toFiniteNumber(db.trailingActivateATR, 1.2);
@@ -1971,11 +2032,12 @@ const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = 
         marginMode: (db.marginMode || "isolated").toLowerCase(),
         positionSide,
         targetProfitUSDT: preservedTargetProfitUSDT,
-        leverageAtEntry: toFiniteNumber(db.leverage, 1),
+        leverageAtEntry: toFiniteNumber(exchangePnlSnapshot?.leverageAtEntry, toFiniteNumber(db.leverage, 1)),
         trailingEnabled: preservedTrailingEnabled,
         trailingActivateATR: preservedTrailingActivateATR,
         trailingOffsetATR: preservedTrailingOffsetATR,
         strategy: preservedStrategy,
+        exchangePnlSnapshot,
         tpOrderId: null, tpClientOrderId: null, slOrderId: null, slClientOrderId: null
     };
 };
@@ -2070,6 +2132,25 @@ const applyTrailingStopUpdate = (position) => {
 
 const calculatePositionPnL = (position, currentPrice, quantityOverride = null) => {
     const quantity = Number.isFinite(quantityOverride) ? quantityOverride : position.quantity;
+    const exchangePnlSnapshot = !Number.isFinite(quantityOverride) ? position?.exchangePnlSnapshot : null;
+    const hasFreshExchangePnl = exchangePnlSnapshot &&
+        exchangePnlSnapshot.source === "exchange" &&
+        Number.isFinite(exchangePnlSnapshot.timestamp) &&
+        (Date.now() - exchangePnlSnapshot.timestamp) <= 10000 &&
+        Number.isFinite(exchangePnlSnapshot.grossProfitUSDT) &&
+        Number.isFinite(exchangePnlSnapshot.netProfitUSDT) &&
+        Number.isFinite(exchangePnlSnapshot.profitPercent);
+    if (hasFreshExchangePnl) {
+        return {
+            grossProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
+            netProfitUSDT: exchangePnlSnapshot.netProfitUSDT,
+            profitPercent: exchangePnlSnapshot.profitPercent,
+            totalEstimatedFee: exchangePnlSnapshot.totalEstimatedFee,
+            currentPrice: Number.isFinite(exchangePnlSnapshot.currentPrice) ? exchangePnlSnapshot.currentPrice : currentPrice,
+            source: "exchange"
+        };
+    }
+
     const entryValue = position.entryPrice * quantity;
     const exitValue = currentPrice * quantity;
     const leverageAtEntry = Math.max(1, toFiniteNumber(position?.leverageAtEntry, db.leverage));
@@ -2085,7 +2166,7 @@ const calculatePositionPnL = (position, currentPrice, quantityOverride = null) =
     const netProfitUSDT = grossProfitUSDT - totalEstimatedFee;
     const profitPercent = (netProfitUSDT / (entryValue / leverageAtEntry)) * 100;
 
-    return { grossProfitUSDT, netProfitUSDT, profitPercent, totalEstimatedFee };
+    return { grossProfitUSDT, netProfitUSDT, profitPercent, totalEstimatedFee, currentPrice, source: "local" };
 };
 
 const getPositionExitTargets = (position) => {
@@ -2757,7 +2838,7 @@ const syncPositionWithExchange = async () => {
         openPositions.forEach((openPosition) => {
             const entryPrice = getExchangePositionEntryPrice(openPosition, currentPrice);
             const existingPosition = currentPositionsMap[toPositionMapKey(getExchangePositionModeSide(openPosition))] || null;
-            const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, existingPosition);
+            const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, existingPosition, currentPrice);
             nextPositionsMap[toPositionMapKey(syncedPosition.positionSide)] = syncedPosition;
         });
         const currentKeys = Object.keys(currentPositionsMap).sort().join(",");
@@ -2769,6 +2850,14 @@ const syncPositionWithExchange = async () => {
         }
 
         if (!shouldPersist) {
+            Object.keys(nextPositionsMap).forEach((key) => {
+                if (!currentPositionsMap[key]) return;
+                currentPositionsMap[key].exchangePnlSnapshot = nextPositionsMap[key].exchangePnlSnapshot;
+                if (Number.isFinite(nextPositionsMap[key].leverageAtEntry)) {
+                    currentPositionsMap[key].leverageAtEntry = nextPositionsMap[key].leverageAtEntry;
+                }
+            });
+            setActivePositionsMap(currentPositionsMap);
             for (const [positionKey, currentPosition] of Object.entries(currentPositionsMap)) {
                 await ensureReduceOnlyTakeProfitOrder(positionKey, currentPosition);
                 await ensureReduceOnlyStopLossOrder(positionKey, currentPosition);
@@ -3436,7 +3525,7 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
                     return;
                 } else {
                     const entryPrice = getExchangePositionEntryPrice(openPosition, await getPrice());
-                    const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, position);
+                    const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, position, entryPrice);
                     await cancelManagedOrdersForPosition(position, "POSITION_RESYNC");
                     upsertActivePosition(syncedPosition);
                     await saveDB();
@@ -3460,7 +3549,7 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
                     await recordPartialClose(position, closeFillSnapshot.price, closedQuantity, reason);
                 }
                 const remainingEntryPrice = getExchangePositionEntryPrice(remainingPosition, position.entryPrice);
-                const syncedRemainingPosition = buildSyncedActivePosition(remainingPosition, remainingEntryPrice, position);
+                const syncedRemainingPosition = buildSyncedActivePosition(remainingPosition, remainingEntryPrice, position, remainingEntryPrice);
                 const recalculatedRemainingPlan = buildOrderPlan(
                     syncedRemainingPosition.side,
                     syncedRemainingPosition.entryPrice,
