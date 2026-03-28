@@ -88,6 +88,7 @@ let lastAppliedLeverageState = { symbol: "", leverage: 0 };
 const gridSizingStateLogCache = new Map();
 let isShuttingDown = false;
 let accountPositionMode = { hedged: false, label: "ONE_WAY" };
+let runtimeCommandsRegistered = false;
 const logPath = path.join(__dirname, 'trades.csv');
 let db = null;
 const BALANCE_CACHE_TTL = 15000;
@@ -163,6 +164,24 @@ const retry = async (fn, retries = 3, delay = 1000) => {
             delay *= 2;
         }
     }
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const withSqliteBusyRetry = async (fn, { attempts = 5, delayMs = 150 } = {}) => {
+    let lastError = null;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+            const message = String(error?.message || error);
+            const isBusy = message.includes("SQLITE_BUSY") || message.includes("database is locked");
+            if (!isBusy || attempt === attempts - 1) throw error;
+            await sleep(delayMs);
+        }
+    }
+    throw lastError;
 };
 
 // -------------------- ENSURE LOG FILE EXISTS --------------------
@@ -324,108 +343,108 @@ const serializeConfigForSave = (config) => ({
     lastUpdated: Date.now()
 });
 
-const getConfigRow = async () => Config.findOne();
+const getConfigRow = async () => withSqliteBusyRetry(() => Config.findOne());
 const OBSOLETE_CONFIG_COLUMNS = ["autoRiskEnabled", "atrTargetMult", "atrStopMult"];
 
 const ensureConfigSchema = async () => {
-    await sequelize.sync();
-    const tableInfo = await sequelize.query("PRAGMA table_info('Configs');", { type: sequelize.QueryTypes.SELECT });
+    await withSqliteBusyRetry(() => sequelize.sync());
+    const tableInfo = await withSqliteBusyRetry(() => sequelize.query("PRAGMA table_info('Configs');", { type: sequelize.QueryTypes.SELECT }));
     const columnNames = new Set(tableInfo.map((column) => String(column.name)));
     if (!columnNames.has("gridOrderSizeUsdt")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN gridOrderSizeUsdt FLOAT DEFAULT 1.5;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN gridOrderSizeUsdt FLOAT DEFAULT 1.5;"));
         if (columnNames.has("usdtPerTrade")) {
-            await sequelize.query("UPDATE Configs SET gridOrderSizeUsdt = COALESCE(usdtPerTrade, 1.5) WHERE gridOrderSizeUsdt IS NULL OR gridOrderSizeUsdt = '';");
+            await withSqliteBusyRetry(() => sequelize.query("UPDATE Configs SET gridOrderSizeUsdt = COALESCE(usdtPerTrade, 1.5) WHERE gridOrderSizeUsdt IS NULL OR gridOrderSizeUsdt = '';"));
         }
         console.log("[INFO] Added config column: gridOrderSizeUsdt");
     }
     if (!columnNames.has("gridTargetProfitUsdt")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN gridTargetProfitUsdt FLOAT DEFAULT 0.5;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN gridTargetProfitUsdt FLOAT DEFAULT 0.5;"));
         if (columnNames.has("targetProfitUSDT")) {
-            await sequelize.query("UPDATE Configs SET gridTargetProfitUsdt = COALESCE(targetProfitUSDT, 0.5) WHERE gridTargetProfitUsdt IS NULL OR gridTargetProfitUsdt = '';");
+            await withSqliteBusyRetry(() => sequelize.query("UPDATE Configs SET gridTargetProfitUsdt = COALESCE(targetProfitUSDT, 0.5) WHERE gridTargetProfitUsdt IS NULL OR gridTargetProfitUsdt = '';"));
         }
         console.log("[INFO] Added config column: gridTargetProfitUsdt");
     }
     if (!columnNames.has("gridStopLossPercent")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN gridStopLossPercent FLOAT DEFAULT 5;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN gridStopLossPercent FLOAT DEFAULT 5;"));
         if (columnNames.has("stopLossPercent")) {
-            await sequelize.query("UPDATE Configs SET gridStopLossPercent = COALESCE(stopLossPercent, 5) WHERE gridStopLossPercent IS NULL OR gridStopLossPercent = '';");
+            await withSqliteBusyRetry(() => sequelize.query("UPDATE Configs SET gridStopLossPercent = COALESCE(stopLossPercent, 5) WHERE gridStopLossPercent IS NULL OR gridStopLossPercent = '';"));
         }
         console.log("[INFO] Added config column: gridStopLossPercent");
     }
     if (!columnNames.has("gridTimeframe")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN gridTimeframe VARCHAR(255) DEFAULT '5m';");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN gridTimeframe VARCHAR(255) DEFAULT '5m';"));
         if (columnNames.has("breakoutTimeframe")) {
-            await sequelize.query("UPDATE Configs SET gridTimeframe = COALESCE(breakoutTimeframe, '5m') WHERE gridTimeframe IS NULL OR gridTimeframe = '';");
+            await withSqliteBusyRetry(() => sequelize.query("UPDATE Configs SET gridTimeframe = COALESCE(breakoutTimeframe, '5m') WHERE gridTimeframe IS NULL OR gridTimeframe = '';"));
         }
         console.log("[INFO] Added config column: gridTimeframe");
     }
     if (!columnNames.has("activeGridState")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN activeGridState TEXT DEFAULT NULL;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN activeGridState TEXT DEFAULT NULL;"));
         console.log("[INFO] Added config column: activeGridState");
     }
     if (!columnNames.has("dailyProfitTargetUsdt")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN dailyProfitTargetUsdt FLOAT DEFAULT 1;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN dailyProfitTargetUsdt FLOAT DEFAULT 1;"));
         if (columnNames.has("targetDailyProfit")) {
-            await sequelize.query("UPDATE Configs SET dailyProfitTargetUsdt = COALESCE(targetDailyProfit, 1) WHERE dailyProfitTargetUsdt IS NULL OR dailyProfitTargetUsdt = '';");
+            await withSqliteBusyRetry(() => sequelize.query("UPDATE Configs SET dailyProfitTargetUsdt = COALESCE(targetDailyProfit, 1) WHERE dailyProfitTargetUsdt IS NULL OR dailyProfitTargetUsdt = '';"));
         }
         console.log("[INFO] Added config column: dailyProfitTargetUsdt");
     }
     if (!columnNames.has("dailyMaxLossPercent")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN dailyMaxLossPercent FLOAT DEFAULT 10;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN dailyMaxLossPercent FLOAT DEFAULT 10;"));
         if (columnNames.has("maxDailyLossPercent")) {
-            await sequelize.query("UPDATE Configs SET dailyMaxLossPercent = COALESCE(maxDailyLossPercent, 10) WHERE dailyMaxLossPercent IS NULL OR dailyMaxLossPercent = '';");
+            await withSqliteBusyRetry(() => sequelize.query("UPDATE Configs SET dailyMaxLossPercent = COALESCE(maxDailyLossPercent, 10) WHERE dailyMaxLossPercent IS NULL OR dailyMaxLossPercent = '';"));
         }
         console.log("[INFO] Added config column: dailyMaxLossPercent");
     }
     if (!columnNames.has("strategy")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN strategy VARCHAR(255) DEFAULT 'futures_grid';");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN strategy VARCHAR(255) DEFAULT 'futures_grid';"));
         console.log("[INFO] Added config column: strategy");
     }
     if (!columnNames.has("sessionStartUTC")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN sessionStartUTC INTEGER DEFAULT 0;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN sessionStartUTC INTEGER DEFAULT 0;"));
         console.log("[INFO] Added config column: sessionStartUTC");
     }
     if (!columnNames.has("sessionEndUTC")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN sessionEndUTC INTEGER DEFAULT 23;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN sessionEndUTC INTEGER DEFAULT 23;"));
         console.log("[INFO] Added config column: sessionEndUTC");
     }
     if (!columnNames.has("volumePeriod")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN volumePeriod INTEGER DEFAULT 20;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN volumePeriod INTEGER DEFAULT 20;"));
         console.log("[INFO] Added config column: volumePeriod");
     }
     if (!columnNames.has("minVolumeRatio")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN minVolumeRatio FLOAT DEFAULT 1.3;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN minVolumeRatio FLOAT DEFAULT 1.3;"));
         console.log("[INFO] Added config column: minVolumeRatio");
     }
     if (!columnNames.has("atrPeriod")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN atrPeriod INTEGER DEFAULT 14;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN atrPeriod INTEGER DEFAULT 14;"));
         console.log("[INFO] Added config column: atrPeriod");
     }
     if (!columnNames.has("trailingEnabled")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN trailingEnabled BOOLEAN DEFAULT 1;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN trailingEnabled BOOLEAN DEFAULT 1;"));
         console.log("[INFO] Added config column: trailingEnabled");
     }
     if (!columnNames.has("trailingActivateATR")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN trailingActivateATR FLOAT DEFAULT 1.2;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN trailingActivateATR FLOAT DEFAULT 1.2;"));
         console.log("[INFO] Added config column: trailingActivateATR");
     }
     if (!columnNames.has("trailingOffsetATR")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN trailingOffsetATR FLOAT DEFAULT 0.6;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN trailingOffsetATR FLOAT DEFAULT 0.6;"));
         console.log("[INFO] Added config column: trailingOffsetATR");
     }
     if (!columnNames.has("allowLong")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN allowLong BOOLEAN DEFAULT 1;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN allowLong BOOLEAN DEFAULT 1;"));
         console.log("[INFO] Added config column: allowLong");
     }
     if (!columnNames.has("allowShort")) {
-        await sequelize.query("ALTER TABLE Configs ADD COLUMN allowShort BOOLEAN DEFAULT 1;");
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN allowShort BOOLEAN DEFAULT 1;"));
         console.log("[INFO] Added config column: allowShort");
     }
 
     for (const obsoleteColumn of OBSOLETE_CONFIG_COLUMNS) {
         if (!columnNames.has(obsoleteColumn)) continue;
         try {
-            await sequelize.query(`ALTER TABLE Configs DROP COLUMN ${obsoleteColumn};`);
+            await withSqliteBusyRetry(() => sequelize.query(`ALTER TABLE Configs DROP COLUMN ${obsoleteColumn};`));
             console.log(`[INFO] Dropped obsolete config column: ${obsoleteColumn}`);
         } catch (error) {
             console.warn(`[WARN] Could not drop obsolete config column ${obsoleteColumn}: ${error.message}`);
@@ -442,7 +461,7 @@ const ensureConfigRow = async () => {
     let configRow = await getConfigRow();
     if (configRow) return configRow;
 
-    configRow = await Config.create(getDefaultConfig());
+    configRow = await withSqliteBusyRetry(() => Config.create(getDefaultConfig()));
     console.log("[INFO] Created new config row");
     return configRow;
 };
@@ -453,18 +472,18 @@ const persistConfig = async (config) => {
     delete createPayload.id;
 
     if (config.id) {
-        const [affectedRows] = await Config.update(toSave, { where: { id: config.id } });
+        const [affectedRows] = await withSqliteBusyRetry(() => Config.update(toSave, { where: { id: config.id } }));
         if (affectedRows > 0) return config.id;
     }
 
     const firstRow = await getConfigRow();
     if (firstRow) {
         config.id = firstRow.id;
-        const [fallbackAffectedRows] = await Config.update(toSave, { where: { id: firstRow.id } });
+        const [fallbackAffectedRows] = await withSqliteBusyRetry(() => Config.update(toSave, { where: { id: firstRow.id } }));
         if (fallbackAffectedRows > 0) return firstRow.id;
     }
 
-    const created = await Config.create(createPayload);
+    const created = await withSqliteBusyRetry(() => Config.create(createPayload));
     config.id = created.id;
     return created.id;
 };
@@ -2337,17 +2356,33 @@ const refreshRuntimeSchedulers = () => { startPnLMonitoring(); startPositionSync
 
 const handleRuntimeCommand = async (input) => {
     const cmd = input.toString().trim().toLowerCase();
+    if (!cmd) return;
     if (cmd === "sync") { await syncPositionWithExchange(); return; }
     if (cmd === "status") {
         try { await printDetailedStatus(); }
         catch (error) { console.error("[ERROR] Failed to print status:", error.message); }
+        return;
     }
+    if (cmd === "help") {
+        console.log("[INFO] Runtime commands: status | sync | help");
+        return;
+    }
+    console.log(`[INFO] Unknown runtime command: ${cmd}. Available: status | sync | help`);
+};
+
+const unregisterRuntimeCommands = () => {
+    if (!runtimeCommandsRegistered || !process.stdin.isTTY) return;
+    process.stdin.removeListener("data", handleRuntimeCommand);
+    process.stdin.pause();
+    runtimeCommandsRegistered = false;
 };
 
 const registerRuntimeCommands = () => {
-    if (!process.stdin.isTTY) return;
+    if (runtimeCommandsRegistered || !process.stdin.isTTY) return;
     process.stdin.setEncoding("utf8");
+    process.stdin.resume();
     process.stdin.on("data", handleRuntimeCommand);
+    runtimeCommandsRegistered = true;
 };
 
 const bootstrapRuntime = async () => {
@@ -3666,6 +3701,7 @@ const shutdown = async (signal = "EXIT") => {
     if (isShuttingDown) return;
     isShuttingDown = true;
     console.log(`\n[SHUTDOWN] Received ${signal}. Stopping bot...`);
+    unregisterRuntimeCommands();
     clearRuntimeTimers();
     try { await saveDB(); } catch (error) { console.error("[ERROR] Failed to save DB during shutdown:", error.message); }
     try { await sequelize.close(); } catch (error) { console.error("[ERROR] Failed to close DB connection:", error.message); }
