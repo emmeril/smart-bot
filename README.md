@@ -70,6 +70,8 @@ node scripts/config.js show
 node scripts/config.js get leverage
 node scripts/config.js set leverage 20
 node scripts/config.js set pair BTC/USDT:USDT
+node scripts/config.js set marginMode cross
+node scripts/config.js set marginMode isolated
 ```
 
 Default strategi yang dipakai:
@@ -83,6 +85,7 @@ Default strategi yang dipakai:
 - `gridOrdersPerSide`: `1`
 - `gridStopLossLevels`: `1.2`
 - `gridTimeframe`: `5m`
+- `marginMode`: `isolated`
 - `dailyProfitTargetUsdt`: `1`
 - `dailyMaxLossPercent`: `10`
 
@@ -94,7 +97,10 @@ node scripts/config.js set gridOrdersPerSide 4
 node scripts/config.js set gridRangePercent 4.5
 node scripts/config.js set gridLookbackCandles 150
 node scripts/config.js set dailyProfitTargetUsdt 3
+node scripts/config.js set marginMode cross
 ```
+
+`marginMode` hanya menerima `cross` atau `isolated`.
 
 ## Logging
 

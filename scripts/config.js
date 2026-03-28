@@ -9,6 +9,7 @@ const { Sequelize, DataTypes } = require("sequelize");
 const DB_PATH = path.join(__dirname, "..", "database.sqlite");
 
 const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort"];
+const VALID_MARGIN_MODES = ["cross", "isolated"];
 const OBSOLETE_CONFIG_COLUMNS = ["autoRiskEnabled", "atrTargetMult", "atrStopMult"];
 
 const GRID_PRESETS = {
@@ -199,6 +200,8 @@ const printUsage = () => {
       "  node scripts/config.js set gridStopLossLevels 0",
       "  node scripts/config.js set gridOrdersPerSide 0",
       "  node scripts/config.js set gridTimeframe 15m",
+      "  node scripts/config.js set marginMode cross",
+      "  node scripts/config.js set marginMode isolated",
       "  node scripts/config.js set dailyProfitTargetUsdt 3",
       "  node scripts/config.js set dailyMaxLossPercent 8",
       "  node scripts/config.js preset binance",
@@ -212,6 +215,7 @@ const printUsage = () => {
       "  gridTakeProfitLevels=0 -> auto next grid level",
       "  gridStopLossLevels=0 -> auto stop outside locked grid range",
       "  gridOrdersPerSide=0 -> full auto by available balance",
+      `  marginMode -> ${VALID_MARGIN_MODES.join(" | ")}`,
     ].join("\n"),
   );
 };
@@ -267,6 +271,14 @@ const parseValueForKey = (key, rawValue) => {
   if (BOOLEAN_CONFIG_KEYS.includes(key)) {
     const parsed = coerceBoolean(rawValue);
     if (parsed === null) throw new Error(`Invalid boolean for ${key}: ${rawValue}`);
+    return parsed;
+  }
+
+  if (key === "marginMode") {
+    const parsed = String(rawValue).trim().toLowerCase();
+    if (!VALID_MARGIN_MODES.includes(parsed)) {
+      throw new Error(`Invalid marginMode: ${rawValue}. Allowed values: ${VALID_MARGIN_MODES.join(", ")}`);
+    }
     return parsed;
   }
 
