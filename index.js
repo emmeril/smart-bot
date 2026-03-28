@@ -1317,7 +1317,8 @@ const fetchTrackedExchangePosition = async () => {
     return findOpenExchangePosition(positions, db.pair, getPrimaryActivePosition());
 };
 
-const validateOrderSize = (market, quantity, referencePrice) => {
+const validateOrderSize = (market, quantity, referencePrice, options = {}) => {
+    const { allowReduceOnlyClose = false } = options;
     if (!Number.isFinite(quantity) || quantity <= 0) {
         return { valid: false, reason: "[ERROR] Invalid order quantity after precision adjustment." };
     }
@@ -1328,6 +1329,12 @@ const validateOrderSize = (market, quantity, referencePrice) => {
     const notional = quantity * referencePrice;
     const minCost = Number(market?.limits?.cost?.min);
     if (Number.isFinite(minCost) && Number.isFinite(notional) && notional < minCost) {
+        if (allowReduceOnlyClose) {
+            return {
+                valid: true,
+                warning: `[WARN] Reduce-only close notional ${notional.toFixed(6)} is below exchange minimum ${minCost}. Allowing placement because the order only closes an existing position.`
+            };
+        }
         return { valid: false, reason: `[ERROR] Order notional ${notional.toFixed(6)} is below exchange minimum ${minCost}. Order skipped.` };
     }
     return { valid: true };
@@ -1499,11 +1506,12 @@ const placeReduceOnlyTakeProfitOrder = async (position) => {
     const closeSide = position.side === "buy" ? "sell" : "buy";
     const quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
     const market = exchange.markets[db.pair];
-    const sizeValidation = validateOrderSize(market, quantity, position.targetPrice);
+    const sizeValidation = validateOrderSize(market, quantity, position.targetPrice, { allowReduceOnlyClose: true });
     if (!sizeValidation.valid) {
         console.warn(`[TP] Skipping TP placement: ${sizeValidation.reason}`);
         return null;
     }
+    if (sizeValidation.warning) console.warn(`[TP] ${sizeValidation.warning}`);
 
     const params = buildExchangeOrderParams({
         side: closeSide,
@@ -1590,11 +1598,12 @@ const placeReduceOnlyStopLossOrder = async (position) => {
     const closeSide = position.side === "buy" ? "sell" : "buy";
     const quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
     const market = exchange.markets[db.pair];
-    const sizeValidation = validateOrderSize(market, quantity, position.stopLossPrice);
+    const sizeValidation = validateOrderSize(market, quantity, position.stopLossPrice, { allowReduceOnlyClose: true });
     if (!sizeValidation.valid) {
         console.warn(`[SL] Skipping SL placement: ${sizeValidation.reason}`);
         return null;
     }
+    if (sizeValidation.warning) console.warn(`[SL] ${sizeValidation.warning}`);
 
     const params = buildExchangeOrderParams({
         side: closeSide,
