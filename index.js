@@ -2355,19 +2355,19 @@ const isCoolingDown = () => {
 const refreshRuntimeSchedulers = () => { startPnLMonitoring(); startPositionSync(); };
 
 const handleRuntimeCommand = async (input) => {
-    const cmd = input.toString().trim().toLowerCase();
-    if (!cmd) return;
-    if (cmd === "sync") { await syncPositionWithExchange(); return; }
-    if (cmd === "status") {
-        try { await printDetailedStatus(); }
-        catch (error) { console.error("[ERROR] Failed to print status:", error.message); }
-        return;
+    try {
+        const cmd = input.toString().trim().toLowerCase();
+        if (!cmd) return;
+        if (cmd === "sync") { await syncPositionWithExchange(); return; }
+        if (cmd === "status") { await printDetailedStatus(); return; }
+        if (cmd === "help") {
+            console.log("[INFO] Runtime commands: status | sync | help");
+            return;
+        }
+        console.log(`[INFO] Unknown runtime command: ${cmd}. Available: status | sync | help`);
+    } catch (error) {
+        console.error("[ERROR] Runtime command failed:", error.message);
     }
-    if (cmd === "help") {
-        console.log("[INFO] Runtime commands: status | sync | help");
-        return;
-    }
-    console.log(`[INFO] Unknown runtime command: ${cmd}. Available: status | sync | help`);
 };
 
 const unregisterRuntimeCommands = () => {
@@ -2810,6 +2810,7 @@ const syncPositionWithExchange = async () => {
 // -------------------- INIT EXCHANGE --------------------
 const initializeExchange = async () => {
     try {
+        validateExchangeCredentials();
         exchange = new ccxt.binanceusdm({
             apiKey: process.env.API_KEY,
             secret: process.env.API_SECRET,
@@ -3629,6 +3630,14 @@ const getLastTradeTimestampFromLog = () => {
         const parsed = Date.parse(timestamp);
         return Number.isFinite(parsed) ? parsed : 0;
     } catch (error) { console.error("[ERROR] Failed to read last trade timestamp:", error.message); return 0; }
+};
+
+const validateExchangeCredentials = () => {
+    const apiKey = String(process.env.API_KEY || "").trim();
+    const apiSecret = String(process.env.API_SECRET || "").trim();
+    if (!apiKey || !apiSecret) {
+        throw new Error("Missing API_KEY or API_SECRET in .env");
+    }
 };
 
 // -------------------- REAL-TIME PNL MONITORING --------------------
