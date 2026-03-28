@@ -1921,43 +1921,27 @@ const buildExchangePnlSnapshot = (exchangePosition, entryPrice, quantity, fallba
     const normalizedEntryPrice = toFiniteNumber(entryPrice, NaN);
     const normalizedQuantity = Math.abs(toFiniteNumber(quantity, 0));
     const normalizedMarkPrice = getExchangePositionMarkPrice(exchangePosition, fallbackPrice);
-    const grossProfitUSDT = toFiniteNumber(exchangePosition?.unrealizedPnl, toFiniteNumber(exchangePosition?.info?.unrealizedPL, NaN));
+    const exchangeUnrealizedPnl = toFiniteNumber(
+        exchangePosition?.unrealizedPnl,
+        toFiniteNumber(exchangePosition?.info?.unrealizedProfit, toFiniteNumber(exchangePosition?.info?.unRealizedProfit, NaN))
+    );
     const exchangePercentage = toFiniteNumber(exchangePosition?.percentage, NaN);
     const initialMargin = Math.abs(toFiniteNumber(exchangePosition?.initialMargin, toFiniteNumber(exchangePosition?.collateral, NaN)));
     const leverageAtEntry = Math.max(1, Math.abs(toFiniteNumber(exchangePosition?.leverage, db.leverage)));
 
-    const entryValue = normalizedEntryPrice * normalizedQuantity;
     const exitReferencePrice = Number.isFinite(normalizedMarkPrice) && normalizedMarkPrice > 0
         ? normalizedMarkPrice
         : fallbackPrice;
-    const exitValue = Number.isFinite(exitReferencePrice) && exitReferencePrice > 0
-        ? exitReferencePrice * normalizedQuantity
-        : NaN;
-    const entryFee = Number.isFinite(entryValue) && entryValue > 0 ? entryValue * TAKER_FEE_RATE : NaN;
-    const exitFee = Number.isFinite(exitValue) && exitValue > 0 ? exitValue * TAKER_FEE_RATE : NaN;
-    const totalEstimatedFee = Number.isFinite(entryFee) && Number.isFinite(exitFee) ? entryFee + exitFee : NaN;
-    const netProfitUSDT = Number.isFinite(grossProfitUSDT) && Number.isFinite(totalEstimatedFee)
-        ? grossProfitUSDT - totalEstimatedFee
-        : NaN;
-
-    let profitPercent = NaN;
-    if (Number.isFinite(initialMargin) && initialMargin > 0 && Number.isFinite(netProfitUSDT)) {
-        profitPercent = (netProfitUSDT / initialMargin) * 100;
-    } else if (Number.isFinite(exchangePercentage)) {
-        const exchangeRatio = Math.abs(exchangePercentage) > 1 ? exchangePercentage : exchangePercentage * 100;
-        const feePercent = Number.isFinite(initialMargin) && initialMargin > 0 && Number.isFinite(totalEstimatedFee)
-            ? (totalEstimatedFee / initialMargin) * 100
-            : 0;
-        profitPercent = exchangeRatio - feePercent;
-    } else if (Number.isFinite(entryValue) && entryValue > 0 && Number.isFinite(netProfitUSDT)) {
-        profitPercent = (netProfitUSDT / (entryValue / leverageAtEntry)) * 100;
+    let profitPercent = exchangePercentage;
+    if (!Number.isFinite(profitPercent) && Number.isFinite(initialMargin) && initialMargin > 0 && Number.isFinite(exchangeUnrealizedPnl)) {
+        profitPercent = (exchangeUnrealizedPnl / initialMargin) * 100;
     }
 
     return {
-        grossProfitUSDT,
-        netProfitUSDT,
+        grossProfitUSDT: exchangeUnrealizedPnl,
+        netProfitUSDT: exchangeUnrealizedPnl,
         profitPercent,
-        totalEstimatedFee,
+        totalEstimatedFee: NaN,
         currentPrice: exitReferencePrice,
         markPrice: normalizedMarkPrice,
         initialMargin,
@@ -2244,7 +2228,7 @@ const maybeLogPositionPnL = (pnlState, exitState) => {
     const pnlLogInterval = nearExit ? 2000 : 5000;
 
     if (Date.now() - lastPnlLog > pnlLogInterval) {
-        console.log(`\n[PNL] Gross: ${pnlState.grossProfitUSDT.toFixed(4)} | Fee: ${pnlState.totalEstimatedFee.toFixed(4)} | NET: ${pnlState.netProfitUSDT.toFixed(4)} USDT (${pnlState.profitPercent.toFixed(2)}%)`);
+        console.log(`\n[PNL] ${pnlState.netProfitUSDT.toFixed(4)} USDT (${pnlState.profitPercent.toFixed(2)}%)`);
         lastPnlLog = Date.now();
     }
 };
@@ -2294,7 +2278,7 @@ const printDetailedStatus = async () => {
         console.log(`   [${positionKey}] side=${String(position.side || "").toUpperCase()} qty=${position.quantity} entry=${position.entryPrice}`);
         console.log(`   [${positionKey}] tp=${position.targetPrice ?? "N/A"} sl=${position.stopLossPrice ?? "N/A"} strategy=${position.strategy || "N/A"}`);
         console.log(`   [${positionKey}] tpOrder=${position.tpClientOrderId ?? "N/A"} slOrder=${position.slClientOrderId ?? "N/A"}`);
-        if (pnlState) console.log(`   [${positionKey}] unrealized=${pnlState.netProfitUSDT.toFixed(4)} USDT (${pnlState.profitPercent.toFixed(2)}%)`);
+        if (pnlState) console.log(`   [${positionKey}] pnl=${pnlState.netProfitUSDT.toFixed(4)} USDT (${pnlState.profitPercent.toFixed(2)}%)`);
     });
 };
 
