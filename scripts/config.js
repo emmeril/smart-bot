@@ -302,6 +302,11 @@ const buildPresetPayload = (name) => {
   return { ...preset };
 };
 
+const getPreservedMarginMode = (config) => {
+  const rawMarginMode = typeof config?.marginMode === "string" ? config.marginMode.trim().toLowerCase() : "";
+  return VALID_MARGIN_MODES.includes(rawMarginMode) ? rawMarginMode : DEFAULT_CONFIG.marginMode;
+};
+
 const resolveAutoPresetName = (pair) => {
   const normalizedPair = String(pair || "").trim().toUpperCase();
   if (!normalizedPair) return "binance";
@@ -486,7 +491,8 @@ const main = async () => {
   if (cmd === "preset") {
     const name = args[0];
     if (!name) throw new Error(`Missing <name>. Available presets: ${getPresetNames().join(", ")}`);
-    const presetPayload = buildPresetPayload(name);
+    const currentConfig = hydrateForOutput(row);
+    const presetPayload = { ...buildPresetPayload(name), marginMode: getPreservedMarginMode(currentConfig) };
     await withSqliteBusyRetry(() => row.update({ ...presetPayload, lastUpdated: Date.now() }));
     console.log(`[OK] Applied preset ${String(name).trim().toLowerCase()}`);
     await row.reload();
@@ -496,9 +502,15 @@ const main = async () => {
 
   if (cmd === "autopreset") {
     const inputPair = args.join(" ").trim();
-    const targetPair = inputPair || hydrateForOutput(row).pair || DEFAULT_CONFIG.pair;
+    const currentConfig = hydrateForOutput(row);
+    const targetPair = inputPair || currentConfig.pair || DEFAULT_CONFIG.pair;
     const presetName = resolveAutoPresetName(targetPair);
-    const presetPayload = { ...buildPresetPayload(presetName), pair: targetPair, activeGridState: null };
+    const presetPayload = {
+      ...buildPresetPayload(presetName),
+      pair: targetPair,
+      marginMode: getPreservedMarginMode(currentConfig),
+      activeGridState: null,
+    };
     await withSqliteBusyRetry(() => row.update({ ...presetPayload, lastUpdated: Date.now() }));
     console.log(`[OK] Applied autopreset ${presetName} for ${targetPair}`);
     await row.reload();
@@ -508,8 +520,9 @@ const main = async () => {
 
   if (cmd === "autoall") {
     const inputPair = args.join(" ").trim();
-    const targetPair = inputPair || hydrateForOutput(row).pair || DEFAULT_CONFIG.pair;
-    const payload = buildAutoAllPayload(targetPair);
+    const currentConfig = hydrateForOutput(row);
+    const targetPair = inputPair || currentConfig.pair || DEFAULT_CONFIG.pair;
+    const payload = { ...buildAutoAllPayload(targetPair), marginMode: getPreservedMarginMode(currentConfig) };
     await withSqliteBusyRetry(() => row.update({ ...payload, lastUpdated: Date.now() }));
     console.log(`[OK] Applied autoall for ${targetPair}`);
     await row.reload();

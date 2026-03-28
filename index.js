@@ -104,6 +104,7 @@ const POSITION_RUNTIME_PERSIST_TTL = 2000;
 const POSITION_SYNC_QTY_TOLERANCE = 0.001;
 const POSITION_SYNC_ENTRY_TOLERANCE_PCT = 0.05;
 const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort"];
+const VALID_MARGIN_MODES = ["cross", "isolated"];
 const DEFAULT_CONFIG = {
     strategy: "futures_grid",
     pair: "DOGE/USDT:USDT",
@@ -294,6 +295,7 @@ const printStartupBanner = (totalUSDT) => {
     console.log(`Session: ${db.sessionStartUTC}-${db.sessionEndUTC} UTC`);
     console.log(`Trailing ATR: ${db.trailingEnabled ? `${db.trailingActivateATR}/${db.trailingOffsetATR}x` : "OFF"}`);
     console.log(`Leverage: ${db.leverage}x`);
+    console.log(`Margin Mode: ${String(db.marginMode || "isolated").toUpperCase()}`);
     console.log(`Daily target: $${db.dailyProfitTargetUsdt} (max ${db.maxTradesPerDay} trades)`);
     console.log("=".repeat(70) + "\n");
 };
@@ -2510,7 +2512,6 @@ const getDefaultConfig = () => ({ ...DEFAULT_CONFIG, lastDailyReset: Date.now(),
 const AUTO_PAIR_GRID_PRESETS = {
     binance: {
         strategy: "futures_grid",
-        marginMode: "isolated",
         leverage: 10,
         gridLevels: 10,
         gridLookbackCandles: 144,
@@ -2532,7 +2533,6 @@ const AUTO_PAIR_GRID_PRESETS = {
     },
     volatile: {
         strategy: "futures_grid",
-        marginMode: "isolated",
         leverage: 8,
         gridLevels: 12,
         gridLookbackCandles: 180,
@@ -2554,7 +2554,6 @@ const AUTO_PAIR_GRID_PRESETS = {
     },
     doge: {
         strategy: "futures_grid",
-        marginMode: "isolated",
         leverage: 8,
         gridOrderSizeUsdt: 0,
         gridLevels: 12,
@@ -2667,6 +2666,11 @@ const applyAutoPairGridPreset = (config) => {
             nextConfig[key] = preset[key];
             changed = true;
         }
+    }
+
+    const rawMarginMode = typeof config.marginMode === "string" ? config.marginMode.trim().toLowerCase() : "";
+    if (VALID_MARGIN_MODES.includes(rawMarginMode)) {
+        nextConfig.marginMode = rawMarginMode;
     }
 
     const activeGridFingerprint = String(nextConfig.activeGridState?.fingerprint || "");
