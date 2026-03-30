@@ -2004,12 +2004,34 @@ const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = 
         : (side === "buy"
             ? formatPriceToMarketPrecision(db.pair, entryPrice - (Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8)))
             : formatPriceToMarketPrecision(db.pair, entryPrice + (Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8))));
-    const preservedTargetPrice = Number.isFinite(existingPosition?.targetPrice) ? existingPosition.targetPrice : targetPrice;
-    const preservedStopLossPrice = Number.isFinite(existingPosition?.stopLossPrice) ? existingPosition.stopLossPrice : stopLossPrice;
+    const existingQuantity = toFiniteNumber(existingPosition?.quantity, 0);
+    const quantityChanged = Math.abs(existingQuantity - contracts) > POSITION_SYNC_QTY_TOLERANCE;
+    const existingEntryPrice = toFiniteNumber(existingPosition?.entryPrice, 0);
+    const entryDeltaPercent = existingEntryPrice > 0 ? Math.abs((existingEntryPrice - entryPrice) / existingEntryPrice) * 100 : 100;
+    const entryChanged = entryDeltaPercent > POSITION_SYNC_ENTRY_TOLERANCE_PCT;
+    const existingSide = String(existingPosition?.side || "").toLowerCase();
+    const existingPositionSide = getTrackedPositionSideLabel(existingPosition);
+    const canPreserveExitPlan = (
+        existingPosition &&
+        existingSide === side &&
+        existingPositionSide === positionSide &&
+        !quantityChanged &&
+        !entryChanged
+    );
+    const preservedTargetPrice = canPreserveExitPlan && Number.isFinite(existingPosition?.targetPrice)
+        ? existingPosition.targetPrice
+        : targetPrice;
+    const preservedStopLossPrice = canPreserveExitPlan && Number.isFinite(existingPosition?.stopLossPrice)
+        ? existingPosition.stopLossPrice
+        : stopLossPrice;
     const fallbackTargetProfitUsdt = Math.abs(preservedTargetPrice - entryPrice) * contracts;
     const fallbackStopLossUsdt = -Math.abs(preservedStopLossPrice - entryPrice) * contracts;
-    const preservedTargetProfitUSDT = Number.isFinite(existingPosition?.targetProfitUSDT) ? existingPosition.targetProfitUSDT : fallbackTargetProfitUsdt;
-    const preservedStopLossUSDT = Number.isFinite(existingPosition?.stopLossUSDT) ? existingPosition.stopLossUSDT : fallbackStopLossUsdt;
+    const preservedTargetProfitUSDT = canPreserveExitPlan && Number.isFinite(existingPosition?.targetProfitUSDT)
+        ? existingPosition.targetProfitUSDT
+        : fallbackTargetProfitUsdt;
+    const preservedStopLossUSDT = canPreserveExitPlan && Number.isFinite(existingPosition?.stopLossUSDT)
+        ? existingPosition.stopLossUSDT
+        : fallbackStopLossUsdt;
     return {
         side, entryPrice, targetPrice: preservedTargetPrice, stopLossPrice: preservedStopLossPrice,
         stopLossUSDT: preservedStopLossUSDT,
@@ -2287,6 +2309,21 @@ const printDetailedStatus = async () => {
 const resetActivePosition = async () => {
     setActivePositionsMap({});
     await saveDB();
+};
+
+const clearMissingPositionState = async (position, reason, positionKey = null) => {
+    await cancelManagedOrdersForPosition(position, reason);
+    removeActivePositionByKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position));
+    await saveDB();
+    logTrade(
+        position.side === "buy" ? "LONG" : "SHORT",
+        position.entryPrice,
+        "",
+        `CLOSE_UNCONFIRMED:${reason}`,
+        0,
+        position.strategy || null
+    );
+    console.warn(`[WARN] Removed local position without realizing P&L because no confirmed exchange exit price was available (${reason}).`);
 };
 
 const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, reason, exitPrice = null, positionKey = null) => {
@@ -2856,19 +2893,7 @@ const syncPositionWithExchange = async () => {
         const removedPositions = Object.entries(currentPositionsMap)
             .filter(([key]) => !nextPositionsMap[key]);
         for (const [removedKey, removedPosition] of removedPositions) {
-            if (Number.isFinite(currentPrice) && currentPrice > 0) {
-                const pnlState = calculatePositionPnL(removedPosition, currentPrice);
-                await finalizeClosedPosition(
-                    removedPosition,
-                    pnlState.netProfitUSDT,
-                    pnlState.profitPercent,
-                    "POSITION_SYNC_REMOVED",
-                    currentPrice,
-                    removedKey
-                );
-            } else {
-                await cancelManagedOrdersForPosition(removedPosition, "POSITION_SYNC_REMOVED");
-            }
+            await clearMissingPositionState(removedPosition, "POSITION_SYNC_REMOVED", removedKey);
         }
 
         setActivePositionsMap(nextPositionsMap);
@@ -3423,22 +3448,7 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
         const currentPos = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
         if (!currentPos) {
             console.log("[INFO] No matching open position on exchange. Removing local active position.");
-            const fallbackExitPrice = await getPrice(true);
-            await cancelManagedOrdersForPosition(position, "POSITION_MISSING");
-            if (Number.isFinite(fallbackExitPrice) && fallbackExitPrice > 0) {
-                const realizedPnL = calculatePositionPnL(position, fallbackExitPrice);
-                await finalizeClosedPosition(
-                    position,
-                    realizedPnL.netProfitUSDT,
-                    realizedPnL.profitPercent,
-                    "POSITION_MISSING",
-                    fallbackExitPrice,
-                    positionKey
-                );
-            } else {
-                removeActivePositionByKey(positionKey);
-                await saveDB();
-            }
+            await clearMissingPositionState(position, "POSITION_MISSING", positionKey);
             return;
         }
         const actualQuantity = Math.abs(getExchangePositionContracts(currentPos));
@@ -3494,22 +3504,7 @@ const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) 
                 const openPosition = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
                 if (!openPosition) {
                     console.log("[INFO] No matching open position on exchange. Removing local active position.");
-                    const fallbackExitPrice = await getPrice(true);
-                    await cancelManagedOrdersForPosition(position, "POSITION_MISSING");
-                    if (Number.isFinite(fallbackExitPrice) && fallbackExitPrice > 0) {
-                        const realizedPnL = calculatePositionPnL(position, fallbackExitPrice);
-                        await finalizeClosedPosition(
-                            position,
-                            realizedPnL.netProfitUSDT,
-                            realizedPnL.profitPercent,
-                            "POSITION_MISSING",
-                            fallbackExitPrice,
-                            positionKey
-                        );
-                    } else {
-                        removeActivePositionByKey(positionKey);
-                        await saveDB();
-                    }
+                    await clearMissingPositionState(position, "POSITION_MISSING", positionKey);
                     return;
                 } else {
                     const entryPrice = getExchangePositionEntryPrice(openPosition, await getPrice());
