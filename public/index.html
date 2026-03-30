@@ -195,6 +195,8 @@
   <script>
     const SECTION_ORDER = ["General", "Risk", "Grid", "Session", "Trailing", "Direction"];
     const state = { config: null, defaults: null, schema: [], status: null, serverTime: 0 };
+    let formDirty = false;
+    let autoRefreshTimer = null;
     const form = document.getElementById("configForm");
     const toast = document.getElementById("toast");
     const saveBtn = document.getElementById("saveBtn");
@@ -379,6 +381,7 @@
         card.appendChild(list);
         form.appendChild(card);
       }
+      formDirty = false;
     }
 
     function collectConfig() {
@@ -405,13 +408,20 @@
       state.serverTime = payload.serverTime || Date.now();
       renderMetrics(state.status || {});
       renderForm(state.config, state.schema);
+      formDirty = false;
     }
 
-    async function loadDashboard(silent = false) {
+    async function loadDashboard(silent = false, preserveEdits = false) {
       if (!silent) setBusy(true);
       try {
         const data = await api("/api/config");
-        applyPayload(data);
+        if (preserveEdits && formDirty) {
+          state.status = data.status || state.status;
+          state.serverTime = data.serverTime || Date.now();
+          renderMetrics(state.status || {});
+        } else {
+          applyPayload(data);
+        }
         if (!silent) showToast("Konfigurasi berhasil dimuat", "success");
       } catch (error) {
         showToast(error.message || "Gagal memuat konfigurasi", "error");
@@ -448,14 +458,32 @@
       }
     }
 
+    function startAutoRefresh() {
+      if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+      autoRefreshTimer = setInterval(() => {
+        if (document.visibilityState !== "visible") return;
+        loadDashboard(true, true);
+      }, 8000);
+    }
+
+    form.addEventListener("input", () => {
+      formDirty = true;
+    });
+
+    form.addEventListener("change", () => {
+      formDirty = true;
+    });
+
     saveBtn.addEventListener("click", saveDashboard);
     refreshBtn.addEventListener("click", () => loadDashboard(false));
     resetBtn.addEventListener("click", resetDashboard);
 
+    startAutoRefresh();
     loadDashboard(false);
   </script>
 </body>
 </html>
+
 
 
 

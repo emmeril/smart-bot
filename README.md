@@ -77,6 +77,7 @@ DASHBOARD_SESSION_SECRET=change-this-to-a-long-random-string
 ```
 
 Kalau env belum diisi, default lokal yang dipakai adalah `admin` / `admin123`.
+Bot juga melakukan auto reload konfigurasi dari SQLite setiap beberapa detik tanpa restart proses. Intervalnya bisa diatur lewat `CONFIG_AUTO_RELOAD_INTERVAL_MS`.
 
 ## Konfigurasi
 

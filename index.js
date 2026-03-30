@@ -92,6 +92,7 @@ let isShuttingDown = false;
 let accountPositionMode = { hedged: false, label: "ONE_WAY" };
 let runtimeCommandsRegistered = false;
 let webServer = null;
+let configReloadTimer = null;
 const logPath = path.join(__dirname, 'trades.csv');
 let db = null;
 const BALANCE_CACHE_TTL = 15000;
@@ -192,6 +193,8 @@ const DASHBOARD_PASSWORD = String(process.env.DASHBOARD_PASSWORD || "admin123");
 const DASHBOARD_SESSION_SECRET = String(process.env.DASHBOARD_SESSION_SECRET || process.env.API_SECRET || "smart-bot-dashboard-secret");
 const DASHBOARD_SESSION_COOKIE = "smartbot_dashboard_session";
 const DASHBOARD_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const CONFIG_AUTO_RELOAD_INTERVAL_MS = Math.max(3000, Math.trunc(Number(process.env.CONFIG_AUTO_RELOAD_INTERVAL_MS || 5000) || 5000));
+let lastKnownDashboardConfigSignature = "";
 
 let metrics = {
     windowStart: Date.now(),
@@ -308,7 +311,8 @@ const clearRuntimeTimers = () => {
         [pnlMonitorTimer, () => { pnlMonitorTimer = null; }],
         [positionSyncTimer, () => { positionSyncTimer = null; }],
         [mainLoopTimer, () => { mainLoopTimer = null; }],
-        [metricsTimer, () => { metricsTimer = null; }]
+        [metricsTimer, () => { metricsTimer = null; }],
+        [configReloadTimer, () => { configReloadTimer = null; }]
     ];
     for (const [timer, resetTimer] of timers) {
         if (!timer) continue;
@@ -2574,6 +2578,7 @@ const bootstrapRuntime = async () => {
     startPnLMonitoring();
     startPositionSync();
     startMetricsReporting();
+    startConfigAutoReload();
     process.once("SIGINT", () => { shutdown("SIGINT"); });
     process.once("SIGTERM", () => { shutdown("SIGTERM"); });
 };
@@ -2719,6 +2724,40 @@ const clearDashboardSessionCookie = (res) => {
         "Max-Age=0"
     ];
     res.setHeader("Set-Cookie", parts.join("; "));
+};
+
+const buildDashboardConfigSignature = (config) => JSON.stringify(
+    DASHBOARD_EDITABLE_FIELDS.map((field) => [field.key, config && Object.prototype.hasOwnProperty.call(config, field.key) ? config[field.key] : null])
+);
+
+const syncDashboardConfigSignature = (config = db) => {
+    lastKnownDashboardConfigSignature = buildDashboardConfigSignature(config || {});
+    return lastKnownDashboardConfigSignature;
+};
+
+const reloadConfigIfChanged = async () => {
+    if (!db || isShuttingDown) return false;
+    try {
+        const persistedConfig = await loadPersistedConfig();
+        if (!persistedConfig) return false;
+        const persistedSignature = buildDashboardConfigSignature(persistedConfig);
+        if (persistedSignature === lastKnownDashboardConfigSignature) return false;
+        console.log("[CONFIG] Detected dashboard config change. Reloading...");
+        const reloaded = await reloadConfig();
+        if (reloaded) syncDashboardConfigSignature();
+        return reloaded;
+    } catch (error) {
+        console.error("[ERROR] Auto config reload failed:", error.message);
+        return false;
+    }
+};
+
+const startConfigAutoReload = () => {
+    if (configReloadTimer) return;
+    configReloadTimer = setInterval(async () => {
+        if (isShuttingDown || isProcessing || isPlacingOrder || isClosingPosition) return;
+        await reloadConfigIfChanged();
+    }, CONFIG_AUTO_RELOAD_INTERVAL_MS);
 };
 
 const requireDashboardAuth = (req, res, next) => {
@@ -3168,6 +3207,7 @@ const initializeDB = async () => {
         const autoPresetResult = applyAutoPairGridPreset(hydrated);
         hydrated = normalizeConfig(autoPresetResult.config);
         db = hydrated;
+        syncDashboardConfigSignature();
         if (autoPresetResult.changed) {
             await saveDB();
             console.log(`[PRESET] Auto-applied ${autoPresetResult.presetName} profile for ${db.pair}`);
@@ -3190,6 +3230,7 @@ const reloadConfig = async () => {
         const autoPresetResult = applyAutoPairGridPreset(normalizedConfig);
         normalizedConfig = normalizeConfig(autoPresetResult.config);
         mergeRuntimeConfig(normalizedConfig);
+        syncDashboardConfigSignature();
         if (autoPresetResult.changed && !hasAnyActivePosition()) {
             await saveDB();
             console.log(`[PRESET] Auto-refreshed ${autoPresetResult.presetName} profile for ${db.pair}`);
@@ -3200,7 +3241,7 @@ const reloadConfig = async () => {
 
 // -------------------- SAVE DB TO DATABASE --------------------
 const saveDB = async () => {
-    try { if (!db) return; await persistConfig(db); }
+    try { if (!db) return; await persistConfig(db); syncDashboardConfigSignature(); }
     catch (error) { console.error("[ERROR] Failed to save DB:", error.message); }
 };
 
