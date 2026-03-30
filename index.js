@@ -1333,11 +1333,6 @@ const fetchOpenExchangePositions = async () => {
     ));
 };
 
-const fetchTrackedExchangePosition = async () => {
-    const positions = await fetchOpenExchangePositions();
-    return findOpenExchangePosition(positions, db.pair, getPrimaryActivePosition());
-};
-
 const validateOrderSize = (market, quantity, referencePrice, options = {}) => {
     const { allowReduceOnlyClose = false } = options;
     if (!Number.isFinite(quantity) || quantity <= 0) {
@@ -1917,11 +1912,9 @@ const getExchangePositionMarkPrice = (position, fallbackPrice = NaN) => {
     return fallbackPrice;
 };
 
-const buildExchangePnlSnapshot = (exchangePosition, entryPrice, quantity, fallbackPrice = NaN) => {
+const buildExchangePnlSnapshot = (exchangePosition, fallbackPrice = NaN) => {
     if (!exchangePosition) return null;
 
-    const normalizedEntryPrice = toFiniteNumber(entryPrice, NaN);
-    const normalizedQuantity = Math.abs(toFiniteNumber(quantity, 0));
     const normalizedMarkPrice = getExchangePositionMarkPrice(exchangePosition, fallbackPrice);
     const exchangeUnrealizedPnl = toFiniteNumber(
         exchangePosition?.unrealizedPnl,
@@ -1973,7 +1966,7 @@ const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = 
     const contracts = Math.abs(getExchangePositionContracts(openPosition));
     const side = getExchangePositionSide(openPosition) || "buy";
     const positionSide = getExchangePositionModeSide(openPosition);
-    const exchangePnlSnapshot = buildExchangePnlSnapshot(openPosition, entryPrice, contracts, currentPrice);
+    const exchangePnlSnapshot = buildExchangePnlSnapshot(openPosition, currentPrice);
     const preservedStrategy = existingPosition?.strategy || "SYNC_ONLY";
     const preservedTrailingEnabled = existingPosition?.trailingEnabled ?? Boolean(db.trailingEnabled);
     const preservedTrailingActivateATR = existingPosition?.trailingActivateATR ?? toFiniteNumber(db.trailingActivateATR, 1.2);
@@ -2304,11 +2297,6 @@ const printDetailedStatus = async () => {
         console.log(`   [${positionKey}] tpOrder=${position.tpClientOrderId ?? "N/A"} slOrder=${position.slClientOrderId ?? "N/A"}`);
         if (pnlState) console.log(`   [${positionKey}] pnl=${pnlState.netProfitUSDT.toFixed(4)} USDT (${pnlState.profitPercent.toFixed(2)}%)`);
     });
-};
-
-const resetActivePosition = async () => {
-    setActivePositionsMap({});
-    await saveDB();
 };
 
 const clearMissingPositionState = async (position, reason, positionKey = null) => {
@@ -3426,7 +3414,7 @@ const placeOrder = async (side, signalData = {}) => {
 };
 
 // -------------------- CLOSE POSITION --------------------
-const closePosition = async (positionKey, reason, netProfitUSDT, profitPercent) => {
+const closePosition = async (positionKey, reason) => {
     const closeLockKey = toPositionMapKey(positionKey);
     if (closingPositionKeys.has(closeLockKey)) return;
     closingPositionKeys.add(closeLockKey);
@@ -3748,7 +3736,7 @@ const startPnLMonitoring = () => {
 
                 if (exitState.shouldClose) {
                     console.log(`[${positionKey}] ${exitState.message.trim()}`);
-                    await closePosition(positionKey, exitState.reason, pnlState.netProfitUSDT, pnlState.profitPercent);
+                    await closePosition(positionKey, exitState.reason);
                     continue;
                 }
 
