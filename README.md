@@ -135,6 +135,7 @@ Dashboard menyediakan edit cepat untuk:
 
 Perubahan dari dashboard langsung disimpan ke SQLite dan di-reload ke runtime bot.
 Login dashboard memakai cookie sesi yang ditandatangani dan akan kedaluwarsa otomatis setelah beberapa jam.
+Panel live di dashboard menampilkan posisi aktif, PnL harian, dan order terbuka secara otomatis dari runtime bot.
 
 ## Logging
 

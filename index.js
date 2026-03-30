@@ -2646,6 +2646,100 @@ const buildDashboardStatus = () => {
     };
 };
 
+const buildLiveStatusPayload = async () => {
+    if (!db) {
+        return {
+            ok: false,
+            error: "Config is not ready yet"
+        };
+    }
+
+    let currentPrice = NaN;
+    let exchangePositions = [];
+    let managedOrders = { grid: [], tp: [], sl: [] };
+
+    try {
+        currentPrice = await getPrice();
+    } catch {
+        currentPrice = NaN;
+    }
+
+    try {
+        exchangePositions = await fetchOpenExchangePositions();
+    } catch (error) {
+        console.warn(`[STATUS] Failed to fetch exchange positions: ${error.message}`);
+    }
+
+    try {
+        managedOrders = await fetchManagedOpenOrdersSnapshot();
+    } catch (error) {
+        console.warn(`[STATUS] Failed to fetch managed open orders: ${error.message}`);
+    }
+
+    const activePositions = getActivePositionEntries().map(([positionKey, position]) => {
+        const pnlState = Number.isFinite(currentPrice) ? calculatePositionPnL(position, currentPrice) : null;
+        return {
+            key: positionKey,
+            side: position.side || null,
+            quantity: toFiniteNumber(position.quantity, 0),
+            entryPrice: toFiniteNumber(position.entryPrice, 0),
+            targetPrice: Number.isFinite(position.targetPrice) ? position.targetPrice : null,
+            stopLossPrice: Number.isFinite(position.stopLossPrice) ? position.stopLossPrice : null,
+            pnlUSDT: pnlState ? toFiniteNumber(pnlState.netProfitUSDT, 0) : null,
+            pnlPercent: pnlState ? toFiniteNumber(pnlState.displayProfitPercent ?? pnlState.profitPercent, 0) : null,
+            currentPrice: Number.isFinite(currentPrice) ? currentPrice : null,
+            strategy: position.strategy || null
+        };
+    });
+
+    const openOrders = {
+        grid: managedOrders.grid.map((order) => ({
+            id: order.id ?? null,
+            clientOrderId: order.clientOrderId ?? null,
+            side: order.side ?? null,
+            type: order.type ?? null,
+            price: Number.isFinite(Number(order.price)) ? Number(order.price) : null,
+            amount: Number.isFinite(Number(order.amount)) ? Number(order.amount) : null
+        })),
+        tp: managedOrders.tp.map((order) => ({
+            id: order.id ?? null,
+            clientOrderId: order.clientOrderId ?? null,
+            side: order.side ?? null,
+            type: order.type ?? null,
+            price: Number.isFinite(Number(order.price)) ? Number(order.price) : null,
+            amount: Number.isFinite(Number(order.amount)) ? Number(order.amount) : null
+        })),
+        sl: managedOrders.sl.map((order) => ({
+            id: order.id ?? null,
+            clientOrderId: order.clientOrderId ?? null,
+            side: order.side ?? null,
+            type: order.type ?? null,
+            price: Number.isFinite(Number(order.price)) ? Number(order.price) : null,
+            amount: Number.isFinite(Number(order.amount)) ? Number(order.amount) : null
+        }))
+    };
+
+    return {
+        ok: true,
+        serverTime: Date.now(),
+        pair: db.pair,
+        currentPrice: Number.isFinite(currentPrice) ? currentPrice : null,
+        botRunning: !isShuttingDown,
+        positionMode: accountPositionMode?.label || "UNKNOWN",
+        dailyPnL: toFiniteNumber(db.dailyPnL, 0),
+        dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(db.dailyTrades, 0))),
+        activePositions,
+        exchangePositionsCount: exchangePositions.length,
+        openOrders,
+        orderCounts: {
+            grid: openOrders.grid.length,
+            tp: openOrders.tp.length,
+            sl: openOrders.sl.length,
+            total: openOrders.grid.length + openOrders.tp.length + openOrders.sl.length
+        }
+    };
+};
+
 const parseCookies = (cookieHeader) => {
     const cookies = {};
     if (!cookieHeader || typeof cookieHeader !== "string") return cookies;
@@ -2903,6 +2997,19 @@ const startWebDashboard = async () => {
             return;
         }
         res.json({ ok: true, ...buildDashboardPayload() });
+    });
+
+    app.get("/api/status", async (req, res) => {
+        try {
+            const payload = await buildLiveStatusPayload();
+            if (!payload.ok) {
+                res.status(503).json(payload);
+                return;
+            }
+            res.json(payload);
+        } catch (error) {
+            res.status(500).json({ ok: false, error: error.message });
+        }
     });
 
     app.put("/api/config", async (req, res) => {

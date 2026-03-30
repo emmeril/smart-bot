@@ -93,6 +93,23 @@
     .metric-card strong { display: block; margin-top: 8px; font-size: 1.05rem; }
     .metric-card span { display: block; margin-top: 4px; color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
     .status-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 18px 20px; }
+    .live-panel { padding: 24px; }
+    .live-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .live-card { padding: 16px; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); }
+    .live-card .label { display: block; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.12em; }
+    .live-card strong { display: block; margin-top: 8px; font-size: 1.25rem; }
+    .live-card span { display: block; margin-top: 4px; color: var(--muted); line-height: 1.5; }
+    .live-lists { margin-top: 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .live-list { padding: 16px; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); }
+    .live-list h3 { margin: 0 0 12px; font-size: 0.96rem; }
+    .live-items { display: grid; gap: 10px; }
+    .live-item { padding: 12px 14px; border-radius: 12px; background: rgba(7, 14, 19, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); }
+    .live-item strong { display: block; margin-bottom: 4px; }
+    .live-item span { display: block; color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
+    .live-empty { color: var(--muted); font-size: 0.92rem; }
+    @media (max-width: 980px) {
+      .live-grid, .live-lists { grid-template-columns: 1fr; }
+    }
     .status-item { padding: 12px 14px; border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.06); }
     .status-item strong { display: block; margin-top: 8px; font-size: 1rem; }
     .form-panel { padding: 24px; }
@@ -172,6 +189,42 @@
       <div class="status-item"><span class="status-label">Terakhir update</span><strong id="updatedStatus">-</strong></div>
     </section>
 
+    <section class="panel live-panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Live Status</p>
+          <h2>Posisi, PnL, dan Order</h2>
+        </div>
+        <p class="muted">Diperbarui otomatis dari runtime bot.</p>
+      </div>
+      <div class="live-grid">
+        <article class="live-card">
+          <span class="label">Posisi aktif</span>
+          <strong id="livePositionsCount">-</strong>
+          <span id="livePositionsMeta">Memuat data posisi...</span>
+        </article>
+        <article class="live-card">
+          <span class="label">PnL harian</span>
+          <strong id="livePnlValue">-</strong>
+          <span id="livePnlMeta">-</span>
+        </article>
+        <article class="live-card">
+          <span class="label">Order terbuka</span>
+          <strong id="liveOrdersCount">-</strong>
+          <span id="liveOrdersMeta">Memuat data order...</span>
+        </article>
+      </div>
+      <div class="live-lists">
+        <section class="live-list">
+          <h3>Detail posisi</h3>
+          <div id="livePositionsList" class="live-items"></div>
+        </section>
+        <section class="live-list">
+          <h3>Ringkasan order</h3>
+          <div id="liveOrdersList" class="live-items"></div>
+        </section>
+      </div>
+    </section>
     <section class="panel form-panel">
       <div class="panel-head">
         <div>
@@ -197,6 +250,7 @@
     const state = { config: null, defaults: null, schema: [], status: null, serverTime: 0 };
     let formDirty = false;
     let autoRefreshTimer = null;
+    let liveRefreshTimer = null;
     const form = document.getElementById("configForm");
     const toast = document.getElementById("toast");
     const saveBtn = document.getElementById("saveBtn");
@@ -207,6 +261,14 @@
     const pairStatus = document.getElementById("pairStatus");
     const marginStatus = document.getElementById("marginStatus");
     const updatedStatus = document.getElementById("updatedStatus");
+    const livePositionsCount = document.getElementById("livePositionsCount");
+    const livePositionsMeta = document.getElementById("livePositionsMeta");
+    const livePnlValue = document.getElementById("livePnlValue");
+    const livePnlMeta = document.getElementById("livePnlMeta");
+    const liveOrdersCount = document.getElementById("liveOrdersCount");
+    const liveOrdersMeta = document.getElementById("liveOrdersMeta");
+    const livePositionsList = document.getElementById("livePositionsList");
+    const liveOrdersList = document.getElementById("liveOrdersList");
 
     const SECTION_LABELS = {
       General: "General",
@@ -290,6 +352,74 @@
       pairStatus.textContent = status.pair || "-";
       marginStatus.textContent = `${String(status.marginMode || "-").toUpperCase()} / ${status.positionMode || "-"}`;
       updatedStatus.textContent = formatDateTime(status.lastUpdated);
+    }
+
+
+    function formatLiveCurrency(value) {
+      if (value === null || value === undefined || value === "") return "-";
+      const num = Number(value);
+      if (!Number.isFinite(num)) return String(value);
+      const prefix = num > 0 ? "+" : "";
+      return prefix + num.toFixed(4).replace(/\.0000$/, "");
+    }
+
+    function renderLiveStatus(data) {
+      if (!data || data.ok === false) return;
+      const positions = Array.isArray(data.activePositions) ? data.activePositions : [];
+      const openOrders = data.openOrders || { grid: [], tp: [], sl: [] };
+      const orderCounts = data.orderCounts || { grid: 0, tp: 0, sl: 0, total: 0 };
+
+      livePositionsCount.textContent = String(positions.length);
+      livePositionsMeta.textContent = data.exchangePositionsCount + " exchange position(s) | " + String(data.positionMode || "-").toUpperCase();
+      livePnlValue.textContent = formatLiveCurrency(data.dailyPnL) + " USDT";
+      livePnlMeta.textContent = String(data.dailyTrades || 0) + " trade(s) today";
+      liveOrdersCount.textContent = String(orderCounts.total || 0);
+      liveOrdersMeta.textContent = (orderCounts.grid || 0) + " grid | " + (orderCounts.tp || 0) + " TP | " + (orderCounts.sl || 0) + " SL";
+
+      livePositionsList.innerHTML = "";
+      if (positions.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "live-empty";
+        empty.textContent = "Belum ada posisi aktif.";
+        livePositionsList.appendChild(empty);
+      } else {
+        positions.slice(0, 4).forEach((position) => {
+          const item = document.createElement("div");
+          item.className = "live-item";
+          const pnlSign = Number(position.pnlUSDT || 0) >= 0 ? "+" : "";
+          item.innerHTML = '<strong>' + String(position.key || position.side || "POSITION") + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
+            '<span>Qty ' + formatNumber(position.quantity) + ' | Entry ' + formatNumber(position.entryPrice) + ' | Mark ' + formatNumber(position.currentPrice) + '</span>' +
+            '<span>PnL ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span>' +
+            '<span>TP ' + formatNumber(position.targetPrice) + ' | SL ' + formatNumber(position.stopLossPrice) + '</span>';
+          livePositionsList.appendChild(item);
+        });
+      }
+
+      liveOrdersList.innerHTML = "";
+      const groups = [
+        { label: 'Grid', list: openOrders.grid || [] },
+        { label: 'TP', list: openOrders.tp || [] },
+        { label: 'SL', list: openOrders.sl || [] }
+      ];
+      const hasOrders = groups.some((group) => group.list.length > 0);
+      if (!hasOrders) {
+        const empty = document.createElement("div");
+        empty.className = "live-empty";
+        empty.textContent = "Belum ada order terbuka.";
+        liveOrdersList.appendChild(empty);
+      } else {
+        groups.forEach((group) => {
+          const header = document.createElement("div");
+          header.className = "live-item";
+          header.innerHTML = '<strong>' + group.label + ' (' + group.list.length + ')</strong>' +
+            '<span>' + (group.list.slice(0, 3).map((order) => {
+              const price = order.price === null || order.price === undefined ? '-' : formatNumber(order.price);
+              const amount = order.amount === null || order.amount === undefined ? '-' : formatNumber(order.amount);
+              return (order.clientOrderId || order.id || 'order') + ' | ' + String(order.side || '-').toUpperCase() + ' | ' + price + ' | ' + amount;
+            }).join('<br>') || 'Tidak ada detail order') + '</span>';
+          liveOrdersList.appendChild(header);
+        });
+      }
     }
 
     function sectionList(schema) {
@@ -422,6 +552,7 @@
         } else {
           applyPayload(data);
         }
+        await loadLiveStatus(true);
         if (!silent) showToast("Konfigurasi berhasil dimuat", "success");
       } catch (error) {
         showToast(error.message || "Gagal memuat konfigurasi", "error");
@@ -450,12 +581,30 @@
       try {
         const data = await api("/api/config/reset", { method: "POST" });
         applyPayload(data);
+        await loadLiveStatus(true);
         showToast(data.message || "Konfigurasi direset", "success");
       } catch (error) {
         showToast(error.message || "Gagal reset konfigurasi", "error");
       } finally {
         setBusy(false);
       }
+    }
+
+    async function loadLiveStatus(silent = false) {
+      try {
+        const data = await api("/api/status");
+        renderLiveStatus(data);
+      } catch (error) {
+        if (!silent) showToast(error.message || "Gagal memuat status live", "error");
+      }
+    }
+
+    function startLiveRefresh() {
+      if (liveRefreshTimer) clearInterval(liveRefreshTimer);
+      liveRefreshTimer = setInterval(() => {
+        if (document.visibilityState !== "visible") return;
+        loadLiveStatus(true);
+      }, 5000);
     }
 
     function startAutoRefresh() {
@@ -479,7 +628,9 @@
     resetBtn.addEventListener("click", resetDashboard);
 
     startAutoRefresh();
+    startLiveRefresh();
     loadDashboard(false);
+    loadLiveStatus(true);
   </script>
 </body>
 </html>
