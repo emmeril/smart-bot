@@ -141,7 +141,6 @@ const DEFAULT_CONFIG = {
     allowLong: true,
     allowShort: true
 };
-const TAKER_FEE_RATE = 0.0005;
 const GRID_CLIENT_ORDER_PREFIX = "smartgrid";
 const TP_CLIENT_ORDER_PREFIX = "smarttp";
 const SL_CLIENT_ORDER_PREFIX = "smartsl";
@@ -1962,7 +1961,6 @@ const buildExchangePnlSnapshot = (exchangePosition, fallbackPrice = NaN) => {
         grossProfitUSDT: exchangeUnrealizedPnl,
         netProfitUSDT: exchangeUnrealizedPnl,
         profitPercent,
-        totalEstimatedFee: NaN,
         currentPrice: exitReferencePrice,
         markPrice: normalizedMarkPrice,
         initialMargin,
@@ -2170,30 +2168,40 @@ const calculatePositionPnL = (position, currentPrice, quantityOverride = null) =
     if (hasFreshExchangePnl) {
         return {
             grossProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
-            netProfitUSDT: exchangePnlSnapshot.netProfitUSDT,
+            netProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
+            realizedProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
             profitPercent: exchangePnlSnapshot.profitPercent,
-            totalEstimatedFee: exchangePnlSnapshot.totalEstimatedFee,
+            displayProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
+            displayProfitPercent: exchangePnlSnapshot.profitPercent,
             currentPrice: Number.isFinite(exchangePnlSnapshot.currentPrice) ? exchangePnlSnapshot.currentPrice : currentPrice,
             source: "exchange"
         };
     }
 
     const entryValue = position.entryPrice * quantity;
-    const exitValue = currentPrice * quantity;
     const leverageAtEntry = Math.max(1, toFiniteNumber(position?.leverageAtEntry, db.leverage));
-    
-    const entryFee = entryValue * TAKER_FEE_RATE;
-    const exitFee = exitValue * TAKER_FEE_RATE;
-    const totalEstimatedFee = entryFee + exitFee;
+    const snapshotMarkPrice = toFiniteNumber(exchangePnlSnapshot?.markPrice, NaN);
+    const priceSource = Number.isFinite(snapshotMarkPrice) && snapshotMarkPrice > 0
+        ? snapshotMarkPrice
+        : currentPrice;
 
     const grossProfitUSDT = position.side === "buy"
-        ? (currentPrice - position.entryPrice) * quantity
-        : (position.entryPrice - currentPrice) * quantity;
-    
-    const netProfitUSDT = grossProfitUSDT - totalEstimatedFee;
-    const profitPercent = (netProfitUSDT / (entryValue / leverageAtEntry)) * 100;
+        ? (priceSource - position.entryPrice) * quantity
+        : (position.entryPrice - priceSource) * quantity;
+    const referenceInitialMargin = Math.max(entryValue / leverageAtEntry, 1e-8);
+    const profitPercent = (grossProfitUSDT / referenceInitialMargin) * 100;
+    const displayProfitPercent = (grossProfitUSDT / referenceInitialMargin) * 100;
 
-    return { grossProfitUSDT, netProfitUSDT, profitPercent, totalEstimatedFee, currentPrice, source: "local" };
+    return {
+        grossProfitUSDT,
+        netProfitUSDT: grossProfitUSDT,
+        realizedProfitUSDT: grossProfitUSDT,
+        profitPercent,
+        displayProfitUSDT: grossProfitUSDT,
+        displayProfitPercent,
+        currentPrice: priceSource,
+        source: "local"
+    };
 };
 
 const getPositionExitTargets = (position) => {
@@ -2271,7 +2279,9 @@ const maybeLogPositionPnL = (pnlState, exitState) => {
     const pnlLogInterval = nearExit ? 2000 : 5000;
 
     if (Date.now() - lastPnlLog > pnlLogInterval) {
-        console.log(`\n[PNL] ${pnlState.netProfitUSDT.toFixed(4)} USDT (${pnlState.profitPercent.toFixed(2)}%)`);
+        const displayProfitUSDT = Number.isFinite(pnlState.displayProfitUSDT) ? pnlState.displayProfitUSDT : pnlState.netProfitUSDT;
+        const displayProfitPercent = Number.isFinite(pnlState.displayProfitPercent) ? pnlState.displayProfitPercent : pnlState.profitPercent;
+        console.log(`\n[PNL] ${displayProfitUSDT.toFixed(4)} USDT (${displayProfitPercent.toFixed(2)}%)`);
         lastPnlLog = Date.now();
     }
 };
@@ -2321,7 +2331,11 @@ const printDetailedStatus = async () => {
         console.log(`   [${positionKey}] side=${String(position.side || "").toUpperCase()} qty=${position.quantity} entry=${position.entryPrice}`);
         console.log(`   [${positionKey}] tp=${position.targetPrice ?? "N/A"} sl=${position.stopLossPrice ?? "N/A"} strategy=${position.strategy || "N/A"}`);
         console.log(`   [${positionKey}] tpOrder=${position.tpClientOrderId ?? "N/A"} slOrder=${position.slClientOrderId ?? "N/A"}`);
-        if (pnlState) console.log(`   [${positionKey}] pnl=${pnlState.netProfitUSDT.toFixed(4)} USDT (${pnlState.profitPercent.toFixed(2)}%)`);
+        if (pnlState) {
+            const displayProfitUSDT = Number.isFinite(pnlState.displayProfitUSDT) ? pnlState.displayProfitUSDT : pnlState.netProfitUSDT;
+            const displayProfitPercent = Number.isFinite(pnlState.displayProfitPercent) ? pnlState.displayProfitPercent : pnlState.profitPercent;
+            console.log(`   [${positionKey}] pnl=${displayProfitUSDT.toFixed(4)} USDT (${displayProfitPercent.toFixed(2)}%)`);
+        }
     });
 };
 
@@ -2357,8 +2371,8 @@ const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, re
     );
 
     console.log(`\n[OK] POSITION CLOSED: ${reason}`);
-    console.log(`   Net P&L: ${netProfitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
-    console.log(`   Daily Total Net P&L: ${db.dailyPnL.toFixed(4)} USDT / ${db.dailyTrades} trades`);
+    console.log(`   Realized P&L: ${netProfitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
+    console.log(`   Daily Total Realized P&L: ${db.dailyPnL.toFixed(4)} USDT / ${db.dailyTrades} trades`);
 
     removeActivePositionByKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position));
     await saveDB();
@@ -2371,16 +2385,16 @@ const recordPartialClose = async (position, exitPrice, closedQuantity, reason) =
     if (!Number.isFinite(exitPrice) || exitPrice <= 0) return;
     if (!Number.isFinite(closedQuantity) || closedQuantity <= 0) return;
     const partialPnl = calculatePositionPnL(position, exitPrice, closedQuantity);
-    db.dailyPnL += partialPnl.netProfitUSDT;
+    db.dailyPnL += partialPnl.realizedProfitUSDT;
     logTrade(
         position.side === "buy" ? "LONG" : "SHORT",
         position.entryPrice,
         exitPrice,
         `PARTIAL_CLOSE:${reason}`,
-        partialPnl.netProfitUSDT,
+        partialPnl.realizedProfitUSDT,
         position.strategy || null
     );
-    console.log(`[INFO] Recorded partial close of ${closedQuantity} contracts: ${partialPnl.netProfitUSDT.toFixed(4)} USDT`);
+    console.log(`[INFO] Recorded partial close of ${closedQuantity} contracts: ${partialPnl.realizedProfitUSDT.toFixed(4)} USDT`);
     await saveDB();
 };
 
