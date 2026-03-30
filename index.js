@@ -2697,24 +2697,33 @@ const buildLiveStatusPayload = async () => {
             id: order.id ?? null,
             clientOrderId: order.clientOrderId ?? null,
             side: order.side ?? null,
+            positionSide: order.positionSide ?? null,
             type: order.type ?? null,
+            reduceOnly: Boolean(order.reduceOnly),
             price: Number.isFinite(Number(order.price)) ? Number(order.price) : null,
+            triggerPrice: Number.isFinite(Number(order.triggerPrice)) ? Number(order.triggerPrice) : null,
             amount: Number.isFinite(Number(order.amount)) ? Number(order.amount) : null
         })),
         tp: managedOrders.tp.map((order) => ({
             id: order.id ?? null,
             clientOrderId: order.clientOrderId ?? null,
             side: order.side ?? null,
+            positionSide: order.positionSide ?? null,
             type: order.type ?? null,
+            reduceOnly: Boolean(order.reduceOnly),
             price: Number.isFinite(Number(order.price)) ? Number(order.price) : null,
+            triggerPrice: Number.isFinite(Number(order.triggerPrice)) ? Number(order.triggerPrice) : null,
             amount: Number.isFinite(Number(order.amount)) ? Number(order.amount) : null
         })),
         sl: managedOrders.sl.map((order) => ({
             id: order.id ?? null,
             clientOrderId: order.clientOrderId ?? null,
             side: order.side ?? null,
+            positionSide: order.positionSide ?? null,
             type: order.type ?? null,
+            reduceOnly: Boolean(order.reduceOnly),
             price: Number.isFinite(Number(order.price)) ? Number(order.price) : null,
+            triggerPrice: Number.isFinite(Number(order.triggerPrice)) ? Number(order.triggerPrice) : null,
             amount: Number.isFinite(Number(order.amount)) ? Number(order.amount) : null
         }))
     };
