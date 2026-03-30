@@ -1,6 +1,8 @@
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+const express = require("express");
 const ccxt = require("ccxt");
 const { Sequelize, DataTypes } = require('sequelize');
 
@@ -89,6 +91,7 @@ const gridSizingStateLogCache = new Map();
 let isShuttingDown = false;
 let accountPositionMode = { hedged: false, label: "ONE_WAY" };
 let runtimeCommandsRegistered = false;
+let webServer = null;
 const logPath = path.join(__dirname, 'trades.csv');
 let db = null;
 const BALANCE_CACHE_TTL = 15000;
@@ -144,6 +147,51 @@ const DEFAULT_CONFIG = {
 const GRID_CLIENT_ORDER_PREFIX = "smartgrid";
 const TP_CLIENT_ORDER_PREFIX = "smarttp";
 const SL_CLIENT_ORDER_PREFIX = "smartsl";
+
+const DASHBOARD_EDITABLE_FIELDS = [
+    { key: "strategy", label: "Strategy", section: "General", type: "select", options: ["futures_grid"], description: "Main strategy used by the bot." },
+    { key: "pair", label: "Pair", section: "General", type: "text", placeholder: "DOGE/USDT:USDT", description: "Futures symbol to trade." },
+    { key: "marginMode", label: "Margin Mode", section: "General", type: "select", options: ["isolated", "cross"], description: "Margin mode used on the exchange." },
+    { key: "leverage", label: "Leverage", section: "General", type: "number", min: 1, step: 1, description: "Futures leverage." },
+    { key: "monitoringInterval", label: "Monitoring Interval", section: "General", type: "number", min: 200, step: 100, description: "PnL monitoring interval in milliseconds." },
+    { key: "coolingPeriod", label: "Cooling Period", section: "General", type: "number", min: 0, step: 500, description: "Cooldown after a trade in milliseconds." },
+
+    { key: "gridOrderSizeUsdt", label: "Grid Order Size (USDT)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Order size per grid entry in USDT." },
+    { key: "gridTargetProfitUsdt", label: "Target Profit (USDT)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Take-profit target in USDT." },
+    { key: "gridStopLossPercent", label: "Stop Loss (%)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Stop loss percentage used by the grid engine." },
+    { key: "dailyProfitTargetUsdt", label: "Daily Profit Target (USDT)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Pause trading after this realized profit is reached." },
+    { key: "dailyMaxLossPercent", label: "Daily Max Loss (%)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Pause trading after this loss percentage is reached." },
+    { key: "maxTradesPerDay", label: "Max Trades Per Day", section: "Risk", type: "number", min: 0, step: 1, description: "Daily trade cap." },
+    { key: "minVolumeRatio", label: "Min Volume Ratio", section: "Risk", type: "number", min: 1, step: 0.1, description: "Minimum volume filter." },
+
+    { key: "gridLevels", label: "Grid Levels", section: "Grid", type: "number", min: 4, step: 1, description: "Number of levels in the grid." },
+    { key: "gridLookbackCandles", label: "Lookback Candles", section: "Grid", type: "number", min: 20, step: 1, description: "Candles used to calculate the grid range." },
+    { key: "gridRangePercent", label: "Range (%)", section: "Grid", type: "number", min: 0.5, step: 0.1, description: "Grid range width in percent." },
+    { key: "gridEntryBufferPercent", label: "Entry Buffer (%)", section: "Grid", type: "number", min: 0.02, step: 0.01, description: "Buffer around grid levels for entries." },
+    { key: "gridTakeProfitLevels", label: "Take Profit Levels", section: "Grid", type: "number", min: 0, step: 1, description: "TP level offset from the entry level." },
+    { key: "gridOrdersPerSide", label: "Orders Per Side", section: "Grid", type: "number", min: 0, step: 1, description: "Number of ladder orders per side." },
+    { key: "gridStopLossLevels", label: "Stop Loss Levels", section: "Grid", type: "number", min: 0, step: 0.1, description: "Stop loss offset in grid steps." },
+    { key: "gridTimeframe", label: "Grid Timeframe", section: "Grid", type: "select", options: ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"], description: "Timeframe used to build the grid." },
+
+    { key: "sessionStartUTC", label: "Session Start UTC", section: "Session", type: "number", min: 0, max: 23, step: 1, description: "Trading session start hour in UTC." },
+    { key: "sessionEndUTC", label: "Session End UTC", section: "Session", type: "number", min: 0, max: 23, step: 1, description: "Trading session end hour in UTC." },
+    { key: "volumePeriod", label: "Volume Period", section: "Session", type: "number", min: 2, step: 1, description: "Volume lookback period." },
+    { key: "atrPeriod", label: "ATR Period", section: "Session", type: "number", min: 2, step: 1, description: "ATR calculation period." },
+
+    { key: "trailingEnabled", label: "Trailing Enabled", section: "Trailing", type: "boolean", description: "Enable trailing stop logic." },
+    { key: "trailingActivateATR", label: "Trail Activate ATR", section: "Trailing", type: "number", min: 0.2, step: 0.1, description: "ATR multiple needed before trailing starts." },
+    { key: "trailingOffsetATR", label: "Trail Offset ATR", section: "Trailing", type: "number", min: 0.1, step: 0.1, description: "ATR offset used by the trailing stop." },
+    { key: "allowLong", label: "Allow Long", section: "Direction", type: "boolean", description: "Allow long entries." },
+    { key: "allowShort", label: "Allow Short", section: "Direction", type: "boolean", description: "Allow short entries." }
+];
+
+const DASHBOARD_EDITABLE_KEYS = new Set(DASHBOARD_EDITABLE_FIELDS.map((field) => field.key));
+const DASHBOARD_PROTECTED_KEYS = new Set(["strategy", "pair", "leverage", "marginMode", "gridTimeframe"]);
+const DASHBOARD_USERNAME = String(process.env.DASHBOARD_USERNAME || "admin");
+const DASHBOARD_PASSWORD = String(process.env.DASHBOARD_PASSWORD || "admin123");
+const DASHBOARD_SESSION_SECRET = String(process.env.DASHBOARD_SESSION_SECRET || process.env.API_SECRET || "smart-bot-dashboard-secret");
+const DASHBOARD_SESSION_COOKIE = "smartbot_dashboard_session";
+const DASHBOARD_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 let metrics = {
     windowStart: Date.now(),
@@ -2574,6 +2622,289 @@ const startMetricsReporting = () => {
 
 const getDefaultConfig = () => ({ ...DEFAULT_CONFIG, lastDailyReset: Date.now(), lastUpdated: Date.now() });
 
+const buildDashboardStatus = () => {
+    const activePositionsMap = getActivePositionsMap(db?.activePosition);
+    return {
+        botRunning: !isShuttingDown,
+        exchangeConnected: Boolean(exchange),
+        positionMode: accountPositionMode?.label || "UNKNOWN",
+        activePositions: Object.keys(activePositionsMap).length,
+        activeGridState: Boolean(db?.activeGridState),
+        dailyPnL: toFiniteNumber(db?.dailyPnL, 0),
+        dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(db?.dailyTrades, 0))),
+        lastUpdated: toFiniteNumber(db?.lastUpdated, 0),
+        lastDailyReset: toFiniteNumber(db?.lastDailyReset, 0),
+        pair: db?.pair || DEFAULT_CONFIG.pair,
+        strategy: db?.strategy || DEFAULT_CONFIG.strategy,
+        marginMode: db?.marginMode || DEFAULT_CONFIG.marginMode,
+        leverage: Math.max(1, Math.trunc(toFiniteNumber(db?.leverage, DEFAULT_CONFIG.leverage)))
+    };
+};
+
+const parseCookies = (cookieHeader) => {
+    const cookies = {};
+    if (!cookieHeader || typeof cookieHeader !== "string") return cookies;
+    cookieHeader.split(";").forEach((part) => {
+        const index = part.indexOf("=");
+        if (index <= 0) return;
+        const key = part.slice(0, index).trim();
+        const value = part.slice(index + 1).trim();
+        if (!key) return;
+        try {
+            cookies[key] = decodeURIComponent(value);
+        } catch {
+            cookies[key] = value;
+        }
+    });
+    return cookies;
+};
+
+const safeBufferEqual = (a, b) => {
+    const left = Buffer.from(String(a));
+    const right = Buffer.from(String(b));
+    if (left.length !== right.length) return false;
+    return crypto.timingSafeEqual(left, right);
+};
+
+const createDashboardSessionToken = (username) => {
+    const payload = Buffer.from(JSON.stringify({ u: username, iat: Date.now() }), "utf8").toString("base64url");
+    const signature = crypto.createHmac("sha256", DASHBOARD_SESSION_SECRET).update(payload).digest("hex");
+    return `${payload}.${signature}`;
+};
+
+const verifyDashboardSessionToken = (token) => {
+    if (!token || typeof token !== "string") return null;
+    const [payload, signature] = token.split(".");
+    if (!payload || !signature) return null;
+    const expected = crypto.createHmac("sha256", DASHBOARD_SESSION_SECRET).update(payload).digest("hex");
+    if (!safeBufferEqual(signature, expected)) return null;
+    try {
+        const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+        if (!parsed || parsed.u !== DASHBOARD_USERNAME) return null;
+        const issuedAt = Number(parsed.iat);
+        if (!Number.isFinite(issuedAt)) return null;
+        if (Date.now() - issuedAt > DASHBOARD_SESSION_TTL_MS) return null;
+        return { username: parsed.u, issuedAt };
+    } catch {
+        return null;
+    }
+};
+
+const getDashboardSession = (req) => {
+    const cookies = parseCookies(req.headers.cookie || "");
+    return verifyDashboardSessionToken(cookies[DASHBOARD_SESSION_COOKIE]);
+};
+
+const isDashboardAuthenticated = (req) => Boolean(getDashboardSession(req));
+
+const setDashboardSessionCookie = (res, username) => {
+    const token = createDashboardSessionToken(username);
+    const parts = [
+        `${DASHBOARD_SESSION_COOKIE}=${encodeURIComponent(token)}`,
+        "HttpOnly",
+        "SameSite=Strict",
+        "Path=/",
+        `Max-Age=${Math.floor(DASHBOARD_SESSION_TTL_MS / 1000)}`
+    ];
+    if (String(process.env.NODE_ENV || "").toLowerCase() === "production") parts.push("Secure");
+    res.setHeader("Set-Cookie", parts.join("; "));
+};
+
+const clearDashboardSessionCookie = (res) => {
+    const parts = [
+        `${DASHBOARD_SESSION_COOKIE}=`,
+        "HttpOnly",
+        "SameSite=Strict",
+        "Path=/",
+        "Max-Age=0"
+    ];
+    res.setHeader("Set-Cookie", parts.join("; "));
+};
+
+const requireDashboardAuth = (req, res, next) => {
+    if (isDashboardAuthenticated(req)) return next();
+    if (req.path.startsWith("/api")) {
+        res.status(401).json({ ok: false, error: "Unauthorized" });
+        return;
+    }
+    res.redirect("/login");
+};
+
+const buildDashboardPayload = () => ({
+    config: db ? { ...db } : getDefaultConfig(),
+    defaults: getDefaultConfig(),
+    schema: DASHBOARD_EDITABLE_FIELDS,
+    status: buildDashboardStatus(),
+    serverTime: Date.now()
+});
+
+const pickEditableConfig = (input) => {
+    const source = input && typeof input === "object" ? input : {};
+    const picked = {};
+    for (const field of DASHBOARD_EDITABLE_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(source, field.key)) picked[field.key] = source[field.key];
+    }
+    return picked;
+};
+
+const applyDashboardConfigUpdate = async (incoming) => {
+    if (!db) throw new Error("Config is not ready yet");
+
+    const current = { ...db };
+    const payload = pickEditableConfig(incoming);
+    const nextConfig = normalizeConfig({ ...current, ...payload });
+
+    nextConfig.activePosition = current.activePosition;
+    nextConfig.activeGridState = current.activeGridState;
+    nextConfig.dailyPnL = current.dailyPnL;
+    nextConfig.dailyTrades = current.dailyTrades;
+    nextConfig.lastDailyReset = current.lastDailyReset;
+    nextConfig.id = current.id;
+
+    if (hasAnyActivePosition()) {
+        for (const key of DASHBOARD_PROTECTED_KEYS) {
+            if (Object.prototype.hasOwnProperty.call(payload, key)) {
+                nextConfig[key] = current[key];
+            }
+        }
+    }
+
+    db = nextConfig;
+    await saveDB();
+    await reloadConfig();
+    refreshRuntimeSchedulers();
+
+    if (exchange) {
+        await setMarginMode();
+        await setLeverage();
+    }
+
+    return buildDashboardPayload();
+};
+
+const resetDashboardConfig = async () => {
+    if (!db) throw new Error("Config is not ready yet");
+    const nextConfig = normalizeConfig({
+        ...getDefaultConfig(),
+        activePosition: db.activePosition,
+        activeGridState: db.activeGridState,
+        dailyPnL: db.dailyPnL,
+        dailyTrades: db.dailyTrades,
+        lastDailyReset: db.lastDailyReset,
+        id: db.id
+    });
+    db = nextConfig;
+    await saveDB();
+    await reloadConfig();
+    refreshRuntimeSchedulers();
+    if (exchange) {
+        await setMarginMode();
+        await setLeverage();
+    }
+    return buildDashboardPayload();
+};
+
+const startWebDashboard = async () => {
+    if (webServer) return webServer;
+
+    const app = express();
+    app.disable("x-powered-by");
+    app.use(express.json({ limit: "1mb" }));
+    app.use(express.urlencoded({ extended: false }));
+
+    app.get("/login", (req, res) => {
+        if (isDashboardAuthenticated(req)) {
+            res.redirect("/dashboard");
+            return;
+        }
+        res.sendFile(path.join(__dirname, "public", "login.html"));
+    });
+
+    app.post("/login", (req, res) => {
+        const username = String(req.body?.username || "").trim();
+        const password = String(req.body?.password || "");
+        if (username === DASHBOARD_USERNAME && password === DASHBOARD_PASSWORD) {
+            setDashboardSessionCookie(res, username);
+            res.redirect("/dashboard");
+            return;
+        }
+        res.redirect("/login?error=1");
+    });
+
+    app.post("/logout", (req, res) => {
+        clearDashboardSessionCookie(res);
+        res.redirect("/login");
+    });
+
+    app.use(requireDashboardAuth);
+
+    app.get("/", (req, res) => {
+        res.sendFile(path.join(__dirname, "public", "index.html"));
+    });
+
+    app.get("/dashboard", (req, res) => {
+        res.sendFile(path.join(__dirname, "public", "index.html"));
+    });
+
+    app.use(express.static(path.join(__dirname, "public")));
+
+    app.get("/api/health", (req, res) => {
+        res.json({
+            ok: true,
+            botRunning: !isShuttingDown,
+            databaseReady: Boolean(db),
+            exchangeReady: Boolean(exchange),
+            serverTime: Date.now()
+        });
+    });
+
+    app.get("/api/config", (req, res) => {
+        if (!db) {
+            res.status(503).json({ ok: false, error: "Config is not ready yet" });
+            return;
+        }
+        res.json({ ok: true, ...buildDashboardPayload() });
+    });
+
+    app.put("/api/config", async (req, res) => {
+        try {
+            const incoming = req.body && typeof req.body === "object" && req.body.config && typeof req.body.config === "object"
+                ? req.body.config
+                : req.body;
+            const result = await applyDashboardConfigUpdate(incoming);
+            res.json({ ok: true, message: "Konfigurasi berhasil disimpan", ...result });
+        } catch (error) {
+            res.status(400).json({ ok: false, error: error.message });
+        }
+    });
+
+    app.post("/api/config/reset", async (req, res) => {
+        try {
+            const result = await resetDashboardConfig();
+            res.json({ ok: true, message: "Konfigurasi dikembalikan ke default", ...result });
+        } catch (error) {
+            res.status(400).json({ ok: false, error: error.message });
+        }
+    });
+
+    app.use(express.static(path.join(__dirname, "public")));
+
+    const port = Math.max(1, Math.trunc(toFiniteNumber(process.env.DASHBOARD_PORT || process.env.PORT, 3000)));
+    const host = process.env.DASHBOARD_HOST || "0.0.0.0";
+
+    webServer = await new Promise((resolve, reject) => {
+        const server = app.listen(port, host, () => {
+            console.log(`[WEB] Dashboard available at http://localhost:${port}`);
+            resolve(server);
+        });
+        server.on("error", (error) => {
+            reject(error);
+        });
+    });
+
+    return webServer;
+};
+
 const AUTO_PAIR_GRID_PRESETS = {
     binance: {
         strategy: "futures_grid",
@@ -3813,6 +4144,11 @@ const shutdown = async (signal = "EXIT") => {
     console.log(`\n[SHUTDOWN] Received ${signal}. Stopping bot...`);
     unregisterRuntimeCommands();
     clearRuntimeTimers();
+    if (webServer) {
+        try { await new Promise((resolve) => webServer.close(() => resolve())); }
+        catch (error) { console.error("[ERROR] Failed to close web server:", error.message); }
+        webServer = null;
+    }
     try { await saveDB(); } catch (error) { console.error("[ERROR] Failed to save DB during shutdown:", error.message); }
     try { await sequelize.close(); } catch (error) { console.error("[ERROR] Failed to close DB connection:", error.message); }
     console.log("[SHUTDOWN] Bot stopped.");
@@ -3823,6 +4159,7 @@ const shutdown = async (signal = "EXIT") => {
 (async () => {
     try {
         if (!(await initializeDB())) process.exit(1);
+        await startWebDashboard();
         await bootstrapRuntime();
         const totalUSDT = await getTotalUSDTBalance(true);
         printStartupBanner(totalUSDT);

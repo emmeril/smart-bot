@@ -61,6 +61,23 @@ node index.js
 
 Saat bot berjalan, kamu bisa ketik `status` di terminal untuk melihat posisi aktif serta order grid, TP, dan SL yang masih terbuka di exchange.
 
+Dashboard web akan ikut aktif di port `3000` secara default. Buka:
+
+```text
+http://localhost:3000
+```
+
+Jika perlu, port bisa diganti lewat env `DASHBOARD_PORT`.
+Dashboard sekarang juga dilindungi login. Set kredensial lewat:
+
+```env
+DASHBOARD_USERNAME=admin
+DASHBOARD_PASSWORD=change-me-now
+DASHBOARD_SESSION_SECRET=change-this-to-a-long-random-string
+```
+
+Kalau env belum diisi, default lokal yang dipakai adalah `admin` / `admin123`.
+
 ## Konfigurasi
 
 Konfigurasi runtime disimpan di `database.sqlite` dan dapat dikelola lewat helper:
@@ -101,6 +118,22 @@ node scripts/config.js set marginMode cross
 ```
 
 `marginMode` hanya menerima `cross` atau `isolated`.
+
+## Dashboard Web
+
+Dashboard menyediakan edit cepat untuk:
+
+- `pair`
+- `strategy`
+- `marginMode`
+- `leverage`
+- parameter grid
+- parameter risiko harian
+- trailing stop
+- filter sesi
+
+Perubahan dari dashboard langsung disimpan ke SQLite dan di-reload ke runtime bot.
+Login dashboard memakai cookie sesi yang ditandatangani dan akan kedaluwarsa otomatis setelah beberapa jam.
 
 ## Logging
 

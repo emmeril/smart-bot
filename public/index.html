@@ -1,0 +1,463 @@
+﻿<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Smart Bot Dashboard</title>
+  <meta name="description" content="Dashboard konfigurasi untuk Smart Bot">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #081118;
+      --bg-2: #0d1720;
+      --panel: rgba(14, 24, 33, 0.88);
+      --line: rgba(164, 194, 210, 0.16);
+      --text: #edf4f7;
+      --muted: #9cb0bb;
+      --accent: #20c997;
+      --accent-2: #f7b955;
+      --danger: #ff6b6b;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 14px;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      font-family: "Bahnschrift", "Aptos", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(32, 201, 151, 0.16), transparent 32%),
+        radial-gradient(circle at top right, rgba(247, 185, 85, 0.14), transparent 28%),
+        linear-gradient(160deg, var(--bg), var(--bg-2));
+    }
+    .bg-orb {
+      position: fixed;
+      width: 38vw;
+      height: 38vw;
+      border-radius: 50%;
+      filter: blur(40px);
+      opacity: 0.23;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .bg-orb-a { left: -12vw; top: -12vw; background: radial-gradient(circle, rgba(32, 201, 151, 0.85), rgba(32, 201, 151, 0)); }
+    .bg-orb-b { right: -10vw; top: 8vw; background: radial-gradient(circle, rgba(247, 185, 85, 0.8), rgba(247, 185, 85, 0)); }
+    .shell {
+      position: relative;
+      z-index: 1;
+      width: min(1240px, calc(100% - 32px));
+      margin: 24px auto 40px;
+      display: grid;
+      gap: 18px;
+    }
+    .panel {
+      background: linear-gradient(180deg, var(--panel), rgba(8, 17, 24, 0.92));
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 18px;
+      padding: 28px;
+      overflow: hidden;
+    }
+    .hero-copy h1, .panel-head h2 { margin: 0; line-height: 1.02; letter-spacing: -0.03em; }
+    .hero-copy h1 { font-size: clamp(2.2rem, 5vw, 4rem); max-width: 10ch; }
+    .lede { margin: 14px 0 0; max-width: 62ch; color: var(--muted); font-size: 1rem; line-height: 1.7; }
+    .eyebrow { margin: 0 0 10px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.74rem; font-weight: 700; }
+    .hero-actions { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 10px; }
+    .btn {
+      border: 0; border-radius: 999px; padding: 12px 18px; font: inherit; font-weight: 700;
+      cursor: pointer; transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:active { transform: translateY(1px); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .btn-primary { background: linear-gradient(135deg, var(--accent), #40e0aa); color: #05110d; box-shadow: 0 16px 30px rgba(32, 201, 151, 0.24); }
+    .btn-secondary { background: rgba(255, 255, 255, 0.06); color: var(--text); border: 1px solid rgba(255, 255, 255, 0.12); }
+    .btn-danger { background: rgba(255, 107, 107, 0.14); color: #ffd2d2; border: 1px solid rgba(255, 107, 107, 0.22); }
+    .hero-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-content: start; }
+    .metric-card {
+      padding: 16px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: var(--radius-lg);
+    }
+    .metric-card .label, .status-label, .field-hint { display: block; color: var(--muted); font-size: 0.82rem; }
+    .metric-card strong { display: block; margin-top: 8px; font-size: 1.05rem; }
+    .metric-card span { display: block; margin-top: 4px; color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
+    .status-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 18px 20px; }
+    .status-item { padding: 12px 14px; border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.06); }
+    .status-item strong { display: block; margin-top: 8px; font-size: 1rem; }
+    .form-panel { padding: 24px; }
+    .panel-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 18px; }
+    .panel-head .muted, .footer-panel .muted { color: var(--muted); margin: 0; line-height: 1.6; }
+    .config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .section-card { padding: 18px; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); }
+    .section-card h3 { margin: 0 0 14px; font-size: 1rem; letter-spacing: 0.02em; }
+    .field-list { display: grid; gap: 12px; }
+    .field { display: grid; gap: 8px; }
+    .field-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 12px 14px; border-radius: var(--radius-md); background: rgba(7, 14, 19, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .field-row label { font-weight: 700; }
+    .field-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+    .field-control {
+      width: 100%; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.04); color: var(--text); padding: 12px 14px; font: inherit; outline: none;
+    }
+    .field-control:focus { border-color: rgba(32, 201, 151, 0.5); box-shadow: 0 0 0 4px rgba(32, 201, 151, 0.12); }
+    .field-control::placeholder { color: #6d8591; }
+    .field-note { color: var(--muted); font-size: 0.82rem; line-height: 1.5; }
+    .footer-panel { padding: 18px 20px; display: flex; justify-content: space-between; gap: 16px; align-items: center; }
+    .toast { min-width: 220px; max-width: 50%; text-align: right; color: var(--muted); font-size: 0.92rem; }
+    .toast.success { color: #9af2cc; }
+    .toast.error { color: #ffb4b4; }
+    .toast.info { color: #d3e6ef; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px;
+      font-size: 0.82rem; font-weight: 700; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .pill.ok { color: #9af2cc; }
+    .pill.warn { color: #ffd27f; }
+    .pill.bad { color: #ffb4b4; }
+    @media (max-width: 980px) {
+      .hero, .config-grid, .status-strip { grid-template-columns: 1fr; }
+      .hero { padding: 22px; }
+      .footer-panel, .panel-head { flex-direction: column; align-items: start; }
+      .toast { max-width: 100%; text-align: left; }
+    }
+    @media (max-width: 640px) {
+      .shell { width: min(100% - 18px, 100%); margin: 10px auto 24px; }
+      .hero, .form-panel { padding: 18px; }
+      .hero-metrics { grid-template-columns: 1fr; }
+      .hero-actions { flex-direction: column; }
+      .btn { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-orb bg-orb-a"></div>
+  <div class="bg-orb bg-orb-b"></div>
+  <main class="shell">
+    <header class="hero panel">
+      <div class="hero-copy">
+        <p class="eyebrow">Smart Bot Control Center</p>
+        <h1>Dashboard konfigurasi via web</h1>
+        <p class="lede">Atur parameter trading, risiko, grid, sesi, dan trailing stop langsung dari browser. Perubahan disimpan ke SQLite dan dipakai ulang oleh bot secara runtime.</p>
+        <div class="hero-actions">
+          <button id="saveBtn" class="btn btn-primary" type="button">Simpan konfigurasi</button>
+          <button id="refreshBtn" class="btn btn-secondary" type="button">Muat ulang</button>
+          <button id="resetBtn" class="btn btn-danger" type="button">Reset default</button>
+          <form action="/logout" method="post" style="margin:0">
+            <button class="btn btn-secondary" type="submit">Logout</button>
+          </form>
+        </div>
+      </div>
+      <div class="hero-metrics" id="statusCards"></div>
+    </header>
+
+    <section class="panel status-strip">
+      <div class="status-item"><span class="status-label">Status bot</span><strong id="botStatus">Memuat...</strong></div>
+      <div class="status-item"><span class="status-label">Pair aktif</span><strong id="pairStatus">-</strong></div>
+      <div class="status-item"><span class="status-label">Mode margin</span><strong id="marginStatus">-</strong></div>
+      <div class="status-item"><span class="status-label">Terakhir update</span><strong id="updatedStatus">-</strong></div>
+    </section>
+
+    <section class="panel form-panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Konfigurasi</p>
+          <h2>Parameter trading</h2>
+        </div>
+        <p class="muted">Semua field di bawah akan divalidasi kembali di sisi server sebelum disimpan.</p>
+      </div>
+      <form id="configForm" class="config-grid"></form>
+    </section>
+
+    <section class="panel footer-panel">
+      <div>
+        <p class="eyebrow">Catatan</p>
+        <p class="muted">Dashboard ini fokus ke konfigurasi. Status posisi aktif dan nilai harian tetap dibaca dari runtime bot.</p>
+      </div>
+      <div id="toast" class="toast" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <script>
+    const SECTION_ORDER = ["General", "Risk", "Grid", "Session", "Trailing", "Direction"];
+    const state = { config: null, defaults: null, schema: [], status: null, serverTime: 0 };
+    const form = document.getElementById("configForm");
+    const toast = document.getElementById("toast");
+    const saveBtn = document.getElementById("saveBtn");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const statusCards = document.getElementById("statusCards");
+    const botStatus = document.getElementById("botStatus");
+    const pairStatus = document.getElementById("pairStatus");
+    const marginStatus = document.getElementById("marginStatus");
+    const updatedStatus = document.getElementById("updatedStatus");
+
+    const SECTION_LABELS = {
+      General: "General",
+      Risk: "Risk Management",
+      Grid: "Grid Engine",
+      Session: "Session & Filters",
+      Trailing: "Trailing Stop",
+      Direction: "Direction Control"
+    };
+
+    function setBusy(busy) {
+      saveBtn.disabled = busy;
+      refreshBtn.disabled = busy;
+      resetBtn.disabled = busy;
+    }
+
+    function showToast(message, type = "info") {
+      toast.className = `toast ${type}`;
+      toast.textContent = message;
+      if (showToast.timer) clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => {
+        if (toast.textContent === message) {
+          toast.className = "toast";
+          toast.textContent = "";
+        }
+      }, 4200);
+    }
+
+    function formatNumber(value) {
+      if (value === null || value === undefined || value === "") return "-";
+      const num = Number(value);
+      if (!Number.isFinite(num)) return String(value);
+      if (Math.abs(num) >= 1000) return num.toLocaleString("en-US");
+      if (Number.isInteger(num)) return String(num);
+      return num.toFixed(2).replace(/\.00$/, "");
+    }
+
+    function formatDateTime(value) {
+      const ts = Number(value);
+      if (!Number.isFinite(ts) || ts <= 0) return "-";
+      return new Date(ts).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+    }
+
+    function formatPill(status) {
+      if (typeof status !== "string") return "pill";
+      const lower = status.toLowerCase();
+      if (lower.includes("running") || lower.includes("ready") || lower.includes("ok")) return "pill ok";
+      if (lower.includes("warn") || lower.includes("pause")) return "pill warn";
+      if (lower.includes("error") || lower.includes("off")) return "pill bad";
+      return "pill";
+    }
+
+    function api(path, options = {}) {
+      return fetch(path, {
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        ...options
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 401) { location.href = "/login"; throw new Error("Sesi login habis. Silakan masuk lagi."); }
+        if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+        return data;
+      });
+    }
+
+    function renderMetrics(status) {
+      const cards = [
+        { label: "Bot", value: status.botRunning ? "Running" : "Stopped", note: status.exchangeConnected ? "Exchange connected" : "Exchange disconnected" },
+        { label: "Positions", value: String(status.activePositions), note: status.activeGridState ? "Grid state active" : "No local grid state" },
+        { label: "Daily PnL", value: `${formatNumber(status.dailyPnL)} USDT`, note: `${status.dailyTrades} trades today` },
+        { label: "Leverage", value: `${formatNumber(status.leverage)}x`, note: `${String(status.marginMode || "-").toUpperCase()} | ${status.positionMode || "-"}` }
+      ];
+      statusCards.innerHTML = cards.map((card) => `
+        <article class="metric-card">
+          <span class="label">${card.label}</span>
+          <strong>${card.value}</strong>
+          <span>${card.note}</span>
+        </article>
+      `).join("");
+      botStatus.textContent = status.botRunning ? "Running" : "Stopped";
+      botStatus.className = formatPill(status.botRunning ? "running" : "stopped");
+      pairStatus.textContent = status.pair || "-";
+      marginStatus.textContent = `${String(status.marginMode || "-").toUpperCase()} / ${status.positionMode || "-"}`;
+      updatedStatus.textContent = formatDateTime(status.lastUpdated);
+    }
+
+    function sectionList(schema) {
+      const map = new Map();
+      for (const field of schema) {
+        const section = field.section || "General";
+        if (!map.has(section)) map.set(section, []);
+        map.get(section).push(field);
+      }
+      const ordered = [];
+      for (const section of SECTION_ORDER) if (map.has(section)) ordered.push([section, map.get(section)]);
+      for (const entry of map.entries()) if (!SECTION_ORDER.includes(entry[0])) ordered.push(entry);
+      return ordered;
+    }
+
+    function createField(field, value) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "field";
+      const label = document.createElement("label");
+      label.textContent = field.label || field.key;
+      label.htmlFor = field.key;
+      wrapper.appendChild(label);
+
+      if (field.type === "boolean") {
+        const row = document.createElement("div");
+        row.className = "field-row";
+        const hint = document.createElement("span");
+        hint.className = "field-hint";
+        hint.textContent = field.description || "";
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.id = field.key;
+        toggle.name = field.key;
+        toggle.checked = Boolean(value);
+        row.appendChild(hint);
+        row.appendChild(toggle);
+        wrapper.appendChild(row);
+        return wrapper;
+      }
+
+      let input;
+      if (field.type === "select") {
+        input = document.createElement("select");
+        for (const optionValue of field.options || []) {
+          const option = document.createElement("option");
+          option.value = optionValue;
+          option.textContent = optionValue;
+          input.appendChild(option);
+        }
+      } else {
+        input = document.createElement("input");
+        input.type = field.type === "number" ? "number" : "text";
+        if (field.step !== undefined) input.step = field.step;
+        if (field.min !== undefined) input.min = field.min;
+        if (field.max !== undefined) input.max = field.max;
+        if (field.placeholder) input.placeholder = field.placeholder;
+      }
+
+      input.className = "field-control";
+      input.id = field.key;
+      input.name = field.key;
+      input.value = value === null || value === undefined ? "" : String(value);
+      if (field.type === "number") {
+        input.inputMode = Number(field.step) === 1 ? "numeric" : "decimal";
+      }
+      const note = document.createElement("div");
+      note.className = "field-note";
+      note.textContent = field.description || "";
+      wrapper.appendChild(input);
+      wrapper.appendChild(note);
+      return wrapper;
+    }
+
+    function renderForm(config, schema) {
+      form.innerHTML = "";
+      const sections = sectionList(schema);
+      for (const [sectionName, fields] of sections) {
+        const card = document.createElement("section");
+        card.className = "section-card";
+        const title = document.createElement("h3");
+        title.textContent = SECTION_LABELS[sectionName] || sectionName;
+        card.appendChild(title);
+        const list = document.createElement("div");
+        list.className = "field-list";
+        for (const field of fields) {
+          const value = Object.prototype.hasOwnProperty.call(config, field.key) ? config[field.key] : "";
+          list.appendChild(createField(field, value));
+        }
+        card.appendChild(list);
+        form.appendChild(card);
+      }
+    }
+
+    function collectConfig() {
+      const payload = {};
+      for (const field of state.schema) {
+        const el = form.elements[field.key];
+        if (!el) continue;
+        if (field.type === "boolean") {
+          payload[field.key] = el.checked;
+        } else if (field.type === "number") {
+          payload[field.key] = el.value === "" ? "" : Number(el.value);
+        } else {
+          payload[field.key] = el.value;
+        }
+      }
+      return payload;
+    }
+
+    function applyPayload(payload) {
+      state.config = payload.config || payload;
+      state.defaults = payload.defaults || state.defaults;
+      state.schema = payload.schema || state.schema;
+      state.status = payload.status || state.status;
+      state.serverTime = payload.serverTime || Date.now();
+      renderMetrics(state.status || {});
+      renderForm(state.config, state.schema);
+    }
+
+    async function loadDashboard(silent = false) {
+      if (!silent) setBusy(true);
+      try {
+        const data = await api("/api/config");
+        applyPayload(data);
+        if (!silent) showToast("Konfigurasi berhasil dimuat", "success");
+      } catch (error) {
+        showToast(error.message || "Gagal memuat konfigurasi", "error");
+      } finally {
+        if (!silent) setBusy(false);
+      }
+    }
+
+    async function saveDashboard() {
+      setBusy(true);
+      try {
+        const data = await api("/api/config", { method: "PUT", body: JSON.stringify({ config: collectConfig() }) });
+        applyPayload(data);
+        showToast(data.message || "Konfigurasi tersimpan", "success");
+      } catch (error) {
+        showToast(error.message || "Gagal menyimpan konfigurasi", "error");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function resetDashboard() {
+      const ok = confirm("Reset konfigurasi ke default? Perubahan yang belum disimpan akan hilang.");
+      if (!ok) return;
+      setBusy(true);
+      try {
+        const data = await api("/api/config/reset", { method: "POST" });
+        applyPayload(data);
+        showToast(data.message || "Konfigurasi direset", "success");
+      } catch (error) {
+        showToast(error.message || "Gagal reset konfigurasi", "error");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    saveBtn.addEventListener("click", saveDashboard);
+    refreshBtn.addEventListener("click", () => loadDashboard(false));
+    resetBtn.addEventListener("click", resetDashboard);
+
+    loadDashboard(false);
+  </script>
+</body>
+</html>
+
+
+
+
+

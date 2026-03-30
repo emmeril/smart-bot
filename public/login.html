@@ -1,0 +1,116 @@
+﻿<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login Dashboard</title>
+  <meta name="description" content="Login untuk Smart Bot Dashboard">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #081118;
+      --bg-2: #0d1720;
+      --panel: rgba(14, 24, 33, 0.9);
+      --line: rgba(164, 194, 210, 0.16);
+      --text: #edf4f7;
+      --muted: #9cb0bb;
+      --accent: #20c997;
+      --danger: #ff6b6b;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      font-family: "Bahnschrift", "Aptos", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(32, 201, 151, 0.16), transparent 32%),
+        radial-gradient(circle at top right, rgba(247, 185, 85, 0.14), transparent 28%),
+        linear-gradient(160deg, var(--bg), var(--bg-2));
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+    .panel {
+      width: min(460px, 100%);
+      padding: 28px;
+      border-radius: 28px;
+      background: linear-gradient(180deg, var(--panel), rgba(8, 17, 24, 0.92));
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+    h1 { margin: 0; font-size: clamp(2rem, 5vw, 2.8rem); letter-spacing: -0.03em; }
+    p { color: var(--muted); line-height: 1.6; }
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      font-size: 0.74rem;
+      font-weight: 700;
+    }
+    .alert {
+      margin: 16px 0 0;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 107, 107, 0.24);
+      background: rgba(255, 107, 107, 0.12);
+      color: #ffcbcb;
+      display: none;
+    }
+    form { margin-top: 20px; display: grid; gap: 14px; }
+    label { display: grid; gap: 8px; font-size: 0.92rem; font-weight: 700; }
+    input {
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      padding: 12px 14px;
+      font: inherit;
+      outline: none;
+    }
+    input:focus { border-color: rgba(32, 201, 151, 0.5); box-shadow: 0 0 0 4px rgba(32, 201, 151, 0.12); }
+    button {
+      margin-top: 4px;
+      border: 0;
+      border-radius: 999px;
+      padding: 12px 18px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      background: linear-gradient(135deg, var(--accent), #40e0aa);
+      color: #05110d;
+    }
+    .hint { margin-top: 16px; font-size: 0.88rem; }
+    code { color: #c8f5e6; }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <p class="eyebrow">Smart Bot Control Center</p>
+    <h1>Login dashboard</h1>
+    <p>Masukkan username dan password untuk membuka dashboard konfigurasi.</p>
+    <div id="errorBox" class="alert">Login gagal. Periksa username dan password.</div>
+    <form method="post" action="/login" autocomplete="on">
+      <label>
+        Username
+        <input name="username" type="text" required autocomplete="username" placeholder="admin">
+      </label>
+      <label>
+        Password
+        <input name="password" type="password" required autocomplete="current-password" placeholder="••••••••">
+      </label>
+      <button type="submit">Masuk</button>
+    </form>
+    <p class="hint">Default lokal saat env belum diisi: <code>admin</code> / <code>admin123</code>.</p>
+  </main>
+  <script>
+    const params = new URLSearchParams(location.search);
+    if (params.get("error") === "1") {
+      document.getElementById("errorBox").style.display = "block";
+    }
+  </script>
+</body>
+</html>
