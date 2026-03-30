@@ -132,7 +132,7 @@ Script lain yang tersedia:
 - Sangat disarankan uji dulu di akun testnet atau akun kecil.
 - Jangan aktifkan izin withdraw pada API key.
 - Bot sekarang mendeteksi mode akun Binance Futures saat startup dan menyesuaikan parameter order untuk One-way atau Hedge Mode.
-- Saat ada posisi aktif, ladder entry order yang tersisa akan dibersihkan dulu agar bot tidak menumpuk posisi di luar engine manajemen risiko saat ini.
+- Saat ada posisi aktif, ladder grid tetap dijaga agar perilakunya lebih dekat ke bot grid Binance. Pada One-way Mode, order ladder disaring mengikuti sisi posisi aktif untuk menghindari reversal yang tidak disengaja.
 - Pada Hedge Mode, bot mengirim `positionSide` sesuai dokumentasi Binance dan dapat menyimpan dua leg aktif lokal sekaligus: `LONG` dan `SHORT`.
 - Pada One-way Mode, bot memakai perilaku single-position dengan `positionSide=BOTH` dan `reduceOnly` untuk penutupan posisi.
 

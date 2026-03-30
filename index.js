@@ -1032,6 +1032,32 @@ const buildGridEntryOrders = (snapshot, params, gridState = null) => {
     return deduped;
 };
 
+const getActiveGridExposureSides = (openPositions = [], trackedPositions = getActivePositionsList()) => {
+    const exposureSides = new Set();
+
+    for (const position of openPositions || []) {
+        const side = String(getExchangePositionSide(position) || "").toLowerCase();
+        if (side === "buy" || side === "sell") exposureSides.add(side);
+    }
+
+    for (const position of trackedPositions || []) {
+        const side = String(position?.side || "").toLowerCase();
+        if (side === "buy" || side === "sell") exposureSides.add(side);
+    }
+
+    return exposureSides;
+};
+
+const filterGridOrdersForActiveExposure = (orders, openPositions = [], trackedPositions = getActivePositionsList()) => {
+    if (!Array.isArray(orders) || orders.length === 0) return [];
+    const exposureSides = getActiveGridExposureSides(openPositions, trackedPositions);
+    if (exposureSides.size === 0 || isHedgeModeEnabled()) return orders;
+
+    // In one-way mode we keep re-entry orders aligned with the live position side
+    // so the ladder can stay active without creating unintended reversal orders.
+    return orders.filter((order) => exposureSides.has(String(order?.side || "").toLowerCase()));
+};
+
 const evaluateGridSignal = (snapshot, params, gridState = null) => {
     const recentClose = snapshot.close.slice(-(params.gridLookbackCandles));
     if (recentClose.length < params.gridLookbackCandles) {
@@ -3128,10 +3154,7 @@ const syncGridOrders = async () => {
         }
 
         const openPositions = await fetchOpenExchangePositions();
-        if (openPositions.length > 0 || hasAnyActivePosition()) {
-            if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "ACTIVE_POSITION");
-            return;
-        }
+        const trackedPositions = getActivePositionsList();
 
         const lockedGridState = await resolveActiveGridState(snapshot, params);
         if (!lockedGridState) {
@@ -3140,9 +3163,13 @@ const syncGridOrders = async () => {
         }
 
         const desiredOrdersRaw = buildGridEntryOrders(snapshot, params, lockedGridState);
+        const desiredOrdersForRuntime = filterGridOrdersForActiveExposure(desiredOrdersRaw, openPositions, trackedPositions);
+        if (desiredOrdersForRuntime.length !== desiredOrdersRaw.length) {
+            console.log(`[GRID] Active position detected in ${accountPositionMode.label}. Keeping ${desiredOrdersForRuntime.length}/${desiredOrdersRaw.length} ladder order(s) aligned with the live exposure.`);
+        }
         const desiredOrderMap = new Map();
         const duplicateDesiredOrders = [];
-        for (const order of desiredOrdersRaw) {
+        for (const order of desiredOrdersForRuntime) {
             if (desiredOrderMap.has(order.clientOrderId)) duplicateDesiredOrders.push(order);
             else desiredOrderMap.set(order.clientOrderId, order);
         }
