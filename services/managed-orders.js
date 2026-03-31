@@ -13,6 +13,8 @@ const createManagedOrdersHelpers = ({
     getHasLoggedTriggerOrderFetchFallback,
     setHasLoggedTriggerOrderFetchFallback
 }) => {
+    const describeError = (error) => String(error?.message || error || "Unknown error");
+
     const dedupeOrdersByIdentity = (orders) => {
         const seen = new Set();
         const uniqueOrders = [];
@@ -52,7 +54,7 @@ const createManagedOrdersHelpers = ({
             fetchedTriggerOrders = await exchange.fetchOpenOrders(symbol, undefined, undefined, { trigger: true });
         } catch (error) {
             if (!getHasLoggedTriggerOrderFetchFallback()) {
-                console.warn(`[WARN] Failed to fetch trigger open orders separately. Falling back to unified open-order snapshot. ${error.message}`);
+                console.warn(`[WARN] Failed to fetch trigger open orders separately. Falling back to unified open-order snapshot. ${describeError(error)}`);
                 setHasLoggedTriggerOrderFetchFallback(true);
             }
         }
@@ -117,7 +119,7 @@ const createManagedOrdersHelpers = ({
                 await exchange.cancelOrder(order.id, currentDb.pair, cancelOptions);
                 metrics.api.orders++;
             } catch (error) {
-                console.warn(`[WARN] Failed to cancel ${label.toLowerCase()} order ${order.id}: ${error.message}`);
+                console.warn(`[WARN] Failed to cancel ${label.toLowerCase()} order ${order.id}: ${describeError(error)}`);
             }
         }
     };
@@ -169,7 +171,7 @@ const createManagedOrdersHelpers = ({
                     await exchange.cancelOrder(duplicateOrder.id, currentDb.pair, cancelParams);
                     metrics.api.orders++;
                 } catch (error) {
-                    console.warn(`[WARN] Failed to cancel duplicate ${label.toLowerCase()} order ${duplicateOrder.id}: ${error.message}`);
+                    console.warn(`[WARN] Failed to cancel duplicate ${label.toLowerCase()} order ${duplicateOrder.id}: ${describeError(error)}`);
                 }
             }
         }

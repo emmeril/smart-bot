@@ -35,8 +35,31 @@ const createPositionLifecycleHelpers = ({
     getOrderFillSnapshot
 }) => {
     const clearMissingPositionState = async (position, reason, positionKey = null) => {
+        const db = getDb();
+        const metrics = getMetrics();
         await cancelManagedOrdersForPosition(position, reason);
         removeActivePositionByKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position));
+        const estimatedExitPrice = await getPrice(true);
+        if (Number.isFinite(estimatedExitPrice) && estimatedExitPrice > 0) {
+            const estimatedPnL = calculatePositionPnL(position, estimatedExitPrice);
+            db.dailyPnL += estimatedPnL.realizedProfitUSDT;
+            db.dailyTrades++;
+            metrics.trades.closed++;
+            if (estimatedPnL.realizedProfitUSDT > 0) metrics.trades.wins++;
+            else if (estimatedPnL.realizedProfitUSDT < 0) metrics.trades.losses++;
+            logTrade(
+                position.side === "buy" ? "LONG" : "SHORT",
+                position.entryPrice,
+                estimatedExitPrice,
+                `CLOSE_UNCONFIRMED:${reason}`,
+                estimatedPnL.realizedProfitUSDT,
+                position.strategy || null
+            );
+            await saveDB();
+            console.warn(`[WARN] Removed local position using estimated exit price because no confirmed exchange exit price was available (${reason}).`);
+            return;
+        }
+
         await saveDB();
         logTrade(
             position.side === "buy" ? "LONG" : "SHORT",
@@ -229,7 +252,7 @@ const createPositionLifecycleHelpers = ({
             const realizedPnL = calculatePositionPnL(position, closeFillSnapshot.price);
             await finalizeClosedPosition(position, realizedPnL.netProfitUSDT, realizedPnL.profitPercent, reason, closeFillSnapshot.price, positionKey);
         } catch (error) {
-            console.error("[ERROR] Close position failed:", error.message);
+            console.error("[ERROR] Close position failed:", String(error?.message || error));
         } finally {
             closingPositionKeys.delete(closeLockKey);
             setIsClosingPosition(closingPositionKeys.size > 0);
@@ -245,5 +268,7 @@ const createPositionLifecycleHelpers = ({
 };
 
 module.exports = { createPositionLifecycleHelpers };
+
+
 
 

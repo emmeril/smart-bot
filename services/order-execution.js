@@ -30,8 +30,10 @@ const createOrderExecutionHelpers = ({
     cancelSlOrders,
     buildReplacementClientOrderId
 }) => {
+    const describeError = (error) => String(error?.message || error || "Unknown error");
+
     const placeGridEntryOrder = async (gridOrder) => {
-        const exchange = getExchange();
+    const describeError = (error) => String(error?.message || error || "Unknown error");        const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
         const market = exchange.markets[db.pair];
@@ -92,7 +94,7 @@ const createOrderExecutionHelpers = ({
                         console.log(`[GRID] Retry succeeded: placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price}`);
                         return true;
                     } catch (retryError) {
-                        console.error(`[GRID] Retry failed for ${gridOrder.clientOrderId}: ${retryError.message}`);
+                        console.error(`[GRID] Retry failed for ${gridOrder.clientOrderId}: ${describeError(retryError)}`);
                         const retryExistingOrder = await findOpenGridOrderByClientOrderId(gridOrder.clientOrderId);
                         if (retryExistingOrder) {
                             console.log(`[GRID] Retry duplicate resolved by existing exchange order for ${gridOrder.clientOrderId}.`);
@@ -108,13 +110,13 @@ const createOrderExecutionHelpers = ({
                 return false;
             }
 
-            console.error(`[GRID] Failed to place ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price}: ${error.message}`);
+            console.error(`[GRID] Failed to place ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price}: ${describeError(error)}`);
             return false;
         }
     };
 
     const placeReduceOnlyTakeProfitOrder = async (position) => {
-        const exchange = getExchange();
+    const describeError = (error) => String(error?.message || error || "Unknown error");        const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
         if (!Number.isFinite(position?.targetPrice) || position.targetPrice <= 0) return null;
@@ -178,7 +180,7 @@ const createOrderExecutionHelpers = ({
                         console.log(`[TP] Retry succeeded: placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
                         return retryOrder;
                     } catch (retryError) {
-                        console.error(`[TP] Retry failed for ${clientOrderId}: ${retryError.message}`);
+                        console.error(`[TP] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
                         await syncPositionWithExchange();
                         return null;
                     }
@@ -199,7 +201,7 @@ const createOrderExecutionHelpers = ({
                     console.log(`[TP] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
                     return retryOrder;
                 } catch (replacementError) {
-                    console.error(`[TP] Replacement retry failed for ${replacementClientOrderId}: ${replacementError.message}`);
+                    console.error(`[TP] Replacement retry failed for ${replacementClientOrderId}: ${describeError(replacementError)}`);
                     await syncPositionWithExchange();
                     return null;
                 }
@@ -209,7 +211,7 @@ const createOrderExecutionHelpers = ({
     };
 
     const placeReduceOnlyStopLossOrder = async (position) => {
-        const exchange = getExchange();
+    const describeError = (error) => String(error?.message || error || "Unknown error");        const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
         if (!Number.isFinite(position?.stopLossPrice) || position.stopLossPrice <= 0) return null;
@@ -275,7 +277,7 @@ const createOrderExecutionHelpers = ({
                         console.log(`[SL] Retry succeeded: placed reduce-only STOP_MARKET ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${quantity}`);
                         return retryOrder;
                     } catch (retryError) {
-                        console.error(`[SL] Retry failed for ${clientOrderId}: ${retryError.message}`);
+                        console.error(`[SL] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
                         await syncPositionWithExchange();
                         return null;
                     }
@@ -296,7 +298,7 @@ const createOrderExecutionHelpers = ({
                     console.log(`[SL] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
                     return retryOrder;
                 } catch (replacementError) {
-                    console.error(`[SL] Replacement retry failed for ${replacementClientOrderId}: ${replacementError.message}`);
+                    console.error(`[SL] Replacement retry failed for ${replacementClientOrderId}: ${describeError(replacementError)}`);
                     await syncPositionWithExchange();
                     return null;
                 }
@@ -322,7 +324,7 @@ const createOrderExecutionHelpers = ({
         syncLogPrefix,
         attachLogPrefix
     }) => {
-        if (matchingOrder) {
+    const describeError = (error) => String(error?.message || error || "Unknown error");        if (matchingOrder) {
             if (matchingOrders.length > 1) {
                 const duplicateOrders = matchingOrders.filter((order) => order !== matchingOrder);
                 if (duplicateOrders.length > 0) await cancelDuplicates(duplicateOrders, cancelReason);
@@ -360,11 +362,11 @@ const createOrderExecutionHelpers = ({
     };
 
     const ensureReduceOnlyTakeProfitOrder = async (positionKey, sourcePosition) => {
-        const position = { ...sourcePosition };
+    const describeError = (error) => String(error?.message || error || "Unknown error");        const position = { ...sourcePosition };
         if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
         const matchingTpOrders = (await fetchOpenTpOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
         const matchingOrder = matchingTpOrders.find((order) => {
-            const orderPrice = toFiniteNumber(order.price, NaN);
+    const describeError = (error) => String(error?.message || error || "Unknown error");            const orderPrice = toFiniteNumber(order.price, NaN);
             const orderAmount = getOrderQuantity(order);
             return isManagedOrderPriceMatch(position.targetPrice, orderPrice) && Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
         });
@@ -388,11 +390,11 @@ const createOrderExecutionHelpers = ({
     };
 
     const ensureReduceOnlyStopLossOrder = async (positionKey, sourcePosition) => {
-        const position = { ...sourcePosition };
+    const describeError = (error) => String(error?.message || error || "Unknown error");        const position = { ...sourcePosition };
         if (!position || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
         const matchingSlOrders = (await fetchOpenSlOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
         const matchingOrder = matchingSlOrders.find((order) => {
-            const orderStopPrice = getOrderTriggerPrice(order);
+    const describeError = (error) => String(error?.message || error || "Unknown error");            const orderStopPrice = getOrderTriggerPrice(order);
             const orderAmount = getOrderQuantity(order);
             return isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice) && Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
         });
@@ -425,4 +427,9 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
+
+
+
+
+
 

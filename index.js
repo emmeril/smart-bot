@@ -2823,6 +2823,12 @@ const getOHLCV = async (limit = 100, forceRefresh = false) => {
     }
 };
 
+const escapeCsvField = (value) => {
+    const text = String(value ?? "");
+    if (!/[",\r\n]/.test(text)) return text;
+    return `"${text.replace(/"/g, '""')}"`;
+};
+
 const logTrade = (side, entry, exit, status, pnl = 0, strategyOverride = null) => {
     try {
         ensureFileExists(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy\n");
