@@ -2039,7 +2039,7 @@ const {
     hasAnyActivePosition: () => hasAnyActivePosition(),
     protectedKeys: DASHBOARD_PROTECTED_KEYS,
     editableKeys: DASHBOARD_EDITABLE_KEYS,
-    normalizeConfig: (...args) => normalizeConfig(...args),
+    applyAutoPresetToConfig: (config) => applyAutoPresetToConfig(config),
     getDefaultConfig: () => getDefaultConfig(),
     saveDB: async () => { await saveDB(); },
     reloadConfig: async (...args) => { await reloadConfig(...args); },
@@ -3117,13 +3117,3 @@ const shutdown = async (signal = "EXIT") => {
         process.exit(1);
     }
 })();
-
-
-
-
-
-
-
-
-
-
