@@ -3079,6 +3079,12 @@ const startPositionSync = () => {
 const shutdown = async (signal = "EXIT") => {
     if (isShuttingDown) return;
     isShuttingDown = true;
+
+    if (isPlacingOrder || isClosingPosition) {
+        console.log("[SHUTDOWN] Waiting for active transaction to complete...");
+        await sleep(2000);
+    }
+
     console.log(`\n[SHUTDOWN] Received ${signal}. Stopping bot...`);
     unregisterRuntimeCommands();
     clearRuntimeTimers();
