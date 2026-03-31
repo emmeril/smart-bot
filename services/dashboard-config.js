@@ -3,17 +3,16 @@ const createDashboardConfigHelpers = ({
     hasAnyActivePosition,
     protectedKeys,
     editableKeys,
-    normalizeConfig,
     getDefaultConfig,
     saveDB,
     reloadConfig,
     refreshRuntimeSchedulers,
     syncExchangeRuntimeSettings,
-    buildDashboardPayload
+    buildDashboardPayload,
+    applyAutoPresetToConfig
 }) => {
     const applyDashboardRuntimeState = (nextConfig, currentConfig = getDb()) => {
         nextConfig.activePosition = currentConfig.activePosition;
-        nextConfig.activeGridState = currentConfig.activeGridState;
         nextConfig.dailyPnL = currentConfig.dailyPnL;
         nextConfig.dailyTrades = currentConfig.dailyTrades;
         nextConfig.lastDailyReset = currentConfig.lastDailyReset;
@@ -43,7 +42,7 @@ const createDashboardConfigHelpers = ({
 
         const current = { ...currentDb };
         const payload = pickEditableConfig(incoming);
-        const nextConfig = normalizeConfig({ ...current, ...payload });
+        const { config: nextConfig } = applyAutoPresetToConfig({ ...current, ...payload });
         applyDashboardRuntimeState(nextConfig, current);
 
         if (hasAnyActivePosition()) {
@@ -63,7 +62,13 @@ const createDashboardConfigHelpers = ({
     const resetDashboardConfig = async () => {
         const currentDb = getDb();
         if (!currentDb) throw new Error("Config is not ready yet");
-        const nextConfig = normalizeConfig(applyDashboardRuntimeState({ ...getDefaultConfig() }, currentDb));
+        
+        if (hasAnyActivePosition()) {
+            throw new Error("Cannot reset configuration while positions are active");
+        }
+
+        const { config: nextConfig } = applyAutoPresetToConfig(getDefaultConfig());
+        applyDashboardRuntimeState(nextConfig, currentDb);
         Object.keys(currentDb).forEach((key) => { delete currentDb[key]; });
         Object.assign(currentDb, nextConfig);
         await persistRuntimeConfigChanges();
