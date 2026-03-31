@@ -122,11 +122,11 @@ const VALID_MARGIN_MODES = ["cross", "isolated"];
 const DEFAULT_CONFIG = {
     strategy: "futures_grid",
     pair: "DOGE/USDT:USDT",
-    gridOrderSizeUsdt: 0, // 0 = Auto-calculate based on balance
-    leverage: 5,          // 5x is conservative and safe for auto-grid
+    gridOrderSizeUsdt: 0,
+    leverage: 10,
     gridTargetProfitUsdt: 0.5,
     dailyProfitTargetUsdt: 1.0,
-    dailyMaxLossPercent: 5,   // Risk stop at 5% drawdown of total balance
+    dailyMaxLossPercent: 10,
     maxTradesPerDay: 20,
     coolingPeriod: 3000,
     activePosition: null,
@@ -136,13 +136,13 @@ const DEFAULT_CONFIG = {
     marginMode: "isolated",
     monitoringInterval: 500,
     gridStopLossPercent: 5,
-    gridLevels: 10,           // 10 levels is standard for 5m timeframe
-    gridLookbackCandles: 144, // 12 hours of data for range calculation
-    gridRangePercent: 4.0,    // Standard volatility coverage
+    gridLevels: 8,
+    gridLookbackCandles: 120,
+    gridRangePercent: 3.5,
     gridEntryBufferPercent: 0.15,
-    gridTakeProfitLevels: 1,  // Profit taken at the next grid level
+    gridTakeProfitLevels: 0,
     gridOrdersPerSide: 0,
-    gridStopLossLevels: 1.5,  // SL set 1.5 steps outside the grid range
+    gridStopLossLevels: 0,
     gridTimeframe: "5m",
     sessionStartUTC: 0,
     sessionEndUTC: 23,
@@ -588,9 +588,8 @@ const resolveEffectiveGridTakeProfitLevels = (configuredTakeProfitLevels) => {
 const resolveEffectiveGridStopLossSteps = (configuredStopLossLevels, step, atr = null) => {
     const configured = toFiniteNumber(configuredStopLossLevels, 0);
     if (configured > 0) return Math.max(0.5, configured);
-    // If auto, use 1.5x ATR divided by step to find a logical distance
-    const atrSteps = Number.isFinite(atr) && Number.isFinite(step) && step > 0 ? (atr * 1.5) / step : 1.5;
-    return clamp(Math.max(1.5, atrSteps), 1.5, 4.0);
+    const atrSteps = Number.isFinite(atr) && Number.isFinite(step) && step > 0 ? atr / step : 1.2;
+    return clamp(Math.max(1.2, atrSteps), 1.2, 3.0);
 };
 
 const findNearestGridLevelIndex = (levels, entryPrice) => {
@@ -1952,7 +1951,7 @@ const {
     hasAnyActivePosition: () => hasAnyActivePosition(),
     protectedKeys: DASHBOARD_PROTECTED_KEYS,
     editableKeys: DASHBOARD_EDITABLE_KEYS,
-    applyAutoPresetToConfig: (config) => applyAutoPresetToConfig(config),
+    normalizeConfig: (...args) => normalizeConfig(...args),
     getDefaultConfig: () => getDefaultConfig(),
     saveDB: async () => { await saveDB(); },
     reloadConfig: async () => { await reloadConfig(); },
@@ -2081,17 +2080,17 @@ const startWebDashboard = async () => {
 const AUTO_PAIR_GRID_PRESETS = {
     binance: {
         strategy: "futures_grid",
-        leverage: 5,
+        leverage: 10,
         gridLevels: 10,
         gridLookbackCandles: 144,
-        gridRangePercent: 4.5,
+        gridRangePercent: 4.0,
         gridEntryBufferPercent: 0.12,
         gridOrderSizeUsdt: 0,
-        gridTakeProfitLevels: 1,
+        gridTakeProfitLevels: 0,
         gridOrdersPerSide: 0,
-        gridStopLossLevels: 1.5,
+        gridStopLossLevels: 0,
         gridTimeframe: "5m",
-        minVolumeRatio: 1.2,
+        minVolumeRatio: 1.1,
         volumePeriod: 20,
         atrPeriod: 14,
         trailingEnabled: true,
@@ -2102,17 +2101,17 @@ const AUTO_PAIR_GRID_PRESETS = {
     },
     volatile: {
         strategy: "futures_grid",
-        leverage: 3,              // Lower leverage for high volatility
-        gridLevels: 15,           // More levels to capture spikes
-        gridLookbackCandles: 288, // 24 hours lookback for better support/resistance
-        gridRangePercent: 8.0,    // Wider range for volatile coins
+        leverage: 8,
+        gridLevels: 12,
+        gridLookbackCandles: 180,
+        gridRangePercent: 6.5,
         gridEntryBufferPercent: 0.18,
         gridOrderSizeUsdt: 0,
-        gridTakeProfitLevels: 1,
+        gridTakeProfitLevels: 0,
         gridOrdersPerSide: 0,
-        gridStopLossLevels: 2.0,  // Wider SL for volatile pairs
+        gridStopLossLevels: 0,
         gridTimeframe: "5m",
-        minVolumeRatio: 1.1,
+        minVolumeRatio: 1.05,
         volumePeriod: 20,
         atrPeriod: 14,
         trailingEnabled: true,
