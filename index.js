@@ -654,11 +654,6 @@ const resolveGridOrdersPerSideCap = (configuredOrdersPerSide, gridLevels = db?.g
     return configured <= 0 ? Math.max(1, safeGridLevels - 1) : Math.max(1, configured);
 };
 
-const resolveGridSizingSideMultiplier = (activeExposureCount = 0) => {
-    if (isHedgeModeEnabled()) return 2;
-    return activeExposureCount > 0 ? 1 : 2;
-};
-
 const getMinimumGridOrderSizeUsdt = (market, referencePrice) => {
     const safeReferencePrice = toFiniteNumber(referencePrice, NaN);
     if (!Number.isFinite(safeReferencePrice) || safeReferencePrice <= 0) return 0;
@@ -702,8 +697,7 @@ const resolveEffectiveGridOrderSizeUsdt = ({
     configuredOrdersPerSide,
     referencePrice,
     market,
-    gridLevels,
-    sideMultiplier = 2
+    gridLevels
 } = {}) => {
     const maxConfiguredOrders = resolveGridOrdersPerSideCap(configuredOrdersPerSide, gridLevels);
     const safeAvailableUsdt = toFiniteNumber(availableUsdt, 0);
@@ -712,8 +706,7 @@ const resolveEffectiveGridOrderSizeUsdt = ({
     const minOrderSizeUsdt = getMinimumValidatedGridOrderSizeUsdt(market, referencePrice);
     const configuredSize = toFiniteNumber(configuredOrderSizeUsdt, 0);
     const isFullAutoSize = configuredSize <= 0;
-    const safeSideMultiplier = Math.max(1, Math.trunc(toFiniteNumber(sideMultiplier, 2)));
-    const derivedAutoSize = maxConfiguredOrders > 0 ? usableUsdt / Math.max(maxConfiguredOrders * safeSideMultiplier, 1) : 0;
+    const derivedAutoSize = maxConfiguredOrders > 0 ? usableUsdt / Math.max(maxConfiguredOrders * 2, 1) : 0;
     const orderSizeUsdt = isFullAutoSize
         ? Math.max(derivedAutoSize, minOrderSizeUsdt)
         : configuredSize;
@@ -737,8 +730,7 @@ const resolveEffectiveGridOrdersPerSide = ({
     perOrderMargin,
     referencePrice,
     market,
-    gridLevels,
-    sideMultiplier = 2
+    gridLevels
 } = {}) => {
     const maxConfigured = resolveGridOrdersPerSideCap(configuredOrdersPerSide, gridLevels);
     const safeAvailableUsdt = toFiniteNumber(availableUsdt, 0);
@@ -757,8 +749,7 @@ const resolveEffectiveGridOrdersPerSide = ({
 
     const capitalBufferRatio = 0.9;
     const usableUsdt = safeAvailableUsdt * capitalBufferRatio;
-    const safeSideMultiplier = Math.max(1, Math.trunc(toFiniteNumber(sideMultiplier, 2)));
-    const affordablePerSide = Math.floor(usableUsdt / Math.max(safePerOrderMargin * safeSideMultiplier, 1e-8));
+    const affordablePerSide = Math.floor(usableUsdt / Math.max(safePerOrderMargin * 2, 1e-8));
     return {
         count: clamp(affordablePerSide, 0, maxConfigured),
         maxConfigured,
@@ -3613,18 +3604,13 @@ const syncGridOrders = async () => {
         }
 
         const availableUsdt = await getAvailableUSDTBalance();
-        const openPositions = await fetchOpenExchangePositions();
-        const trackedPositions = getActivePositionsList();
-        const activeExposureCount = getActiveGridExposureSides(openPositions, trackedPositions).size;
-        const sizingSideMultiplier = resolveGridSizingSideMultiplier(activeExposureCount);
         const effectiveSizeMeta = resolveEffectiveGridOrderSizeUsdt({
             availableUsdt,
             configuredOrderSizeUsdt: params.gridOrderSizeUsdt,
             configuredOrdersPerSide: params.gridOrdersPerSide,
             referencePrice: snapshot.currentPrice,
             market: exchange?.markets?.[db?.pair],
-            gridLevels: params.gridLevels,
-            sideMultiplier: sizingSideMultiplier
+            gridLevels: params.gridLevels
         });
         params.gridOrderSizeUsdt = effectiveSizeMeta.orderSizeUsdt;
         const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
@@ -3633,8 +3619,7 @@ const syncGridOrders = async () => {
             perOrderMargin: params.gridOrderSizeUsdt,
             referencePrice: snapshot.currentPrice,
             market: exchange?.markets?.[db?.pair],
-            gridLevels: params.gridLevels,
-            sideMultiplier: sizingSideMultiplier
+            gridLevels: params.gridLevels
         });
         params.gridOrdersPerSide = effectiveOrdersMeta.count;
         let openGridOrders = await fetchOpenGridOrders();
@@ -3669,6 +3654,9 @@ const syncGridOrders = async () => {
                 `COUNT:${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured}:${effectiveOrdersMeta.mode}:${availableUsdt.toFixed(2)}`
             );
         }
+
+        const openPositions = await fetchOpenExchangePositions();
+        const trackedPositions = getActivePositionsList();
 
         const lockedGridState = await resolveActiveGridState(snapshot, params);
         if (!lockedGridState) {
