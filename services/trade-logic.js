@@ -136,7 +136,7 @@ const createTradeLogicHelpers = ({
             const entryPrice = toFiniteNumber(position.entryPrice, NaN);
             const quantity = toFiniteNumber(position.quantity, NaN);
             if (Number.isFinite(entryPrice) && entryPrice > 0 && Number.isFinite(quantity) && quantity > 0 && Number.isFinite(effectiveStopLossUSDT)) {
-                // Optimasi: Selalu prioritaskan stopLossPrice yang sudah ada di state (misal dari Trailing Stop)
+                // Prioritaskan harga Stop Loss yang sudah dikalkulasi oleh grid engine atau trailing
                 let derivedStopLossPrice;
                 if (Number.isFinite(position.stopLossPrice) && position.stopLossPrice > 0) {
                     derivedStopLossPrice = position.stopLossPrice;
