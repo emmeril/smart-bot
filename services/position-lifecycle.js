@@ -2,11 +2,13 @@ const createPositionLifecycleHelpers = ({
     getDb,
     getExchange,
     getMetrics,
+    isHedgeModeEnabled,
     getClosingPositionKeys,
     getIsClosingPosition,
     setIsClosingPosition,
     toPositionMapKey,
     hasAnyActivePosition,
+    getActivePositionEntries,
     getActivePositionByKey,
     cancelManagedOrdersForPosition,
     removeActivePositionByKey,
@@ -19,11 +21,13 @@ const createPositionLifecycleHelpers = ({
     findOpenExchangePosition,
     getExchangePositionContracts,
     getExchangePositionEntryPrice,
+    fetchOpenGridOrders,
     buildOrderPlan,
     upsertActivePosition,
     fetchOpenTpOrders,
     fetchOpenSlOrders,
     matchesOrderToTrackedPosition,
+    cancelGridOrders,
     cancelTpOrders,
     cancelSlOrders,
     buildExchangeOrderParams,
@@ -34,9 +38,19 @@ const createPositionLifecycleHelpers = ({
     getPositionSyncQtyTolerance,
     getOrderFillSnapshot
 }) => {
+    const shouldCancelGridOrdersForPositionCleanup = () => {
+        if (!isHedgeModeEnabled()) return true;
+        const activeEntries = typeof getActivePositionEntries === "function" ? getActivePositionEntries() : [];
+        return !Array.isArray(activeEntries) || activeEntries.length <= 1;
+    };
+
     const clearMissingPositionState = async (position, reason, positionKey = null) => {
         const db = getDb();
         const metrics = getMetrics();
+        if (shouldCancelGridOrdersForPositionCleanup()) {
+            const openGridOrders = await fetchOpenGridOrders();
+            if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, reason);
+        }
         await cancelManagedOrdersForPosition(position, reason);
         removeActivePositionByKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position));
         const estimatedExitPrice = await getPrice(true);
@@ -75,6 +89,10 @@ const createPositionLifecycleHelpers = ({
     const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, reason, exitPrice = null, positionKey = null) => {
         const db = getDb();
         const metrics = getMetrics();
+        if (shouldCancelGridOrdersForPositionCleanup()) {
+            const openGridOrders = await fetchOpenGridOrders();
+            if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "POSITION_CLOSED");
+        }
         await cancelManagedOrdersForPosition(position, "POSITION_CLOSED");
         db.dailyPnL += netProfitUSDT;
         db.dailyTrades++;
@@ -135,6 +153,10 @@ const createPositionLifecycleHelpers = ({
             const { side, quantity } = position;
             if (!Number.isFinite(quantity) || quantity <= 0) {
                 console.error("[ERROR] Invalid position quantity. Removing local active position.");
+                if (shouldCancelGridOrdersForPositionCleanup()) {
+                    const openGridOrders = await fetchOpenGridOrders();
+                    if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "INVALID_POSITION_QTY");
+                }
                 await cancelManagedOrdersForPosition(position, "INVALID_POSITION_QTY");
                 removeActivePositionByKey(positionKey);
                 await saveDB();
@@ -175,6 +197,7 @@ const createPositionLifecycleHelpers = ({
             }
 
             const closeSide = side === "buy" ? "sell" : "buy";
+            const useClosePositionOrder = !isHedgeModeEnabled();
             console.log(`\n[CLOSE] Closing position ${positionKey}...`);
             const matchingTpOrders = (await fetchOpenTpOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
             if (matchingTpOrders.length > 0) await cancelTpOrders(matchingTpOrders, "MANUAL_CLOSE");
@@ -187,9 +210,14 @@ const createPositionLifecycleHelpers = ({
                     db.pair,
                     "market",
                     closeSide,
-                    position.quantity,
+                    useClosePositionOrder ? undefined : position.quantity,
                     undefined,
-                    buildExchangeOrderParams({ side: closeSide, reduceOnly: true, positionSide: getClosePositionSide(position) })
+                    buildExchangeOrderParams({
+                        side: closeSide,
+                        reduceOnly: !useClosePositionOrder,
+                        positionSide: getClosePositionSide(position),
+                        closePosition: useClosePositionOrder
+                    })
                 );
                 metrics.api.orders++;
             } catch (error) {
@@ -205,6 +233,10 @@ const createPositionLifecycleHelpers = ({
 
                     const entryPrice = getExchangePositionEntryPrice(openPosition, await getPrice());
                     const syncedPosition = buildSyncedActivePosition(openPosition, entryPrice, position, entryPrice);
+                    if (shouldCancelGridOrdersForPositionCleanup()) {
+                        const openGridOrders = await fetchOpenGridOrders();
+                        if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "POSITION_RESYNC");
+                    }
                     await cancelManagedOrdersForPosition(position, "POSITION_RESYNC");
                     upsertActivePosition(syncedPosition);
                     await saveDB();

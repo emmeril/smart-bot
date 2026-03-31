@@ -34,8 +34,6 @@ const createExchangePositionHelpers = ({
     };
 
     const matchesOrderToTrackedPosition = (order, position) => {
-        const orderClientId = getExchangeClientOrderId(order);
-        if (!orderClientId) return false;
         const positionSide = String(position?.side || "").toLowerCase();
         const trackedSide = getTrackedPositionSideLabel(position);
         const expectedCloseSide = positionSide === "buy" || trackedSide === "LONG"
@@ -198,6 +196,7 @@ const createExchangePositionHelpers = ({
         const preservedEntryTime = Number.isFinite(existingPosition?.entryTime) ? existingPosition.entryTime : Date.now() - 300000;
         const preservedHighestSinceEntry = Number.isFinite(existingPosition?.highestSinceEntry) ? existingPosition.highestSinceEntry : entryPrice;
         const preservedLowestSinceEntry = Number.isFinite(existingPosition?.lowestSinceEntry) ? existingPosition.lowestSinceEntry : entryPrice;
+        const preservedAtrAtEntry = Number.isFinite(existingPosition?.atrAtEntry) ? existingPosition.atrAtEntry : NaN;
         const signalParams = getSignalParameters();
         const gridState = sanitizeGridState(currentDb?.activeGridState, signalParams);
         const levels = Array.isArray(gridState?.levels) ? gridState.levels : [];
@@ -239,6 +238,7 @@ const createExchangePositionHelpers = ({
             entryTime: preservedEntryTime,
             highestSinceEntry: preservedHighestSinceEntry,
             lowestSinceEntry: preservedLowestSinceEntry,
+            atrAtEntry: preservedAtrAtEntry,
             marginMode: (currentDb.marginMode || "isolated").toLowerCase(),
             positionSide,
             targetProfitUSDT: preservedTargetProfitUSDT,
@@ -307,3 +307,4 @@ const createExchangePositionHelpers = ({
 };
 
 module.exports = { createExchangePositionHelpers };
+

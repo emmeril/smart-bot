@@ -1252,13 +1252,15 @@ const {
     calcATR
 });
 
-const buildExchangeOrderParams = ({ side, reduceOnly = false, positionSide } = {}) => {
+const buildExchangeOrderParams = ({ side, reduceOnly = false, positionSide, closePosition = false } = {}) => {
     const params = {
         newOrderRespType: "RESULT"
     };
     if (isHedgeModeEnabled()) {
         const resolvedPositionSide = positionSide || getOrderPositionSide(side);
         if (resolvedPositionSide && resolvedPositionSide !== "BOTH") params.positionSide = resolvedPositionSide;
+    } else if (closePosition) {
+        params.closePosition = true;
     } else if (reduceOnly) {
         params.reduceOnly = true;
     }
@@ -1305,6 +1307,7 @@ const {
     getExchange: () => exchange,
     getMetrics: () => metrics,
     getDb: () => db,
+    isHedgeModeEnabled: () => isHedgeModeEnabled(),
     toFiniteNumber,
     formatAmountToMarketPrecision,
     formatPriceToMarketPrecision,
@@ -1564,11 +1567,13 @@ const {
     getDb: () => db,
     getExchange: () => exchange,
     getMetrics: () => metrics,
+    isHedgeModeEnabled: () => isHedgeModeEnabled(),
     getClosingPositionKeys: () => closingPositionKeys,
     getIsClosingPosition: () => isClosingPosition,
     setIsClosingPosition: (value) => { isClosingPosition = value; },
     toPositionMapKey,
     hasAnyActivePosition,
+    getActivePositionEntries,
     getActivePositionByKey,
     cancelManagedOrdersForPosition,
     removeActivePositionByKey,
@@ -1579,6 +1584,7 @@ const {
     calculatePositionPnL,
     fetchOpenExchangePositions: (...args) => fetchOpenExchangePositions(...args),
     findOpenExchangePosition,
+    fetchOpenGridOrders,
     getExchangePositionContracts,
     getExchangePositionEntryPrice,
     buildOrderPlan,
@@ -1586,6 +1592,7 @@ const {
     fetchOpenTpOrders,
     fetchOpenSlOrders,
     matchesOrderToTrackedPosition: (...args) => matchesOrderToTrackedPosition(...args),
+    cancelGridOrders,
     cancelTpOrders,
     cancelSlOrders,
     buildExchangeOrderParams,
@@ -1610,7 +1617,14 @@ const mergeRuntimeConfig = (nextConfig) => {
                 nextConfig[key] = db[key];
             }
         });
+
+        const currentPositionKeys = getPositionMapKeys(currentPositionsMap);
+        const nextPositionKeys = getPositionMapKeys(nextPositionsMap);
+        if (currentPositionKeys.length > 0 && nextPositionKeys.length === 0) {
+            nextConfig.activePosition = currentPositionsMap;
+        }
     }
+
 
     const currentLastDailyReset = toFiniteNumber(db.lastDailyReset, 0);
     const nextLastDailyReset = toFiniteNumber(nextConfig.lastDailyReset, 0);
@@ -2847,6 +2861,7 @@ const { placeOrder } = createTradeEntryHelpers({
     getDb: () => db,
     getExchange: () => exchange,
     getMetrics: () => metrics,
+    isHedgeModeEnabled: () => isHedgeModeEnabled(),
     getIsPlacingOrder: () => isPlacingOrder,
     setIsPlacingOrder: (value) => { isPlacingOrder = value; },
     getIsClosingPosition: () => isClosingPosition,
@@ -2854,7 +2869,6 @@ const { placeOrder } = createTradeEntryHelpers({
     getActivePositionByKey,
     setMarginMode: (...args) => setMarginMode(...args),
     fetchOpenExchangePositions: (...args) => fetchOpenExchangePositions(...args),
-    isHedgeModeEnabled,
     matchesTrackedPositionSide,
     fetchManagedOpenOrdersSnapshot,
     setLeverage: (...args) => setLeverage(...args),
@@ -2995,10 +3009,12 @@ const getLastTradeTimestampFromLog = () => {
         if (!content) return 0;
         const lines = content.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
         if (lines.length <= 1) return 0;
-        const lastLine = lines[lines.length - 1];
-        const timestamp = lastLine.split(",")[0];
-        const parsed = Date.parse(timestamp);
-        return Number.isFinite(parsed) ? parsed : 0;
+        for (let i = lines.length - 1; i >= 1; i--) {
+            const timestamp = String(lines[i]).split(",")[0];
+            const parsed = Date.parse(timestamp);
+            if (Number.isFinite(parsed)) return parsed;
+        }
+        return 0;
     } catch (error) { console.error("[ERROR] Failed to read last trade timestamp:", error.message); return 0; }
 };
 
@@ -3022,7 +3038,7 @@ const startPnLMonitoring = () => {
             if (!db || !hasAnyActivePosition() || isClosingPosition) return;
             const currentPrice = await getPrice();
             if (!currentPrice) return;
-            const managedOrdersSnapshot = await fetchManagedOpenOrdersSnapshot();
+            let managedOrdersSnapshot = await fetchManagedOpenOrdersSnapshot();
 
             const activeEntries = getActivePositionEntries();
             for (const [positionKey, sourcePosition] of activeEntries) {
@@ -3039,6 +3055,7 @@ const startPnLMonitoring = () => {
                     upsertActivePosition(position);
                     await maybePersistActivePositionRuntimeState();
                     await ensureReduceOnlyStopLossOrder(positionKey, position);
+                    managedOrdersSnapshot = await fetchManagedOpenOrdersSnapshot();
                 }
 
                 const pnlState = calculatePositionPnL(position, currentPrice);

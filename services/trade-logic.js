@@ -58,25 +58,29 @@ const createTradeLogicHelpers = ({
         let targetPrice;
         let stopLossPrice;
 
-        if (Number.isFinite(explicitTargetPrice) && Number.isFinite(explicitStopLossPrice)) {
+        if (Number.isFinite(explicitTargetPrice)) {
             const roundedTargetPrice = formatPriceToMarketPrecision(db.pair, explicitTargetPrice);
-            const roundedStopLossPrice = formatPriceToMarketPrecision(db.pair, explicitStopLossPrice);
             targetPrice = Number.isFinite(roundedTargetPrice) ? roundedTargetPrice : explicitTargetPrice;
-            stopLossPrice = Number.isFinite(roundedStopLossPrice) ? roundedStopLossPrice : explicitStopLossPrice;
             targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
-            stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
         } else {
             const rawTargetPrice = side === "buy"
                 ? entryPrice + (targetProfitUSDT / adjustedQty)
                 : entryPrice - (targetProfitUSDT / adjustedQty);
+            const roundedTargetPrice = formatPriceToMarketPrecision(db.pair, rawTargetPrice);
+            targetPrice = Number.isFinite(roundedTargetPrice) ? roundedTargetPrice : rawTargetPrice;
+            targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
+        }
+
+        if (Number.isFinite(explicitStopLossPrice)) {
+            const roundedStopLossPrice = formatPriceToMarketPrecision(db.pair, explicitStopLossPrice);
+            stopLossPrice = Number.isFinite(roundedStopLossPrice) ? roundedStopLossPrice : explicitStopLossPrice;
+            stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
+        } else {
             const rawStopLossPrice = side === "buy"
                 ? entryPrice + (stopLossUSDT / adjustedQty)
                 : entryPrice - (stopLossUSDT / adjustedQty);
-            const roundedTargetPrice = formatPriceToMarketPrecision(db.pair, rawTargetPrice);
             const roundedStopLossPrice = formatPriceToMarketPrecision(db.pair, rawStopLossPrice);
-            targetPrice = Number.isFinite(roundedTargetPrice) ? roundedTargetPrice : rawTargetPrice;
             stopLossPrice = Number.isFinite(roundedStopLossPrice) ? roundedStopLossPrice : rawStopLossPrice;
-            targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
             stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
         }
 
@@ -247,3 +251,5 @@ const createTradeLogicHelpers = ({
 };
 
 module.exports = { createTradeLogicHelpers };
+
+

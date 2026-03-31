@@ -2,6 +2,7 @@ const createOrderExecutionHelpers = ({
     getExchange,
     getMetrics,
     getDb,
+    isHedgeModeEnabled,
     toFiniteNumber,
     formatAmountToMarketPrecision,
     formatPriceToMarketPrecision,
@@ -30,10 +31,8 @@ const createOrderExecutionHelpers = ({
     cancelSlOrders,
     buildReplacementClientOrderId
 }) => {
-    const describeError = (error) => String(error?.message || error || "Unknown error");
-
     const placeGridEntryOrder = async (gridOrder) => {
-    const describeError = (error) => String(error?.message || error || "Unknown error");        const exchange = getExchange();
+        const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
         const market = exchange.markets[db.pair];
@@ -116,7 +115,7 @@ const createOrderExecutionHelpers = ({
     };
 
     const placeReduceOnlyTakeProfitOrder = async (position) => {
-    const describeError = (error) => String(error?.message || error || "Unknown error");        const exchange = getExchange();
+        const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
         if (!Number.isFinite(position?.targetPrice) || position.targetPrice <= 0) return null;
@@ -141,6 +140,14 @@ const createOrderExecutionHelpers = ({
 
         const existingOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
         if (existingOrder) {
+            const nextOrderId = existingOrder.id || position.tpOrderId || null;
+            const nextClientOrderId = getExchangeClientOrderId(existingOrder) || clientOrderId;
+            if (position.tpOrderId !== nextOrderId || position.tpClientOrderId !== nextClientOrderId) {
+                position.tpOrderId = nextOrderId;
+                position.tpClientOrderId = nextClientOrderId;
+                upsertActivePosition(position);
+                await saveDB();
+            }
             console.log(`[TP] Existing exchange order already active for ${clientOrderId}. Reusing it.`);
             return existingOrder;
         }
@@ -211,7 +218,7 @@ const createOrderExecutionHelpers = ({
     };
 
     const placeReduceOnlyStopLossOrder = async (position) => {
-    const describeError = (error) => String(error?.message || error || "Unknown error");        const exchange = getExchange();
+        const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
         if (!Number.isFinite(position?.stopLossPrice) || position.stopLossPrice <= 0) return null;
@@ -226,10 +233,12 @@ const createOrderExecutionHelpers = ({
         }
         if (sizeValidation.warning) console.warn(`[SL] ${sizeValidation.warning}`);
 
+        const useClosePositionOrder = !isHedgeModeEnabled();
         const params = buildExchangeOrderParams({
             side: closeSide,
-            reduceOnly: true,
-            positionSide: getClosePositionSide(position)
+            reduceOnly: !useClosePositionOrder,
+            positionSide: getClosePositionSide(position),
+            closePosition: useClosePositionOrder
         });
         const clientOrderId = position?.slClientOrderId || getSlClientOrderId(position);
         params.newClientOrderId = clientOrderId;
@@ -238,6 +247,14 @@ const createOrderExecutionHelpers = ({
 
         const existingOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
         if (existingOrder) {
+            const nextOrderId = existingOrder.id || position.slOrderId || null;
+            const nextClientOrderId = getExchangeClientOrderId(existingOrder) || clientOrderId;
+            if (position.slOrderId !== nextOrderId || position.slClientOrderId !== nextClientOrderId) {
+                position.slOrderId = nextOrderId;
+                position.slClientOrderId = nextClientOrderId;
+                upsertActivePosition(position);
+                await saveDB();
+            }
             console.log(`[SL] Existing exchange order already active for ${clientOrderId}. Reusing it.`);
             return existingOrder;
         }
@@ -247,12 +264,13 @@ const createOrderExecutionHelpers = ({
                 db.pair,
                 "STOP_MARKET",
                 closeSide,
-                quantity,
+                useClosePositionOrder ? undefined : quantity,
                 undefined,
                 params
             );
             metrics.api.orders++;
-            console.log(`[SL] Placed reduce-only STOP_MARKET ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${quantity}`);
+            const orderModeLabel = useClosePositionOrder ? "close-position STOP_MARKET" : "reduce-only STOP_MARKET";
+            console.log(`[SL] Placed ${orderModeLabel} ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${useClosePositionOrder ? "FULL" : quantity}`);
             return order;
         } catch (error) {
             if (isDuplicateClientOrderIdError(error)) {
@@ -269,12 +287,13 @@ const createOrderExecutionHelpers = ({
                             db.pair,
                             "STOP_MARKET",
                             closeSide,
-                            quantity,
+                            useClosePositionOrder ? undefined : quantity,
                             undefined,
                             params
                         );
                         metrics.api.orders++;
-                        console.log(`[SL] Retry succeeded: placed reduce-only STOP_MARKET ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${quantity}`);
+                        const retryModeLabel = useClosePositionOrder ? "close-position STOP_MARKET" : "reduce-only STOP_MARKET";
+                        console.log(`[SL] Retry succeeded: placed ${retryModeLabel} ${closeSide.toUpperCase()} @ stop ${params.stopPrice}`);
                         return retryOrder;
                     } catch (retryError) {
                         console.error(`[SL] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
@@ -290,7 +309,7 @@ const createOrderExecutionHelpers = ({
                         db.pair,
                         "STOP_MARKET",
                         closeSide,
-                        quantity,
+                        useClosePositionOrder ? undefined : quantity,
                         undefined,
                         { ...params, newClientOrderId: replacementClientOrderId }
                     );
@@ -324,7 +343,7 @@ const createOrderExecutionHelpers = ({
         syncLogPrefix,
         attachLogPrefix
     }) => {
-    const describeError = (error) => String(error?.message || error || "Unknown error");        if (matchingOrder) {
+        if (matchingOrder) {
             if (matchingOrders.length > 1) {
                 const duplicateOrders = matchingOrders.filter((order) => order !== matchingOrder);
                 if (duplicateOrders.length > 0) await cancelDuplicates(duplicateOrders, cancelReason);
@@ -362,11 +381,11 @@ const createOrderExecutionHelpers = ({
     };
 
     const ensureReduceOnlyTakeProfitOrder = async (positionKey, sourcePosition) => {
-    const describeError = (error) => String(error?.message || error || "Unknown error");        const position = { ...sourcePosition };
+        const position = { ...sourcePosition };
         if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
         const matchingTpOrders = (await fetchOpenTpOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
         const matchingOrder = matchingTpOrders.find((order) => {
-    const describeError = (error) => String(error?.message || error || "Unknown error");            const orderPrice = toFiniteNumber(order.price, NaN);
+            const orderPrice = toFiniteNumber(order.price, NaN);
             const orderAmount = getOrderQuantity(order);
             return isManagedOrderPriceMatch(position.targetPrice, orderPrice) && Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
         });
@@ -390,13 +409,16 @@ const createOrderExecutionHelpers = ({
     };
 
     const ensureReduceOnlyStopLossOrder = async (positionKey, sourcePosition) => {
-    const describeError = (error) => String(error?.message || error || "Unknown error");        const position = { ...sourcePosition };
+        const position = { ...sourcePosition };
         if (!position || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
         const matchingSlOrders = (await fetchOpenSlOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
         const matchingOrder = matchingSlOrders.find((order) => {
-    const describeError = (error) => String(error?.message || error || "Unknown error");            const orderStopPrice = getOrderTriggerPrice(order);
+            const orderStopPrice = getOrderTriggerPrice(order);
             const orderAmount = getOrderQuantity(order);
-            return isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice) && Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
+            const closePositionOrder = Boolean(order?.closePosition || order?.info?.closePosition || !Number.isFinite(orderAmount) || orderAmount <= 0);
+            if (!isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice)) return false;
+            if (closePositionOrder) return true;
+            return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
         });
         return syncManagedReduceOnlyOrder({
             positionKey,
@@ -427,6 +449,10 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
+
+
+
+
 
 
 

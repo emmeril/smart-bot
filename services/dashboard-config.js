@@ -42,16 +42,24 @@ const createDashboardConfigHelpers = ({
 
         const current = { ...currentDb };
         const payload = pickEditableConfig(incoming);
-        const { config: nextConfig } = applyAutoPresetToConfig({ ...current, ...payload });
-        applyDashboardRuntimeState(nextConfig, current);
+        const merged = { ...current, ...payload };
+        const protectedRuntimeValues = new Map();
 
         if (hasAnyActivePosition()) {
             for (const key of protectedKeys) {
                 if (Object.prototype.hasOwnProperty.call(payload, key)) {
-                    nextConfig[key] = current[key];
+                    protectedRuntimeValues.set(key, current[key]);
                 }
             }
         }
+
+        const { config: nextConfig } = applyAutoPresetToConfig(merged);
+        if (protectedRuntimeValues.size > 0) {
+            for (const [key, value] of protectedRuntimeValues.entries()) {
+                nextConfig[key] = value;
+            }
+        }
+        applyDashboardRuntimeState(nextConfig, current);
 
         Object.keys(currentDb).forEach((key) => { delete currentDb[key]; });
         Object.assign(currentDb, nextConfig);

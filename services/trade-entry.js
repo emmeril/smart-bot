@@ -124,9 +124,14 @@ const createTradeEntryHelpers = ({
                         db.pair,
                         "market",
                         closeSide,
-                        actualQuantity,
+                        isHedgeModeEnabled() ? actualQuantity : undefined,
                         undefined,
-                        buildExchangeOrderParams({ side: closeSide, reduceOnly: true, positionSide: getOrderPositionSide(side) })
+                        buildExchangeOrderParams({
+                            side: closeSide,
+                            reduceOnly: isHedgeModeEnabled(),
+                            positionSide: getOrderPositionSide(side),
+                            closePosition: !isHedgeModeEnabled()
+                        })
                     );
                     metrics.api.orders++;
                 } catch (closeError) {

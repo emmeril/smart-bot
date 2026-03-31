@@ -15,6 +15,8 @@ const createManagedOrdersHelpers = ({
 }) => {
     const describeError = (error) => String(error?.message || error || "Unknown error");
 
+    const getManagedOrderId = (order) => String(order?.id || order?.orderId || order?.info?.orderId || "");
+
     const dedupeOrdersByIdentity = (orders) => {
         const seen = new Set();
         const uniqueOrders = [];
@@ -116,7 +118,12 @@ const createManagedOrdersHelpers = ({
         console.log(`[${label}] Cancelling ${orders.length} ${label.toLowerCase()} order(s) (${reason})...`);
         for (const order of orders) {
             try {
-                await exchange.cancelOrder(order.id, currentDb.pair, cancelOptions);
+                const orderId = getManagedOrderId(order);
+                if (!orderId) {
+                    console.warn(`[WARN] Failed to cancel ${label.toLowerCase()} order without exchange id.`);
+                    continue;
+                }
+                await exchange.cancelOrder(orderId, currentDb.pair, cancelOptions);
                 metrics.api.orders++;
             } catch (error) {
                 console.warn(`[WARN] Failed to cancel ${label.toLowerCase()} order ${order.id}: ${describeError(error)}`);
@@ -168,7 +175,12 @@ const createManagedOrdersHelpers = ({
             for (const duplicateOrder of duplicateOrders) {
                 try {
                     const cancelParams = isTriggerManagedOrder(duplicateOrder, label) ? { trigger: true } : undefined;
-                    await exchange.cancelOrder(duplicateOrder.id, currentDb.pair, cancelParams);
+                    const duplicateOrderId = getManagedOrderId(duplicateOrder);
+                    if (!duplicateOrderId) {
+                        console.warn(`[WARN] Failed to cancel duplicate ${label.toLowerCase()} order without exchange id.`);
+                        continue;
+                    }
+                    await exchange.cancelOrder(duplicateOrderId, currentDb.pair, cancelParams);
                     metrics.api.orders++;
                 } catch (error) {
                     console.warn(`[WARN] Failed to cancel duplicate ${label.toLowerCase()} order ${duplicateOrder.id}: ${describeError(error)}`);
@@ -185,7 +197,9 @@ const createManagedOrdersHelpers = ({
         const { regularOrders, triggerOrders } = await fetchOpenOrdersSnapshot(symbol);
         const order = regularOrders.find((item) => getExchangeClientOrderId(item) === clientOrderId);
         if (order) {
-            await exchange.cancelOrder(order.id, symbol);
+            const orderId = getManagedOrderId(order);
+            if (!orderId) return false;
+            await exchange.cancelOrder(orderId, symbol);
             metrics.api.orders++;
             console.log(`[CANCEL] Cancelled order with clientOrderId ${clientOrderId}`);
             return true;
@@ -193,7 +207,9 @@ const createManagedOrdersHelpers = ({
 
         const triggerOrder = triggerOrders.find((item) => getExchangeClientOrderId(item) === clientOrderId);
         if (triggerOrder) {
-            await exchange.cancelOrder(triggerOrder.id, symbol, { trigger: true });
+            const triggerOrderId = getManagedOrderId(triggerOrder);
+            if (!triggerOrderId) return false;
+            await exchange.cancelOrder(triggerOrderId, symbol, { trigger: true });
             metrics.api.orders++;
             console.log(`[CANCEL] Cancelled trigger order with clientOrderId ${clientOrderId}`);
             return true;
@@ -221,3 +237,4 @@ const createManagedOrdersHelpers = ({
 };
 
 module.exports = { createManagedOrdersHelpers };
+
