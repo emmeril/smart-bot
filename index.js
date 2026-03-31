@@ -1791,22 +1791,18 @@ const buildLiveStatusPayload = async () => {
     let exchangePositions = [];
     let managedOrders = { grid: [], tp: [], sl: [] };
 
+    // Optimasi: Memanggil API secara paralel untuk mempercepat respon dashboard
     try {
-        currentPrice = await getPrice();
-    } catch {
-        currentPrice = NaN;
-    }
-
-    try {
-        exchangePositions = await fetchOpenExchangePositions();
+        const [priceRes, posRes, ordersRes] = await Promise.allSettled([
+            getPrice(),
+            fetchOpenExchangePositions(),
+            fetchManagedOpenOrdersSnapshot()
+        ]);
+        currentPrice = priceRes.status === 'fulfilled' ? priceRes.value : NaN;
+        exchangePositions = posRes.status === 'fulfilled' ? posRes.value : [];
+        managedOrders = ordersRes.status === 'fulfilled' ? ordersRes.value : { grid: [], tp: [], sl: [] };
     } catch (error) {
-        console.warn(`[STATUS] Failed to fetch exchange positions: ${error.message}`);
-    }
-
-    try {
-        managedOrders = await fetchManagedOpenOrdersSnapshot();
-    } catch (error) {
-        console.warn(`[STATUS] Failed to fetch managed open orders: ${error.message}`);
+        console.warn(`[STATUS] Parallel fetch error: ${error.message}`);
     }
 
     const activePositions = getActivePositionEntries().map(([positionKey, position]) => {
@@ -2013,11 +2009,12 @@ const startWebDashboard = async () => {
     app.use(express.static(path.join(__dirname, "public")));
 
     app.get("/api/health", (req, res) => {
-        res.json({
-            ok: true,
+        const isReady = !isShuttingDown && !!db && !!exchange;
+        res.status(isReady ? 200 : 503).json({
+            ok: isReady,
             botRunning: !isShuttingDown,
-            databaseReady: Boolean(db),
-            exchangeReady: Boolean(exchange),
+            databaseReady: !!db,
+            exchangeReady: !!exchange,
             serverTime: Date.now()
         });
     });
@@ -2063,8 +2060,6 @@ const startWebDashboard = async () => {
             res.status(400).json({ ok: false, error: error.message });
         }
     });
-
-    app.use(express.static(path.join(__dirname, "public")));
 
     const port = Math.max(1, Math.trunc(toFiniteNumber(process.env.DASHBOARD_PORT || process.env.PORT, 3000)));
     const host = process.env.DASHBOARD_HOST || "0.0.0.0";
@@ -2788,7 +2783,6 @@ const { placeOrder } = createTradeEntryHelpers({
     syncPositionWithExchange: (...args) => syncPositionWithExchange(...args)
 });
 
-// -------------------- CLOSE POSITION --------------------
 // -------------------- UTILITY FUNCTIONS --------------------
 const getPrice = async (forceRefresh = false) => {
     try {
@@ -3029,9 +3023,3 @@ const shutdown = async (signal = "EXIT") => {
         process.exit(1);
     }
 })();
-
-
-
-
-
-
