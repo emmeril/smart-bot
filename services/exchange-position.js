@@ -184,8 +184,9 @@ const createExchangePositionHelpers = ({
         return openPositions[0];
     };
 
-    const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = null, currentPrice = NaN) => {
+    const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = null, currentPrice = NaN, options = {}) => {
         const currentDb = getDb();
+        const preserveExitPlan = options.preserveExitPlan !== false;
         const contracts = Math.abs(getExchangePositionContracts(openPosition));
         const side = getExchangePositionSide(openPosition) || "buy";
         const positionSide = getExchangePositionModeSide(openPosition);
@@ -220,7 +221,7 @@ const createExchangePositionHelpers = ({
         const entryChanged = entryDeltaPercent > getPositionSyncEntryTolerancePct();
         const existingSide = String(existingPosition?.side || "").toLowerCase();
         const existingPositionSide = getTrackedPositionSideLabel(existingPosition);
-        const canPreserveExitPlan = existingPosition && existingSide === side && existingPositionSide === positionSide && !quantityChanged && !entryChanged;
+        const canPreserveExitPlan = preserveExitPlan && existingPosition && existingSide === side && existingPositionSide === positionSide && !quantityChanged && !entryChanged;
         const preservedTargetPrice = canPreserveExitPlan && Number.isFinite(existingPosition?.targetPrice) ? existingPosition.targetPrice : targetPrice;
         const preservedStopLossPrice = canPreserveExitPlan && Number.isFinite(existingPosition?.stopLossPrice) ? existingPosition.stopLossPrice : stopLossPrice;
         const fallbackTargetProfitUsdt = Math.abs(preservedTargetPrice - entryPrice) * contracts;
@@ -242,9 +243,9 @@ const createExchangePositionHelpers = ({
             positionSide,
             targetProfitUSDT: preservedTargetProfitUSDT,
             leverageAtEntry: toFiniteNumber(exchangePnlSnapshot?.leverageAtEntry, toFiniteNumber(currentDb.leverage, 1)),
-            trailingEnabled: preservedTrailingEnabled,
-            trailingActivateATR: preservedTrailingActivateATR,
-            trailingOffsetATR: preservedTrailingOffsetATR,
+            trailingEnabled: preserveExitPlan ? preservedTrailingEnabled : Boolean(currentDb.trailingEnabled),
+            trailingActivateATR: preserveExitPlan ? preservedTrailingActivateATR : toFiniteNumber(currentDb.trailingActivateATR, 1.2),
+            trailingOffsetATR: preserveExitPlan ? preservedTrailingOffsetATR : toFiniteNumber(currentDb.trailingOffsetATR, 0.6),
             strategy: preservedStrategy,
             exchangePnlSnapshot,
             tpOrderId: null,

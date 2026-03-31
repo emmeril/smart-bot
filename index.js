@@ -1628,6 +1628,90 @@ const mergeRuntimeConfig = (nextConfig) => {
     Object.keys(nextConfig).forEach((key) => { db[key] = nextConfig[key]; });
 };
 
+const CONFIG_KEYS_REQUIRING_GRID_REBUILD = new Set([
+    "pair",
+    "gridTimeframe",
+    "gridLevels",
+    "gridLookbackCandles",
+    "gridRangePercent",
+    "gridTakeProfitLevels",
+    "gridStopLossLevels",
+    "gridEntryBufferPercent"
+]);
+
+const CONFIG_KEYS_REQUIRING_POSITION_REAPPLY = new Set([
+    "gridOrderSizeUsdt",
+    "gridTargetProfitUsdt",
+    "gridStopLossPercent",
+    "gridTakeProfitLevels",
+    "gridStopLossLevels",
+    "gridLevels",
+    "gridLookbackCandles",
+    "gridRangePercent",
+    "gridTimeframe",
+    "trailingEnabled",
+    "trailingActivateATR",
+    "trailingOffsetATR"
+]);
+
+const didConfigFieldChange = (previousConfig, nextConfig, key) => {
+    if (!previousConfig || typeof previousConfig !== "object") return false;
+    return previousConfig[key] !== nextConfig[key];
+};
+
+const applyRuntimeConfigChanges = async (previousConfig = null) => {
+    if (!db || !previousConfig || typeof previousConfig !== "object") return false;
+
+    let runtimeChanged = false;
+    const shouldResetGridState = Array.from(CONFIG_KEYS_REQUIRING_GRID_REBUILD).some((key) => didConfigFieldChange(previousConfig, db, key));
+    if (shouldResetGridState && db.activeGridState) {
+        db.activeGridState = null;
+        runtimeChanged = true;
+        console.log("[CONFIG] Grid parameters changed. Cleared locked grid state for rebuild.");
+    }
+
+    const shouldReapplyPositions = hasAnyActivePosition() && Array.from(CONFIG_KEYS_REQUIRING_POSITION_REAPPLY).some((key) => didConfigFieldChange(previousConfig, db, key));
+    if (!shouldReapplyPositions) {
+        if (runtimeChanged) await saveDB();
+        return runtimeChanged;
+    }
+
+    const openExchangePositions = exchange ? await fetchOpenExchangePositions() : [];
+    for (const [positionKey, position] of getActivePositionEntries()) {
+        const openExchangePosition = openExchangePositions.length > 0
+            ? findOpenExchangePosition(openExchangePositions, db.pair, position)
+            : null;
+        if (!openExchangePosition) continue;
+
+        const syncedEntryPrice = getExchangePositionEntryPrice(openExchangePosition, position.entryPrice);
+        const nextPosition = buildSyncedActivePosition(openExchangePosition, syncedEntryPrice, position, syncedEntryPrice, { preserveExitPlan: false });
+        const shouldUpdatePosition = [
+            "targetPrice",
+            "stopLossPrice",
+            "targetProfitUSDT",
+            "stopLossUSDT",
+            "trailingEnabled",
+            "trailingActivateATR",
+            "trailingOffsetATR"
+        ].some((key) => nextPosition[key] !== position[key]);
+
+        if (!shouldUpdatePosition) continue;
+
+        upsertActivePosition(nextPosition);
+        runtimeChanged = true;
+        console.log(`[CONFIG] Re-applied trading parameters to active position ${positionKey}.`);
+    }
+
+    if (runtimeChanged) await saveDB();
+
+    for (const [positionKey, position] of getActivePositionEntries()) {
+        await ensureReduceOnlyTakeProfitOrder(positionKey, position);
+        await ensureReduceOnlyStopLossOrder(positionKey, position);
+    }
+
+    return runtimeChanged;
+};
+
 const {
     configureRecurringTask,
     refreshRuntimeSchedulers,
@@ -1958,7 +2042,7 @@ const {
     normalizeConfig: (...args) => normalizeConfig(...args),
     getDefaultConfig: () => getDefaultConfig(),
     saveDB: async () => { await saveDB(); },
-    reloadConfig: async () => { await reloadConfig(); },
+    reloadConfig: async (...args) => { await reloadConfig(...args); },
     refreshRuntimeSchedulers: () => { refreshRuntimeSchedulers(); },
     syncExchangeRuntimeSettings: async () => {
         if (!exchange) return;
@@ -2378,13 +2462,17 @@ const createConfigLifecycleHelpers = () => {
         }
     };
 
-    const reloadConfig = async () => {
+    const reloadConfig = async (previousRuntimeConfig = null) => {
         try {
             if (!db) return false;
+            const runtimeSnapshot = previousRuntimeConfig && typeof previousRuntimeConfig === "object"
+                ? { ...previousRuntimeConfig }
+                : { ...db };
             const persistedConfig = await loadPersistedConfig();
             if (!persistedConfig) return false;
             const { config: normalizedConfig, autoPresetResult } = applyAutoPresetToConfig(persistedConfig);
             mergeRuntimeConfig(normalizedConfig);
+            await applyRuntimeConfigChanges(runtimeSnapshot);
             syncDashboardConfigSignature();
             if (autoPresetResult.changed && !hasAnyActivePosition()) {
                 await saveDB();
@@ -3029,6 +3117,10 @@ const shutdown = async (signal = "EXIT") => {
         process.exit(1);
     }
 })();
+
+
+
+
 
 
 

@@ -29,9 +29,9 @@ const createDashboardConfigHelpers = ({
         return picked;
     };
 
-    const persistRuntimeConfigChanges = async () => {
+    const persistRuntimeConfigChanges = async (previousConfig = null) => {
         await saveDB();
-        await reloadConfig();
+        await reloadConfig(previousConfig);
         refreshRuntimeSchedulers();
         await syncExchangeRuntimeSettings();
     };
@@ -55,7 +55,7 @@ const createDashboardConfigHelpers = ({
 
         Object.keys(currentDb).forEach((key) => { delete currentDb[key]; });
         Object.assign(currentDb, nextConfig);
-        await persistRuntimeConfigChanges();
+        await persistRuntimeConfigChanges(current);
         return buildDashboardPayload();
     };
 
@@ -67,11 +67,12 @@ const createDashboardConfigHelpers = ({
             throw new Error("Cannot reset configuration while positions are active");
         }
 
+        const current = { ...currentDb };
         const { config: nextConfig } = applyAutoPresetToConfig(getDefaultConfig());
         applyDashboardRuntimeState(nextConfig, currentDb);
         Object.keys(currentDb).forEach((key) => { delete currentDb[key]; });
         Object.assign(currentDb, nextConfig);
-        await persistRuntimeConfigChanges();
+        await persistRuntimeConfigChanges(current);
         return buildDashboardPayload();
     };
 
@@ -82,3 +83,5 @@ const createDashboardConfigHelpers = ({
 };
 
 module.exports = { createDashboardConfigHelpers };
+
+
