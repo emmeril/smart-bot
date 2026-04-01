@@ -7,16 +7,18 @@ const createTradeLogicHelpers = ({
     setLastPnlLog,
     calcATR
 }) => {
+    const normalizeSignalOrderDefaults = (signalData) => ({
+        signalPrice: signalData,
+        signalATR: null,
+        strategyName: "FUTURES_GRID",
+        riskOverrides: {},
+        signalTargetPrice: null,
+        signalStopLossPrice: null
+    });
+
     const parseSignalOrderData = (signalData) => {
         if (typeof signalData !== "object" || signalData === null) {
-            return {
-                signalPrice: signalData,
-                signalATR: null,
-                strategyName: "FUTURES_GRID",
-                riskOverrides: {},
-                signalTargetPrice: null,
-                signalStopLossPrice: null
-            };
+            return normalizeSignalOrderDefaults(signalData);
         }
         return {
             signalPrice: signalData.price,
@@ -28,23 +30,45 @@ const createTradeLogicHelpers = ({
         };
     };
 
-    const getOrderFillSnapshot = (order, fallbackPrice, fallbackQuantity) => {
-        const filledQuantity = toFiniteNumber(order?.filled, 0);
+    const getResolvedOrderPrice = (order, fallbackPrice, filledQuantity) => {
         const averagePrice = toFiniteNumber(order?.average, 0);
         const orderCost = toFiniteNumber(order?.cost, 0);
         const directPrice = toFiniteNumber(order?.price, 0);
         const infoAveragePrice = toFiniteNumber(order?.info?.avgPrice, 0);
         const infoQuoteQty = toFiniteNumber(order?.info?.cumQuoteQty, 0);
-        const resolvedQuantity = filledQuantity > 0 ? filledQuantity : fallbackQuantity;
-        const resolvedPrice = averagePrice > 0
-            ? averagePrice
-            : (infoAveragePrice > 0
-                ? infoAveragePrice
-                : (filledQuantity > 0 && orderCost > 0
-                    ? orderCost / filledQuantity
-                    : (filledQuantity > 0 && infoQuoteQty > 0 ? infoQuoteQty / filledQuantity : (directPrice > 0 ? directPrice : fallbackPrice))));
-        return { price: resolvedPrice, quantity: resolvedQuantity };
+
+        if (averagePrice > 0) return averagePrice;
+        if (infoAveragePrice > 0) return infoAveragePrice;
+        if (filledQuantity > 0 && orderCost > 0) return orderCost / filledQuantity;
+        if (filledQuantity > 0 && infoQuoteQty > 0) return infoQuoteQty / filledQuantity;
+        if (directPrice > 0) return directPrice;
+        return fallbackPrice;
     };
+
+    const getOrderFillSnapshot = (order, fallbackPrice, fallbackQuantity) => {
+        const filledQuantity = toFiniteNumber(order?.filled, 0);
+        return {
+            price: getResolvedOrderPrice(order, fallbackPrice, filledQuantity),
+            quantity: filledQuantity > 0 ? filledQuantity : fallbackQuantity
+        };
+    };
+
+    const resolveRoundedPlanPrice = (pair, price) => {
+        const roundedPrice = formatPriceToMarketPrecision(pair, price);
+        return Number.isFinite(roundedPrice) ? roundedPrice : price;
+    };
+
+    const buildDirectionalTargetPrice = (side, entryPrice, targetProfitUSDT, adjustedQty) => (
+        side === "buy"
+            ? entryPrice + (targetProfitUSDT / adjustedQty)
+            : entryPrice - (targetProfitUSDT / adjustedQty)
+    );
+
+    const buildDirectionalStopLossPrice = (side, entryPrice, stopLossUSDT, adjustedQty) => (
+        side === "buy"
+            ? entryPrice + (stopLossUSDT / adjustedQty)
+            : entryPrice - (stopLossUSDT / adjustedQty)
+    );
 
     const buildOrderPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides, explicitTargets = {}) => {
         const db = getDb();
@@ -59,28 +83,20 @@ const createTradeLogicHelpers = ({
         let stopLossPrice;
 
         if (Number.isFinite(explicitTargetPrice)) {
-            const roundedTargetPrice = formatPriceToMarketPrecision(db.pair, explicitTargetPrice);
-            targetPrice = Number.isFinite(roundedTargetPrice) ? roundedTargetPrice : explicitTargetPrice;
+            targetPrice = resolveRoundedPlanPrice(db.pair, explicitTargetPrice);
             targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
         } else {
-            const rawTargetPrice = side === "buy"
-                ? entryPrice + (targetProfitUSDT / adjustedQty)
-                : entryPrice - (targetProfitUSDT / adjustedQty);
-            const roundedTargetPrice = formatPriceToMarketPrecision(db.pair, rawTargetPrice);
-            targetPrice = Number.isFinite(roundedTargetPrice) ? roundedTargetPrice : rawTargetPrice;
+            const rawTargetPrice = buildDirectionalTargetPrice(side, entryPrice, targetProfitUSDT, adjustedQty);
+            targetPrice = resolveRoundedPlanPrice(db.pair, rawTargetPrice);
             targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
         }
 
         if (Number.isFinite(explicitStopLossPrice)) {
-            const roundedStopLossPrice = formatPriceToMarketPrecision(db.pair, explicitStopLossPrice);
-            stopLossPrice = Number.isFinite(roundedStopLossPrice) ? roundedStopLossPrice : explicitStopLossPrice;
+            stopLossPrice = resolveRoundedPlanPrice(db.pair, explicitStopLossPrice);
             stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
         } else {
-            const rawStopLossPrice = side === "buy"
-                ? entryPrice + (stopLossUSDT / adjustedQty)
-                : entryPrice - (stopLossUSDT / adjustedQty);
-            const roundedStopLossPrice = formatPriceToMarketPrecision(db.pair, rawStopLossPrice);
-            stopLossPrice = Number.isFinite(roundedStopLossPrice) ? roundedStopLossPrice : rawStopLossPrice;
+            const rawStopLossPrice = buildDirectionalStopLossPrice(side, entryPrice, stopLossUSDT, adjustedQty);
+            stopLossPrice = resolveRoundedPlanPrice(db.pair, rawStopLossPrice);
             stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
         }
 
@@ -101,7 +117,6 @@ const createTradeLogicHelpers = ({
             trailingEnabled: Boolean(db.trailingEnabled)
         };
     };
-
     const isDirectionalOrderPlanValid = (side, entryPrice, orderPlan) => {
         if (!orderPlan) return false;
         const targetPrice = toFiniteNumber(orderPlan.targetPrice, NaN);
@@ -112,104 +127,252 @@ const createTradeLogicHelpers = ({
         return false;
     };
 
+    const formatOrderPlanLine = (label, value) => `   - ${label}: ${value}`;
+
+    const formatOrderPlanQuantityLabel = (adjustedQty) => {
+        const db = getDb();
+        const baseAsset = String(db.pair || "").split("/")[0] || "BASE";
+        return `${adjustedQty} ${baseAsset}`;
+    };
+
+    const formatTrailingPlanLabel = (orderPlan) => `${orderPlan.trailingActivateATR}/${orderPlan.trailingOffsetATR}x`;
+
     const logOrderPlan = (strategyName, entryPrice, adjustedQty, orderPlan) => {
         const db = getDb();
         console.log("   Order Details:");
-        console.log(`   - Amount: ${db.gridOrderSizeUsdt} USDT x ${db.leverage}x = ${(db.gridOrderSizeUsdt * db.leverage).toFixed(2)} USDT`);
-        console.log(`   - Quantity: ${adjustedQty} ${db.pair.split('/')[0]}`);
-        console.log(`   - Entry Price: ${entryPrice}`);
-        console.log(`   - Strategy: ${strategyName}`);
-        console.log(`   - Target Profit: ${orderPlan.targetProfitUSDT.toFixed(4)} USDT`);
-        console.log(`   - Target Price: ${orderPlan.targetPrice}`);
-        console.log(`   - Stop Loss: ${orderPlan.stopLossUSDT.toFixed(4)} USDT`);
-        console.log(`   - Stop Loss Price: ${orderPlan.stopLossPrice}`);
-        console.log(`   - Trailing ATR: ${orderPlan.trailingActivateATR}/${orderPlan.trailingOffsetATR}x`);
+        console.log(formatOrderPlanLine("Amount", `${db.gridOrderSizeUsdt} USDT x ${db.leverage}x = ${(db.gridOrderSizeUsdt * db.leverage).toFixed(2)} USDT`));
+        console.log(formatOrderPlanLine("Quantity", formatOrderPlanQuantityLabel(adjustedQty)));
+        console.log(formatOrderPlanLine("Entry Price", entryPrice));
+        console.log(formatOrderPlanLine("Strategy", strategyName));
+        console.log(formatOrderPlanLine("Target Profit", `${orderPlan.targetProfitUSDT.toFixed(4)} USDT`));
+        console.log(formatOrderPlanLine("Target Price", orderPlan.targetPrice));
+        console.log(formatOrderPlanLine("Stop Loss", `${orderPlan.stopLossUSDT.toFixed(4)} USDT`));
+        console.log(formatOrderPlanLine("Stop Loss Price", orderPlan.stopLossPrice));
+        console.log(formatOrderPlanLine("Trailing ATR", formatTrailingPlanLabel(orderPlan)));
     };
 
-    const getPositionExitTargets = (position) => {
-        const db = getDb();
-        const effectiveTargetProfitUSDT = Number.isFinite(position.targetProfitUSDT) && position.targetProfitUSDT > 0
-            ? position.targetProfitUSDT
-            : db.gridTargetProfitUsdt;
-        const fallbackStopLossUSDT = -Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100));
-        const rawStopLossUSDT = Number.isFinite(position.stopLossUSDT) ? position.stopLossUSDT : fallbackStopLossUSDT;
-        const effectiveStopLossUSDT = -Math.abs(rawStopLossUSDT);
+    const shouldUseStoredStopLossPrice = (position) => Number.isFinite(position.stopLossPrice) && position.stopLossPrice > 0;
 
+    const getDerivedStopLossPrice = (position, entryPrice, effectiveStopLossUSDT, quantity) => (
+        position.side === "buy"
+            ? entryPrice + (effectiveStopLossUSDT / quantity)
+            : entryPrice - (effectiveStopLossUSDT / quantity)
+    );
+
+    const resolveEffectiveStopLossPrice = (position, effectiveStopLossUSDT) => {
+        const db = getDb();
         let effectiveStopLossPrice = toFiniteNumber(position.stopLossPrice, NaN);
         if (!Number.isFinite(effectiveStopLossPrice) || effectiveStopLossPrice <= 0) {
             const entryPrice = toFiniteNumber(position.entryPrice, NaN);
             const quantity = toFiniteNumber(position.quantity, NaN);
             if (Number.isFinite(entryPrice) && entryPrice > 0 && Number.isFinite(quantity) && quantity > 0 && Number.isFinite(effectiveStopLossUSDT)) {
                 // Optimasi: Selalu prioritaskan stopLossPrice yang sudah ada di state (misal dari Trailing Stop)
-                let derivedStopLossPrice;
-                if (Number.isFinite(position.stopLossPrice) && position.stopLossPrice > 0) {
-                    derivedStopLossPrice = position.stopLossPrice;
-                } else {
-                    derivedStopLossPrice = position.side === "buy"
-                        ? entryPrice + (effectiveStopLossUSDT / quantity)
-                        : entryPrice - (effectiveStopLossUSDT / quantity);
-                }
+                const derivedStopLossPrice = shouldUseStoredStopLossPrice(position)
+                    ? position.stopLossPrice
+                    : getDerivedStopLossPrice(position, entryPrice, effectiveStopLossUSDT, quantity);
                 effectiveStopLossPrice = formatPriceToMarketPrecision(db.pair, derivedStopLossPrice);
             } else {
                 effectiveStopLossPrice = NaN;
             }
         }
+        return effectiveStopLossPrice;
+    };
+
+    const resolveEffectiveTargetProfitUSDT = (position) => {
+        const db = getDb();
+        return Number.isFinite(position.targetProfitUSDT) && position.targetProfitUSDT > 0
+            ? position.targetProfitUSDT
+            : db.gridTargetProfitUsdt;
+    };
+
+    const resolveEffectiveStopLossUSDT = (position) => {
+        const db = getDb();
+        const fallbackStopLossUSDT = -Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100));
+        const rawStopLossUSDT = Number.isFinite(position.stopLossUSDT) ? position.stopLossUSDT : fallbackStopLossUSDT;
+        return -Math.abs(rawStopLossUSDT);
+    };
+
+    const getPositionExitTargets = (position) => {
+        const effectiveTargetProfitUSDT = resolveEffectiveTargetProfitUSDT(position);
+        const effectiveStopLossUSDT = resolveEffectiveStopLossUSDT(position);
+        const effectiveStopLossPrice = resolveEffectiveStopLossPrice(position, effectiveStopLossUSDT);
         return { effectiveTargetProfitUSDT, effectiveStopLossUSDT, effectiveStopLossPrice };
     };
 
-    const evaluatePositionExit = (position, currentPrice, pnlState, managedOrdersSnapshot = null) => {
+    const hasTrackedExchangeOrder = (orders, position) => (
+        Array.isArray(orders) && orders.some((order) => matchesOrderToTrackedPosition(order, position))
+    );
+
+    const getManagedExitOrders = (managedOrdersSnapshot, orderType) => (
+        Array.isArray(managedOrdersSnapshot?.[orderType]) ? managedOrdersSnapshot[orderType] : null
+    );
+
+    const hasFallbackExitOrderId = (position, orderType) => (
+        orderType === "tp"
+            ? Boolean(position?.tpOrderId || position?.tpClientOrderId)
+            : Boolean(position?.slOrderId || position?.slClientOrderId)
+    );
+
+    const hasManagedExitOrder = (managedOrdersSnapshot, position, orderType) => {
+        const orders = getManagedExitOrders(managedOrdersSnapshot, orderType);
+        if (orders) return hasTrackedExchangeOrder(orders, position);
+        return hasFallbackExitOrderId(position, orderType);
+    };
+
+    const buildExitDecision = (reason, message, effectiveTargetProfitUSDT, effectiveStopLossUSDT) => ({
+        shouldClose: true,
+        reason,
+        message,
+        effectiveTargetProfitUSDT,
+        effectiveStopLossUSDT
+    });
+
+    const isBuySide = (position) => position.side === "buy";
+
+    const isTargetHit = (position, currentPrice) => (
+        Number.isFinite(position.targetPrice) &&
+        (isBuySide(position) ? currentPrice >= position.targetPrice : currentPrice <= position.targetPrice)
+    );
+
+    const isStopHit = (position, currentPrice, effectiveStopLossPrice) => (
+        Number.isFinite(effectiveStopLossPrice) &&
+        (isBuySide(position) ? currentPrice <= effectiveStopLossPrice : currentPrice >= effectiveStopLossPrice)
+    );
+
+    const shouldCloseForProfitTarget = (hasExchangeTpOrder, position, currentPrice, netPnlUSDT, effectiveTargetProfitUSDT) => (
+        !hasExchangeTpOrder && (isTargetHit(position, currentPrice) || netPnlUSDT >= effectiveTargetProfitUSDT)
+    );
+
+    const shouldCloseForStopLoss = (hasExchangeSlOrder, position, currentPrice, effectiveStopLossPrice, netPnlUSDT, effectiveStopLossUSDT) => (
+        !hasExchangeSlOrder && (isStopHit(position, currentPrice, effectiveStopLossPrice) || netPnlUSDT <= effectiveStopLossUSDT)
+    );
+
+    const getNetPnlUSDT = (pnlState) => toFiniteNumber(pnlState?.netProfitUSDT, NaN);
+
+    const buildPositionExitContext = (position, currentPrice, pnlState, managedOrdersSnapshot) => {
         const { effectiveTargetProfitUSDT, effectiveStopLossUSDT, effectiveStopLossPrice } = getPositionExitTargets(position);
-        const tpOrders = Array.isArray(managedOrdersSnapshot?.tp) ? managedOrdersSnapshot.tp : null;
-        const slOrders = Array.isArray(managedOrdersSnapshot?.sl) ? managedOrdersSnapshot.sl : null;
-        const hasExchangeTpOrder = tpOrders
-            ? tpOrders.some((order) => matchesOrderToTrackedPosition(order, position))
-            : Boolean(position?.tpOrderId || position?.tpClientOrderId);
-        const hasExchangeSlOrder = slOrders
-            ? slOrders.some((order) => matchesOrderToTrackedPosition(order, position))
-            : Boolean(position?.slOrderId || position?.slClientOrderId);
+        return {
+            position,
+            currentPrice,
+            netPnlUSDT: getNetPnlUSDT(pnlState),
+            effectiveTargetProfitUSDT,
+            effectiveStopLossUSDT,
+            effectiveStopLossPrice,
+            hasExchangeTpOrder: hasManagedExitOrder(managedOrdersSnapshot, position, "tp"),
+            hasExchangeSlOrder: hasManagedExitOrder(managedOrdersSnapshot, position, "sl")
+        };
+    };
 
-        const targetHit = Number.isFinite(position.targetPrice) &&
-            (position.side === "buy" ? currentPrice >= position.targetPrice : currentPrice <= position.targetPrice);
-
-        const stopHit = Number.isFinite(effectiveStopLossPrice) &&
-            (position.side === "buy" ? currentPrice <= effectiveStopLossPrice : currentPrice >= effectiveStopLossPrice);
-
-        if (!hasExchangeTpOrder && (targetHit || pnlState.netProfitUSDT >= effectiveTargetProfitUSDT)) {
-            return {
-                shouldClose: true,
-                reason: "PROFIT_TARGET",
-                message: `\n[PROFIT] Net Target hit (+${pnlState.netProfitUSDT.toFixed(4)} USDT)! Closing...`,
+    const resolvePositionExitDecision = ({ position, currentPrice, netPnlUSDT, effectiveTargetProfitUSDT, effectiveStopLossUSDT, effectiveStopLossPrice, hasExchangeTpOrder, hasExchangeSlOrder }) => {
+        if (shouldCloseForProfitTarget(hasExchangeTpOrder, position, currentPrice, netPnlUSDT, effectiveTargetProfitUSDT)) {
+            return buildExitDecision(
+                "PROFIT_TARGET",
+                `\n[PROFIT] Net Target hit (+${netPnlUSDT.toFixed(4)} USDT)! Closing...`,
                 effectiveTargetProfitUSDT,
                 effectiveStopLossUSDT
-            };
+            );
         }
 
-        if (!hasExchangeSlOrder && (stopHit || pnlState.netProfitUSDT <= effectiveStopLossUSDT)) {
-            return {
-                shouldClose: true,
-                reason: "STOP_LOSS",
-                message: `\n[STOP] Stop loss hit (${pnlState.netProfitUSDT.toFixed(4)} USDT)! Closing...`,
+        if (shouldCloseForStopLoss(hasExchangeSlOrder, position, currentPrice, effectiveStopLossPrice, netPnlUSDT, effectiveStopLossUSDT)) {
+            return buildExitDecision(
+                "STOP_LOSS",
+                `\n[STOP] Stop loss hit (${netPnlUSDT.toFixed(4)} USDT)! Closing...`,
                 effectiveTargetProfitUSDT,
                 effectiveStopLossUSDT
-            };
+            );
         }
+
+        return null;
+    };
+
+    const evaluatePositionExit = (position, currentPrice, pnlState, managedOrdersSnapshot = null) => {
+        const exitContext = buildPositionExitContext(position, currentPrice, pnlState, managedOrdersSnapshot);
+        const exitDecision = resolvePositionExitDecision(exitContext);
+
+        if (exitDecision) return exitDecision;
 
         return {
             shouldClose: false,
-            effectiveTargetProfitUSDT,
-            effectiveStopLossUSDT
+            effectiveTargetProfitUSDT: exitContext.effectiveTargetProfitUSDT,
+            effectiveStopLossUSDT: exitContext.effectiveStopLossUSDT
+        };
+    };
+
+    const isNearExitPnl = (netProfitUSDT, exitState) => (
+        netProfitUSDT >= (exitState.effectiveTargetProfitUSDT * 0.7) ||
+        netProfitUSDT <= (exitState.effectiveStopLossUSDT * 0.7)
+    );
+
+    const getPnlLogInterval = (pnlState, exitState) => {
+        const netProfitUSDT = getNetPnlUSDT(pnlState);
+        return isNearExitPnl(netProfitUSDT, exitState) ? 2000 : 5000;
+    };
+
+    const getDisplayProfitUSDT = (pnlState) => (
+        Number.isFinite(pnlState.displayProfitUSDT) ? pnlState.displayProfitUSDT : getNetPnlUSDT(pnlState)
+    );
+
+    const getDisplayProfitPercent = (pnlState) => (
+        Number.isFinite(pnlState.displayProfitPercent) ? pnlState.displayProfitPercent : pnlState.profitPercent
+    );
+
+    const getDisplayPnlValues = (pnlState) => ({
+        displayProfitUSDT: getDisplayProfitUSDT(pnlState),
+        displayProfitPercent: getDisplayProfitPercent(pnlState)
+    });
+
+    const extractOhlcvSeries = (ohlcv) => ({
+        open: ohlcv.map((c) => c[1]),
+        high: ohlcv.map((c) => c[2]),
+        low: ohlcv.map((c) => c[3]),
+        close: ohlcv.map((c) => c[4]),
+        volume: ohlcv.map((c) => c[5])
+    });
+
+    const getAverageVolume = (volume, lastIndex, volumePeriod) => {
+        const recentVolumes = volume.slice(Math.max(0, lastIndex - volumePeriod), lastIndex);
+        const denominator = Math.max(recentVolumes.length, 1);
+        return recentVolumes.reduce((a, b) => a + b, 0) / denominator;
+    };
+
+    const getCurrentAtr = (high, low, close, atrPeriod, lastIndex) => {
+        const atrSeries = calcATR(high, low, close, atrPeriod);
+        return atrSeries[lastIndex];
+    };
+
+    const getSignalSnapshotContext = (ohlcv, params) => {
+        const { open, high, low, close, volume } = extractOhlcvSeries(ohlcv);
+        const lastIndex = close.length - 2;
+        const currentOpen = open[lastIndex];
+        const currentPrice = close[lastIndex];
+        const currentVolume = volume[lastIndex];
+        const avgVolume = getAverageVolume(volume, lastIndex, params.volumePeriod);
+        const volumeRatio = currentVolume / (avgVolume || 1);
+        const hourUTC = new Date(ohlcv[lastIndex][0]).getUTCHours();
+        const currentATR = getCurrentAtr(high, low, close, params.atrPeriod, lastIndex);
+
+        return {
+            open,
+            high,
+            low,
+            close,
+            volume,
+            lastIndex,
+            currentOpen,
+            currentPrice,
+            currentVolume,
+            avgVolume,
+            volumeRatio,
+            hourUTC,
+            currentATR
         };
     };
 
     const maybeLogPositionPnL = (pnlState, exitState) => {
-        const nearExit =
-            pnlState.netProfitUSDT >= (exitState.effectiveTargetProfitUSDT * 0.7) ||
-            pnlState.netProfitUSDT <= (exitState.effectiveStopLossUSDT * 0.7);
-        const pnlLogInterval = nearExit ? 2000 : 5000;
+        const pnlLogInterval = getPnlLogInterval(pnlState, exitState);
 
         if (Date.now() - getLastPnlLog() > pnlLogInterval) {
-            const displayProfitUSDT = Number.isFinite(pnlState.displayProfitUSDT) ? pnlState.displayProfitUSDT : pnlState.netProfitUSDT;
-            const displayProfitPercent = Number.isFinite(pnlState.displayProfitPercent) ? pnlState.displayProfitPercent : pnlState.profitPercent;
+            const { displayProfitUSDT, displayProfitPercent } = getDisplayPnlValues(pnlState);
             console.log(`\n[PNL] ${displayProfitUSDT.toFixed(4)} USDT (${displayProfitPercent.toFixed(2)}%)`);
             setLastPnlLog(Date.now());
         }
@@ -218,25 +381,12 @@ const createTradeLogicHelpers = ({
     const buildSignalSnapshot = (ohlcv, params) => {
         if (!Array.isArray(ohlcv) || ohlcv.length < 3) return null;
 
-        const open = ohlcv.map((c) => c[1]);
-        const high = ohlcv.map((c) => c[2]);
-        const low = ohlcv.map((c) => c[3]);
-        const close = ohlcv.map((c) => c[4]);
-        const volume = ohlcv.map((c) => c[5]);
-        const lastIndex = close.length - 2;
-        const currentOpen = open[lastIndex];
-        const currentPrice = close[lastIndex];
-        const currentVolume = volume[lastIndex];
-        const recentVolumes = volume.slice(Math.max(0, lastIndex - params.volumePeriod), lastIndex);
-        const avgVolume = recentVolumes.reduce((a, b) => a + b, 0) / Math.max(recentVolumes.length, 1);
-        const volumeRatio = currentVolume / (avgVolume || 1);
-        const hourUTC = new Date(ohlcv[lastIndex][0]).getUTCHours();
-        const atrSeries = calcATR(high, low, close, params.atrPeriod);
-        const currentATR = atrSeries[lastIndex];
+        const { open, high, low, close, volume, lastIndex, currentOpen, currentPrice, currentVolume, avgVolume, volumeRatio, hourUTC, currentATR } = getSignalSnapshotContext(ohlcv, params);
         if (!Number.isFinite(currentATR) || currentATR <= 0) return { invalidAtr: true };
 
         return { ohlcv, open, high, low, close, volume, lastIndex, currentOpen, currentPrice, currentVolume, avgVolume, volumeRatio, hourUTC, currentATR };
     };
+
 
     return {
         parseSignalOrderData,

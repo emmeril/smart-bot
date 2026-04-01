@@ -197,7 +197,6 @@ const createPositionLifecycleHelpers = ({
             }
 
             const closeSide = side === "buy" ? "sell" : "buy";
-            const useClosePositionOrder = !isHedgeModeEnabled();
             console.log(`\n[CLOSE] Closing position ${positionKey}...`);
             const matchingTpOrders = (await fetchOpenTpOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
             if (matchingTpOrders.length > 0) await cancelTpOrders(matchingTpOrders, "MANUAL_CLOSE");
@@ -210,13 +209,12 @@ const createPositionLifecycleHelpers = ({
                     db.pair,
                     "market",
                     closeSide,
-                    useClosePositionOrder ? undefined : position.quantity,
+                    position.quantity,
                     undefined,
                     buildExchangeOrderParams({
                         side: closeSide,
-                        reduceOnly: !useClosePositionOrder,
-                        positionSide: getClosePositionSide(position),
-                        closePosition: useClosePositionOrder
+                        reduceOnly: true,
+                        positionSide: getClosePositionSide(position)
                     })
                 );
                 metrics.api.orders++;

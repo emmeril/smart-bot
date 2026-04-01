@@ -6,3 +6,5 @@ pnpm-lock.yaml
 pnpm-workspace.yaml
 .env.local
 .env
+database.sqlite
+trades.csv

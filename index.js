@@ -364,6 +364,13 @@ const clearRuntimeTimers = () => {
 
 const printStartupBanner = (totalUSDT) => {
     const gridSummary = getGridRuntimeSummary();
+    const formatGridTpSlLabel = (levels, fallbackLabel, unitLabel) => (
+        levels <= 0 ? fallbackLabel : `${levels} ${unitLabel}`
+    );
+    const formatTrailingLabel = () => (
+        db.trailingEnabled ? `${db.trailingActivateATR}/${db.trailingOffsetATR}x` : "OFF"
+    );
+
     console.log("\n" + "=".repeat(70));
     console.log("BINANCE-STYLE FUTURES GRID BOT");
     console.log("=".repeat(70));
@@ -373,8 +380,8 @@ const printStartupBanner = (totalUSDT) => {
     console.log(`Preset Profile: ${gridSummary.presetName.toUpperCase()}`);
     console.log(`Position Mode: ${accountPositionMode.label}`);
     console.log(`Grid: ${db.gridLevels} levels | lookback ${db.gridLookbackCandles} candles | range ${db.gridRangePercent}%`);
-    const tpLabel = db.gridTakeProfitLevels <= 0 ? "AUTO_NEXT_GRID" : `${db.gridTakeProfitLevels} level(s)`;
-    const slLabel = db.gridStopLossLevels <= 0 ? "AUTO_RANGE" : `${db.gridStopLossLevels} step(s)`;
+    const tpLabel = formatGridTpSlLabel(db.gridTakeProfitLevels, "AUTO_NEXT_GRID", "level(s)");
+    const slLabel = formatGridTpSlLabel(db.gridStopLossLevels, "AUTO_RANGE", "step(s)");
     console.log(`Grid TP/SL: ${tpLabel} / ${slLabel} | mode ${gridSummary.ordersMode} ${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} order(s) per side`);
     console.log(`Grid Order Size: mode ${gridSummary.sizeMode} ${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT`);
     console.log(`Min Valid Order Size: ${gridSummary.minOrderSizeUsdt.toFixed(4)} USDT`);
@@ -385,7 +392,7 @@ const printStartupBanner = (totalUSDT) => {
     }
     console.log(`Volume filter: ${db.minVolumeRatio}x over ${db.volumePeriod} periods`);
     console.log(`Session: ${db.sessionStartUTC}-${db.sessionEndUTC} UTC`);
-    console.log(`Trailing ATR: ${db.trailingEnabled ? `${db.trailingActivateATR}/${db.trailingOffsetATR}x` : "OFF"}`);
+    console.log(`Trailing ATR: ${formatTrailingLabel()}`);
     console.log(`Leverage: ${db.leverage}x`);
     console.log(`Margin Mode: ${String(db.marginMode || "isolated").toUpperCase()}`);
     console.log(`Daily target: $${db.dailyProfitTargetUsdt} (max ${db.maxTradesPerDay} trades)`);
@@ -889,6 +896,12 @@ const extractExchangeErrorCode = (error) => {
     return match ? Number(match[1]) : NaN;
 };
 
+const isExchangeTimestampError = (error) => {
+    const payload = String(error?.message || error || "");
+    const code = extractExchangeErrorCode(error);
+    return code === -1021 || /timestamp.*ahead of the server's time|timestamp for this request was/i.test(payload);
+};
+
 const isDuplicateClientOrderIdError = (error) => {
     const payload = String(error?.message || error || "");
     const code = extractExchangeErrorCode(error);
@@ -1195,21 +1208,53 @@ const applySignalGuards = (signalState, snapshot) => {
 };
 
 const logSignalDetails = (params, snapshot, signalState) => {
-    console.log("\n" + "=".repeat(50));
-    console.log(`${signalState.detailTitle} (${db.gridTimeframe}):`);
-    console.log(`   Current Price: ${snapshot.currentPrice}`);
-    console.log(`   Current Volume: ${snapshot.currentVolume.toFixed(2)}`);
-    console.log(`   Avg Volume (${params.volumePeriod}): ${snapshot.avgVolume.toFixed(2)}`);
-    console.log(`   Volume Ratio: ${snapshot.volumeRatio.toFixed(2)}x`);
-    console.log(`   ATR ${params.atrPeriod}: ${snapshot.currentATR.toFixed(6)}`);
-    console.log("");
-    console.log("SETUP CONDITIONS:");
-    signalState.extraDetailLines.forEach((line) => console.log(line));
+    const printSignalHeader = () => {
+        console.log("\n" + "=".repeat(50));
+        console.log(`${signalState.detailTitle} (${db.gridTimeframe}):`);
+        console.log(`   Current Price: ${snapshot.currentPrice}`);
+        console.log(`   Current Volume: ${snapshot.currentVolume.toFixed(2)}`);
+        console.log(`   Avg Volume (${params.volumePeriod}): ${snapshot.avgVolume.toFixed(2)}`);
+        console.log(`   Volume Ratio: ${snapshot.volumeRatio.toFixed(2)}x`);
+        console.log(`   ATR ${params.atrPeriod}: ${snapshot.currentATR.toFixed(6)}`);
+    };
+    const printSignalSection = (title, lines) => {
+        console.log("");
+        console.log(title);
+        lines.forEach((line) => console.log(line));
+    };
+    const printFinalSignalLine = (label, confirmed) => (
+        console.log(`   ${label} Signal: ${confirmed ? "[OK] CONFIRMED" : "[NO] NOT CONFIRMED"}`)
+    );
+
+    printSignalHeader();
+    printSignalSection("SETUP CONDITIONS:", signalState.extraDetailLines);
     console.log("");
     console.log("FINAL SIGNAL:");
-    console.log(`   LONG Signal: ${signalState.canLong ? "[OK] CONFIRMED" : "[NO] NOT CONFIRMED"}`);
-    console.log(`   SHORT Signal: ${signalState.canShort ? "[OK] CONFIRMED" : "[NO] NOT CONFIRMED"}`);
+    printFinalSignalLine("LONG", signalState.canLong);
+    printFinalSignalLine("SHORT", signalState.canShort);
     console.log("=".repeat(50));
+};
+
+const formatStatusTimestamp = (value) => (value > 0 ? new Date(value).toISOString() : "N/A");
+
+const printStatusLine = (label, value) => {
+    console.log(`[STATUS] ${label}=${value}`);
+};
+
+const printOrderSample = (orders, typeLabel) => {
+    orders.slice(0, 4).forEach((order) => console.log(`   ${formatOrderSummary(order, typeLabel)}`));
+};
+
+const printPositionLine = (positionKey, position, currentPrice) => {
+    const pnlState = Number.isFinite(currentPrice) ? calculatePositionPnL(position, currentPrice) : null;
+    console.log(`   [${positionKey}] side=${String(position.side || "").toUpperCase()} qty=${position.quantity} entry=${position.entryPrice}`);
+    console.log(`   [${positionKey}] tp=${position.targetPrice ?? "N/A"} sl=${position.stopLossPrice ?? "N/A"} strategy=${position.strategy || "N/A"}`);
+    console.log(`   [${positionKey}] tpOrder=${position.tpClientOrderId ?? "N/A"} slOrder=${position.slClientOrderId ?? "N/A"}`);
+    if (pnlState) {
+        const displayProfitUSDT = Number.isFinite(pnlState.displayProfitUSDT) ? pnlState.displayProfitUSDT : pnlState.netProfitUSDT;
+        const displayProfitPercent = Number.isFinite(pnlState.displayProfitPercent) ? pnlState.displayProfitPercent : pnlState.profitPercent;
+        console.log(`   [${positionKey}] pnl=${displayProfitUSDT.toFixed(4)} USDT (${displayProfitPercent.toFixed(2)}%)`);
+    }
 };
 
 const logGridSyncStatus = (desiredOrders, openGridOrders) => {
@@ -1526,36 +1571,24 @@ const printDetailedStatus = async () => {
     const gridSummary = getGridRuntimeSummary(currentPrice, managedOrders);
 
     console.log(`\n[STATUS] Mode=${accountPositionMode.label} | Pair=${db.pair} | Price=${Number.isFinite(currentPrice) ? currentPrice : "N/A"} | LocalActive=${activeEntries.length} | ExchangePos=${openExchangePositions.length}`);
-    console.log(`[STATUS] Profile=${gridSummary.presetName.toUpperCase()} | Grid Slot=${gridSummary.slotLabel} | Ladder=${gridSummary.ladderLabel}`);
-    console.log(`[STATUS] Side Orders ${gridSummary.ordersMode}=${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} | Size ${gridSummary.sizeMode}=${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT | Min Valid=${gridSummary.minOrderSizeUsdt.toFixed(4)} USDT | Available USDT=${gridSummary.availableUsdtLabel}`);
-    console.log(`[STATUS] Daily P&L=${db.dailyPnL.toFixed(2)} USDT | Trades=${db.dailyTrades}`);
-    console.log(`[STATUS] Runtime | placing=${isPlacingOrder ? "Y" : "N"} closing=${isClosingPosition ? "Y" : "N"} posSync=${isSyncingPosition ? "Y" : "N"} gridSync=${isSyncingGridOrders ? "Y" : "N"}`);
-    console.log(`[STATUS] Last trade=${lastTradeAt > 0 ? new Date(lastTradeAt).toISOString() : "N/A"} | Daily reset=${new Date(toFiniteNumber(db.lastDailyReset, Date.now())).toISOString()}`);
-    console.log(`[STATUS] Open Orders | Grid=${managedOrders.grid.length} | TP=${managedOrders.tp.length} | SL=${managedOrders.sl.length}`);
-    if (gridSummary.hasLockedGrid) {
-        console.log(`[STATUS] Locked Grid=${gridSummary.lockedRangeLabel} | Step=${gridSummary.stepLabel}`);
-    }
+    printStatusLine("Profile", `${gridSummary.presetName.toUpperCase()} | Grid Slot=${gridSummary.slotLabel} | Ladder=${gridSummary.ladderLabel}`);
+    printStatusLine("Side Orders", `${gridSummary.ordersMode}=${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} | Size ${gridSummary.sizeMode}=${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT | Min Valid=${gridSummary.minOrderSizeUsdt.toFixed(4)} USDT | Available USDT=${gridSummary.availableUsdtLabel}`);
+    printStatusLine("Daily P&L", `${db.dailyPnL.toFixed(2)} USDT | Trades=${db.dailyTrades}`);
+    printStatusLine("Runtime", `placing=${isPlacingOrder ? "Y" : "N"} closing=${isClosingPosition ? "Y" : "N"} posSync=${isSyncingPosition ? "Y" : "N"} gridSync=${isSyncingGridOrders ? "Y" : "N"}`);
+    printStatusLine("Last trade", `${formatStatusTimestamp(lastTradeAt)} | Daily reset=${formatStatusTimestamp(toFiniteNumber(db.lastDailyReset, Date.now()))}`);
+    printStatusLine("Open Orders", `Grid=${managedOrders.grid.length} | TP=${managedOrders.tp.length} | SL=${managedOrders.sl.length}`);
+    if (gridSummary.hasLockedGrid) printStatusLine("Locked Grid", `${gridSummary.lockedRangeLabel} | Step=${gridSummary.stepLabel}`);
     if (openExchangePositions.length !== activeEntries.length) {
         console.warn(`[STATUS] Position mismatch detected: local=${activeEntries.length} vs exchange=${openExchangePositions.length}`);
     }
-    managedOrders.grid.slice(0, 4).forEach((order) => console.log(`   ${formatOrderSummary(order, "GRID")}`));
-    managedOrders.tp.slice(0, 4).forEach((order) => console.log(`   ${formatOrderSummary(order, "TP")}`));
-    managedOrders.sl.slice(0, 4).forEach((order) => console.log(`   ${formatOrderSummary(order, "SL")}`));
+    printOrderSample(managedOrders.grid, "GRID");
+    printOrderSample(managedOrders.tp, "TP");
+    printOrderSample(managedOrders.sl, "SL");
     if (activeEntries.length === 0) {
         console.log("[STATUS] No active positions.");
         return;
     }
-    activeEntries.forEach(([positionKey, position]) => {
-        const pnlState = Number.isFinite(currentPrice) ? calculatePositionPnL(position, currentPrice) : null;
-        console.log(`   [${positionKey}] side=${String(position.side || "").toUpperCase()} qty=${position.quantity} entry=${position.entryPrice}`);
-        console.log(`   [${positionKey}] tp=${position.targetPrice ?? "N/A"} sl=${position.stopLossPrice ?? "N/A"} strategy=${position.strategy || "N/A"}`);
-        console.log(`   [${positionKey}] tpOrder=${position.tpClientOrderId ?? "N/A"} slOrder=${position.slClientOrderId ?? "N/A"}`);
-        if (pnlState) {
-            const displayProfitUSDT = Number.isFinite(pnlState.displayProfitUSDT) ? pnlState.displayProfitUSDT : pnlState.netProfitUSDT;
-            const displayProfitPercent = Number.isFinite(pnlState.displayProfitPercent) ? pnlState.displayProfitPercent : pnlState.profitPercent;
-            console.log(`   [${positionKey}] pnl=${displayProfitUSDT.toFixed(4)} USDT (${displayProfitPercent.toFixed(2)}%)`);
-        }
-    });
+    activeEntries.forEach(([positionKey, position]) => printPositionLine(positionKey, position, currentPrice));
 };
 
 const {
@@ -2584,9 +2617,24 @@ const initializeExchange = async () => {
             timeout: 20000,
             recvWindow: 10000
         });
-        await exchange.loadMarkets();
-        await exchange.loadTimeDifference();
-        console.log("[OK] Exchange connected");
+        exchange.options.adjustForTimeDifference = true;
+
+        const loadExchangeMetadata = async () => {
+            await exchange.loadTimeDifference();
+            await exchange.loadMarkets();
+        };
+
+        try {
+            await loadExchangeMetadata();
+        } catch (error) {
+            if (!isExchangeTimestampError(error)) throw error;
+            console.warn("[WARN] Exchange clock skew detected. Refreshing time difference and retrying...");
+            await sleep(500);
+            await loadExchangeMetadata();
+        }
+
+        const timeDifference = toFiniteNumber(exchange.timeDifference, 0);
+        console.log(`[OK] Exchange connected${timeDifference ? ` (time difference ${timeDifference}ms)` : ""}`);
         return exchange;
     } catch (error) { 
         console.error("[ERROR] Exchange connection failed:", error.message); 
