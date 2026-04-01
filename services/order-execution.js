@@ -31,6 +31,8 @@ const createOrderExecutionHelpers = ({
     cancelSlOrders,
     buildReplacementClientOrderId
 }) => {
+    const describeError = (error) => String(error?.message || error || "Unknown error");
+
     const placeGridEntryOrder = async (gridOrder) => {
         const exchange = getExchange();
         const metrics = getMetrics();
@@ -449,6 +451,8 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
+
+
 
 
 

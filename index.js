@@ -93,6 +93,8 @@ let metricsTimer = null;
 let lastSignalDetailLogAt = 0;
 let lastSyncLogAt = 0;
 let lastGridSyncLogAt = 0;
+let lastGridExposureLogAt = 0;
+let lastGridExposureLogKey = "";
 let lastGridSizingSkipLogAt = 0;
 let lastGridSizingSkipReason = "";
 let hasLoggedTriggerOrderFetchFallback = false;
@@ -2864,7 +2866,13 @@ const syncGridOrders = async () => {
         const desiredOrdersRaw = buildGridEntryOrders(snapshot, params, lockedGridState);
         const desiredOrdersForRuntime = filterGridOrdersForActiveExposure(desiredOrdersRaw, openPositions, trackedPositions);
         if (desiredOrdersForRuntime.length !== desiredOrdersRaw.length) {
-            console.log(`[GRID] Active position detected in ${accountPositionMode.label}. Keeping ${desiredOrdersForRuntime.length}/${desiredOrdersRaw.length} ladder order(s) aligned with the live exposure.`);
+            const exposureLogKey = `${accountPositionMode.label}:${desiredOrdersForRuntime.length}/${desiredOrdersRaw.length}`;
+            const now = Date.now();
+            if (exposureLogKey !== lastGridExposureLogKey || now - lastGridExposureLogAt >= GRID_SYNC_LOG_TTL) {
+                console.log(`[GRID] Active position detected in ${accountPositionMode.label}. Keeping ${desiredOrdersForRuntime.length}/${desiredOrdersRaw.length} ladder order(s) aligned with the live exposure.`);
+                lastGridExposureLogKey = exposureLogKey;
+                lastGridExposureLogAt = now;
+            }
         }
         const desiredOrderMap = new Map();
         const duplicateDesiredOrders = [];
@@ -3188,3 +3196,6 @@ const shutdown = async (signal = "EXIT") => {
         process.exit(1);
     }
 })();
+
+
+
