@@ -58,6 +58,14 @@ const Config = sequelize.define('Config', {
     minVolumeRatio: { type: DataTypes.FLOAT, defaultValue: 1.3 },
     atrPeriod: { type: DataTypes.INTEGER, defaultValue: 14 },
     trailingEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
+    autoStopLossEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
+    stopLossAtrMultiplier: { type: DataTypes.FLOAT, defaultValue: 0.12 },
+    stopLossMinPercent: { type: DataTypes.FLOAT, defaultValue: 3 },
+    stopLossMaxPercent: { type: DataTypes.FLOAT, defaultValue: 7 },
+    autoTargetProfitEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
+    targetProfitAtrMultiplier: { type: DataTypes.FLOAT, defaultValue: 0.75 },
+    targetProfitMinUsdt: { type: DataTypes.FLOAT, defaultValue: 0.25 },
+    targetProfitMaxUsdt: { type: DataTypes.FLOAT, defaultValue: 3 },
     trailingActivateATR: { type: DataTypes.FLOAT, defaultValue: 1.2 },
     trailingOffsetATR: { type: DataTypes.FLOAT, defaultValue: 0.6 },
     allowLong: { type: DataTypes.BOOLEAN, defaultValue: true },
@@ -119,7 +127,7 @@ const METRICS_LOG_INTERVAL = 60000;
 const POSITION_RUNTIME_PERSIST_TTL = 2000;
 const POSITION_SYNC_QTY_TOLERANCE = 0.001;
 const POSITION_SYNC_ENTRY_TOLERANCE_PCT = 0.05;
-const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort"];
+const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort", "autoTargetProfitEnabled", "autoStopLossEnabled"];
 const VALID_MARGIN_MODES = ["cross", "isolated"];
 const DEFAULT_CONFIG = {
     strategy: "futures_grid",
@@ -138,6 +146,14 @@ const DEFAULT_CONFIG = {
     marginMode: "isolated",
     monitoringInterval: 500,
     gridStopLossPercent: 5,
+    autoStopLossEnabled: true,
+    stopLossAtrMultiplier: 0.12,
+    stopLossMinPercent: 3,
+    stopLossMaxPercent: 7,
+    autoTargetProfitEnabled: true,
+    targetProfitAtrMultiplier: 0.75,
+    targetProfitMinUsdt: 0.25,
+    targetProfitMaxUsdt: 3,
     gridLevels: 8,
     gridLookbackCandles: 120,
     gridRangePercent: 3.5,
@@ -171,7 +187,15 @@ const DASHBOARD_EDITABLE_FIELDS = [
 
     { key: "gridOrderSizeUsdt", label: "Grid Order Size (USDT)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Order size per grid entry in USDT." },
     { key: "gridTargetProfitUsdt", label: "Target Profit (USDT)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Take-profit target in USDT." },
+    { key: "autoTargetProfitEnabled", label: "Auto Target Profit", section: "Risk", type: "boolean", description: "Use ATR-based TP with a capped range instead of a fixed profit." },
+    { key: "targetProfitAtrMultiplier", label: "TP ATR Multiplier", section: "Risk", type: "number", min: 0.1, step: 0.05, description: "ATR multiplier used to derive automatic target profit." },
+    { key: "targetProfitMinUsdt", label: "TP Min (USDT)", section: "Risk", type: "number", min: 0, step: 0.05, description: "Lower bound for automatic target profit." },
+    { key: "targetProfitMaxUsdt", label: "TP Max (USDT)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Upper bound for automatic target profit." },
     { key: "gridStopLossPercent", label: "Stop Loss (%)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Stop loss percentage used by the grid engine." },
+    { key: "autoStopLossEnabled", label: "Auto Stop Loss", section: "Risk", type: "boolean", description: "Use ATR-based stop loss with a capped range instead of a fixed percentage." },
+    { key: "stopLossAtrMultiplier", label: "SL ATR Multiplier", section: "Risk", type: "number", min: 0.05, step: 0.05, description: "ATR multiplier used to derive automatic stop loss." },
+    { key: "stopLossMinPercent", label: "SL Min (%)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Lower bound for automatic stop loss percent." },
+    { key: "stopLossMaxPercent", label: "SL Max (%)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Upper bound for automatic stop loss percent." },
     { key: "dailyProfitTargetUsdt", label: "Daily Profit Target (USDT)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Pause trading after this realized profit is reached." },
     { key: "dailyMaxLossPercent", label: "Daily Max Loss (%)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Pause trading after this loss percentage is reached." },
     { key: "maxTradesPerDay", label: "Max Trades Per Day", section: "Risk", type: "number", min: 0, step: 1, description: "Daily trade cap." },
@@ -411,6 +435,14 @@ const hydrateConfig = (config) => {
         hydrated.gridTargetProfitUsdt = hydrated.targetProfitUSDT;
     }
     delete hydrated.targetProfitUSDT;
+    if (hydrated.autoTargetProfitEnabled === undefined && hydrated.autoTpEnabled !== undefined) {
+        hydrated.autoTargetProfitEnabled = hydrated.autoTpEnabled;
+    }
+    delete hydrated.autoTpEnabled;
+    if (hydrated.autoStopLossEnabled === undefined && hydrated.autoSlEnabled !== undefined) {
+        hydrated.autoStopLossEnabled = hydrated.autoSlEnabled;
+    }
+    delete hydrated.autoSlEnabled;
     if (hydrated.gridStopLossPercent === undefined && hydrated.stopLossPercent !== undefined) {
         hydrated.gridStopLossPercent = hydrated.stopLossPercent;
     }
@@ -466,6 +498,44 @@ const ensureConfigSchema = async () => {
             await withSqliteBusyRetry(() => sequelize.query("UPDATE Configs SET gridStopLossPercent = COALESCE(stopLossPercent, 5) WHERE gridStopLossPercent IS NULL OR gridStopLossPercent = '';"));
         }
         console.log("[INFO] Added config column: gridStopLossPercent");
+    }
+    if (!columnNames.has("autoStopLossEnabled")) {
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN autoStopLossEnabled BOOLEAN DEFAULT 1;"));
+        if (columnNames.has("autoSlEnabled")) {
+            await withSqliteBusyRetry(() => sequelize.query("UPDATE Configs SET autoStopLossEnabled = COALESCE(autoSlEnabled, 1) WHERE autoStopLossEnabled IS NULL OR autoStopLossEnabled = '';"));
+        }
+        console.log("[INFO] Added config column: autoStopLossEnabled");
+    }
+    if (!columnNames.has("stopLossAtrMultiplier")) {
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN stopLossAtrMultiplier FLOAT DEFAULT 0.12;"));
+        console.log("[INFO] Added config column: stopLossAtrMultiplier");
+    }
+    if (!columnNames.has("stopLossMinPercent")) {
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN stopLossMinPercent FLOAT DEFAULT 3;"));
+        console.log("[INFO] Added config column: stopLossMinPercent");
+    }
+    if (!columnNames.has("stopLossMaxPercent")) {
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN stopLossMaxPercent FLOAT DEFAULT 7;"));
+        console.log("[INFO] Added config column: stopLossMaxPercent");
+    }
+    if (!columnNames.has("autoTargetProfitEnabled")) {
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN autoTargetProfitEnabled BOOLEAN DEFAULT 1;"));
+        if (columnNames.has("autoTpEnabled")) {
+            await withSqliteBusyRetry(() => sequelize.query("UPDATE Configs SET autoTargetProfitEnabled = COALESCE(autoTpEnabled, 1) WHERE autoTargetProfitEnabled IS NULL OR autoTargetProfitEnabled = '';"));
+        }
+        console.log("[INFO] Added config column: autoTargetProfitEnabled");
+    }
+    if (!columnNames.has("targetProfitAtrMultiplier")) {
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN targetProfitAtrMultiplier FLOAT DEFAULT 0.75;"));
+        console.log("[INFO] Added config column: targetProfitAtrMultiplier");
+    }
+    if (!columnNames.has("targetProfitMinUsdt")) {
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN targetProfitMinUsdt FLOAT DEFAULT 0.25;"));
+        console.log("[INFO] Added config column: targetProfitMinUsdt");
+    }
+    if (!columnNames.has("targetProfitMaxUsdt")) {
+        await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN targetProfitMaxUsdt FLOAT DEFAULT 3;"));
+        console.log("[INFO] Added config column: targetProfitMaxUsdt");
     }
     if (!columnNames.has("gridTimeframe")) {
         await withSqliteBusyRetry(() => sequelize.query("ALTER TABLE Configs ADD COLUMN gridTimeframe VARCHAR(255) DEFAULT '5m';"));
@@ -1691,6 +1761,14 @@ const CONFIG_KEYS_REQUIRING_GRID_REBUILD = new Set([
 const CONFIG_KEYS_REQUIRING_POSITION_REAPPLY = new Set([
     "gridOrderSizeUsdt",
     "gridTargetProfitUsdt",
+    "autoTargetProfitEnabled",
+    "targetProfitAtrMultiplier",
+    "targetProfitMinUsdt",
+    "targetProfitMaxUsdt",
+    "autoStopLossEnabled",
+    "stopLossAtrMultiplier",
+    "stopLossMinPercent",
+    "stopLossMaxPercent",
     "gridStopLossPercent",
     "gridTakeProfitLevels",
     "gridStopLossLevels",
@@ -2219,6 +2297,16 @@ const AUTO_PAIR_GRID_PRESETS = {
     binance: {
         strategy: "futures_grid",
         leverage: 10,
+        gridTargetProfitUsdt: 0.4,
+        autoTargetProfitEnabled: true,
+        targetProfitAtrMultiplier: 0.8,
+        targetProfitMinUsdt: 0.3,
+        targetProfitMaxUsdt: 4,
+        gridStopLossPercent: 5,
+        autoStopLossEnabled: true,
+        stopLossAtrMultiplier: 0.12,
+        stopLossMinPercent: 3,
+        stopLossMaxPercent: 7,
         gridLevels: 10,
         gridLookbackCandles: 144,
         gridRangePercent: 4.0,
@@ -2240,6 +2328,16 @@ const AUTO_PAIR_GRID_PRESETS = {
     volatile: {
         strategy: "futures_grid",
         leverage: 8,
+        gridTargetProfitUsdt: 0.35,
+        autoTargetProfitEnabled: true,
+        targetProfitAtrMultiplier: 0.7,
+        targetProfitMinUsdt: 0.2,
+        targetProfitMaxUsdt: 2,
+        gridStopLossPercent: 6,
+        autoStopLossEnabled: true,
+        stopLossAtrMultiplier: 0.15,
+        stopLossMinPercent: 4,
+        stopLossMaxPercent: 9,
         gridLevels: 12,
         gridLookbackCandles: 180,
         gridRangePercent: 6.5,
@@ -2261,6 +2359,16 @@ const AUTO_PAIR_GRID_PRESETS = {
     doge: {
         strategy: "futures_grid",
         leverage: 8,
+        gridTargetProfitUsdt: 0.25,
+        autoTargetProfitEnabled: true,
+        targetProfitAtrMultiplier: 0.6,
+        targetProfitMinUsdt: 0.15,
+        targetProfitMaxUsdt: 1.25,
+        gridStopLossPercent: 4,
+        autoStopLossEnabled: true,
+        stopLossAtrMultiplier: 0.1,
+        stopLossMinPercent: 2.5,
+        stopLossMaxPercent: 6,
         gridOrderSizeUsdt: 0,
         gridLevels: 12,
         gridLookbackCandles: 180,
@@ -2407,6 +2515,12 @@ const normalizeConfig = (config) => {
         sessionEndUTC: { min: 0, allowZero: true, integer: true }, volumePeriod: { min: 2, allowZero: false, integer: true },
         minVolumeRatio: { min: 1, allowZero: false },
         atrPeriod: { min: 2, allowZero: false, integer: true },
+        targetProfitAtrMultiplier: { min: 0.1, allowZero: false },
+        targetProfitMinUsdt: { min: 0, allowZero: true },
+        targetProfitMaxUsdt: { min: 0, allowZero: true },
+        stopLossAtrMultiplier: { min: 0.05, allowZero: false },
+        stopLossMinPercent: { min: 0, allowZero: true },
+        stopLossMaxPercent: { min: 0, allowZero: true },
         trailingActivateATR: { min: 0.2, allowZero: false },
         trailingOffsetATR: { min: 0.1, allowZero: false }
     };
@@ -3196,6 +3310,7 @@ const shutdown = async (signal = "EXIT") => {
         process.exit(1);
     }
 })();
+
 
 
 

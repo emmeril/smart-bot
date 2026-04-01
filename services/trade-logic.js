@@ -7,6 +7,8 @@ const createTradeLogicHelpers = ({
     setLastPnlLog,
     calcATR
 }) => {
+    const clampNumber = (value, min, max) => Math.min(Math.max(value, min), max);
+
     const normalizeSignalOrderDefaults = (signalData) => ({
         signalPrice: signalData,
         signalATR: null,
@@ -58,6 +60,55 @@ const createTradeLogicHelpers = ({
         return Number.isFinite(roundedPrice) ? roundedPrice : price;
     };
 
+    const resolveTargetProfitUSDT = (signalATR, adjustedQty) => {
+        const db = getDb();
+        const baseTargetProfitUSDT = Math.max(0, toFiniteNumber(db.gridTargetProfitUsdt, 0.5));
+        const atrValue = Math.abs(toFiniteNumber(signalATR, NaN));
+        const autoTargetProfitEnabled = db.autoTargetProfitEnabled !== false;
+        if (!autoTargetProfitEnabled || !Number.isFinite(atrValue) || atrValue <= 0 || !Number.isFinite(adjustedQty) || adjustedQty <= 0) {
+            return { targetProfitUSDT: baseTargetProfitUSDT, targetProfitMode: "STATIC" };
+        }
+
+        const atrMultiplier = Math.max(0.1, toFiniteNumber(db.targetProfitAtrMultiplier, 0.75));
+        const minTargetProfitUSDT = Math.max(0.01, toFiniteNumber(db.targetProfitMinUsdt, Math.min(baseTargetProfitUSDT, 0.25)));
+        const maxTargetProfitUSDT = Math.max(
+            minTargetProfitUSDT,
+            toFiniteNumber(db.targetProfitMaxUsdt, Math.max(baseTargetProfitUSDT * 3, minTargetProfitUSDT))
+        );
+        const atrTargetProfitUSDT = atrValue * adjustedQty * atrMultiplier;
+        const suggestedTargetProfitUSDT = Math.max(baseTargetProfitUSDT, atrTargetProfitUSDT);
+
+        return {
+            targetProfitUSDT: clampNumber(suggestedTargetProfitUSDT, minTargetProfitUSDT, maxTargetProfitUSDT),
+            targetProfitMode: "AUTO"
+        };
+    };
+
+    const resolveStopLossPercent = (signalATR, entryPrice) => {
+        const db = getDb();
+        const baseStopLossPercent = Math.max(0, toFiniteNumber(db.gridStopLossPercent, 5));
+        const atrValue = Math.abs(toFiniteNumber(signalATR, NaN));
+        const autoStopLossEnabled = db.autoStopLossEnabled !== false;
+        if (!autoStopLossEnabled || !Number.isFinite(atrValue) || atrValue <= 0 || !Number.isFinite(entryPrice) || entryPrice <= 0) {
+            return { stopLossPercent: baseStopLossPercent, stopLossMode: "STATIC" };
+        }
+
+        const leverage = Math.max(1, toFiniteNumber(db.leverage, 1));
+        const atrMultiplier = Math.max(0.05, toFiniteNumber(db.stopLossAtrMultiplier, 0.12));
+        const minStopLossPercent = Math.max(0.1, toFiniteNumber(db.stopLossMinPercent, Math.min(baseStopLossPercent, 3)));
+        const maxStopLossPercent = Math.max(
+            minStopLossPercent,
+            toFiniteNumber(db.stopLossMaxPercent, Math.max(baseStopLossPercent * 1.5, minStopLossPercent))
+        );
+        const atrBasedPercent = (atrValue / entryPrice) * leverage * atrMultiplier * 100;
+        const suggestedStopLossPercent = Math.max(baseStopLossPercent, atrBasedPercent);
+
+        return {
+            stopLossPercent: clampNumber(suggestedStopLossPercent, minStopLossPercent, maxStopLossPercent),
+            stopLossMode: "AUTO"
+        };
+    };
+
     const buildDirectionalTargetPrice = (side, entryPrice, targetProfitUSDT, adjustedQty) => (
         side === "buy"
             ? entryPrice + (targetProfitUSDT / adjustedQty)
@@ -78,14 +129,21 @@ const createTradeLogicHelpers = ({
         const explicitStopLossPrice = toFiniteNumber(explicitTargets.stopLossPrice, null);
 
         let targetProfitUSDT = db.gridTargetProfitUsdt;
-        let stopLossUSDT = -db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100);
+        let targetProfitMode = "STATIC";
+        let stopLossPercent = db.gridStopLossPercent;
+        let stopLossMode = "STATIC";
+        let stopLossUSDT = -db.gridOrderSizeUsdt * (stopLossPercent / 100);
         let targetPrice;
         let stopLossPrice;
 
         if (Number.isFinite(explicitTargetPrice)) {
             targetPrice = resolveRoundedPlanPrice(db.pair, explicitTargetPrice);
             targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
+            targetProfitMode = "EXPLICIT";
         } else {
+            const resolvedTargetProfit = resolveTargetProfitUSDT(signalATR, adjustedQty);
+            targetProfitUSDT = resolvedTargetProfit.targetProfitUSDT;
+            targetProfitMode = resolvedTargetProfit.targetProfitMode;
             const rawTargetPrice = buildDirectionalTargetPrice(side, entryPrice, targetProfitUSDT, adjustedQty);
             targetPrice = resolveRoundedPlanPrice(db.pair, rawTargetPrice);
             targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
@@ -95,6 +153,10 @@ const createTradeLogicHelpers = ({
             stopLossPrice = resolveRoundedPlanPrice(db.pair, explicitStopLossPrice);
             stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
         } else {
+            const resolvedStopLoss = resolveStopLossPercent(signalATR, entryPrice);
+            stopLossPercent = resolvedStopLoss.stopLossPercent;
+            stopLossMode = resolvedStopLoss.stopLossMode;
+            stopLossUSDT = -db.gridOrderSizeUsdt * (stopLossPercent / 100);
             const rawStopLossPrice = buildDirectionalStopLossPrice(side, entryPrice, stopLossUSDT, adjustedQty);
             stopLossPrice = resolveRoundedPlanPrice(db.pair, rawStopLossPrice);
             stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
@@ -111,6 +173,9 @@ const createTradeLogicHelpers = ({
             trailingActivateATR,
             trailingOffsetATR,
             targetProfitUSDT,
+            targetProfitMode,
+            stopLossPercent,
+            stopLossMode,
             stopLossUSDT,
             targetPrice,
             stopLossPrice,
@@ -144,9 +209,15 @@ const createTradeLogicHelpers = ({
         console.log(formatOrderPlanLine("Quantity", formatOrderPlanQuantityLabel(adjustedQty)));
         console.log(formatOrderPlanLine("Entry Price", entryPrice));
         console.log(formatOrderPlanLine("Strategy", strategyName));
-        console.log(formatOrderPlanLine("Target Profit", `${orderPlan.targetProfitUSDT.toFixed(4)} USDT`));
+        const targetProfitLabel = orderPlan.targetProfitMode && orderPlan.targetProfitMode !== "STATIC"
+            ? `${orderPlan.targetProfitUSDT.toFixed(4)} USDT (${orderPlan.targetProfitMode})`
+            : `${orderPlan.targetProfitUSDT.toFixed(4)} USDT`;
+        console.log(formatOrderPlanLine("Target Profit", targetProfitLabel));
         console.log(formatOrderPlanLine("Target Price", orderPlan.targetPrice));
-        console.log(formatOrderPlanLine("Stop Loss", `${orderPlan.stopLossUSDT.toFixed(4)} USDT`));
+        const stopLossLabel = orderPlan.stopLossMode && orderPlan.stopLossMode !== "STATIC"
+            ? `${orderPlan.stopLossUSDT.toFixed(4)} USDT (${orderPlan.stopLossPercent.toFixed(2)}%) (${orderPlan.stopLossMode})`
+            : `${orderPlan.stopLossUSDT.toFixed(4)} USDT (${orderPlan.stopLossPercent.toFixed(2)}%)`;
+        console.log(formatOrderPlanLine("Stop Loss", stopLossLabel));
         console.log(formatOrderPlanLine("Stop Loss Price", orderPlan.stopLossPrice));
         console.log(formatOrderPlanLine("Trailing ATR", formatTrailingPlanLabel(orderPlan)));
     };
@@ -180,15 +251,24 @@ const createTradeLogicHelpers = ({
 
     const resolveEffectiveTargetProfitUSDT = (position) => {
         const db = getDb();
-        return Number.isFinite(position.targetProfitUSDT) && position.targetProfitUSDT > 0
-            ? position.targetProfitUSDT
+        if (Number.isFinite(position.targetProfitUSDT) && position.targetProfitUSDT > 0) {
+            return position.targetProfitUSDT;
+        }
+        const fallbackResolved = resolveTargetProfitUSDT(position.atrAtEntry, position.quantity);
+        return fallbackResolved.targetProfitMode === "AUTO"
+            ? fallbackResolved.targetProfitUSDT
             : db.gridTargetProfitUsdt;
     };
 
     const resolveEffectiveStopLossUSDT = (position) => {
         const db = getDb();
-        const fallbackStopLossUSDT = -Math.abs(db.gridOrderSizeUsdt * (db.gridStopLossPercent / 100));
-        const rawStopLossUSDT = Number.isFinite(position.stopLossUSDT) ? position.stopLossUSDT : fallbackStopLossUSDT;
+        const fallbackStopLossPercent = resolveStopLossPercent(position.atrAtEntry, position.entryPrice).stopLossPercent;
+        const fallbackOrderSizeUsdt = Number.isFinite(position.quantity) && position.quantity > 0 && Number.isFinite(position.entryPrice) && position.entryPrice > 0
+            && Number.isFinite(position.leverageAtEntry) && position.leverageAtEntry > 0
+            ? (position.quantity * position.entryPrice) / position.leverageAtEntry
+            : db.gridOrderSizeUsdt;
+        const fallbackStopLossUSDT = -Math.abs(fallbackOrderSizeUsdt * (fallbackStopLossPercent / 100));
+        const rawStopLossUSDT = Number.isFinite(position.stopLossUSDT) && position.stopLossUSDT !== 0 ? position.stopLossUSDT : fallbackStopLossUSDT;
         return -Math.abs(rawStopLossUSDT);
     };
 
@@ -402,5 +482,14 @@ const createTradeLogicHelpers = ({
 };
 
 module.exports = { createTradeLogicHelpers };
+
+
+
+
+
+
+
+
+
 
 

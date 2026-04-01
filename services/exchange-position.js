@@ -182,6 +182,47 @@ const createExchangePositionHelpers = ({
         return openPositions[0];
     };
 
+    const resolveAutoTargetProfitUSDT = (entryPrice, quantity, atrAtEntry = NaN) => {
+        const currentDb = getDb();
+        const baseTargetProfitUSDT = Math.max(0, toFiniteNumber(currentDb.gridTargetProfitUsdt, 0.5));
+        const atrValue = Math.abs(toFiniteNumber(atrAtEntry, NaN));
+        const autoTargetProfitEnabled = currentDb.autoTargetProfitEnabled !== false;
+        if (!autoTargetProfitEnabled || !Number.isFinite(atrValue) || atrValue <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
+            return baseTargetProfitUSDT;
+        }
+
+        const atrMultiplier = Math.max(0.1, toFiniteNumber(currentDb.targetProfitAtrMultiplier, 0.75));
+        const minTargetProfitUSDT = Math.max(0.01, toFiniteNumber(currentDb.targetProfitMinUsdt, Math.min(baseTargetProfitUSDT, 0.25)));
+        const maxTargetProfitUSDT = Math.max(
+            minTargetProfitUSDT,
+            toFiniteNumber(currentDb.targetProfitMaxUsdt, Math.max(baseTargetProfitUSDT * 3, minTargetProfitUSDT))
+        );
+        const atrTargetProfitUSDT = atrValue * quantity * atrMultiplier;
+        const suggestedTargetProfitUSDT = Math.max(baseTargetProfitUSDT, atrTargetProfitUSDT);
+        return Math.min(maxTargetProfitUSDT, Math.max(minTargetProfitUSDT, suggestedTargetProfitUSDT));
+    };
+
+    const resolveAutoStopLossPercent = (atrAtEntry, entryPrice) => {
+        const currentDb = getDb();
+        const baseStopLossPercent = Math.max(0, toFiniteNumber(currentDb.gridStopLossPercent, 5));
+        const atrValue = Math.abs(toFiniteNumber(atrAtEntry, NaN));
+        const autoStopLossEnabled = currentDb.autoStopLossEnabled !== false;
+        if (!autoStopLossEnabled || !Number.isFinite(atrValue) || atrValue <= 0 || !Number.isFinite(entryPrice) || entryPrice <= 0) {
+            return baseStopLossPercent;
+        }
+
+        const leverage = Math.max(1, toFiniteNumber(currentDb.leverage, 1));
+        const atrMultiplier = Math.max(0.05, toFiniteNumber(currentDb.stopLossAtrMultiplier, 0.12));
+        const minStopLossPercent = Math.max(0.1, toFiniteNumber(currentDb.stopLossMinPercent, Math.min(baseStopLossPercent, 3)));
+        const maxStopLossPercent = Math.max(
+            minStopLossPercent,
+            toFiniteNumber(currentDb.stopLossMaxPercent, Math.max(baseStopLossPercent * 1.5, minStopLossPercent))
+        );
+        const atrBasedPercent = (atrValue / entryPrice) * leverage * atrMultiplier * 100;
+        const suggestedStopLossPercent = Math.max(baseStopLossPercent, atrBasedPercent);
+        return Math.min(maxStopLossPercent, Math.max(minStopLossPercent, suggestedStopLossPercent));
+    };
+
     const buildSyncedActivePosition = (openPosition, entryPrice, existingPosition = null, currentPrice = NaN, options = {}) => {
         const currentDb = getDb();
         const preserveExitPlan = options.preserveExitPlan !== false;
@@ -203,16 +244,20 @@ const createExchangePositionHelpers = ({
         const step = toFiniteNumber(gridState?.step, NaN);
         const derivedGridIndex = findNearestGridLevelIndex(levels, entryPrice);
         const gridExitPlan = buildGridExitPlan({ side, entryIndex: derivedGridIndex, levels, step, params: signalParams, gridState });
+        const fallbackTargetProfitUSDT = resolveAutoTargetProfitUSDT(entryPrice, contracts, preservedAtrAtEntry);
+        const fallbackStopLossPercent = resolveAutoStopLossPercent(preservedAtrAtEntry, entryPrice);
+        const fallbackLeverage = Math.max(1, toFiniteNumber(existingPosition?.leverageAtEntry, currentDb.leverage));
+        const fallbackStopLossUSDT = -Math.abs((contracts * entryPrice / fallbackLeverage) * (fallbackStopLossPercent / 100));
         const targetPrice = Number.isFinite(gridExitPlan.targetPrice)
             ? gridExitPlan.targetPrice
             : (side === "buy"
-                ? formatPriceToMarketPrecision(currentDb.pair, entryPrice + (currentDb.gridTargetProfitUsdt / Math.max(contracts, 1e-8)))
-                : formatPriceToMarketPrecision(currentDb.pair, entryPrice - (currentDb.gridTargetProfitUsdt / Math.max(contracts, 1e-8))));
+                ? formatPriceToMarketPrecision(currentDb.pair, entryPrice + (fallbackTargetProfitUSDT / Math.max(contracts, 1e-8)))
+                : formatPriceToMarketPrecision(currentDb.pair, entryPrice - (fallbackTargetProfitUSDT / Math.max(contracts, 1e-8))));
         const stopLossPrice = Number.isFinite(gridExitPlan.stopLossPrice)
             ? gridExitPlan.stopLossPrice
             : (side === "buy"
-                ? formatPriceToMarketPrecision(currentDb.pair, entryPrice - (Math.abs(currentDb.gridOrderSizeUsdt * (currentDb.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8)))
-                : formatPriceToMarketPrecision(currentDb.pair, entryPrice + (Math.abs(currentDb.gridOrderSizeUsdt * (currentDb.gridStopLossPercent / 100)) / Math.max(contracts, 1e-8))));
+                ? formatPriceToMarketPrecision(currentDb.pair, entryPrice + (fallbackStopLossUSDT / Math.max(contracts, 1e-8)))
+                : formatPriceToMarketPrecision(currentDb.pair, entryPrice - (fallbackStopLossUSDT / Math.max(contracts, 1e-8))));
         const existingQuantity = toFiniteNumber(existingPosition?.quantity, 0);
         const quantityChanged = Math.abs(existingQuantity - contracts) > getPositionSyncQtyTolerance();
         const existingEntryPrice = toFiniteNumber(existingPosition?.entryPrice, 0);
@@ -224,8 +269,10 @@ const createExchangePositionHelpers = ({
         const preservedTargetPrice = canPreserveExitPlan && Number.isFinite(existingPosition?.targetPrice) ? existingPosition.targetPrice : targetPrice;
         const preservedStopLossPrice = canPreserveExitPlan && Number.isFinite(existingPosition?.stopLossPrice) ? existingPosition.stopLossPrice : stopLossPrice;
         const fallbackTargetProfitUsdt = Math.abs(preservedTargetPrice - entryPrice) * contracts;
-        const fallbackStopLossUsdt = -Math.abs(preservedStopLossPrice - entryPrice) * contracts;
-        const preservedTargetProfitUSDT = canPreserveExitPlan && Number.isFinite(existingPosition?.targetProfitUSDT) ? existingPosition.targetProfitUSDT : fallbackTargetProfitUsdt;
+        const fallbackStopLossUsdt = fallbackStopLossUSDT;
+        const preservedTargetProfitUSDT = canPreserveExitPlan && Number.isFinite(existingPosition?.targetProfitUSDT)
+            ? existingPosition.targetProfitUSDT
+            : resolveAutoTargetProfitUSDT(entryPrice, contracts, preservedAtrAtEntry);
         const preservedStopLossUSDT = canPreserveExitPlan && Number.isFinite(existingPosition?.stopLossUSDT) ? existingPosition.stopLossUSDT : fallbackStopLossUsdt;
         return {
             side,
@@ -307,4 +354,14 @@ const createExchangePositionHelpers = ({
 };
 
 module.exports = { createExchangePositionHelpers };
+
+
+
+
+
+
+
+
+
+
 
