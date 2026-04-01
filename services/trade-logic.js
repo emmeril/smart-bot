@@ -214,6 +214,7 @@ const createTradeLogicHelpers = ({
     );
 
     const hasManagedExitOrder = (managedOrdersSnapshot, position, orderType) => {
+        if (managedOrdersSnapshot?.triggerOrdersFetchFailed) return hasFallbackExitOrderId(position, orderType);
         const orders = getManagedExitOrders(managedOrdersSnapshot, orderType);
         if (orders) return hasTrackedExchangeOrder(orders, position);
         return hasFallbackExitOrderId(position, orderType);

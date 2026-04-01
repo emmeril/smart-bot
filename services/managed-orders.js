@@ -50,11 +50,13 @@ const createManagedOrdersHelpers = ({
         metrics.api.orders++;
         const fetchedRegularOrders = await exchange.fetchOpenOrders(symbol);
         let fetchedTriggerOrders = [];
+        let triggerOrdersFetchFailed = false;
 
         try {
             metrics.api.orders++;
             fetchedTriggerOrders = await exchange.fetchOpenOrders(symbol, undefined, undefined, { trigger: true });
         } catch (error) {
+            triggerOrdersFetchFailed = true;
             if (!getHasLoggedTriggerOrderFetchFallback()) {
                 console.warn(`[WARN] Failed to fetch trigger open orders separately. Falling back to unified open-order snapshot. ${describeError(error)}`);
                 setHasLoggedTriggerOrderFetchFallback(true);
@@ -64,7 +66,7 @@ const createManagedOrdersHelpers = ({
         const mergedOrders = dedupeOrdersByIdentity([...(fetchedRegularOrders || []), ...(fetchedTriggerOrders || [])]);
         const triggerOrders = mergedOrders.filter(isConditionalOpenOrder);
         const regularOrders = mergedOrders.filter((order) => !isConditionalOpenOrder(order));
-        return { regularOrders, triggerOrders };
+        return { regularOrders, triggerOrders, triggerOrdersFetchFailed };
     };
 
     const fetchOpenGridOrders = async () => {

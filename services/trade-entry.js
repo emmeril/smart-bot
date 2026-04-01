@@ -50,6 +50,10 @@ const createTradeEntryHelpers = ({
                 return;
             }
             const managedOrdersSnapshot = await fetchManagedOpenOrdersSnapshot();
+            if (managedOrdersSnapshot.triggerOrdersFetchFailed) {
+                console.warn(`[WARN] Skipping ${side.toUpperCase()} order because managed trigger-order snapshot could not be verified.`);
+                return;
+            }
             const managedOrderCount = managedOrdersSnapshot.grid.length + managedOrdersSnapshot.tp.length + managedOrdersSnapshot.sl.length;
             if (managedOrderCount > 0) {
                 console.warn(`[WARN] Skipping ${side.toUpperCase()} order because ${managedOrderCount} managed order(s) are still open on the exchange.`);
@@ -124,21 +128,18 @@ const createTradeEntryHelpers = ({
                         db.pair,
                         "market",
                         closeSide,
-                        isHedgeModeEnabled() ? actualQuantity : undefined,
+                        actualQuantity,
                         undefined,
                         buildExchangeOrderParams({
                             side: closeSide,
-                            reduceOnly: isHedgeModeEnabled(),
-                            positionSide: getOrderPositionSide(side),
-                            closePosition: !isHedgeModeEnabled()
+                            reduceOnly: true,
+                            positionSide: getOrderPositionSide(side)
                         })
                     );
                     metrics.api.orders++;
                 } catch (closeError) {
                     console.error(`[ERROR] Failed to immediately close invalid ${side.toUpperCase()} position: ${closeError.message}`);
                 }
-                await syncPositionWithExchange();
-                return;
             }
             if (!actualPlanValid) {
                 console.warn(`[WARN] Actual fill produced an invalid directional TP/SL plan for ${side.toUpperCase()} order. Falling back to the pre-fill plan.`);
