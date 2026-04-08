@@ -22,6 +22,7 @@ const createPositionLifecycleHelpers = ({
     getExchangePositionContracts,
     getExchangePositionEntryPrice,
     fetchOpenGridOrders,
+    fetchManagedOpenOrdersSnapshot,
     buildOrderPlan,
     upsertActivePosition,
     fetchOpenTpOrders,
@@ -46,6 +47,13 @@ const createPositionLifecycleHelpers = ({
                 const openPositions = await fetchOpenExchangePositions();
                 const matchedPosition = findOpenExchangePosition(openPositions, getDb()?.pair, position);
                 if (matchedPosition) return false;
+
+                const managedOrdersSnapshot = await fetchManagedOpenOrdersSnapshot();
+                const openManagedOrders = managedOrdersSnapshot.grid.length + managedOrdersSnapshot.tp.length + managedOrdersSnapshot.sl.length;
+                if (openManagedOrders > 0) {
+                    console.warn(`[WARN] Exchange position is missing, but ${openManagedOrders} managed open order(s) still exist for ${positionKey || position?.positionSide || getTrackedPositionSideLabel(position)}.`);
+                    return false;
+                }
             } catch (error) {
                 console.warn(`[WARN] Could not verify exchange position state for ${positionKey || position?.positionSide || getTrackedPositionSideLabel(position)}: ${error.message}`);
                 return false;

@@ -100,6 +100,9 @@ let mainLoopTimer = null;
 let metricsTimer = null;
 let lastSignalDetailLogAt = 0;
 let lastSyncLogAt = 0;
+let lastEmptyPositionSyncAt = 0;
+let emptyPositionSyncStreak = 0;
+let lastEmptyPositionWarningAt = 0;
 let lastGridSyncLogAt = 0;
 let lastGridExposureLogAt = 0;
 let lastGridExposureLogKey = "";
@@ -991,11 +994,11 @@ const isTriggerManagedOrder = (order, label = "") => label === "SL" || isSlReduc
 
 const {
     fetchOpenGridOrders,
+    fetchManagedOpenOrdersSnapshot,
     findOpenGridOrderByClientOrderId,
     fetchOpenTpOrders,
     fetchOpenSlOrders,
     findOpenOrderByClientOrderId,
-    fetchManagedOpenOrdersSnapshot,
     cancelManagedOrdersForPosition,
     cancelDuplicateManagedOrders,
     fetchOpenOrdersSnapshot,
@@ -1690,6 +1693,7 @@ const {
     fetchOpenExchangePositions: (...args) => fetchOpenExchangePositions(...args),
     findOpenExchangePosition,
     fetchOpenGridOrders,
+    fetchManagedOpenOrdersSnapshot,
     getExchangePositionContracts,
     getExchangePositionEntryPrice,
     buildOrderPlan,
@@ -2671,11 +2675,55 @@ const syncPositionWithExchange = async () => {
         const openPositions = await fetchOpenExchangePositions();
         const currentPositionsMap = getActivePositionsMap();
         if (openPositions.length === 0) {
-            if (getPositionMapCount(currentPositionsMap) > 0) {
-                console.warn("[WARN] Exchange returned no open positions, but local active positions still exist. Preserving local state until the next successful confirmation.");
+            const managedOrdersSnapshot = await fetchManagedOpenOrdersSnapshot();
+            const openManagedOrders = managedOrdersSnapshot.grid.length + managedOrdersSnapshot.tp.length + managedOrdersSnapshot.sl.length;
+            const currentPositionCount = getPositionMapCount(currentPositionsMap);
+            if (currentPositionCount === 0 && openManagedOrders === 0) {
+                emptyPositionSyncStreak = 0;
+                lastEmptyPositionSyncAt = 0;
+                return;
+            }
+
+            const nowEmpty = Date.now();
+            emptyPositionSyncStreak = lastEmptyPositionSyncAt && (nowEmpty - lastEmptyPositionSyncAt <= 3000)
+                ? emptyPositionSyncStreak + 1
+                : 1;
+            lastEmptyPositionSyncAt = nowEmpty;
+
+            const warningMessage = openManagedOrders > 0
+                ? `[WARN] Exchange returned no open positions, but ${openManagedOrders} managed open order(s) still exist${currentPositionCount > 0 ? " and local active positions still exist" : ""}. Preserving local state until the next successful confirmation.`
+                : `[WARN] Exchange returned no open positions, but local active positions still exist. Preserving local state until the next successful confirmation.`;
+            if (nowEmpty - lastEmptyPositionWarningAt >= SYNC_LOG_TTL || emptyPositionSyncStreak === 1) {
+                console.warn(warningMessage);
+                lastEmptyPositionWarningAt = nowEmpty;
+            }
+            if (emptyPositionSyncStreak < 12) {
+                return;
+            }
+
+            console.warn(openManagedOrders > 0
+                ? `[WARN] Exchange stayed empty across repeated checks and ${openManagedOrders} managed open order(s) remain. Clearing stale local state and orphan orders.`
+                : `[WARN] Exchange stayed empty across repeated checks. Clearing stale local active position state.`
+            );
+            emptyPositionSyncStreak = 0;
+            lastEmptyPositionSyncAt = 0;
+
+            if (openManagedOrders > 0) {
+                if (managedOrdersSnapshot.grid.length > 0) await cancelGridOrders(managedOrdersSnapshot.grid, "POSITION_SYNC_CONFIRMED_EMPTY");
+                if (managedOrdersSnapshot.tp.length > 0) await cancelTpOrders(managedOrdersSnapshot.tp, "POSITION_SYNC_CONFIRMED_EMPTY");
+                if (managedOrdersSnapshot.sl.length > 0) await cancelSlOrders(managedOrdersSnapshot.sl, "POSITION_SYNC_CONFIRMED_EMPTY");
+            }
+
+            if (currentPositionCount > 0) {
+                const stalePositions = Object.entries(currentPositionsMap);
+                for (const [positionKey, stalePosition] of stalePositions) {
+                    await clearMissingPositionState(stalePosition, "POSITION_SYNC_CONFIRMED_EMPTY", positionKey);
+                }
             }
             return;
         }
+        emptyPositionSyncStreak = 0;
+        lastEmptyPositionSyncAt = 0;
         const currentPrice = await getPrice();
         const nextPositionsMap = {};
         openPositions.forEach((openPosition) => {
