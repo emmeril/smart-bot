@@ -33,6 +33,14 @@ const createOrderExecutionHelpers = ({
 }) => {
     const describeError = (error) => String(error?.message || error || "Unknown error");
 
+    const shouldAdoptExistingManagedOrder = (position, orderIdKey, clientIdKey) => {
+        if (!position || typeof position !== "object") return false;
+        const hasAttachedManagedOrder = Boolean(position?.[orderIdKey] || position?.[clientIdKey]);
+        if (hasAttachedManagedOrder) return false;
+        if (String(position?.strategy || "").toUpperCase() === "SYNC_ONLY") return true;
+        return String(position?.orderId || "").startsWith("SYNC_");
+    };
+
     const placeGridEntryOrder = async (gridOrder) => {
         const exchange = getExchange();
         const metrics = getMetrics();
@@ -333,6 +341,7 @@ const createOrderExecutionHelpers = ({
         position,
         matchingOrders,
         matchingOrder,
+        adoptableOrder,
         priceKey,
         orderIdKey,
         clientIdKey,
@@ -366,6 +375,19 @@ const createOrderExecutionHelpers = ({
             return;
         }
 
+        if (adoptableOrder && shouldAdoptExistingManagedOrder(position, orderIdKey, clientIdKey)) {
+            const nextClientOrderId = getExchangeClientOrderId(adoptableOrder) || position[clientIdKey] || buildClientOrderId(position);
+            const nextOrderId = adoptableOrder.id || position[orderIdKey] || null;
+            const nextPrice = syncPrice(adoptableOrder);
+            console.log(`${syncLogPrefix} Adopted existing ${label} order for ${positionKey} @ ${nextPrice}`);
+            position[orderIdKey] = nextOrderId;
+            position[clientIdKey] = nextClientOrderId;
+            position[priceKey] = nextPrice;
+            upsertActivePosition(position);
+            await saveDB();
+            return;
+        }
+
         if (matchingOrders.length > 0) {
             console.log(`${syncLogPrefix} Existing ${label} order for ${positionKey} no longer matches target. Replacing...`);
             await cancelDuplicates(matchingOrders, cancelReason.replace("_DUPLICATE", "_REPLACE"));
@@ -386,6 +408,10 @@ const createOrderExecutionHelpers = ({
         const position = { ...sourcePosition };
         if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
         const matchingTpOrders = (await fetchOpenTpOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
+        const adoptableOrder = matchingTpOrders.find((order) => {
+            const orderAmount = getOrderQuantity(order);
+            return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
+        }) || null;
         const matchingOrder = matchingTpOrders.find((order) => {
             const orderPrice = toFiniteNumber(order.price, NaN);
             const orderAmount = getOrderQuantity(order);
@@ -396,6 +422,7 @@ const createOrderExecutionHelpers = ({
             position,
             matchingOrders: matchingTpOrders,
             matchingOrder,
+            adoptableOrder,
             priceKey: "targetPrice",
             orderIdKey: "tpOrderId",
             clientIdKey: "tpClientOrderId",
@@ -414,6 +441,12 @@ const createOrderExecutionHelpers = ({
         const position = { ...sourcePosition };
         if (!position || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
         const matchingSlOrders = (await fetchOpenSlOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
+        const adoptableOrder = matchingSlOrders.find((order) => {
+            const orderAmount = getOrderQuantity(order);
+            const closePositionOrder = Boolean(order?.closePosition || order?.info?.closePosition || !Number.isFinite(orderAmount) || orderAmount <= 0);
+            if (closePositionOrder) return true;
+            return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
+        }) || null;
         const matchingOrder = matchingSlOrders.find((order) => {
             const orderStopPrice = getOrderTriggerPrice(order);
             const orderAmount = getOrderQuantity(order);
@@ -427,6 +460,7 @@ const createOrderExecutionHelpers = ({
             position,
             matchingOrders: matchingSlOrders,
             matchingOrder,
+            adoptableOrder,
             priceKey: "stopLossPrice",
             orderIdKey: "slOrderId",
             clientIdKey: "slClientOrderId",
@@ -451,6 +485,14 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
+
+
+
+
+
+
+
+
 
 
 
