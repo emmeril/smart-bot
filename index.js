@@ -113,6 +113,16 @@ let accountPositionMode = { hedged: false, label: "ONE_WAY" };
 let runtimeCommandsRegistered = false;
 let webServer = null;
 let configReloadTimer = null;
+let exchangeHealth = {
+    isHealthy: false,
+    needsRecoverySync: true,
+    consecutiveFailures: 0,
+    lastFailureAt: 0,
+    lastRecoveryAt: 0,
+    lastError: "",
+    lastContext: ""
+};
+let lastRecoveryBlockLogAt = 0;
 const logPath = path.join(__dirname, 'trades.csv');
 let db = null;
 const BALANCE_CACHE_TTL = 15000;
@@ -255,6 +265,61 @@ const retry = async (fn, retries = 3, delay = 1000) => {
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const formatRuntimeTimestamp = (timestamp) => {
+    const value = toFiniteNumber(timestamp, 0);
+    if (!value) return "N/A";
+    return new Date(value).toISOString();
+};
+
+const markExchangeUnhealthy = (error, context = "exchange", options = {}) => {
+    const { requireRecoverySync = true } = options;
+    const errorMessage = String(error?.message || error || "Unknown error");
+    const now = Date.now();
+    exchangeHealth.isHealthy = false;
+    exchangeHealth.lastFailureAt = now;
+    exchangeHealth.lastError = errorMessage;
+    exchangeHealth.lastContext = context;
+    exchangeHealth.consecutiveFailures += 1;
+    if (requireRecoverySync) exchangeHealth.needsRecoverySync = true;
+    console.warn(`[RECOVERY] Exchange degraded during ${context}: ${errorMessage}`);
+};
+
+const markExchangeHealthy = (context = "exchange sync") => {
+    const shouldLogRecovery = !exchangeHealth.isHealthy || exchangeHealth.needsRecoverySync || exchangeHealth.consecutiveFailures > 0;
+    exchangeHealth.isHealthy = true;
+    exchangeHealth.needsRecoverySync = false;
+    exchangeHealth.consecutiveFailures = 0;
+    exchangeHealth.lastRecoveryAt = Date.now();
+    exchangeHealth.lastError = "";
+    exchangeHealth.lastContext = context;
+    if (shouldLogRecovery) {
+        console.log(`[RECOVERY] Exchange healthy again after ${context}. Trading entries resumed.`);
+    }
+};
+
+const getExchangeRecoveryReason = () => {
+    if (exchangeHealth.needsRecoverySync) return "Waiting for successful recovery sync";
+    if (!exchangeHealth.isHealthy) return exchangeHealth.lastError || "Exchange connection is degraded";
+    return "";
+};
+
+const canOpenNewPositions = () => exchangeHealth.isHealthy && !exchangeHealth.needsRecoverySync;
+
+const logExchangeRecoveryBlock = (context = "trading") => {
+    const now = Date.now();
+    if (now - lastRecoveryBlockLogAt < 10000) return;
+    const reason = getExchangeRecoveryReason();
+    console.warn(`[RECOVERY] Pausing ${context}. ${reason || "Exchange recovery is still in progress."}`);
+    lastRecoveryBlockLogAt = now;
+};
+
+const hasRuntimePositionMutationInFlight = () => (
+    isPlacingOrder ||
+    isClosingPosition ||
+    isSyncingPosition ||
+    isMonitoringPnL
+);
 
 const withSqliteBusyRetry = async (fn, { attempts = 5, delayMs = 150 } = {}) => {
     let lastError = null;
@@ -1641,12 +1706,14 @@ const printDetailedStatus = async () => {
         console.warn(`[STATUS] Failed to fetch managed open orders: ${error.message}`);
     }
     const gridSummary = getGridRuntimeSummary(currentPrice, managedOrders);
+    const recoveryReason = getExchangeRecoveryReason();
 
     console.log(`\n[STATUS] Mode=${accountPositionMode.label} | Pair=${db.pair} | Price=${Number.isFinite(currentPrice) ? currentPrice : "N/A"} | LocalActive=${activeEntries.length} | ExchangePos=${openExchangePositions.length}`);
     printStatusLine("Profile", `${gridSummary.presetName.toUpperCase()} | Grid Slot=${gridSummary.slotLabel} | Ladder=${gridSummary.ladderLabel}`);
     printStatusLine("Side Orders", `${gridSummary.ordersMode}=${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} | Size ${gridSummary.sizeMode}=${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT | Min Valid=${gridSummary.minOrderSizeUsdt.toFixed(4)} USDT | Available USDT=${gridSummary.availableUsdtLabel}`);
     printStatusLine("Daily P&L", `${db.dailyPnL.toFixed(2)} USDT | Trades=${db.dailyTrades}`);
     printStatusLine("Runtime", `placing=${isPlacingOrder ? "Y" : "N"} closing=${isClosingPosition ? "Y" : "N"} posSync=${isSyncingPosition ? "Y" : "N"} gridSync=${isSyncingGridOrders ? "Y" : "N"}`);
+    printStatusLine("Exchange", `${exchangeHealth.isHealthy ? "HEALTHY" : "DEGRADED"} | RecoverySync=${exchangeHealth.needsRecoverySync ? "Y" : "N"}${recoveryReason ? ` | ${recoveryReason}` : ""}`);
     printStatusLine("Last trade", `${formatStatusTimestamp(lastTradeAt)} | Daily reset=${formatStatusTimestamp(toFiniteNumber(db.lastDailyReset, Date.now()))}`);
     printStatusLine("Open Orders", `Grid=${managedOrders.grid.length} | TP=${managedOrders.tp.length} | SL=${managedOrders.sl.length}`);
     if (gridSummary.hasLockedGrid) printStatusLine("Locked Grid", `${gridSummary.lockedRangeLabel} | Step=${gridSummary.stepLabel}`);
@@ -1788,6 +1855,10 @@ const didConfigFieldChange = (previousConfig, nextConfig, key) => {
 
 const applyRuntimeConfigChanges = async (previousConfig = null) => {
     if (!db || !previousConfig || typeof previousConfig !== "object") return false;
+    if (hasRuntimePositionMutationInFlight()) {
+        console.log("[CONFIG] Runtime mutation in progress. Deferring config re-apply for active positions.");
+        return false;
+    }
 
     let runtimeChanged = false;
     const shouldResetGridState = Array.from(CONFIG_KEYS_REQUIRING_GRID_REBUILD).some((key) => didConfigFieldChange(previousConfig, db, key));
@@ -1932,8 +2003,12 @@ const runTradingCycle = async () => {
     refreshRuntimeSchedulers();
     const strategy = String(db?.strategy || "futures_grid").toLowerCase();
 
-    if (isPlacingOrder || isClosingPosition) return;
+    if (hasRuntimePositionMutationInFlight()) return;
     await resetDailyStateIfNeeded(Date.now());
+    if (!canOpenNewPositions()) {
+        logExchangeRecoveryBlock(strategy === "futures_grid" ? "grid entries" : "new position entries");
+        return;
+    }
 
     const pauseReason = await getTradingPauseReason();
     if (pauseReason) {
@@ -1976,6 +2051,9 @@ const buildDashboardStatus = () => {
     return {
         botRunning: !isShuttingDown,
         exchangeConnected: Boolean(exchange),
+        exchangeHealthy: exchangeHealth.isHealthy,
+        needsRecoverySync: exchangeHealth.needsRecoverySync,
+        exchangeRecoveryReason: getExchangeRecoveryReason() || null,
         positionMode: accountPositionMode?.label || "UNKNOWN",
         activePositions: Object.keys(activePositionsMap).length,
         activeGridState: Boolean(db?.activeGridState),
@@ -2136,7 +2214,7 @@ const reloadConfigIfChanged = async () => {
 const startConfigAutoReload = () => {
     if (configReloadTimer) return;
     configReloadTimer = setInterval(async () => {
-        if (isShuttingDown || isProcessing || isPlacingOrder || isClosingPosition) return;
+        if (isShuttingDown || isProcessing || hasRuntimePositionMutationInFlight()) return;
         await reloadConfigIfChanged();
     }, CONFIG_AUTO_RELOAD_INTERVAL_MS);
 };
@@ -2229,6 +2307,9 @@ const startWebDashboard = async () => {
             botRunning: !isShuttingDown,
             databaseReady: Boolean(db),
             exchangeReady: Boolean(exchange),
+            exchangeHealthy: exchangeHealth.isHealthy,
+            needsRecoverySync: exchangeHealth.needsRecoverySync,
+            exchangeRecoveryReason: getExchangeRecoveryReason() || null,
             serverTime: Date.now()
         });
     });
@@ -2659,7 +2740,7 @@ const {
 
 // -------------------- SYNC POSITION WITH EXCHANGE --------------------
 const syncPositionWithExchange = async () => {
-    if (isSyncingPosition || isClosingPosition) return;
+    if (isSyncingPosition || isClosingPosition || isPlacingOrder || isMonitoringPnL) return;
     isSyncingPosition = true;
     try {
         if (!db || !exchange) return;
@@ -2717,7 +2798,11 @@ const syncPositionWithExchange = async () => {
             await ensureReduceOnlyTakeProfitOrder(positionKey, syncedPosition);
             await ensureReduceOnlyStopLossOrder(positionKey, syncedPosition);
         }
-    } catch (error) { console.error("[ERROR] Sync position failed:", error.message); }
+        markExchangeHealthy("position sync");
+    } catch (error) {
+        markExchangeUnhealthy(error, "position sync");
+        console.error("[ERROR] Sync position failed:", error.message);
+    }
     finally { isSyncingPosition = false; }
 };
 
@@ -2753,6 +2838,7 @@ const initializeExchange = async () => {
         console.log(`[OK] Exchange connected${timeDifference ? ` (time difference ${timeDifference}ms)` : ""}`);
         return exchange;
     } catch (error) { 
+        markExchangeUnhealthy(error, "exchange initialization");
         console.error("[ERROR] Exchange connection failed:", error.message); 
         throw error; 
     }
@@ -2899,7 +2985,7 @@ const analyzeSignal = async () => {
 
 const syncGridOrders = async () => {
     if (!db || String(db.strategy || "futures_grid").toLowerCase() !== "futures_grid") return;
-    if (isSyncingGridOrders || isPlacingOrder || isClosingPosition) return;
+    if (isSyncingGridOrders || isPlacingOrder || isClosingPosition || isSyncingPosition || isMonitoringPnL) return;
     isSyncingGridOrders = true;
 
     try {
@@ -3205,7 +3291,7 @@ const startPnLMonitoring = () => {
         if (isMonitoringPnL) return;
         isMonitoringPnL = true;
         try {
-            if (!db || !hasAnyActivePosition() || isClosingPosition) return;
+            if (!db || !hasAnyActivePosition() || isClosingPosition || isSyncingPosition || isPlacingOrder) return;
             const currentPrice = await getPrice();
             if (!currentPrice) return;
             let managedOrdersSnapshot = await fetchManagedOpenOrdersSnapshot();
@@ -3310,7 +3396,3 @@ const shutdown = async (signal = "EXIT") => {
         process.exit(1);
     }
 })();
-
-
-
-
