@@ -317,8 +317,7 @@ const logExchangeRecoveryBlock = (context = "trading") => {
 const hasRuntimePositionMutationInFlight = () => (
     isPlacingOrder ||
     isClosingPosition ||
-    isSyncingPosition ||
-    isMonitoringPnL
+    isSyncingPosition
 );
 
 const withSqliteBusyRetry = async (fn, { attempts = 5, delayMs = 150 } = {}) => {
@@ -1855,10 +1854,7 @@ const didConfigFieldChange = (previousConfig, nextConfig, key) => {
 
 const applyRuntimeConfigChanges = async (previousConfig = null) => {
     if (!db || !previousConfig || typeof previousConfig !== "object") return false;
-    if (hasRuntimePositionMutationInFlight()) {
-        console.log("[CONFIG] Runtime mutation in progress. Deferring config re-apply for active positions.");
-        return false;
-    }
+    if (hasRuntimePositionMutationInFlight()) return false;
 
     let runtimeChanged = false;
     const shouldResetGridState = Array.from(CONFIG_KEYS_REQUIRING_GRID_REBUILD).some((key) => didConfigFieldChange(previousConfig, db, key));
@@ -2740,7 +2736,7 @@ const {
 
 // -------------------- SYNC POSITION WITH EXCHANGE --------------------
 const syncPositionWithExchange = async () => {
-    if (isSyncingPosition || isClosingPosition || isPlacingOrder || isMonitoringPnL) return;
+    if (isSyncingPosition || isClosingPosition || isPlacingOrder) return;
     isSyncingPosition = true;
     try {
         if (!db || !exchange) return;
@@ -2780,6 +2776,7 @@ const syncPositionWithExchange = async () => {
                 await ensureReduceOnlyTakeProfitOrder(positionKey, currentPosition);
                 await ensureReduceOnlyStopLossOrder(positionKey, currentPosition);
             }
+            markExchangeHealthy("position sync");
             return;
         }
 
