@@ -2669,8 +2669,14 @@ const syncPositionWithExchange = async () => {
             lastSyncLogAt = now;
         }
         const openPositions = await fetchOpenExchangePositions();
-        const currentPrice = await getPrice();
         const currentPositionsMap = getActivePositionsMap();
+        if (openPositions.length === 0) {
+            if (getPositionMapCount(currentPositionsMap) > 0) {
+                console.warn("[WARN] Exchange returned no open positions, but local active positions still exist. Preserving local state until the next successful confirmation.");
+            }
+            return;
+        }
+        const currentPrice = await getPrice();
         const nextPositionsMap = {};
         openPositions.forEach((openPosition) => {
             const entryPrice = getExchangePositionEntryPrice(openPosition, currentPrice);

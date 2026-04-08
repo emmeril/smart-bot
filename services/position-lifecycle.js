@@ -38,6 +38,22 @@ const createPositionLifecycleHelpers = ({
     getPositionSyncQtyTolerance,
     getOrderFillSnapshot
 }) => {
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const confirmPositionStillMissingOnExchange = async (position, positionKey = null) => {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                const openPositions = await fetchOpenExchangePositions();
+                const matchedPosition = findOpenExchangePosition(openPositions, getDb()?.pair, position);
+                if (matchedPosition) return false;
+            } catch (error) {
+                console.warn(`[WARN] Could not verify exchange position state for ${positionKey || position?.positionSide || getTrackedPositionSideLabel(position)}: ${error.message}`);
+                return false;
+            }
+            if (attempt === 0) await wait(1000);
+        }
+        return true;
+    };
     const shouldCancelGridOrdersForPositionCleanup = () => {
         if (!isHedgeModeEnabled()) return true;
         const activeEntries = typeof getActivePositionEntries === "function" ? getActivePositionEntries() : [];
@@ -165,7 +181,12 @@ const createPositionLifecycleHelpers = ({
 
             const currentPos = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
             if (!currentPos) {
-                console.log("[INFO] No matching open position on exchange. Removing local active position.");
+                const stillMissing = await confirmPositionStillMissingOnExchange(position, positionKey);
+                if (!stillMissing) {
+                    console.log("[INFO] Position was not confirmed missing. Keeping local active position for the next sync.");
+                    return;
+                }
+                console.log("[INFO] No matching open position on exchange after recheck. Removing local active position.");
                 await clearMissingPositionState(position, "POSITION_MISSING", positionKey);
                 return;
             }
@@ -224,7 +245,12 @@ const createPositionLifecycleHelpers = ({
                     console.warn("[WARN] Reduce-only order rejected. Syncing position with exchange...");
                     const openPosition = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
                     if (!openPosition) {
-                        console.log("[INFO] No matching open position on exchange. Removing local active position.");
+                        const stillMissing = await confirmPositionStillMissingOnExchange(position, positionKey);
+                        if (!stillMissing) {
+                            console.log("[INFO] Position was not confirmed missing after reduce-only rejection. Keeping local active position for retry.");
+                            return;
+                        }
+                        console.log("[INFO] No matching open position on exchange after recheck. Removing local active position.");
                         await clearMissingPositionState(position, "POSITION_MISSING", positionKey);
                         return;
                     }
