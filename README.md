@@ -215,6 +215,62 @@ Bot juga memakai filter tambahan seperti:
 
 Berikut parameter yang paling sering dipakai:
 
+Contoh set konfigurasi dasar yang cukup aman untuk mulai uji kecil:
+
+```text
+pair=BTC/USDT:USDT
+marginMode=isolated
+leverage=10
+gridOrderSizeUsdt=5
+gridLevels=8
+gridLookbackCandles=120
+gridRangePercent=3.5
+gridEntryBufferPercent=0.15
+gridTakeProfitLevels=0
+gridOrdersPerSide=2
+gridStopLossLevels=0
+gridTimeframe=5m
+dailyProfitTargetUsdt=3
+dailyMaxLossPercent=5
+maxTradesPerDay=10
+sessionStartUTC=0
+sessionEndUTC=23
+trailingEnabled=true
+trailingActivateATR=1.2
+trailingOffsetATR=0.6
+allowLong=true
+allowShort=true
+```
+
+Parameter berikut memang valid jika di-set `0`:
+
+- `gridOrderSizeUsdt=0`: bot memakai mode ukuran order otomatis atau `FULL_AUTO`, lalu menghitung size efektif dari balance, leverage, dan minimum order exchange
+- `gridTakeProfitLevels=0`: take profit memakai mode otomatis ke grid berikutnya
+- `gridOrdersPerSide=0`: jumlah ladder order per sisi dihitung otomatis sesuai balance dan jumlah level grid
+- `gridStopLossLevels=0`: stop loss grid memakai mode otomatis berbasis range atau ATR, bukan fixed step manual
+- `coolingPeriod=0`: tidak ada jeda cooldown setelah trade
+- `sessionStartUTC=0`: sesi mulai dari jam 00:00 UTC
+- `sessionEndUTC=0`: sesi berakhir di jam 00:00 UTC; jika dipasangkan dengan `sessionStartUTC=0`, sesi efektif hanya melewati jam 00 UTC, jadi ini bukan mode "24 jam"
+
+Contoh penggunaan nilai `0`:
+
+```text
+gridOrderSizeUsdt=0
+gridTakeProfitLevels=0
+gridOrdersPerSide=0
+gridStopLossLevels=0
+coolingPeriod=0
+sessionStartUTC=0
+sessionEndUTC=23
+```
+
+Catatan penting:
+
+- `0` pada `gridOrderSizeUsdt`, `gridTakeProfitLevels`, `gridOrdersPerSide`, dan `gridStopLossLevels` berarti mode otomatis
+- `0` pada `coolingPeriod` berarti nonaktif
+- `0` pada `sessionStartUTC` atau `sessionEndUTC` hanyalah nilai jam UTC, bukan berarti filter sesi dimatikan
+- parameter seperti `dailyProfitTargetUsdt`, `dailyMaxLossPercent`, `maxTradesPerDay`, `gridTargetProfitUsdt`, `gridStopLossPercent`, `gridLevels`, dan `gridRangePercent` tidak didesain untuk `0`
+
 ### General
 
 - `strategy`: strategi aktif, saat ini `futures_grid`
@@ -223,6 +279,19 @@ Berikut parameter yang paling sering dipakai:
 - `leverage`: leverage futures
 - `monitoringInterval`: jeda monitor runtime dalam milidetik
 - `coolingPeriod`: jeda setelah trade sebelum evaluasi berikutnya
+
+Example:
+
+```text
+strategy=futures_grid
+pair=BTC/USDT:USDT
+marginMode=isolated
+leverage=10
+monitoringInterval=500
+coolingPeriod=3000
+```
+
+Contoh ini cocok untuk setup awal yang masih responsif, tapi belum terlalu agresif.
 
 ### Risk
 
@@ -235,6 +304,21 @@ Berikut parameter yang paling sering dipakai:
 - `autoTargetProfitEnabled`: aktifkan TP otomatis berbasis ATR
 - `autoStopLossEnabled`: aktifkan SL otomatis berbasis ATR
 
+Example:
+
+```text
+gridOrderSizeUsdt=5
+gridTargetProfitUsdt=0.5
+gridStopLossPercent=4
+dailyProfitTargetUsdt=3
+dailyMaxLossPercent=5
+maxTradesPerDay=10
+autoTargetProfitEnabled=true
+autoStopLossEnabled=true
+```
+
+Contoh ini berarti setiap order grid memakai ukuran `5 USDT`, bot berhenti sementara jika profit harian sudah `3 USDT`, dan juga berhenti jika batas rugi harian tercapai.
+
 ### Grid
 
 - `gridLevels`: jumlah level grid
@@ -246,6 +330,27 @@ Berikut parameter yang paling sering dipakai:
 - `gridStopLossLevels`: offset SL dalam langkah grid
 - `gridTimeframe`: timeframe candle grid
 
+Example:
+
+```text
+gridLevels=8
+gridLookbackCandles=120
+gridRangePercent=3.5
+gridEntryBufferPercent=0.15
+gridTakeProfitLevels=0
+gridOrdersPerSide=2
+gridStopLossLevels=0
+gridTimeframe=5m
+```
+
+Arti contoh:
+
+- `gridLevels=8` membagi range menjadi 8 level
+- `gridLookbackCandles=120` memakai 120 candle terakhir untuk membentuk range
+- `gridRangePercent=3.5` memberi lebar grid sekitar 3.5%
+- `gridTakeProfitLevels=0` membiarkan runtime memakai mode TP otomatis ke grid berikutnya
+- `gridStopLossLevels=0` membiarkan runtime menghitung SL otomatis
+
 ### Session dan Filter
 
 - `sessionStartUTC`: jam mulai trading
@@ -254,16 +359,47 @@ Berikut parameter yang paling sering dipakai:
 - `minVolumeRatio`: rasio volume minimum
 - `atrPeriod`: periode ATR
 
+Example:
+
+```text
+sessionStartUTC=0
+sessionEndUTC=23
+volumePeriod=20
+minVolumeRatio=1.3
+atrPeriod=14
+```
+
+Contoh ini berarti bot aktif sepanjang hari UTC, memakai volume 20 candle sebagai pembanding, dan ATR 14 untuk perhitungan volatilitas.
+
 ### Trailing
 
 - `trailingEnabled`: aktif atau nonaktif
 - `trailingActivateATR`: ATR multiplier untuk mulai trailing
 - `trailingOffsetATR`: ATR offset trailing stop
 
+Example:
+
+```text
+trailingEnabled=true
+trailingActivateATR=1.2
+trailingOffsetATR=0.6
+```
+
+Contoh ini berarti trailing stop baru aktif setelah harga bergerak sejauh `1.2x ATR`, lalu stop mengikuti dengan jarak `0.6x ATR`.
+
 ### Direction
 
 - `allowLong`: izinkan entry long
 - `allowShort`: izinkan entry short
+
+Example:
+
+```text
+allowLong=true
+allowShort=false
+```
+
+Contoh ini cocok jika kamu hanya ingin bot mencari peluang `LONG` dan menonaktifkan entry `SHORT`.
 
 ## Penyimpanan Data
 
