@@ -1,173 +1,324 @@
-# Binance-Style Futures Grid Bot
+# Smart Bot Futures Grid
 
-Bot trading otomatis Binance Futures berbasis Node.js dan `ccxt` dengan gaya kerja yang lebih mirip bot bawaan Binance, terutama mode Futures Grid yang netral dan adaptif.
+Bot trading otomatis berbasis Node.js untuk Binance USDT-M Futures dengan strategi utama `futures_grid`. Proyek ini menggabungkan engine trading, sinkronisasi posisi exchange, penyimpanan konfigurasi di SQLite, dan dashboard web untuk memantau status bot serta mengubah parameter runtime tanpa perlu restart proses.
 
-## Strategi
+## Ringkasan
 
-Bot sekarang memakai pendekatan `Binance-style Futures Grid`:
+Bot ini dirancang untuk gaya trading grid yang adaptif:
 
-- Membentuk range harga dari candle recent sesuai `gridLookbackCandles` pada `gridTimeframe`
-- Membagi range menjadi beberapa level grid sesuai `gridLevels`
-- `LONG` saat harga turun ke area grid bawah untuk entry mean reversion
-- `SHORT` saat harga naik ke area grid atas untuk entry mean reversion
-- Take profit diarahkan ke level grid berikutnya
-- Bot memasang beberapa order `limit` buy dan sell sekaligus seperti ladder grid
-- Stop loss dipasang beberapa langkah di luar level entry
+- range grid dihitung dari candle historis sesuai timeframe aktif
+- bot membuat ladder order `buy` dan `sell` di sekitar harga berjalan
+- target profit dan stop loss bisa mengikuti level grid atau menyesuaikan ATR
+- posisi dan order aktif di exchange disinkronkan kembali saat bot restart
+- konfigurasi disimpan di database SQLite dan dapat diubah dari dashboard
 
-Manajemen risiko inti tetap memakai engine posisi yang sudah ada: sinkronisasi posisi exchange, recovery state, dan monitoring real-time.
+Strategi yang tersedia saat ini adalah `futures_grid`.
 
 ## Fitur Utama
 
-- Analisis level grid otomatis `LONG` dan `SHORT`
-- Ladder order `limit` buy/sell yang dibangun ulang otomatis
-- Take profit dan stop loss berbasis level grid
-- Sinkronisasi posisi aktif dengan exchange
-- Recovery state setelah restart
-- Konfigurasi tersimpan di SQLite
-- Logging transaksi ke CSV
+- Grid futures berbasis level harga dari candle terbaru
+- Support `LONG` dan `SHORT`
+- Support `isolated` dan `cross` margin
+- Deteksi mode akun Binance Futures untuk menyesuaikan perilaku order
+- Recovery state posisi aktif setelah restart
+- Auto reload konfigurasi runtime dari database
+- Dashboard web dengan login sesi
+- Logging trade ke file CSV
+- Perintah runtime dari terminal seperti `status`, `sync`, dan `help`
 
 ## Struktur Proyek
 
 ```text
 .
 |-- index.js
-|-- backtest.js
-|-- scripts/
-|   `-- config.js
+|-- package.json
+|-- .env.example
 |-- database.sqlite
 |-- trades.csv
-|-- .env
-`-- package.json
+|-- log.csv
+|-- config/
+|-- db/
+|-- public/
+|   |-- index.html
+|   `-- login.html
+`-- services/
+    |-- config-model.js
+    |-- config-persistence.js
+    |-- config-runtime.js
+    |-- dashboard-config.js
+    |-- dashboard-session.js
+    |-- dashboard-status.js
+    |-- database-config.js
+    |-- exchange-position.js
+    |-- grid-runtime.js
+    |-- managed-orders.js
+    |-- order-execution.js
+    |-- position-lifecycle.js
+    |-- position-state.js
+    |-- runtime-scheduler.js
+    |-- runtime-utils.js
+    |-- trade-entry.js
+    `-- trade-logic.js
 ```
 
+## Kebutuhan
+
+- Node.js 18 atau lebih baru
+- Akun Binance Futures USDT-M
+- API key Binance yang punya izin trading futures
+
+Saran keamanan:
+
+- jangan aktifkan izin withdraw pada API key
+- mulai dari ukuran kecil atau akun uji terlebih dulu
+- pastikan pahami risiko leverage dan futures sebelum bot dijalankan live
+
 ## Instalasi
+
+Install dependency:
 
 ```bash
 npm install
 ```
 
-Buat file `.env`:
+Buat file `.env` dari `.env.example`, lalu isi minimal:
 
 ```env
-API_KEY=your_api_key_here
-API_SECRET=your_api_secret_here
+API_KEY=binance_api_key
+API_SECRET=binance_api_secret
+ADMIN_PHONE=
+DASHBOARD_PORT=3000
+DASHBOARD_USERNAME=admin
+DASHBOARD_PASSWORD=ganti-password-aman
+DASHBOARD_SESSION_SECRET=ganti-random-string-panjang
+CONFIG_AUTO_RELOAD_INTERVAL_MS=5000
 ```
 
+Keterangan env:
+
+- `API_KEY`: API key Binance
+- `API_SECRET`: API secret Binance
+- `ADMIN_PHONE`: sudah disediakan di template env, tetapi bukan bagian utama alur README ini
+- `DASHBOARD_PORT`: port dashboard web
+- `DASHBOARD_USERNAME`: username login dashboard
+- `DASHBOARD_PASSWORD`: password login dashboard
+- `DASHBOARD_SESSION_SECRET`: secret untuk cookie sesi dashboard
+- `CONFIG_AUTO_RELOAD_INTERVAL_MS`: interval pembacaan ulang konfigurasi dari database
+
+Jika kredensial dashboard tidak diisi, aplikasi memakai default lokal:
+
+- username `admin`
+- password `admin123`
+
+Default ini sebaiknya hanya dipakai untuk pengujian lokal.
+
 ## Menjalankan Bot
+
+Jalankan:
 
 ```bash
 node index.js
 ```
 
-Saat bot berjalan, kamu bisa ketik `status` di terminal untuk melihat posisi aktif serta order grid, TP, dan SL yang masih terbuka di exchange.
+Saat proses aktif:
 
-Dashboard web akan ikut aktif di port `3000` secara default. Buka:
+- engine trading berjalan dari `index.js`
+- dashboard web aktif di `http://localhost:3000` atau sesuai `DASHBOARD_PORT`
+- konfigurasi runtime dibaca dari SQLite
+- bot akan mencoba sinkronisasi posisi dan order aktif dari exchange
+
+## Perintah Runtime di Terminal
+
+Ketika bot sedang berjalan, beberapa perintah berikut bisa diketik langsung di terminal proses:
+
+```text
+status
+sync
+help
+```
+
+Penjelasan singkat:
+
+- `status`: menampilkan ringkasan runtime, posisi aktif, grid state, dan order terbuka
+- `sync`: memaksa sinkronisasi ulang state lokal dengan exchange
+- `help`: menampilkan daftar command runtime yang tersedia
+
+## Dashboard Web
+
+Dashboard tersedia setelah aplikasi berjalan.
+
+URL default:
 
 ```text
 http://localhost:3000
 ```
 
-Jika perlu, port bisa diganti lewat env `DASHBOARD_PORT`.
-Dashboard sekarang juga dilindungi login. Set kredensial lewat:
+Fungsi dashboard:
 
-```env
-DASHBOARD_USERNAME=admin
-DASHBOARD_PASSWORD=change-me-now
-DASHBOARD_SESSION_SECRET=change-this-to-a-long-random-string
-```
+- login dengan sesi berbasis cookie
+- melihat status bot secara live
+- melihat ringkasan posisi, daily PnL, dan order aktif
+- mengubah konfigurasi yang disimpan ke SQLite
+- menerapkan perubahan ke runtime tanpa restart proses
 
-Kalau env belum diisi, default lokal yang dipakai adalah `admin` / `admin123`.
-Bot juga melakukan auto reload konfigurasi dari SQLite setiap beberapa detik tanpa restart proses. Intervalnya bisa diatur lewat `CONFIG_AUTO_RELOAD_INTERVAL_MS`.
-
-## Konfigurasi
-
-Konfigurasi runtime disimpan di `database.sqlite` dan dapat dikelola lewat helper:
-
-```bash
-node scripts/config.js show
-node scripts/config.js get leverage
-node scripts/config.js set leverage 20
-node scripts/config.js set pair BTC/USDT:USDT
-node scripts/config.js set marginMode cross
-node scripts/config.js set marginMode isolated
-```
-
-Default strategi yang dipakai:
-
-- `strategy`: `futures_grid`
-- `gridOrderSizeUsdt`: `1.5`
-- `gridLevels`: `8`
-- `gridLookbackCandles`: `120`
-- `gridRangePercent`: `3.5`
-- `gridTakeProfitLevels`: `1`
-- `gridOrdersPerSide`: `1`
-- `gridStopLossLevels`: `1.2`
-- `gridTimeframe`: `5m`
-- `marginMode`: `isolated`
-- `dailyProfitTargetUsdt`: `1`
-- `dailyMaxLossPercent`: `10`
-
-Contoh pengaturan cepat:
-
-```bash
-node scripts/config.js set gridLevels 10
-node scripts/config.js set gridOrdersPerSide 4
-node scripts/config.js set gridRangePercent 4.5
-node scripts/config.js set gridLookbackCandles 150
-node scripts/config.js set dailyProfitTargetUsdt 3
-node scripts/config.js set marginMode cross
-```
-
-`marginMode` hanya menerima `cross` atau `isolated`.
-
-## Dashboard Web
-
-Dashboard menyediakan edit cepat untuk:
+Beberapa field penting yang bisa diatur dari dashboard:
 
 - `pair`
-- `strategy`
 - `marginMode`
 - `leverage`
-- parameter grid
-- parameter risiko harian
-- trailing stop
-- filter sesi
+- `monitoringInterval`
+- `coolingPeriod`
+- `gridOrderSizeUsdt`
+- `gridTargetProfitUsdt`
+- `gridStopLossPercent`
+- `dailyProfitTargetUsdt`
+- `dailyMaxLossPercent`
+- `maxTradesPerDay`
+- `gridLevels`
+- `gridLookbackCandles`
+- `gridRangePercent`
+- `gridEntryBufferPercent`
+- `gridTakeProfitLevels`
+- `gridOrdersPerSide`
+- `gridStopLossLevels`
+- `gridTimeframe`
+- `sessionStartUTC`
+- `sessionEndUTC`
+- `volumePeriod`
+- `atrPeriod`
+- `trailingEnabled`
+- `trailingActivateATR`
+- `trailingOffsetATR`
+- `allowLong`
+- `allowShort`
 
-Perubahan dari dashboard langsung disimpan ke SQLite dan di-reload ke runtime bot.
-Login dashboard memakai cookie sesi yang ditandatangani dan akan kedaluwarsa otomatis setelah beberapa jam.
-Panel live di dashboard menampilkan posisi aktif, PnL harian, dan order terbuka secara otomatis dari runtime bot.
+## Cara Kerja Strategi Grid
 
-## Logging
+Secara umum strategi `futures_grid` di proyek ini bekerja seperti berikut:
 
-Riwayat transaksi disimpan di `trades.csv`.
+1. Bot mengambil candle sesuai `gridTimeframe`.
+2. Bot menghitung range grid dari data lookback dan parameter range.
+3. Range dibagi menjadi beberapa level sesuai `gridLevels`.
+4. Bot menyiapkan ladder order di bawah dan di atas harga sekarang.
+5. Saat order tereksekusi, bot menyiapkan target profit dan stop loss berdasarkan aturan grid atau ATR.
+6. Runtime terus memonitor posisi, trailing stop, order terbuka, batas harian, dan sesi trading.
 
-Contoh kolom:
+Bot juga memakai filter tambahan seperti:
+
+- filter jam trading berbasis UTC
+- filter volume minimum
+- batas profit harian
+- batas loss harian
+- batas jumlah trade per hari
+
+## Konfigurasi Penting
+
+Berikut parameter yang paling sering dipakai:
+
+### General
+
+- `strategy`: strategi aktif, saat ini `futures_grid`
+- `pair`: simbol futures, contoh `DOGE/USDT:USDT`
+- `marginMode`: `isolated` atau `cross`
+- `leverage`: leverage futures
+- `monitoringInterval`: jeda monitor runtime dalam milidetik
+- `coolingPeriod`: jeda setelah trade sebelum evaluasi berikutnya
+
+### Risk
+
+- `gridOrderSizeUsdt`: nominal per order grid dalam USDT
+- `gridTargetProfitUsdt`: target profit nominal
+- `gridStopLossPercent`: stop loss persentase
+- `dailyProfitTargetUsdt`: target profit harian sebelum pause
+- `dailyMaxLossPercent`: batas rugi harian sebelum pause
+- `maxTradesPerDay`: batas jumlah trade harian
+- `autoTargetProfitEnabled`: aktifkan TP otomatis berbasis ATR
+- `autoStopLossEnabled`: aktifkan SL otomatis berbasis ATR
+
+### Grid
+
+- `gridLevels`: jumlah level grid
+- `gridLookbackCandles`: jumlah candle untuk membangun range
+- `gridRangePercent`: lebar range grid
+- `gridEntryBufferPercent`: buffer harga untuk entry
+- `gridTakeProfitLevels`: offset TP dalam jumlah level grid
+- `gridOrdersPerSide`: jumlah ladder order per sisi
+- `gridStopLossLevels`: offset SL dalam langkah grid
+- `gridTimeframe`: timeframe candle grid
+
+### Session dan Filter
+
+- `sessionStartUTC`: jam mulai trading
+- `sessionEndUTC`: jam akhir trading
+- `volumePeriod`: periode perhitungan volume
+- `minVolumeRatio`: rasio volume minimum
+- `atrPeriod`: periode ATR
+
+### Trailing
+
+- `trailingEnabled`: aktif atau nonaktif
+- `trailingActivateATR`: ATR multiplier untuk mulai trailing
+- `trailingOffsetATR`: ATR offset trailing stop
+
+### Direction
+
+- `allowLong`: izinkan entry long
+- `allowShort`: izinkan entry short
+
+## Penyimpanan Data
+
+Project ini memakai SQLite sebagai penyimpanan lokal.
+
+File penting:
+
+- `database.sqlite`: menyimpan konfigurasi dan state runtime
+- `trades.csv`: log transaksi
+- `log.csv`: file log tambahan yang sudah ada di repo
+
+Trade log di `trades.csv` berisi kolom seperti:
 
 ```text
 timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy
 ```
 
-## Backtest
+## Sinkronisasi dan Recovery
+
+Salah satu bagian penting bot ini adalah sinkronisasi state lokal dengan exchange. Saat proses dijalankan ulang, bot akan berusaha:
+
+- membaca posisi futures yang masih aktif
+- memetakan order grid, take profit, dan stop loss yang masih terbuka
+- memulihkan state lokal agar tidak membuka posisi ganda secara tidak sengaja
+
+Ini penting untuk menjaga runtime tetap konsisten setelah crash, restart server, atau restart manual.
+
+## Catatan Operasional
+
+- Bot ini ditujukan untuk Binance Futures USDT-M.
+- Pair futures harus sesuai format exchange yang didukung `ccxt`, misalnya `DOGE/USDT:USDT`.
+- Timezone filter sesi memakai UTC, bukan WIB.
+- Perubahan config dari dashboard tidak mengharuskan restart jika proses auto reload aktif.
+- `gridOrderSizeUsdt` atau `gridOrdersPerSide` bernilai `0` dapat dipakai runtime untuk menghitung nilai efektif secara adaptif pada kondisi tertentu.
+
+## Pengembangan
+
+Jika ingin mengembangkan proyek ini:
 
 ```bash
-npm run backtest
+npm install
+node index.js
 ```
 
-Script lain yang tersedia:
+Lalu buka dashboard dan ubah parameter sambil memonitor output terminal.
 
-- `npm run backtest:grid`
-- `npm run backtest:approve`
-- `npm run backtest:auto`
-- `npm run backtest:risk`
-- `npm run backtest:sensitivity`
+Dependency utama:
 
-## Catatan
+- `ccxt`
+- `dotenv`
+- `express`
+- `sequelize`
+- `sqlite3`
+- `technicalindicators`
 
-- Gunakan Binance Futures USDT-M.
-- Sangat disarankan uji dulu di akun testnet atau akun kecil.
-- Jangan aktifkan izin withdraw pada API key.
-- Bot sekarang mendeteksi mode akun Binance Futures saat startup dan menyesuaikan parameter order untuk One-way atau Hedge Mode.
-- Saat ada posisi aktif, ladder grid tetap dijaga agar perilakunya lebih dekat ke bot grid Binance. Pada One-way Mode, order ladder disaring mengikuti sisi posisi aktif untuk menghindari reversal yang tidak disengaja.
-- Pada Hedge Mode, bot mengirim `positionSide` sesuai dokumentasi Binance dan dapat menyimpan dua leg aktif lokal sekaligus: `LONG` dan `SHORT`.
-- Pada One-way Mode, bot memakai perilaku single-position dengan `positionSide=BOTH` dan `reduceOnly` untuk penutupan posisi.
+## Disclaimer
 
+Software ini berisiko tinggi jika dipakai pada akun real. Semua keputusan trading, kerugian, dan konsekuensi penggunaan sepenuhnya menjadi tanggung jawab pengguna. Lakukan pengujian bertahap dan pahami seluruh parameter sebelum dipakai untuk trading live.
