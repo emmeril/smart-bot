@@ -1666,6 +1666,10 @@ const setMarginMode = async () => {
             return false;
         }
         const managedOrders = await fetchManagedOpenOrdersSnapshot();
+        if (managedOrders.triggerOrdersFetchFailed) {
+            console.log(`[INFO] Skipping margin mode update because trigger open orders could not be verified on ${db.pair}.`);
+            return false;
+        }
         const openOrderCount = managedOrders.grid.length + managedOrders.tp.length + managedOrders.sl.length;
         if (openOrderCount > 0) {
             console.log(`[INFO] Skipping margin mode update while ${openOrderCount} open managed order(s) exist on ${db.pair}.`);
@@ -1699,6 +1703,10 @@ const setLeverage = async () => {
         }
 
         const managedOrders = await fetchManagedOpenOrdersSnapshot();
+        if (managedOrders.triggerOrdersFetchFailed) {
+            console.log(`[INFO] Skipping leverage update because trigger open orders could not be verified on ${symbol}.`);
+            return false;
+        }
         const openOrderCount = managedOrders.grid.length + managedOrders.tp.length + managedOrders.sl.length;
         if (openOrderCount > 0) {
             console.log(`[INFO] Skipping leverage update while ${openOrderCount} open managed order(s) exist on ${symbol}.`);

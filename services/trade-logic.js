@@ -123,6 +123,11 @@ const createTradeLogicHelpers = ({
 
     const buildOrderPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides, explicitTargets = {}) => {
         const db = getDb();
+        const numericQty = Math.abs(toFiniteNumber(adjustedQty, 0));
+        const leverage = Math.max(1, toFiniteNumber(db.leverage, 1));
+        const positionMarginUsdt = Number.isFinite(entryPrice) && entryPrice > 0 && numericQty > 0
+            ? (numericQty * entryPrice) / leverage
+            : Math.max(0, toFiniteNumber(db.gridOrderSizeUsdt, 0));
         const trailingActivateATR = toFiniteNumber(riskOverrides.trailingActivateATR, db.trailingActivateATR);
         const trailingOffsetATR = toFiniteNumber(riskOverrides.trailingOffsetATR, db.trailingOffsetATR);
         const explicitTargetPrice = toFiniteNumber(explicitTargets.targetPrice, null);
@@ -132,7 +137,7 @@ const createTradeLogicHelpers = ({
         let targetProfitMode = "STATIC";
         let stopLossPercent = db.gridStopLossPercent;
         let stopLossMode = "STATIC";
-        let stopLossUSDT = -db.gridOrderSizeUsdt * (stopLossPercent / 100);
+        let stopLossUSDT = -positionMarginUsdt * (stopLossPercent / 100);
         let targetPrice;
         let stopLossPrice;
 
@@ -156,7 +161,7 @@ const createTradeLogicHelpers = ({
             const resolvedStopLoss = resolveStopLossPercent(signalATR, entryPrice);
             stopLossPercent = resolvedStopLoss.stopLossPercent;
             stopLossMode = resolvedStopLoss.stopLossMode;
-            stopLossUSDT = -db.gridOrderSizeUsdt * (stopLossPercent / 100);
+            stopLossUSDT = -positionMarginUsdt * (stopLossPercent / 100);
             const rawStopLossPrice = buildDirectionalStopLossPrice(side, entryPrice, stopLossUSDT, adjustedQty);
             stopLossPrice = resolveRoundedPlanPrice(db.pair, rawStopLossPrice);
             stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
@@ -482,7 +487,6 @@ const createTradeLogicHelpers = ({
 };
 
 module.exports = { createTradeLogicHelpers };
-
 
 
 

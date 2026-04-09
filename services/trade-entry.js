@@ -140,6 +140,8 @@ const createTradeEntryHelpers = ({
                 } catch (closeError) {
                     console.error(`[ERROR] Failed to immediately close invalid ${side.toUpperCase()} position: ${closeError.message}`);
                 }
+                await syncPositionWithExchange();
+                return;
             }
             if (!actualPlanValid) {
                 console.warn(`[WARN] Actual fill produced an invalid directional TP/SL plan for ${side.toUpperCase()} order. Falling back to the pre-fill plan.`);

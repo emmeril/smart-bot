@@ -103,12 +103,13 @@ const createManagedOrdersHelpers = ({
 
     const fetchManagedOpenOrdersSnapshot = async () => {
         const currentDb = getDb();
-        const { regularOrders, triggerOrders } = await fetchOpenOrdersSnapshot(currentDb.pair);
+        const { regularOrders, triggerOrders, triggerOrdersFetchFailed } = await fetchOpenOrdersSnapshot(currentDb.pair);
         const managedOrders = [...regularOrders, ...triggerOrders].filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(currentDb.pair));
         return {
             grid: managedOrders.filter(isGridEntryOrder),
             tp: managedOrders.filter(isTpReduceOnlyOrder),
-            sl: managedOrders.filter(isSlReduceOnlyOrder)
+            sl: managedOrders.filter(isSlReduceOnlyOrder),
+            triggerOrdersFetchFailed
         };
     };
 
@@ -239,4 +240,3 @@ const createManagedOrdersHelpers = ({
 };
 
 module.exports = { createManagedOrdersHelpers };
-

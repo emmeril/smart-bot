@@ -446,6 +446,33 @@ node index.js
 
 Lalu buka dashboard dan ubah parameter sambil memonitor output terminal.
 
+## Testing
+
+Project ini sekarang punya smoke test ringan berbasis `node:test` untuk menjaga area runtime yang paling sensitif.
+
+Jalankan:
+
+```bash
+npm test
+```
+
+Jika PowerShell lokal memblokir `npm.ps1`, gunakan:
+
+```bash
+npm.cmd test
+```
+
+Smoke test saat ini mencakup:
+
+- propagasi flag kegagalan fetch trigger order pada managed orders
+- perhitungan TP/SL plan saat auto size aktif
+- jalur emergency close ketika plan setelah fill tidak valid
+- sinkronisasi posisi hasil recovery dari exchange
+- partial close dan pemasangan ulang TP/SL
+- filter ladder grid untuk `one-way` dan `hedge`
+
+Test yang ada memang belum menggantikan integration test penuh dengan exchange, tetapi cukup berguna untuk menangkap regresi logika runtime sebelum bot dijalankan live.
+
 Dependency utama:
 
 - `ccxt`
