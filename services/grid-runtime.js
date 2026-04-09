@@ -507,9 +507,10 @@ const createGridRuntimeHelpers = ({
         if (!config || typeof config !== "object") return { config, changed: false, presetName: null };
         const strategy = String(config.strategy || "").toLowerCase();
         if (strategy && strategy !== "futures_grid") return { config, changed: false, presetName: null };
+        const presets = autoPairGridPresets && typeof autoPairGridPresets === "object" ? autoPairGridPresets : {};
 
         const presetName = resolveAutoPairPresetName(config.pair);
-        const preset = autoPairGridPresets[presetName];
+        const preset = presets[presetName];
         if (!preset) return { config, changed: false, presetName: null };
 
         const gridKeys = Object.keys(preset);

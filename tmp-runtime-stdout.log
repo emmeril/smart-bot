@@ -1,0 +1,37 @@
+[OK] Database synced
+[OK] DB initialized successfully
+[WEB] Dashboard available at http://localhost:3000
+[OK] Exchange connected
+[OK] Position mode detected: ONE_WAY
+[INFO] Skipping margin mode update while 1 position(s) are open on DOGE/USDT:USDT.
+[INFO] Skipping leverage update while 1 position(s) are open on DOGE/USDT:USDT.
+[SYNC] Checking positions for DOGE/USDT:USDT...
+[RECOVERY] Exchange healthy again after position sync. Trading entries resumed.
+[MONITOR] Real-time P&L monitoring interval: 500ms
+[SYNC] Position sync interval: 5000ms
+
+======================================================================
+BINANCE-STYLE FUTURES GRID BOT
+======================================================================
+Balance: $21.27
+Pair: DOGE/USDT:USDT
+Strategy: FUTURES_GRID on 5m
+Preset Profile: DOGE
+Position Mode: ONE_WAY
+Grid: 12 levels | lookback 180 candles | range 5.5%
+Grid TP/SL: AUTO_NEXT_GRID / AUTO_RANGE | mode FULL_AUTO 4/11 order(s) per side
+Grid Order Size: mode FULL_AUTO 0.6350 USDT
+Min Valid Order Size: 0.6350 USDT
+Available USDT: 5.80
+Locked Grid Range: 0.088306 - 0.098584
+Grid Step: 0.000857
+Volume filter: 1.05x over 20 periods
+Session: 0-23 UTC
+Trailing ATR: 1.3/0.7x
+Leverage: 8x
+Margin Mode: ISOLATED
+Daily target: $1 (max 20 trades)
+======================================================================
+
+
+[PNL] -0.7571 USDT (-4.68%)
