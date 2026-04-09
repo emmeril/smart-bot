@@ -6,7 +6,6 @@ const createGridRuntimeHelpers = ({
     getSaveDB,
     defaultConfig,
     validMarginModes,
-    saveDB,
     normalizeConfig,
     normalizeSymbol,
     toFiniteNumber,

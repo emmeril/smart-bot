@@ -1235,6 +1235,7 @@ const {
     toFiniteNumber,
     defaultConfig: DEFAULT_CONFIG,
     dashboardEditableFields: DASHBOARD_EDITABLE_FIELDS,
+    getExchangeClientOrderId,
     getPrice: async (...args) => getPrice(...args),
     fetchOpenExchangePositions: async (...args) => fetchOpenExchangePositions(...args),
     fetchManagedOpenOrdersSnapshot: async (...args) => fetchManagedOpenOrdersSnapshot(...args),

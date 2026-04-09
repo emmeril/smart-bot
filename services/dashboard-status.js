@@ -11,6 +11,7 @@ const createDashboardStatusHelpers = ({
     toFiniteNumber,
     defaultConfig,
     dashboardEditableFields,
+    getExchangeClientOrderId,
     getPrice,
     fetchOpenExchangePositions,
     fetchManagedOpenOrdersSnapshot,
@@ -42,7 +43,7 @@ const createDashboardStatusHelpers = ({
 
     const mapManagedOrder = (order) => ({
         id: order.id ?? null,
-        clientOrderId: order.clientOrderId ?? null,
+        clientOrderId: getExchangeClientOrderId(order) || null,
         side: order.side ?? null,
         positionSide: order.positionSide ?? null,
         type: order.type ?? null,
