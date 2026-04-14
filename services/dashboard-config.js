@@ -44,6 +44,7 @@ const createDashboardConfigHelpers = ({
         const payload = pickEditableConfig(incoming);
         const merged = { ...current, ...payload };
         const protectedRuntimeValues = new Map();
+        const pairChanged = Object.prototype.hasOwnProperty.call(payload, "pair") && payload.pair !== current.pair;
 
         if (hasAnyActivePosition()) {
             for (const key of protectedKeys) {
@@ -53,16 +54,21 @@ const createDashboardConfigHelpers = ({
             }
         }
 
-        const { config: nextConfig } = applyAutoPresetToConfig(merged);
+        const { config: presetAdjustedConfig } = applyAutoPresetToConfig(merged, { forcePresetFields: pairChanged });
+        const nextConfig = { ...presetAdjustedConfig };
+        for (const [key, value] of Object.entries(payload)) {
+            if (editableKeys.has(key)) nextConfig[key] = value;
+        }
+        const { config: finalizedConfig } = applyAutoPresetToConfig(nextConfig);
         if (protectedRuntimeValues.size > 0) {
             for (const [key, value] of protectedRuntimeValues.entries()) {
-                nextConfig[key] = value;
+                finalizedConfig[key] = value;
             }
         }
-        applyDashboardRuntimeState(nextConfig, current);
+        applyDashboardRuntimeState(finalizedConfig, current);
 
         Object.keys(currentDb).forEach((key) => { delete currentDb[key]; });
-        Object.assign(currentDb, nextConfig);
+        Object.assign(currentDb, finalizedConfig);
         await persistRuntimeConfigChanges(current);
         return buildDashboardPayload();
     };
@@ -76,7 +82,7 @@ const createDashboardConfigHelpers = ({
         }
 
         const current = { ...currentDb };
-        const { config: nextConfig } = applyAutoPresetToConfig(getDefaultConfig());
+        const { config: nextConfig } = applyAutoPresetToConfig(getDefaultConfig(), { forcePresetFields: true });
         applyDashboardRuntimeState(nextConfig, currentDb);
         Object.keys(currentDb).forEach((key) => { delete currentDb[key]; });
         Object.assign(currentDb, nextConfig);

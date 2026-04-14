@@ -1499,8 +1499,8 @@ const AUTO_PAIR_GRID_PRESETS = {
     }
 };
 
-const applyAutoPresetToConfig = (config) => {
-    const autoPresetResult = applyAutoPairGridPreset(config, AUTO_PAIR_GRID_PRESETS);
+const applyAutoPresetToConfig = (config, options = {}) => {
+    const autoPresetResult = applyAutoPairGridPreset(config, AUTO_PAIR_GRID_PRESETS, options);
     return {
         config: normalizeConfig(autoPresetResult.config),
         autoPresetResult
