@@ -957,6 +957,11 @@ const mergeRuntimeConfig = (nextConfig) => {
     const hasActiveTradeState = getPositionMapCount(currentPositionsMap) > 0;
     nextConfig.activePosition = mergeTrackedPositions(currentPositionsMap, nextPositionsMap);
 
+    // Preserve activeGridState if it exists in current db
+    if (db.activeGridState && !nextConfig.activeGridState) {
+        nextConfig.activeGridState = db.activeGridState;
+    }
+
     if (hasActiveTradeState) {
         RUNTIME_PROTECTED_CONFIG_KEYS.forEach((key) => {
             if (nextConfig[key] !== db[key]) {
