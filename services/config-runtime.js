@@ -19,6 +19,7 @@ const createConfigRuntimeHelpers = ({
     configAutoReloadIntervalMs
 }) => {
     let lastKnownDashboardConfigSignature = "";
+    const editableConfigKeys = dashboardEditableFields.map((field) => field.key);
 
     const buildDashboardConfigSignature = (config) => JSON.stringify(
         dashboardEditableFields.map((field) => [field.key, config && Object.prototype.hasOwnProperty.call(config, field.key) ? config[field.key] : null])
@@ -29,12 +30,27 @@ const createConfigRuntimeHelpers = ({
         return lastKnownDashboardConfigSignature;
     };
 
-    const saveDB = async () => {
+    const saveDB = async (options = {}) => {
         try {
             const db = getDb();
             if (!db) return;
-            await persistConfig(db);
-            syncDashboardConfigSignature();
+            const mode = options && typeof options === "object" ? String(options.mode || "runtime").toLowerCase() : "runtime";
+            let nextConfigToSave = { ...db };
+            let signatureSource = nextConfigToSave;
+
+            if (mode !== "full") {
+                const persistedConfig = await loadPersistedConfig();
+                if (persistedConfig && typeof persistedConfig === "object") {
+                    signatureSource = persistedConfig;
+                    for (const key of editableConfigKeys) {
+                        if (!Object.prototype.hasOwnProperty.call(persistedConfig, key)) continue;
+                        nextConfigToSave[key] = persistedConfig[key];
+                    }
+                }
+            }
+
+            await persistConfig(nextConfigToSave);
+            syncDashboardConfigSignature(signatureSource);
         } catch (error) {
             console.error("[ERROR] Failed to save DB:", error.message);
         }
@@ -50,7 +66,7 @@ const createConfigRuntimeHelpers = ({
             setDb(hydratedConfig);
             syncDashboardConfigSignature();
             if (autoPresetResult.changed) {
-                await saveDB();
+                await saveDB({ mode: "full" });
                 console.log(`[PRESET] Auto-applied ${autoPresetResult.presetName} profile for ${getDb().pair}`);
             }
             console.log("[OK] DB initialized successfully");
@@ -76,7 +92,7 @@ const createConfigRuntimeHelpers = ({
             await applyRuntimeConfigChanges(runtimeSnapshot);
             syncDashboardConfigSignature();
             if (autoPresetResult.changed && !hasAnyActivePosition()) {
-                await saveDB();
+                await saveDB({ mode: "full" });
                 console.log(`[PRESET] Auto-refreshed ${autoPresetResult.presetName} profile for ${getDb().pair}`);
             }
             return true;
