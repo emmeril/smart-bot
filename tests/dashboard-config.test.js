@@ -41,6 +41,53 @@ test("applyDashboardConfigUpdate persists full config changes before reloading r
     assert.deepEqual(result, { pair: "BTC/USDT:USDT", gridLevels: 12 });
 });
 
+test("applyDashboardConfigUpdate preserves activeGridState until runtime decides whether to rebuild it", async () => {
+    const runtimeDb = {
+        id: 1,
+        pair: "DOGE/USDT:USDT",
+        gridLevels: 8,
+        trailingEnabled: true,
+        dailyPnL: 1.25,
+        activePosition: null,
+        activeGridState: {
+            fingerprint: "DOGE/USDT:USDT|5m|8|120|3.5|0|0",
+            lowerBound: 0.1,
+            upperBound: 0.2
+        }
+    };
+
+    const helpers = createDashboardConfigHelpers({
+        getDb: () => runtimeDb,
+        hasAnyActivePosition: () => false,
+        protectedKeys: new Set(["pair"]),
+        editableKeys: new Set(["pair", "gridLevels", "trailingEnabled"]),
+        getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", gridLevels: 8, trailingEnabled: true }),
+        saveDB: async () => {},
+        reloadConfig: async () => {},
+        refreshRuntimeSchedulers: () => {},
+        syncExchangeRuntimeSettings: async () => {},
+        buildDashboardPayload: () => ({ activeGridState: runtimeDb.activeGridState }),
+        applyAutoPresetToConfig: (config) => ({ config })
+    });
+
+    const result = await helpers.applyDashboardConfigUpdate({
+        trailingEnabled: false
+    });
+
+    assert.deepEqual(runtimeDb.activeGridState, {
+        fingerprint: "DOGE/USDT:USDT|5m|8|120|3.5|0|0",
+        lowerBound: 0.1,
+        upperBound: 0.2
+    });
+    assert.deepEqual(result, {
+        activeGridState: {
+            fingerprint: "DOGE/USDT:USDT|5m|8|120|3.5|0|0",
+            lowerBound: 0.1,
+            upperBound: 0.2
+        }
+    });
+});
+
 test("resetDashboardConfig persists full config changes before reloading runtime", async () => {
     const saveCalls = [];
     const reloadCalls = [];
