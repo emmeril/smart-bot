@@ -516,7 +516,14 @@ const createGridRuntimeHelpers = ({
         const gridKeys = Object.keys(preset);
         let changed = false;
         const nextConfig = { ...config };
+        const shouldApplyPresetValue = (key, currentValue) => (
+            currentValue === undefined ||
+            currentValue === null ||
+            currentValue === "" ||
+            currentValue === defaultConfig[key]
+        );
         for (const key of gridKeys) {
+            if (!shouldApplyPresetValue(key, nextConfig[key])) continue;
             if (nextConfig[key] !== preset[key]) {
                 nextConfig[key] = preset[key];
                 changed = true;
