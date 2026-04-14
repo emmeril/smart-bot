@@ -30,7 +30,7 @@ const createDashboardConfigHelpers = ({
     };
 
     const persistRuntimeConfigChanges = async (previousConfig = null) => {
-        await saveDB();
+        await saveDB({ mode: "full" });
         await reloadConfig(previousConfig);
         refreshRuntimeSchedulers();
         await syncExchangeRuntimeSettings();

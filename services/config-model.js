@@ -68,15 +68,16 @@ const createConfigModelHelpers = ({
             const hasValue = rawValue !== undefined && rawValue !== null && rawValue !== "";
             if (!hasValue) { normalized[key] = defaults[key]; return; }
             const value = Number(rawValue);
+            const normalizedValue = rule.integer ? Math.trunc(value) : value;
             const invalidNumber = !Number.isFinite(value);
-            const invalidZero = !rule.allowZero && value === 0;
-            const belowMin = value < rule.min;
+            const invalidZero = !rule.allowZero && normalizedValue === 0;
+            const belowMin = normalizedValue < rule.min;
             if (invalidNumber || invalidZero || belowMin) {
                 console.warn(`[WARN] Invalid config '${key}' (${normalized[key]}). Using default ${defaults[key]}.`);
                 normalized[key] = defaults[key];
                 return;
             }
-            normalized[key] = rule.integer ? Math.trunc(value) : value;
+            normalized[key] = normalizedValue;
         });
 
         const isValidTimeframe = (value) => typeof value === "string" && /^[1-9]\d*[mhdwM]$/.test(value.trim());

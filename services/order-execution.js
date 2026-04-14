@@ -32,6 +32,19 @@ const createOrderExecutionHelpers = ({
     buildReplacementClientOrderId
 }) => {
     const describeError = (error) => String(error?.message || error || "Unknown error");
+    const attachClientOrderId = (order, clientOrderId) => {
+        if (!order || typeof order !== "object" || !clientOrderId) return order;
+        const info = order.info && typeof order.info === "object" ? { ...order.info } : {};
+        return {
+            ...order,
+            clientOrderId,
+            info: {
+                ...info,
+                clientOrderId: info.clientOrderId || clientOrderId,
+                origClientOrderId: info.origClientOrderId || clientOrderId
+            }
+        };
+    };
 
     const shouldAdoptExistingManagedOrder = (position, orderIdKey, clientIdKey) => {
         if (!position || typeof position !== "object") return false;
@@ -173,7 +186,7 @@ const createOrderExecutionHelpers = ({
             );
             metrics.api.orders++;
             console.log(`[TP] Placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
-            return order;
+            return attachClientOrderId(order, clientOrderId);
         } catch (error) {
             if (isDuplicateClientOrderIdError(error)) {
                 console.warn(`[TP] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
@@ -195,7 +208,7 @@ const createOrderExecutionHelpers = ({
                         );
                         metrics.api.orders++;
                         console.log(`[TP] Retry succeeded: placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
-                        return retryOrder;
+                        return attachClientOrderId(retryOrder, clientOrderId);
                     } catch (retryError) {
                         console.error(`[TP] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
                         await syncPositionWithExchange();
@@ -216,7 +229,7 @@ const createOrderExecutionHelpers = ({
                     );
                     metrics.api.orders++;
                     console.log(`[TP] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
-                    return retryOrder;
+                    return attachClientOrderId(retryOrder, replacementClientOrderId);
                 } catch (replacementError) {
                     console.error(`[TP] Replacement retry failed for ${replacementClientOrderId}: ${describeError(replacementError)}`);
                     await syncPositionWithExchange();
@@ -281,7 +294,7 @@ const createOrderExecutionHelpers = ({
             metrics.api.orders++;
             const orderModeLabel = useClosePositionOrder ? "close-position STOP_MARKET" : "reduce-only STOP_MARKET";
             console.log(`[SL] Placed ${orderModeLabel} ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${useClosePositionOrder ? "FULL" : quantity}`);
-            return order;
+            return attachClientOrderId(order, clientOrderId);
         } catch (error) {
             if (isDuplicateClientOrderIdError(error)) {
                 console.warn(`[SL] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
@@ -304,7 +317,7 @@ const createOrderExecutionHelpers = ({
                         metrics.api.orders++;
                         const retryModeLabel = useClosePositionOrder ? "close-position STOP_MARKET" : "reduce-only STOP_MARKET";
                         console.log(`[SL] Retry succeeded: placed ${retryModeLabel} ${closeSide.toUpperCase()} @ stop ${params.stopPrice}`);
-                        return retryOrder;
+                        return attachClientOrderId(retryOrder, clientOrderId);
                     } catch (retryError) {
                         console.error(`[SL] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
                         await syncPositionWithExchange();
@@ -325,7 +338,7 @@ const createOrderExecutionHelpers = ({
                     );
                     metrics.api.orders++;
                     console.log(`[SL] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
-                    return retryOrder;
+                    return attachClientOrderId(retryOrder, replacementClientOrderId);
                 } catch (replacementError) {
                     console.error(`[SL] Replacement retry failed for ${replacementClientOrderId}: ${describeError(replacementError)}`);
                     await syncPositionWithExchange();
