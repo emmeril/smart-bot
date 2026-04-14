@@ -13,7 +13,6 @@ const createDashboardConfigHelpers = ({
 }) => {
     const applyDashboardRuntimeState = (nextConfig, currentConfig = getDb()) => {
         nextConfig.activePosition = currentConfig.activePosition;
-        nextConfig.activeGridState = currentConfig.activeGridState;
         nextConfig.dailyPnL = currentConfig.dailyPnL;
         nextConfig.dailyTrades = currentConfig.dailyTrades;
         nextConfig.lastDailyReset = currentConfig.lastDailyReset;
