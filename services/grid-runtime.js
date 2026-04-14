@@ -503,9 +503,8 @@ const createGridRuntimeHelpers = ({
         };
     };
 
-    const applyAutoPairGridPreset = (config, autoPairGridPresets, options = {}) => {
+    const applyAutoPairGridPreset = (config, autoPairGridPresets) => {
         if (!config || typeof config !== "object") return { config, changed: false, presetName: null };
-        const { forcePresetFields = false } = options || {};
         const strategy = String(config.strategy || "").toLowerCase();
         if (strategy && strategy !== "futures_grid") return { config, changed: false, presetName: null };
         const presets = autoPairGridPresets && typeof autoPairGridPresets === "object" ? autoPairGridPresets : {};
@@ -518,8 +517,7 @@ const createGridRuntimeHelpers = ({
         let changed = false;
         const nextConfig = { ...config };
         for (const key of gridKeys) {
-            const hasExplicitValue = nextConfig[key] !== undefined && nextConfig[key] !== null && nextConfig[key] !== "";
-            if ((forcePresetFields || !hasExplicitValue) && nextConfig[key] !== preset[key]) {
+            if (nextConfig[key] !== preset[key]) {
                 nextConfig[key] = preset[key];
                 changed = true;
             }
@@ -528,9 +526,8 @@ const createGridRuntimeHelpers = ({
         const rawMarginMode = typeof config.marginMode === "string" ? config.marginMode.trim().toLowerCase() : "";
         if (validMarginModes.includes(rawMarginMode)) nextConfig.marginMode = rawMarginMode;
 
-        const expectedGridFingerprint = getGridStateFingerprint(nextConfig);
         const activeGridFingerprint = String(nextConfig.activeGridState?.fingerprint || "");
-        if (activeGridFingerprint !== expectedGridFingerprint || changed) {
+        if (!activeGridFingerprint.includes(String(nextConfig.gridLevels)) || changed) {
             if (nextConfig.activeGridState !== null) changed = true;
             nextConfig.activeGridState = null;
         }

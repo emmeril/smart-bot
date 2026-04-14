@@ -1275,7 +1275,7 @@ const {
     editableKeys: DASHBOARD_EDITABLE_KEYS,
     applyAutoPresetToConfig: (config) => applyAutoPresetToConfig(config),
     getDefaultConfig: () => getDefaultConfig(),
-    saveDB: async (...args) => { await saveDB(...args); },
+    saveDB: async () => { await saveDB(); },
     reloadConfig: async (...args) => { await reloadConfig(...args); },
     refreshRuntimeSchedulers: () => { refreshRuntimeSchedulers(); },
     syncExchangeRuntimeSettings: async () => {
@@ -1384,6 +1384,8 @@ const startWebDashboard = async () => {
             res.status(400).json({ ok: false, error: error.message });
         }
     });
+
+    app.use(express.static(path.join(__dirname, "public")));
 
     const port = Math.max(1, Math.trunc(toFiniteNumber(process.env.DASHBOARD_PORT || process.env.PORT, 3000)));
     const host = process.env.DASHBOARD_HOST || "0.0.0.0";
@@ -1497,8 +1499,8 @@ const AUTO_PAIR_GRID_PRESETS = {
     }
 };
 
-const applyAutoPresetToConfig = (config, options = {}) => {
-    const autoPresetResult = applyAutoPairGridPreset(config, AUTO_PAIR_GRID_PRESETS, options);
+const applyAutoPresetToConfig = (config) => {
+    const autoPresetResult = applyAutoPairGridPreset(config, AUTO_PAIR_GRID_PRESETS);
     return {
         config: normalizeConfig(autoPresetResult.config),
         autoPresetResult

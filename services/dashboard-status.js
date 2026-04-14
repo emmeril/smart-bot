@@ -45,13 +45,11 @@ const createDashboardStatusHelpers = ({
         id: order.id ?? null,
         clientOrderId: getExchangeClientOrderId(order) || null,
         side: order.side ?? null,
-        positionSide: order.positionSide ?? order.info?.positionSide ?? null,
+        positionSide: order.positionSide ?? null,
         type: order.type ?? null,
-        reduceOnly: Boolean(order.reduceOnly ?? order.info?.reduceOnly),
+        reduceOnly: Boolean(order.reduceOnly),
         price: Number.isFinite(Number(order.price)) ? Number(order.price) : null,
-        triggerPrice: Number.isFinite(Number(order.triggerPrice))
-            ? Number(order.triggerPrice)
-            : (Number.isFinite(Number(order.stopPrice ?? order.info?.stopPrice)) ? Number(order.stopPrice ?? order.info?.stopPrice) : null),
+        triggerPrice: Number.isFinite(Number(order.triggerPrice)) ? Number(order.triggerPrice) : null,
         amount: Number.isFinite(Number(order.amount)) ? Number(order.amount) : null
     });
 

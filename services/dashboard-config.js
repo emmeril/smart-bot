@@ -13,7 +13,6 @@ const createDashboardConfigHelpers = ({
 }) => {
     const applyDashboardRuntimeState = (nextConfig, currentConfig = getDb()) => {
         nextConfig.activePosition = currentConfig.activePosition;
-        nextConfig.activeGridState = currentConfig.activeGridState;
         nextConfig.dailyPnL = currentConfig.dailyPnL;
         nextConfig.dailyTrades = currentConfig.dailyTrades;
         nextConfig.lastDailyReset = currentConfig.lastDailyReset;
@@ -31,7 +30,7 @@ const createDashboardConfigHelpers = ({
     };
 
     const persistRuntimeConfigChanges = async (previousConfig = null) => {
-        await saveDB({ mode: "full" });
+        await saveDB();
         await reloadConfig(previousConfig);
         refreshRuntimeSchedulers();
         await syncExchangeRuntimeSettings();
@@ -45,7 +44,6 @@ const createDashboardConfigHelpers = ({
         const payload = pickEditableConfig(incoming);
         const merged = { ...current, ...payload };
         const protectedRuntimeValues = new Map();
-        const pairChanged = Object.prototype.hasOwnProperty.call(payload, "pair") && payload.pair !== current.pair;
 
         if (hasAnyActivePosition()) {
             for (const key of protectedKeys) {
@@ -55,21 +53,16 @@ const createDashboardConfigHelpers = ({
             }
         }
 
-        const { config: presetAdjustedConfig } = applyAutoPresetToConfig(merged, { forcePresetFields: pairChanged });
-        const nextConfig = { ...presetAdjustedConfig };
-        for (const [key, value] of Object.entries(payload)) {
-            if (editableKeys.has(key)) nextConfig[key] = value;
-        }
-        const { config: finalizedConfig } = applyAutoPresetToConfig(nextConfig);
+        const { config: nextConfig } = applyAutoPresetToConfig(merged);
         if (protectedRuntimeValues.size > 0) {
             for (const [key, value] of protectedRuntimeValues.entries()) {
-                finalizedConfig[key] = value;
+                nextConfig[key] = value;
             }
         }
-        applyDashboardRuntimeState(finalizedConfig, current);
+        applyDashboardRuntimeState(nextConfig, current);
 
         Object.keys(currentDb).forEach((key) => { delete currentDb[key]; });
-        Object.assign(currentDb, finalizedConfig);
+        Object.assign(currentDb, nextConfig);
         await persistRuntimeConfigChanges(current);
         return buildDashboardPayload();
     };
@@ -83,7 +76,7 @@ const createDashboardConfigHelpers = ({
         }
 
         const current = { ...currentDb };
-        const { config: nextConfig } = applyAutoPresetToConfig(getDefaultConfig(), { forcePresetFields: true });
+        const { config: nextConfig } = applyAutoPresetToConfig(getDefaultConfig());
         applyDashboardRuntimeState(nextConfig, currentDb);
         Object.keys(currentDb).forEach((key) => { delete currentDb[key]; });
         Object.assign(currentDb, nextConfig);
@@ -98,4 +91,5 @@ const createDashboardConfigHelpers = ({
 };
 
 module.exports = { createDashboardConfigHelpers };
+
 

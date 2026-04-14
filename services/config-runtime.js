@@ -19,7 +19,6 @@ const createConfigRuntimeHelpers = ({
     configAutoReloadIntervalMs
 }) => {
     let lastKnownDashboardConfigSignature = "";
-    const editableKeys = dashboardEditableFields.map((field) => field.key);
 
     const buildDashboardConfigSignature = (config) => JSON.stringify(
         dashboardEditableFields.map((field) => [field.key, config && Object.prototype.hasOwnProperty.call(config, field.key) ? config[field.key] : null])
@@ -30,30 +29,12 @@ const createConfigRuntimeHelpers = ({
         return lastKnownDashboardConfigSignature;
     };
 
-    const buildPersistableConfig = async (options = {}) => {
-        const db = getDb();
-        if (!db) return null;
-        const mode = String(options?.mode || "runtime").toLowerCase();
-        if (mode === "full") return db;
-
-        const persistedConfig = await loadPersistedConfig();
-        if (!persistedConfig || typeof persistedConfig !== "object") return db;
-
-        const mergedConfig = { ...db };
-        for (const key of editableKeys) {
-            if (Object.prototype.hasOwnProperty.call(persistedConfig, key)) {
-                mergedConfig[key] = persistedConfig[key];
-            }
-        }
-        return mergedConfig;
-    };
-
-    const saveDB = async (options = {}) => {
+    const saveDB = async () => {
         try {
-            const configToPersist = await buildPersistableConfig(options);
-            if (!configToPersist) return;
-            await persistConfig(configToPersist);
-            syncDashboardConfigSignature(configToPersist);
+            const db = getDb();
+            if (!db) return;
+            await persistConfig(db);
+            syncDashboardConfigSignature();
         } catch (error) {
             console.error("[ERROR] Failed to save DB:", error.message);
         }
@@ -134,7 +115,6 @@ const createConfigRuntimeHelpers = ({
     return {
         buildDashboardConfigSignature,
         syncDashboardConfigSignature,
-        buildPersistableConfig,
         saveDB,
         initializeDB,
         reloadConfig,
