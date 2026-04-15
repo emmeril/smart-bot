@@ -260,6 +260,20 @@
     .field-control:focus { border-color: rgba(32, 201, 151, 0.5); box-shadow: 0 0 0 4px rgba(32, 201, 151, 0.12); }
     .field-control::placeholder { color: #6d8591; }
     .field-note { color: var(--muted); font-size: 0.82rem; line-height: 1.5; }
+    .config-actions {
+      position: sticky;
+      bottom: 14px;
+      z-index: 2;
+      margin-top: 18px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 12px;
+      border-radius: 18px;
+      background: rgba(7, 15, 21, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(12px);
+    }
     .footer-panel { padding: 18px 20px; display: flex; justify-content: space-between; gap: 16px; align-items: center; }
     .toast { min-width: 220px; max-width: 50%; text-align: right; color: var(--muted); font-size: 0.92rem; }
     .toast.success { color: #9af2cc; }
@@ -349,6 +363,9 @@
       .hero-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .panel-head,
       .footer-panel { flex-direction: column; align-items: start; }
+      .config-actions {
+        justify-content: stretch;
+      }
     }
     @media (max-width: 640px) {
       .shell { width: min(100% - 14px, 100%); margin: 8px auto 20px; }
@@ -357,6 +374,10 @@
       .hero-metrics { grid-template-columns: 1fr; }
       .hero-actions { flex-direction: column; }
       .btn { width: 100%; }
+      .config-actions {
+        bottom: 8px;
+        flex-direction: column;
+      }
       .status-strip { padding: 16px; }
       .live-panel, .footer-panel { padding: 16px; }
       .field-row { flex-direction: column; align-items: stretch; }
@@ -395,7 +416,6 @@
           <span class="signal-chip">Mode <strong id="heroMode">Syncing...</strong></span>
         </div>
         <div class="hero-actions">
-          <button id="saveBtn" class="btn btn-primary" type="button">Simpan konfigurasi</button>
           <button id="refreshBtn" class="btn btn-secondary" type="button">Muat ulang</button>
           <button id="resetBtn" class="btn btn-danger" type="button">Reset default</button>
           <form action="/logout" method="post" style="margin:0">
@@ -480,6 +500,9 @@
         <p class="muted">Semua field di bawah akan divalidasi kembali di sisi server sebelum disimpan.</p>
       </div>
       <form id="configForm" class="config-grid"></form>
+      <div class="config-actions">
+        <button id="saveBtn" class="btn btn-primary" type="button">Simpan konfigurasi</button>
+      </div>
     </section>
 
     <section class="panel footer-panel">
@@ -1016,7 +1039,6 @@
   </script>
 </body>
 </html>
-
 
 
 
