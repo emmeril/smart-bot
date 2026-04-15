@@ -252,6 +252,42 @@
     .section-card h3 { margin: 0 0 14px; font-size: 1rem; letter-spacing: 0.02em; }
     .field-list { display: grid; gap: 12px; }
     .field { display: grid; gap: 8px; }
+    .config-legend {
+      margin: 0 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.5;
+    }
+    .field-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .field-label label {
+      font-weight: 700;
+    }
+    .field-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      color: #b8f7de;
+      background: rgba(72, 226, 174, 0.12);
+      border: 1px solid rgba(72, 226, 174, 0.2);
+    }
+    .field-badge.toggle {
+      color: #ffe0a8;
+      background: rgba(246, 198, 103, 0.12);
+      border-color: rgba(246, 198, 103, 0.2);
+    }
     .field-row {
       display: flex; align-items: center; justify-content: space-between; gap: 12px;
       padding: 12px 14px; border-radius: var(--radius-md); background: rgba(7, 14, 19, 0.75);
@@ -450,6 +486,10 @@
 	        gap: 10px;
 	        margin-bottom: 14px;
 	      }
+	      .config-legend {
+	        margin-bottom: 14px;
+	        align-items: flex-start;
+	      }
 	      .field-row { flex-direction: column; align-items: stretch; }
 	      .field-row input[type="checkbox"] { align-self: flex-start; }
 	      .live-table-head,
@@ -601,17 +641,23 @@
         </section>
       </div>
     </section>
-    <section class="panel form-panel">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">Konfigurasi</p>
-          <h2>Parameter trading</h2>
-        </div>
-        <p class="muted">Semua field di bawah akan divalidasi kembali di sisi server sebelum disimpan.</p>
-      </div>
-      <form id="configForm" class="config-grid"></form>
-      <div class="config-actions">
-        <button id="saveBtn" class="btn btn-primary" type="button">Simpan konfigurasi</button>
+	    <section class="panel form-panel">
+	      <div class="panel-head">
+	        <div>
+	          <p class="eyebrow">Konfigurasi</p>
+	          <h2>Parameter trading</h2>
+	        </div>
+	        <p class="muted">Semua field di bawah akan divalidasi kembali di sisi server sebelum disimpan.</p>
+	      </div>
+	      <div class="config-legend">
+	        <span class="field-badge">AUTO 0</span>
+	        <span>Isi `0` untuk mode otomatis.</span>
+	        <span class="field-badge toggle">AUTO TOGGLE</span>
+	        <span>Aktifkan switch untuk mode otomatis.</span>
+	      </div>
+	      <form id="configForm" class="config-grid"></form>
+	      <div class="config-actions">
+	        <button id="saveBtn" class="btn btn-primary" type="button">Simpan konfigurasi</button>
       </div>
     </section>
 
@@ -663,17 +709,36 @@
     const liveOrdersList = document.getElementById("liveOrdersList");
     const livePnlTrend = document.getElementById("livePnlTrend");
 
-    const SECTION_LABELS = {
-      General: "General",
-      Risk: "Risk Management",
-      Grid: "Grid Engine",
-      Session: "Session & Filters",
-      Trailing: "Trailing Stop",
-      Direction: "Direction Control"
-    };
+	    const SECTION_LABELS = {
+	      General: "General",
+	      Risk: "Risk Management",
+	      Grid: "Grid Engine",
+	      Session: "Session & Filters",
+	      Trailing: "Trailing Stop",
+	      Direction: "Direction Control"
+	    };
+	
+	    const AUTO_MODE_META = {
+	      gridOrderSizeUsdt: { label: "AUTO 0", hint: "0 = ukuran order dihitung otomatis oleh bot." },
+	      gridLevels: { label: "AUTO 0", hint: "0 = jumlah level dihitung otomatis." },
+	      gridRangePercent: { label: "AUTO 0", hint: "0 = range grid dihitung otomatis." },
+	      gridEntryBufferPercent: { label: "AUTO 0", hint: "0 = buffer entry dihitung otomatis." },
+	      gridTakeProfitLevels: { label: "AUTO 0", hint: "0 = TP otomatis mengikuti grid berikutnya." },
+	      gridOrdersPerSide: { label: "AUTO 0", hint: "0 = jumlah order per sisi dihitung otomatis." },
+	      gridStopLossLevels: { label: "AUTO 0", hint: "0 = SL grid dihitung otomatis." },
+	      autoTargetProfitEnabled: { label: "AUTO TOGGLE", hint: "Aktif = target profit memakai mode ATR otomatis.", className: "toggle" },
+	      autoStopLossEnabled: { label: "AUTO TOGGLE", hint: "Aktif = stop loss memakai mode ATR otomatis.", className: "toggle" }
+	    };
+	
+	    function getFieldHint(field) {
+	      const base = field.description || "";
+	      const autoHint = AUTO_MODE_META[field.key] ? AUTO_MODE_META[field.key].hint : "";
+	      if (base && autoHint) return `${base} ${autoHint}`;
+	      return autoHint || base;
+	    }
 
-    function setBusy(busy) {
-      saveBtn.disabled = busy;
+	    function setBusy(busy) {
+	      saveBtn.disabled = busy;
       refreshBtn.disabled = busy;
       resetBtn.disabled = busy;
     }
@@ -945,23 +1010,32 @@
       return ordered;
     }
 
-    function createField(field, value) {
-      const wrapper = document.createElement("div");
-      wrapper.className = "field";
-      const label = document.createElement("label");
-      label.textContent = field.label || field.key;
-      label.htmlFor = field.key;
-      wrapper.appendChild(label);
+	    function createField(field, value) {
+	      const wrapper = document.createElement("div");
+	      wrapper.className = "field";
+	      const labelRow = document.createElement("div");
+	      labelRow.className = "field-label";
+	      const label = document.createElement("label");
+	      label.textContent = field.label || field.key;
+	      label.htmlFor = field.key;
+	      labelRow.appendChild(label);
+	      if (AUTO_MODE_META[field.key]) {
+	        const badge = document.createElement("span");
+	        badge.className = `field-badge${AUTO_MODE_META[field.key].className ? ` ${AUTO_MODE_META[field.key].className}` : ""}`;
+	        badge.textContent = AUTO_MODE_META[field.key].label;
+	        labelRow.appendChild(badge);
+	      }
+	      wrapper.appendChild(labelRow);
 
-      if (field.type === "boolean") {
-        const row = document.createElement("div");
-        row.className = "field-row";
-        const hint = document.createElement("span");
-        hint.className = "field-hint";
-        hint.textContent = field.description || "";
-        const toggle = document.createElement("input");
-        toggle.type = "checkbox";
-        toggle.id = field.key;
+	      if (field.type === "boolean") {
+	        const row = document.createElement("div");
+	        row.className = "field-row";
+	        const hint = document.createElement("span");
+	        hint.className = "field-hint";
+	        hint.textContent = getFieldHint(field);
+	        const toggle = document.createElement("input");
+	        toggle.type = "checkbox";
+	        toggle.id = field.key;
         toggle.name = field.key;
         toggle.checked = Boolean(value);
         row.appendChild(hint);
@@ -994,14 +1068,14 @@
       input.value = value === null || value === undefined ? "" : String(value);
       if (field.type === "number") {
         input.inputMode = Number(field.step) === 1 ? "numeric" : "decimal";
-      }
-      const note = document.createElement("div");
-      note.className = "field-note";
-      note.textContent = field.description || "";
-      wrapper.appendChild(input);
-      wrapper.appendChild(note);
-      return wrapper;
-    }
+	      }
+	      const note = document.createElement("div");
+	      note.className = "field-note";
+	      note.textContent = getFieldHint(field);
+	      wrapper.appendChild(input);
+	      wrapper.appendChild(note);
+	      return wrapper;
+	    }
 
     function renderForm(config, schema) {
       form.innerHTML = "";
@@ -1149,6 +1223,3 @@
   </script>
 </body>
 </html>
-
-
-
