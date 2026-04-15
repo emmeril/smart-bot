@@ -457,7 +457,7 @@ const {
     formatAmountToMarketPrecision,
     formatPriceToMarketPrecision,
     validateOrderSize,
-    buildExchangeOrderParams,
+    buildExchangeOrderParams: (...args) => buildExchangeOrderParams(...args),
     getOrderPositionSide: (...args) => getOrderPositionSide(...args),
     getClosePositionSide: (...args) => getClosePositionSide(...args),
     findOpenGridOrderByClientOrderId,
