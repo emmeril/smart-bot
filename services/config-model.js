@@ -73,7 +73,7 @@ const createConfigModelHelpers = ({
             const invalidZero = !rule.allowZero && normalizedValue === 0;
             const belowMin = normalizedValue < rule.min;
             if (invalidNumber || invalidZero || belowMin) {
-                console.warn(`[WARN] Invalid config '${key}' (${normalized[key]}). Using default ${defaults[key]}.`);
+                console.warn(`[CONFIG][WARN] Invalid config '${key}' (${normalized[key]}). Using default ${defaults[key]}.`);
                 normalized[key] = defaults[key];
                 return;
             }
@@ -81,7 +81,7 @@ const createConfigModelHelpers = ({
         });
 
         if (normalized.gridLevels !== 0 && normalized.gridLevels < 4) {
-            console.warn(`[WARN] Invalid config 'gridLevels' (${normalized.gridLevels}). Using default ${defaults.gridLevels}.`);
+            console.warn(`[CONFIG][WARN] Invalid config 'gridLevels' (${normalized.gridLevels}). Using default ${defaults.gridLevels}.`);
             normalized.gridLevels = defaults.gridLevels;
         }
 
@@ -177,7 +177,7 @@ const createConfigModelHelpers = ({
             if (columnNames.has(column)) return;
             await withSqliteBusyRetry(() => sequelize.query(sql));
             if (legacyCopySql) await withSqliteBusyRetry(() => sequelize.query(legacyCopySql));
-            console.log(`[INFO] Added config column: ${column}`);
+            console.log(`[CONFIG][INFO] Added config column: ${column}`);
         };
 
         await addColumnIfMissing({
@@ -259,9 +259,9 @@ const createConfigModelHelpers = ({
             if (!columnNames.has(obsoleteColumn)) continue;
             try {
                 await withSqliteBusyRetry(() => sequelize.query(`ALTER TABLE Configs DROP COLUMN ${obsoleteColumn};`));
-                console.log(`[INFO] Dropped obsolete config column: ${obsoleteColumn}`);
+                console.log(`[CONFIG][INFO] Dropped obsolete config column: ${obsoleteColumn}`);
             } catch (error) {
-                console.warn(`[WARN] Could not drop obsolete config column ${obsoleteColumn}: ${error.message}`);
+                console.warn(`[CONFIG][WARN] Could not drop obsolete config column ${obsoleteColumn}: ${error.message}`);
             }
         }
     };

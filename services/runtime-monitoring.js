@@ -63,7 +63,7 @@ const createRuntimeMonitoringHelpers = ({
                 for (const [positionKey, sourcePosition] of activeEntries) {
                     const position = { ...sourcePosition };
                     if (!Number.isFinite(position.entryPrice) || position.entryPrice <= 0 || !Number.isFinite(position.quantity) || position.quantity <= 0) {
-                        console.error(`[ERROR] Invalid active position data for P&L monitoring (${positionKey}).`);
+                        console.error(`[MONITOR][ERROR] Invalid active position data for P&L monitoring (${positionKey}).`);
                         continue;
                     }
 
@@ -89,7 +89,7 @@ const createRuntimeMonitoringHelpers = ({
                     maybeLogPositionPnL(pnlState, exitState);
                 }
             } catch (error) {
-                console.error("[ERROR] PnL Monitoring failed:", error.message);
+                console.error("[MONITOR][ERROR] PnL monitoring failed:", error.message);
             } finally {
                 setIsMonitoringPnL(false);
             }
@@ -125,11 +125,11 @@ const createRuntimeMonitoringHelpers = ({
         setIsShuttingDown(true);
 
         if (getIsPlacingOrderState() || getIsClosingPositionState()) {
-            console.log("[SHUTDOWN] Waiting for active transaction to complete...");
+            console.log("[SHUTDOWN][INFO] Waiting for active transaction to complete...");
             await sleep(2000);
         }
 
-        console.log(`\n[SHUTDOWN] Received ${signal}. Stopping bot...`);
+        console.log(`[SHUTDOWN][INFO] Received ${signal}. Stopping bot...`);
         unregisterRuntimeCommands();
         clearRuntimeTimers();
 
@@ -137,14 +137,14 @@ const createRuntimeMonitoringHelpers = ({
             try {
                 await closeWebServer();
             } catch (error) {
-                console.error("[ERROR] Failed to close web server:", error.message);
+                console.error("[SHUTDOWN][ERROR] Failed to close web server:", error.message);
             }
             clearWebServer();
         }
 
-        try { await saveDB(); } catch (error) { console.error("[ERROR] Failed to save DB during shutdown:", error.message); }
-        try { await closeSequelize(); } catch (error) { console.error("[ERROR] Failed to close DB connection:", error.message); }
-        console.log("[SHUTDOWN] Bot stopped.");
+        try { await saveDB(); } catch (error) { console.error("[SHUTDOWN][ERROR] Failed to save DB during shutdown:", error.message); }
+        try { await closeSequelize(); } catch (error) { console.error("[SHUTDOWN][ERROR] Failed to close DB connection:", error.message); }
+        console.log("[SHUTDOWN][INFO] Bot stopped.");
         exitProcess(0);
     };
 

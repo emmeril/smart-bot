@@ -70,7 +70,7 @@ const createPositionLifecycleHelpers = ({
                 position.strategy || null
             );
             await saveDB();
-            console.warn(`[WARN] Removed local position using estimated exit price because no confirmed exchange exit price was available (${reason}).`);
+            console.warn(`[POSITION][WARN] Removed local position using estimated exit price because no confirmed exchange exit price was available (${reason}).`);
             return;
         }
 
@@ -83,7 +83,7 @@ const createPositionLifecycleHelpers = ({
             0,
             position.strategy || null
         );
-        console.warn(`[WARN] Removed local position without realizing P&L because no confirmed exchange exit price was available (${reason}).`);
+        console.warn(`[POSITION][WARN] Removed local position without realizing P&L because no confirmed exchange exit price was available (${reason}).`);
     };
 
     const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, reason, exitPrice = null, positionKey = null) => {
@@ -107,7 +107,7 @@ const createPositionLifecycleHelpers = ({
             position.strategy || null
         );
 
-        console.log(`\n[OK] POSITION CLOSED: ${reason}`);
+        console.log(`[POSITION][INFO] Closed position: ${reason}`);
         console.log(`   Realized P&L: ${netProfitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
         console.log(`   Daily Total Realized P&L: ${db.dailyPnL.toFixed(4)} USDT / ${db.dailyTrades} trades`);
 
@@ -132,7 +132,7 @@ const createPositionLifecycleHelpers = ({
             partialPnl.realizedProfitUSDT,
             position.strategy || null
         );
-        console.log(`[INFO] Recorded partial close of ${closedQuantity} contracts: ${partialPnl.realizedProfitUSDT.toFixed(4)} USDT`);
+        console.log(`[POSITION][INFO] Recorded partial close of ${closedQuantity} contracts: ${partialPnl.realizedProfitUSDT.toFixed(4)} USDT`);
         await saveDB();
     };
 
@@ -152,7 +152,7 @@ const createPositionLifecycleHelpers = ({
             const position = { ...trackedPosition };
             const { side, quantity } = position;
             if (!Number.isFinite(quantity) || quantity <= 0) {
-                console.error("[ERROR] Invalid position quantity. Removing local active position.");
+                console.error("[POSITION][ERROR] Invalid position quantity. Removing local active position.");
                 if (shouldCancelGridOrdersForPositionCleanup()) {
                     const openGridOrders = await fetchOpenGridOrders();
                     if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "INVALID_POSITION_QTY");
@@ -165,13 +165,13 @@ const createPositionLifecycleHelpers = ({
 
             const currentPos = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
             if (!currentPos) {
-                console.log("[INFO] No matching open position on exchange. Removing local active position.");
+                console.log("[POSITION][INFO] No matching open position on exchange. Removing local active position.");
                 await clearMissingPositionState(position, "POSITION_MISSING", positionKey);
                 return;
             }
             const actualQuantity = Math.abs(getExchangePositionContracts(currentPos));
             if (Math.abs(actualQuantity - quantity) > getPositionSyncQtyTolerance()) {
-                console.log("[INFO] Position size changed on exchange. Updating local record.");
+                console.log("[POSITION][INFO] Position size changed on exchange. Updating local record.");
                 position.quantity = actualQuantity;
                 position.entryPrice = getExchangePositionEntryPrice(currentPos, position.entryPrice);
                 const recalculatedPlan = buildOrderPlan(
@@ -197,7 +197,7 @@ const createPositionLifecycleHelpers = ({
             }
 
             const closeSide = side === "buy" ? "sell" : "buy";
-            console.log(`\n[CLOSE] Closing position ${positionKey}...`);
+            console.log(`[POSITION][INFO] Closing position ${positionKey}...`);
             const matchingTpOrders = (await fetchOpenTpOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
             if (matchingTpOrders.length > 0) await cancelTpOrders(matchingTpOrders, "MANUAL_CLOSE");
             const matchingSlOrders = (await fetchOpenSlOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
@@ -221,10 +221,10 @@ const createPositionLifecycleHelpers = ({
             } catch (error) {
                 const errorMessage = String(error?.message || "");
                 if (error.code === -2022 || errorMessage.includes("ReduceOnly Order is rejected")) {
-                    console.warn("[WARN] Reduce-only order rejected. Syncing position with exchange...");
+                    console.warn("[POSITION][WARN] Reduce-only order rejected. Syncing position with exchange...");
                     const openPosition = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
                     if (!openPosition) {
-                        console.log("[INFO] No matching open position on exchange. Removing local active position.");
+                        console.log("[POSITION][INFO] No matching open position on exchange. Removing local active position.");
                         await clearMissingPositionState(position, "POSITION_MISSING", positionKey);
                         return;
                     }
@@ -240,7 +240,7 @@ const createPositionLifecycleHelpers = ({
                     await saveDB();
                     await ensureReduceOnlyTakeProfitOrder(positionKey, syncedPosition);
                     await ensureReduceOnlyStopLossOrder(positionKey, syncedPosition);
-                    console.log("[INFO] Updated activePosition from exchange data. Will retry close on next cycle.");
+                    console.log("[POSITION][INFO] Updated active position from exchange data. Will retry close on next cycle.");
                     return;
                 }
                 throw error;
@@ -275,14 +275,14 @@ const createPositionLifecycleHelpers = ({
                     await saveDB();
                     await ensureReduceOnlyTakeProfitOrder(positionKey, syncedRemainingPosition);
                     await ensureReduceOnlyStopLossOrder(positionKey, syncedRemainingPosition);
-                    console.warn(`[WARN] Close order partially filled. Remaining quantity on exchange: ${remainingContracts}`);
+                    console.warn(`[POSITION][WARN] Close order partially filled. Remaining quantity on exchange: ${remainingContracts}`);
                     return;
                 }
             }
             const realizedPnL = calculatePositionPnL(position, closeFillSnapshot.price);
             await finalizeClosedPosition(position, realizedPnL.netProfitUSDT, realizedPnL.profitPercent, reason, closeFillSnapshot.price, positionKey);
         } catch (error) {
-            console.error("[ERROR] Close position failed:", String(error?.message || error));
+            console.error("[POSITION][ERROR] Close position failed:", String(error?.message || error));
         } finally {
             closingPositionKeys.delete(closeLockKey);
             setIsClosingPosition(closingPositionKeys.size > 0);
@@ -298,7 +298,4 @@ const createPositionLifecycleHelpers = ({
 };
 
 module.exports = { createPositionLifecycleHelpers };
-
-
-
 

@@ -44,7 +44,6 @@ const { createTradeLogicHelpers } = require("./services/trade-logic");
 const { createPositionStateHelpers } = require("./services/position-state");
 const { createRuntimeSchedulerHelpers } = require("./services/runtime-scheduler");
 
-// -------------------- GLOBAL VARIABLES --------------------
 let isProcessing = false;
 let isPlacingOrder = false;
 let isClosingPosition = false;
@@ -122,7 +121,6 @@ const {
     sleep,
     toFiniteNumber,
     clamp,
-    formatRuntimeTimestamp,
     getUTCDateKey,
     isSameUTCDate,
     markExchangeUnhealthy,
@@ -230,7 +228,7 @@ const {
     getDefaultConfig: () => getDefaultConfig(),
     hydrateConfig,
     serializeConfigForSave,
-    logCreated: () => console.log("[INFO] Created new config row")
+    logCreated: () => console.log("[CONFIG][INFO] Created new config row")
 });
 
 const {
@@ -269,7 +267,6 @@ const {
     getSaveDB: () => saveDB,
     defaultConfig: DEFAULT_CONFIG,
     validMarginModes: VALID_MARGIN_MODES,
-    normalizeConfig,
     normalizeSymbol,
     toFiniteNumber,
     clamp,
@@ -281,7 +278,6 @@ const {
     isHedgeModeEnabled,
     getActivePositionsList: (...args) => getActivePositionsList(...args),
     getExchangePositionSide: (...args) => getExchangePositionSide(...args),
-    getOrderTriggerPrice: (...args) => getOrderTriggerPrice(...args),
     gridClientOrderPrefix: GRID_CLIENT_ORDER_PREFIX,
     tpClientOrderPrefix: TP_CLIENT_ORDER_PREFIX,
     slClientOrderPrefix: SL_CLIENT_ORDER_PREFIX
@@ -424,11 +420,11 @@ const {
 const validateOrderSize = (market, quantity, referencePrice, options = {}) => {
     const { allowReduceOnlyClose = false } = options;
     if (!Number.isFinite(quantity) || quantity <= 0) {
-        return { valid: false, reason: "[ERROR] Invalid order quantity after precision adjustment." };
+        return { valid: false, reason: "[ORDER][ERROR] Invalid order quantity after precision adjustment." };
     }
     const minAmount = Number(market?.limits?.amount?.min);
     if (Number.isFinite(minAmount) && quantity < minAmount) {
-        return { valid: false, reason: `[ERROR] Quantity ${quantity} is below exchange minimum ${minAmount}. Order skipped.` };
+        return { valid: false, reason: `[ORDER][ERROR] Quantity ${quantity} is below exchange minimum ${minAmount}. Order skipped.` };
     }
     const notional = quantity * referencePrice;
     const minCost = Number(market?.limits?.cost?.min);
@@ -436,10 +432,10 @@ const validateOrderSize = (market, quantity, referencePrice, options = {}) => {
         if (allowReduceOnlyClose) {
             return {
                 valid: true,
-                warning: `[WARN] Reduce-only close notional ${notional.toFixed(6)} is below exchange minimum ${minCost}. Allowing placement because the order only closes an existing position.`
+                warning: `[ORDER][WARN] Reduce-only close notional ${notional.toFixed(6)} is below exchange minimum ${minCost}. Allowing placement because the order only closes an existing position.`
             };
         }
-        return { valid: false, reason: `[ERROR] Order notional ${notional.toFixed(6)} is below exchange minimum ${minCost}. Order skipped.` };
+        return { valid: false, reason: `[ORDER][ERROR] Order notional ${notional.toFixed(6)} is below exchange minimum ${minCost}. Order skipped.` };
     }
     return { valid: true };
 };
@@ -643,7 +639,7 @@ const mergeRuntimeConfig = (nextConfig) => {
     if (hasActiveTradeState) {
         RUNTIME_PROTECTED_CONFIG_KEYS.forEach((key) => {
             if (nextConfig[key] !== db[key]) {
-                console.warn(`[WARN] Preserving runtime ${key}=${db[key]} while positions are active.`);
+                console.warn(`[CONFIG][WARN] Preserving runtime ${key}=${db[key]} while positions are active.`);
                 nextConfig[key] = db[key];
             }
         });
@@ -720,7 +716,7 @@ const applyRuntimeConfigChanges = async (previousConfig = null) => {
     if (shouldResetGridState && db.activeGridState) {
         db.activeGridState = null;
         runtimeChanged = true;
-        console.log("[CONFIG] Grid parameters changed. Cleared locked grid state for rebuild.");
+        console.log("[CONFIG][INFO] Grid parameters changed. Cleared locked grid state for rebuild.");
     }
 
     const shouldReapplyPositions = hasAnyActivePosition() && Array.from(CONFIG_KEYS_REQUIRING_POSITION_REAPPLY).some((key) => didConfigFieldChange(previousConfig, db, key));
@@ -752,7 +748,7 @@ const applyRuntimeConfigChanges = async (previousConfig = null) => {
 
         upsertActivePosition(nextPosition);
         runtimeChanged = true;
-        console.log(`[CONFIG] Re-applied trading parameters to active position ${positionKey}.`);
+        console.log(`[CONFIG][INFO] Re-applied trading parameters to active position ${positionKey}.`);
     }
 
     if (runtimeChanged) await saveDB();
@@ -1000,7 +996,6 @@ const applyAutoPresetToConfig = (config) => {
 };
 
 const {
-    syncDashboardConfigSignature,
     initializeDB,
     reloadConfig,
     saveDB,
@@ -1026,7 +1021,6 @@ const {
     configAutoReloadIntervalMs: CONFIG_AUTO_RELOAD_INTERVAL_MS
 });
 
-// -------------------- SYNC POSITION WITH EXCHANGE --------------------
 const syncPositionWithExchange = async () => {
     if (isSyncingPosition || isClosingPosition || isPlacingOrder) return;
     isSyncingPosition = true;
@@ -1034,7 +1028,7 @@ const syncPositionWithExchange = async () => {
         if (!db || !exchange) return;
         const now = Date.now();
         if (now - lastSyncLogAt >= SYNC_LOG_TTL) {
-            console.log(`[SYNC] Checking positions for ${db.pair}...`);
+            console.log(`[SYNC][INFO] Checking positions for ${db.pair}...`);
             lastSyncLogAt = now;
         }
         const openPositions = await fetchOpenExchangePositions();
@@ -1080,8 +1074,8 @@ const syncPositionWithExchange = async () => {
 
         setActivePositionsMap(nextPositionsMap);
         await saveDB();
-        if (getPositionMapCount(nextPositionsMap) === 0) console.log("[OK] Cleared local active positions from exchange state");
-        else console.log(`[OK] Synced active positions: ${getPositionMapKeys(nextPositionsMap).join(", ")}`);
+        if (getPositionMapCount(nextPositionsMap) === 0) console.log("[SYNC][INFO] Cleared local active positions from exchange state");
+        else console.log(`[SYNC][INFO] Synced active positions: ${getPositionMapKeys(nextPositionsMap).join(", ")}`);
 
         for (const [positionKey, syncedPosition] of Object.entries(nextPositionsMap)) {
             await ensureReduceOnlyTakeProfitOrder(positionKey, syncedPosition);
@@ -1090,7 +1084,7 @@ const syncPositionWithExchange = async () => {
         markExchangeHealthy("position sync");
     } catch (error) {
         markExchangeUnhealthy(error, "position sync");
-        console.error("[ERROR] Sync position failed:", error.message);
+        console.error("[SYNC][ERROR] Position sync failed:", error.message);
     }
     finally { isSyncingPosition = false; }
 };
@@ -1117,7 +1111,6 @@ const {
     markExchangeUnhealthy
 });
 
-// -------------------- SIGNAL DETECTION --------------------
 const {
     analyzeSignal,
     syncGridOrders
@@ -1215,7 +1208,6 @@ const { placeOrder } = createTradeEntryHelpers({
     syncPositionWithExchange: (...args) => syncPositionWithExchange(...args)
 });
 
-// -------------------- REAL-TIME PNL MONITORING --------------------
 const {
     startPnLMonitoring,
     startPositionSync,
@@ -1268,7 +1260,6 @@ const {
     exitProcess: (code) => process.exit(code)
 });
 
-// -------------------- MAIN LOOP --------------------
 (async () => {
     try {
         if (!(await initializeDB())) process.exit(1);
@@ -1282,13 +1273,13 @@ const {
             if (isProcessing) return;
             isProcessing = true;
             try { await runTradingCycle(); }
-            catch (error) { console.error("[ERROR] Loop error:", error.message); }
+            catch (error) { console.error("[APP][ERROR] Main loop failed:", error.message); }
             finally { isProcessing = false; }
         }, 2000);
 
         registerRuntimeCommands();
     } catch (error) {
-        console.error("[ERROR] Bot startup failed:", error.message);
+        console.error("[APP][ERROR] Bot startup failed:", error.message);
         process.exit(1);
     }
 })();

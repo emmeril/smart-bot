@@ -15,7 +15,7 @@ const createRuntimeUtils = ({
                 return await fn();
             } catch (error) {
                 if (i === retries - 1) throw error;
-                console.log(`[RETRY] Attempt ${i + 1} failed, retrying in ${delay}ms...`);
+                console.log(`[RETRY][INFO] Attempt ${i + 1} failed, retrying in ${delay}ms...`);
                 await new Promise((resolve) => setTimeout(resolve, delay));
                 delay *= 2;
             }
@@ -30,12 +30,6 @@ const createRuntimeUtils = ({
     };
 
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-
-    const formatRuntimeTimestamp = (timestamp) => {
-        const value = toFiniteNumber(timestamp, 0);
-        if (!value) return "N/A";
-        return new Date(value).toISOString();
-    };
 
     const getUTCDateKey = (timestamp) => {
         const parsed = toFiniteNumber(timestamp, NaN);
@@ -59,7 +53,7 @@ const createRuntimeUtils = ({
         exchangeHealth.lastContext = context;
         exchangeHealth.consecutiveFailures += 1;
         if (requireRecoverySync) exchangeHealth.needsRecoverySync = true;
-        console.warn(`[RECOVERY] Exchange degraded during ${context}: ${errorMessage}`);
+        console.warn(`[RECOVERY][WARN] Exchange degraded during ${context}: ${errorMessage}`);
     };
 
     const markExchangeHealthy = (context = "exchange sync") => {
@@ -72,7 +66,7 @@ const createRuntimeUtils = ({
         exchangeHealth.lastError = "";
         exchangeHealth.lastContext = context;
         if (shouldLogRecovery) {
-            console.log(`[RECOVERY] Exchange healthy again after ${context}. Trading entries resumed.`);
+            console.log(`[RECOVERY][INFO] Exchange healthy again after ${context}. Trading entries resumed.`);
         }
     };
 
@@ -92,7 +86,7 @@ const createRuntimeUtils = ({
         const now = Date.now();
         if (now - getLastRecoveryBlockLogAt() < 10000) return;
         const reason = getExchangeRecoveryReason();
-        console.warn(`[RECOVERY] Pausing ${context}. ${reason || "Exchange recovery is still in progress."}`);
+        console.warn(`[RECOVERY][WARN] Pausing ${context}. ${reason || "Exchange recovery is still in progress."}`);
         setLastRecoveryBlockLogAt(now);
     };
 
@@ -124,11 +118,11 @@ const createRuntimeUtils = ({
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
             if (!fs.existsSync(filePath)) {
                 fs.writeFileSync(filePath, defaultContent, "utf8");
-                console.log(`[OK] Created ${path.basename(filePath)} file`);
+                console.log(`[FILE][INFO] Created ${path.basename(filePath)} file`);
             }
             return true;
         } catch (error) {
-            console.error(`[ERROR] Failed to create ${path.basename(filePath)}:`, error.message);
+            console.error(`[FILE][ERROR] Failed to create ${path.basename(filePath)}:`, error.message);
             return false;
         }
     };
@@ -138,7 +132,6 @@ const createRuntimeUtils = ({
         sleep,
         toFiniteNumber,
         clamp,
-        formatRuntimeTimestamp,
         getUTCDateKey,
         isSameUTCDate,
         markExchangeUnhealthy,

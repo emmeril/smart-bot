@@ -59,14 +59,14 @@ const createConfigRuntimeHelpers = ({
             await persistConfig(configToPersist);
             syncDashboardConfigSignature(configToPersist);
         } catch (error) {
-            console.error("[ERROR] Failed to save DB:", error.message);
+            console.error("[CONFIG][ERROR] Failed to save DB:", error.message);
         }
     };
 
     const initializeDB = async () => {
         try {
             await ensureConfigSchema();
-            console.log("[OK] Database synced");
+            console.log("[DB][INFO] Database synced");
             const configRow = await ensureConfigRow();
             const persisted = configRow.toJSON();
             const { config: hydratedConfig, autoPresetResult } = applyAutoPresetToConfig(hydrateConfig(persisted));
@@ -74,12 +74,12 @@ const createConfigRuntimeHelpers = ({
             syncDashboardConfigSignature();
             if (autoPresetResult.changed) {
                 await saveDB({ mode: "full" });
-                console.log(`[PRESET] Auto-applied ${autoPresetResult.presetName} profile for ${getDb().pair}`);
+                console.log(`[PRESET][INFO] Auto-applied ${autoPresetResult.presetName} profile for ${getDb().pair}`);
             }
-            console.log("[OK] DB initialized successfully");
+            console.log("[DB][INFO] Runtime DB initialized successfully");
             return true;
         } catch (error) {
-            console.error("[ERROR] Error initializing DB:", error.message);
+            console.error("[DB][ERROR] Failed to initialize DB:", error.message);
             setDb(null);
             return false;
         }
@@ -100,11 +100,11 @@ const createConfigRuntimeHelpers = ({
             syncDashboardConfigSignature();
             if (autoPresetResult.changed && !hasAnyActivePosition()) {
                 await saveDB({ mode: "full" });
-                console.log(`[PRESET] Auto-refreshed ${autoPresetResult.presetName} profile for ${getDb().pair}`);
+                console.log(`[PRESET][INFO] Auto-refreshed ${autoPresetResult.presetName} profile for ${getDb().pair}`);
             }
             return true;
         } catch (error) {
-            console.error("[ERROR] Failed to reload config:", error.message);
+            console.error("[CONFIG][ERROR] Failed to reload config:", error.message);
             return false;
         }
     };
@@ -116,12 +116,12 @@ const createConfigRuntimeHelpers = ({
             if (!persistedConfig) return false;
             const persistedSignature = buildDashboardConfigSignature(persistedConfig);
             if (persistedSignature === lastKnownDashboardConfigSignature) return false;
-            console.log("[CONFIG] Detected dashboard config change. Reloading...");
+            console.log("[CONFIG][INFO] Detected dashboard config change. Reloading...");
             const reloaded = await reloadConfig();
             if (reloaded) syncDashboardConfigSignature();
             return reloaded;
         } catch (error) {
-            console.error("[ERROR] Auto config reload failed:", error.message);
+            console.error("[CONFIG][ERROR] Auto config reload failed:", error.message);
             return false;
         }
     };

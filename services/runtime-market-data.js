@@ -47,7 +47,7 @@ const createRuntimeMarketDataHelpers = ({
             }
             return latestPrice;
         } catch (error) {
-            console.error("[ERROR] Failed to get price after retries:", error.message);
+            console.error("[MARKET][ERROR] Failed to get price after retries:", error.message);
             return getTickerCache().price;
         }
     };
@@ -69,7 +69,7 @@ const createRuntimeMarketDataHelpers = ({
             setOhlcvCache({ key: cacheKey, data: ohlcv, lastUpdate: now });
             return ohlcv;
         } catch (error) {
-            console.error("[ERROR] Failed to fetch OHLCV after retries:", error.message);
+            console.error("[MARKET][ERROR] Failed to fetch OHLCV after retries:", error.message);
             return getOhlcvCache().data || [];
         }
     };
@@ -104,7 +104,7 @@ const createRuntimeMarketDataHelpers = ({
             ].join(",") + "\n";
             fs.appendFileSync(logPath, line);
         } catch (error) {
-            console.error("[ERROR] Failed to log trade:", error.message);
+            console.error("[MARKET][ERROR] Failed to log trade:", error.message);
         }
     };
 
@@ -144,7 +144,7 @@ const createRuntimeMarketDataHelpers = ({
             });
             return getBalanceCache().totalUSDT;
         } catch (error) {
-            console.error("[ERROR] Failed to fetch balance:", error.message);
+            console.error("[MARKET][ERROR] Failed to fetch balance:", error.message);
             return getBalanceCache().totalUSDT || 0;
         }
     };
@@ -160,7 +160,7 @@ const createRuntimeMarketDataHelpers = ({
             const latestBalanceCache = getBalanceCache();
             return Number.isFinite(latestBalanceCache.availableUSDT) ? latestBalanceCache.availableUSDT : latestBalanceCache.totalUSDT;
         } catch (error) {
-            console.error("[ERROR] Failed to resolve available balance:", error.message);
+            console.error("[MARKET][ERROR] Failed to resolve available balance:", error.message);
             const latestBalanceCache = getBalanceCache();
             return Number.isFinite(latestBalanceCache.availableUSDT) ? latestBalanceCache.availableUSDT : 0;
         }
@@ -180,7 +180,7 @@ const createRuntimeMarketDataHelpers = ({
             }
             return 0;
         } catch (error) {
-            console.error("[ERROR] Failed to read last trade timestamp:", error.message);
+            console.error("[MARKET][ERROR] Failed to read last trade timestamp:", error.message);
             return 0;
         }
     };

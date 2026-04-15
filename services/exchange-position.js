@@ -177,7 +177,7 @@ const createExchangePositionHelpers = ({
         if (openPositions.length === 0) return null;
         if (trackedPosition) return openPositions.find((position) => matchesTrackedPositionSide(position, trackedPosition)) || null;
         if (isHedgeModeEnabled() && openPositions.length > 1) {
-            console.warn("[WARN] Multiple hedge positions detected on the same symbol. Bot will track the first open side only.");
+            console.warn("[POSITION][WARN] Multiple hedge positions detected on the same symbol. Bot will track the first open side only.");
         }
         return openPositions[0];
     };
@@ -354,7 +354,6 @@ const createExchangePositionHelpers = ({
 };
 
 module.exports = { createExchangePositionHelpers };
-
 
 
 

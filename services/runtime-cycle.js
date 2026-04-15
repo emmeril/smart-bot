@@ -41,7 +41,7 @@ const createRuntimeCycleHelpers = ({
     const resetDailyStateIfNeeded = async (now) => {
         const db = getDb();
         if (!isNewTradingDay(now)) return false;
-        console.log("[DAILY] Daily reset");
+        console.log("[DAILY][INFO] Daily reset");
         db.dailyPnL = 0;
         db.dailyTrades = 0;
         db.lastDailyReset = toFiniteNumber(now, Date.now());
@@ -80,12 +80,12 @@ const createRuntimeCycleHelpers = ({
             if (cmd === "sync") { await syncPositionWithExchange(); return; }
             if (cmd === "status") { await printDetailedStatus(); return; }
             if (cmd === "help") {
-                console.log("[INFO] Runtime commands: status | sync | help");
+                console.log("[RUNTIME][INFO] Runtime commands: status | sync | help");
                 return;
             }
-            console.log(`[INFO] Unknown runtime command: ${cmd}. Available: status | sync | help`);
+            console.log(`[RUNTIME][INFO] Unknown runtime command: ${cmd}. Available: status | sync | help`);
         } catch (error) {
-            console.error("[ERROR] Runtime command failed:", error.message);
+            console.error("[RUNTIME][ERROR] Runtime command failed:", error.message);
         }
     };
 
@@ -147,7 +147,7 @@ const createRuntimeCycleHelpers = ({
             const elapsedSec = Math.max(1, Math.round((Date.now() - metrics.windowStart) / 1000));
             const apiTotal = metrics.api.ticker + metrics.api.ohlcv + metrics.api.balance + metrics.api.positions + metrics.api.orders;
             const winRate = metrics.trades.closed > 0 ? ((metrics.trades.wins / metrics.trades.closed) * 100).toFixed(1) : "0.0";
-            console.log(`[METRICS] ${elapsedSec}s | API=${apiTotal} (ticker:${metrics.api.ticker}, ohlcv:${metrics.api.ohlcv}, bal:${metrics.api.balance}, pos:${metrics.api.positions}, order:${metrics.api.orders}) | Signals=${metrics.signals.analyzed} (setups:${metrics.signals.crossoverDetected}, long:${metrics.signals.longConfirmed}, short:${metrics.signals.shortConfirmed}) | Trades today O/C/W/L=${metrics.trades.opened}/${metrics.trades.closed}/${metrics.trades.wins}/${metrics.trades.losses} (WR ${winRate}%)`);
+            console.log(`[METRICS][INFO] ${elapsedSec}s | API=${apiTotal} (ticker:${metrics.api.ticker}, ohlcv:${metrics.api.ohlcv}, bal:${metrics.api.balance}, pos:${metrics.api.positions}, order:${metrics.api.orders}) | Signals=${metrics.signals.analyzed} (setups:${metrics.signals.crossoverDetected}, long:${metrics.signals.longConfirmed}, short:${metrics.signals.shortConfirmed}) | Trades today O/C/W/L=${metrics.trades.opened}/${metrics.trades.closed}/${metrics.trades.wins}/${metrics.trades.losses} (WR ${winRate}%)`);
             resetMetricWindow();
         }, metricsLogInterval);
         setMetricsTimer(timer);

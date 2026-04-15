@@ -58,7 +58,7 @@ const createManagedOrdersHelpers = ({
         } catch (error) {
             triggerOrdersFetchFailed = true;
             if (!getHasLoggedTriggerOrderFetchFallback()) {
-                console.warn(`[WARN] Failed to fetch trigger open orders separately. Falling back to unified open-order snapshot. ${describeError(error)}`);
+                console.warn(`[ORDERS][WARN] Failed to fetch trigger open orders separately. Falling back to unified open-order snapshot. ${describeError(error)}`);
                 setHasLoggedTriggerOrderFetchFallback(true);
             }
         }
@@ -118,18 +118,18 @@ const createManagedOrdersHelpers = ({
         const exchange = getExchange();
         const metrics = getMetrics();
         const currentDb = getDb();
-        console.log(`[${label}] Cancelling ${orders.length} ${label.toLowerCase()} order(s) (${reason})...`);
+        console.log(`[${label}][INFO] Cancelling ${orders.length} ${label.toLowerCase()} order(s) (${reason})...`);
         for (const order of orders) {
             try {
                 const orderId = getManagedOrderId(order);
                 if (!orderId) {
-                    console.warn(`[WARN] Failed to cancel ${label.toLowerCase()} order without exchange id.`);
+                    console.warn(`[${label}][WARN] Failed to cancel ${label.toLowerCase()} order without exchange id.`);
                     continue;
                 }
                 await exchange.cancelOrder(orderId, currentDb.pair, cancelOptions);
                 metrics.api.orders++;
             } catch (error) {
-                console.warn(`[WARN] Failed to cancel ${label.toLowerCase()} order ${order.id}: ${describeError(error)}`);
+                console.warn(`[${label}][WARN] Failed to cancel ${label.toLowerCase()} order ${order.id}: ${describeError(error)}`);
             }
         }
     };
@@ -174,19 +174,19 @@ const createManagedOrdersHelpers = ({
         }
 
         if (duplicateOrders.length > 0) {
-            console.warn(`[${label}] Found ${duplicateOrders.length} duplicate managed order(s) (${cancelReason}). Cancelling extras...`);
+            console.warn(`[${label}][WARN] Found ${duplicateOrders.length} duplicate managed order(s) (${cancelReason}). Cancelling extras...`);
             for (const duplicateOrder of duplicateOrders) {
                 try {
                     const cancelParams = isTriggerManagedOrder(duplicateOrder, label) ? { trigger: true } : undefined;
                     const duplicateOrderId = getManagedOrderId(duplicateOrder);
                     if (!duplicateOrderId) {
-                        console.warn(`[WARN] Failed to cancel duplicate ${label.toLowerCase()} order without exchange id.`);
+                        console.warn(`[${label}][WARN] Failed to cancel duplicate ${label.toLowerCase()} order without exchange id.`);
                         continue;
                     }
                     await exchange.cancelOrder(duplicateOrderId, currentDb.pair, cancelParams);
                     metrics.api.orders++;
                 } catch (error) {
-                    console.warn(`[WARN] Failed to cancel duplicate ${label.toLowerCase()} order ${duplicateOrder.id}: ${describeError(error)}`);
+                    console.warn(`[${label}][WARN] Failed to cancel duplicate ${label.toLowerCase()} order ${duplicateOrder.id}: ${describeError(error)}`);
                 }
             }
         }
@@ -204,7 +204,7 @@ const createManagedOrdersHelpers = ({
             if (!orderId) return false;
             await exchange.cancelOrder(orderId, symbol);
             metrics.api.orders++;
-            console.log(`[CANCEL] Cancelled order with clientOrderId ${clientOrderId}`);
+            console.log(`[CANCEL][INFO] Cancelled order with clientOrderId ${clientOrderId}`);
             return true;
         }
 
@@ -214,7 +214,7 @@ const createManagedOrdersHelpers = ({
             if (!triggerOrderId) return false;
             await exchange.cancelOrder(triggerOrderId, symbol, { trigger: true });
             metrics.api.orders++;
-            console.log(`[CANCEL] Cancelled trigger order with clientOrderId ${clientOrderId}`);
+            console.log(`[CANCEL][INFO] Cancelled trigger order with clientOrderId ${clientOrderId}`);
             return true;
         }
 

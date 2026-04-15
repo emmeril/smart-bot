@@ -79,13 +79,13 @@ const createDashboardStatusHelpers = ({
         try {
             exchangePositions = await fetchOpenExchangePositions();
         } catch (error) {
-            console.warn(`[STATUS] Failed to fetch exchange positions: ${error.message}`);
+            console.warn(`[STATUS][WARN] Failed to fetch exchange positions: ${error.message}`);
         }
 
         try {
             managedOrders = await fetchManagedOpenOrdersSnapshot();
         } catch (error) {
-            console.warn(`[STATUS] Failed to fetch managed open orders: ${error.message}`);
+            console.warn(`[STATUS][WARN] Failed to fetch managed open orders: ${error.message}`);
         }
 
         const activePositions = getActivePositionEntries().map(([positionKey, position]) => {

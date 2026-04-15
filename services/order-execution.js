@@ -60,7 +60,7 @@ const createOrderExecutionHelpers = ({
         const quantity = formatAmountToMarketPrecision(db.pair, rawQty);
         const sizeValidation = validateOrderSize(market, quantity, gridOrder.price);
         if (!sizeValidation.valid) {
-            console.warn(`[GRID] Skipping ${gridOrder.side.toUpperCase()} ${gridOrder.price}: ${sizeValidation.reason}`);
+            console.warn(`[GRID][WARN] Skipping ${gridOrder.side.toUpperCase()} ${gridOrder.price}: ${sizeValidation.reason}`);
             return false;
         }
 
@@ -72,7 +72,7 @@ const createOrderExecutionHelpers = ({
 
         const existingOrder = await findOpenGridOrderByClientOrderId(gridOrder.clientOrderId);
         if (existingOrder) {
-            console.log(`[GRID] Existing order already on exchange for ${gridOrder.clientOrderId}. Skipping duplicate placement.`);
+            console.log(`[GRID][INFO] Existing order already on exchange for ${gridOrder.clientOrderId}. Skipping duplicate placement.`);
             return true;
         }
 
@@ -86,14 +86,14 @@ const createOrderExecutionHelpers = ({
                 params
             );
             metrics.api.orders++;
-            console.log(`[GRID] Placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price} size ${orderSizeUsdt.toFixed(4)} USDT -> TP ${gridOrder.targetPrice} | SL ${gridOrder.stopLossPrice}`);
+            console.log(`[GRID][INFO] Placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price} size ${orderSizeUsdt.toFixed(4)} USDT -> TP ${gridOrder.targetPrice} | SL ${gridOrder.stopLossPrice}`);
             return true;
         } catch (error) {
             if (isDuplicateClientOrderIdError(error)) {
-                console.warn(`[GRID] Duplicate clientOrderId ${gridOrder.clientOrderId}. Attempting to cancel existing order and retry.`);
+                console.warn(`[GRID][WARN] Duplicate clientOrderId ${gridOrder.clientOrderId}. Attempting to cancel existing order and retry.`);
                 const existingDuplicate = await findOpenGridOrderByClientOrderId(gridOrder.clientOrderId);
                 if (existingDuplicate) {
-                    console.log(`[GRID] Duplicate order already active for ${gridOrder.clientOrderId}. Treating as placed.`);
+                    console.log(`[GRID][INFO] Duplicate order already active for ${gridOrder.clientOrderId}. Treating as placed.`);
                     return true;
                 }
 
@@ -109,13 +109,13 @@ const createOrderExecutionHelpers = ({
                             params
                         );
                         metrics.api.orders++;
-                        console.log(`[GRID] Retry succeeded: placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price}`);
+                        console.log(`[GRID][INFO] Retry succeeded: placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price}`);
                         return true;
                     } catch (retryError) {
-                        console.error(`[GRID] Retry failed for ${gridOrder.clientOrderId}: ${describeError(retryError)}`);
+                        console.error(`[GRID][ERROR] Retry failed for ${gridOrder.clientOrderId}: ${describeError(retryError)}`);
                         const retryExistingOrder = await findOpenGridOrderByClientOrderId(gridOrder.clientOrderId);
                         if (retryExistingOrder) {
-                            console.log(`[GRID] Retry duplicate resolved by existing exchange order for ${gridOrder.clientOrderId}.`);
+                            console.log(`[GRID][INFO] Retry duplicate resolved by existing exchange order for ${gridOrder.clientOrderId}.`);
                             return true;
                         }
                         await syncPositionWithExchange();
@@ -123,12 +123,12 @@ const createOrderExecutionHelpers = ({
                     }
                 }
 
-                console.warn(`[GRID] Could not cancel order with clientOrderId ${gridOrder.clientOrderId}. Syncing position state instead.`);
+                console.warn(`[GRID][WARN] Could not cancel order with clientOrderId ${gridOrder.clientOrderId}. Syncing position state instead.`);
                 await syncPositionWithExchange();
                 return false;
             }
 
-            console.error(`[GRID] Failed to place ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price}: ${describeError(error)}`);
+            console.error(`[GRID][ERROR] Failed to place ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price}: ${describeError(error)}`);
             return false;
         }
     };
@@ -144,10 +144,10 @@ const createOrderExecutionHelpers = ({
         const market = exchange.markets[db.pair];
         const sizeValidation = validateOrderSize(market, quantity, position.targetPrice, { allowReduceOnlyClose: true });
         if (!sizeValidation.valid) {
-            console.warn(`[TP] Skipping TP placement: ${sizeValidation.reason}`);
+            console.warn(`[TP][WARN] Skipping TP placement: ${sizeValidation.reason}`);
             return null;
         }
-        if (sizeValidation.warning) console.warn(`[TP] ${sizeValidation.warning}`);
+        if (sizeValidation.warning) console.warn(`[TP][WARN] ${sizeValidation.warning}`);
 
         const params = buildExchangeOrderParams({
             side: closeSide,
@@ -167,7 +167,7 @@ const createOrderExecutionHelpers = ({
                 upsertActivePosition(position);
                 await saveDB();
             }
-            console.log(`[TP] Existing exchange order already active for ${clientOrderId}. Reusing it.`);
+            console.log(`[TP][INFO] Existing exchange order already active for ${clientOrderId}. Reusing it.`);
             return existingOrder;
         }
 
@@ -181,14 +181,14 @@ const createOrderExecutionHelpers = ({
                 params
             );
             metrics.api.orders++;
-            console.log(`[TP] Placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
+            console.log(`[TP][INFO] Placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
             return attachClientOrderIdFallback(order, clientOrderId);
         } catch (error) {
             if (isDuplicateClientOrderIdError(error)) {
-                console.warn(`[TP] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
+                console.warn(`[TP][WARN] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
                 const duplicateOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
                 if (duplicateOrder) {
-                    console.log(`[TP] Duplicate resolved by existing exchange TP ${clientOrderId}.`);
+                    console.log(`[TP][INFO] Duplicate resolved by existing exchange TP ${clientOrderId}.`);
                     return attachClientOrderIdFallback(duplicateOrder, clientOrderId);
                 }
                 const cancelled = await cancelOrderByClientOrderId(clientOrderId, db.pair);
@@ -203,17 +203,17 @@ const createOrderExecutionHelpers = ({
                             params
                         );
                         metrics.api.orders++;
-                        console.log(`[TP] Retry succeeded: placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
+                        console.log(`[TP][INFO] Retry succeeded: placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
                         return attachClientOrderIdFallback(retryOrder, clientOrderId);
                     } catch (retryError) {
-                        console.error(`[TP] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
+                        console.error(`[TP][ERROR] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
                         await syncPositionWithExchange();
                         return null;
                     }
                 }
 
                 const replacementClientOrderId = buildReplacementClientOrderId(clientOrderId);
-                console.warn(`[TP] Existing clientOrderId ${clientOrderId} is unusable. Retrying with replacement ${replacementClientOrderId}.`);
+                console.warn(`[TP][WARN] Existing clientOrderId ${clientOrderId} is unusable. Retrying with replacement ${replacementClientOrderId}.`);
                 try {
                     const retryOrder = await exchange.createOrder(
                         db.pair,
@@ -224,10 +224,10 @@ const createOrderExecutionHelpers = ({
                         { ...params, newClientOrderId: replacementClientOrderId }
                     );
                     metrics.api.orders++;
-                    console.log(`[TP] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
+                    console.log(`[TP][INFO] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
                     return attachClientOrderIdFallback(retryOrder, replacementClientOrderId);
                 } catch (replacementError) {
-                    console.error(`[TP] Replacement retry failed for ${replacementClientOrderId}: ${describeError(replacementError)}`);
+                    console.error(`[TP][ERROR] Replacement retry failed for ${replacementClientOrderId}: ${describeError(replacementError)}`);
                     await syncPositionWithExchange();
                     return null;
                 }
@@ -247,10 +247,10 @@ const createOrderExecutionHelpers = ({
         const market = exchange.markets[db.pair];
         const sizeValidation = validateOrderSize(market, quantity, position.stopLossPrice, { allowReduceOnlyClose: true });
         if (!sizeValidation.valid) {
-            console.warn(`[SL] Skipping SL placement: ${sizeValidation.reason}`);
+            console.warn(`[SL][WARN] Skipping SL placement: ${sizeValidation.reason}`);
             return null;
         }
-        if (sizeValidation.warning) console.warn(`[SL] ${sizeValidation.warning}`);
+        if (sizeValidation.warning) console.warn(`[SL][WARN] ${sizeValidation.warning}`);
 
         const useClosePositionOrder = !isHedgeModeEnabled();
         const params = buildExchangeOrderParams({
@@ -274,7 +274,7 @@ const createOrderExecutionHelpers = ({
                 upsertActivePosition(position);
                 await saveDB();
             }
-            console.log(`[SL] Existing exchange order already active for ${clientOrderId}. Reusing it.`);
+            console.log(`[SL][INFO] Existing exchange order already active for ${clientOrderId}. Reusing it.`);
             return existingOrder;
         }
 
@@ -289,14 +289,14 @@ const createOrderExecutionHelpers = ({
             );
             metrics.api.orders++;
             const orderModeLabel = useClosePositionOrder ? "close-position STOP_MARKET" : "reduce-only STOP_MARKET";
-            console.log(`[SL] Placed ${orderModeLabel} ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${useClosePositionOrder ? "FULL" : quantity}`);
+            console.log(`[SL][INFO] Placed ${orderModeLabel} ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${useClosePositionOrder ? "FULL" : quantity}`);
             return attachClientOrderIdFallback(order, clientOrderId);
         } catch (error) {
             if (isDuplicateClientOrderIdError(error)) {
-                console.warn(`[SL] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
+                console.warn(`[SL][WARN] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
                 const duplicateOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
                 if (duplicateOrder) {
-                    console.log(`[SL] Duplicate resolved by existing exchange SL ${clientOrderId}.`);
+                    console.log(`[SL][INFO] Duplicate resolved by existing exchange SL ${clientOrderId}.`);
                     return attachClientOrderIdFallback(duplicateOrder, clientOrderId);
                 }
                 const cancelled = await cancelOrderByClientOrderId(clientOrderId, db.pair);
@@ -312,17 +312,17 @@ const createOrderExecutionHelpers = ({
                         );
                         metrics.api.orders++;
                         const retryModeLabel = useClosePositionOrder ? "close-position STOP_MARKET" : "reduce-only STOP_MARKET";
-                        console.log(`[SL] Retry succeeded: placed ${retryModeLabel} ${closeSide.toUpperCase()} @ stop ${params.stopPrice}`);
+                        console.log(`[SL][INFO] Retry succeeded: placed ${retryModeLabel} ${closeSide.toUpperCase()} @ stop ${params.stopPrice}`);
                         return attachClientOrderIdFallback(retryOrder, clientOrderId);
                     } catch (retryError) {
-                        console.error(`[SL] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
+                        console.error(`[SL][ERROR] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
                         await syncPositionWithExchange();
                         return null;
                     }
                 }
 
                 const replacementClientOrderId = buildReplacementClientOrderId(clientOrderId);
-                console.warn(`[SL] Existing clientOrderId ${clientOrderId} is unusable. Retrying with replacement ${replacementClientOrderId}.`);
+                console.warn(`[SL][WARN] Existing clientOrderId ${clientOrderId} is unusable. Retrying with replacement ${replacementClientOrderId}.`);
                 try {
                     const retryOrder = await exchange.createOrder(
                         db.pair,
@@ -333,10 +333,10 @@ const createOrderExecutionHelpers = ({
                         { ...params, newClientOrderId: replacementClientOrderId }
                     );
                     metrics.api.orders++;
-                    console.log(`[SL] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
+                    console.log(`[SL][INFO] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
                     return attachClientOrderIdFallback(retryOrder, replacementClientOrderId);
                 } catch (replacementError) {
-                    console.error(`[SL] Replacement retry failed for ${replacementClientOrderId}: ${describeError(replacementError)}`);
+                    console.error(`[SL][ERROR] Replacement retry failed for ${replacementClientOrderId}: ${describeError(replacementError)}`);
                     await syncPositionWithExchange();
                     return null;
                 }

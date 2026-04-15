@@ -171,20 +171,20 @@ const createRuntimePositionUtils = ({
         try {
             openExchangePositions = await fetchOpenExchangePositions();
         } catch (error) {
-            console.warn(`[STATUS] Failed to fetch exchange positions: ${error.message}`);
+            console.warn(`[STATUS][WARN] Failed to fetch exchange positions: ${error.message}`);
         }
 
         try {
             managedOrders = await fetchManagedOpenOrdersSnapshot();
         } catch (error) {
-            console.warn(`[STATUS] Failed to fetch managed open orders: ${error.message}`);
+            console.warn(`[STATUS][WARN] Failed to fetch managed open orders: ${error.message}`);
         }
         const gridSummary = getGridRuntimeSummary(currentPrice, managedOrders);
         const recoveryReason = getExchangeRecoveryReason();
         const accountPositionMode = getAccountPositionMode();
         const exchangeHealth = getExchangeHealth();
 
-        console.log(`\n[STATUS] Mode=${accountPositionMode.label} | Pair=${db.pair} | Price=${Number.isFinite(currentPrice) ? currentPrice : "N/A"} | LocalActive=${activeEntries.length} | ExchangePos=${openExchangePositions.length}`);
+        console.log(`[STATUS] Mode=${accountPositionMode.label} | Pair=${db.pair} | Price=${Number.isFinite(currentPrice) ? currentPrice : "N/A"} | LocalActive=${activeEntries.length} | ExchangePos=${openExchangePositions.length}`);
         printStatusLine("Profile", `${gridSummary.presetName.toUpperCase()} | Grid=${gridSummary.gridLevelsMode === "AUTO" ? `AUTO ${gridSummary.effectiveGridLevels}` : gridSummary.effectiveGridLevels} | Range=${gridSummary.gridRangeMode === "AUTO" ? `AUTO ${gridSummary.effectiveGridRangePercent}%` : `${gridSummary.effectiveGridRangePercent}%`} | Buffer=${gridSummary.gridEntryBufferMode === "AUTO" ? `AUTO ${gridSummary.effectiveGridEntryBufferPercent}%` : `${gridSummary.effectiveGridEntryBufferPercent}%`} | Slot=${gridSummary.slotLabel} | Ladder=${gridSummary.ladderLabel}`);
         printStatusLine("Side Orders", `${gridSummary.ordersMode}=${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} | Size ${gridSummary.sizeMode}=${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT | Min Valid=${gridSummary.minOrderSizeUsdt.toFixed(4)} USDT | Available USDT=${gridSummary.availableUsdtLabel}`);
         printStatusLine("Daily P&L", `${db.dailyPnL.toFixed(2)} USDT | Trades=${db.dailyTrades}`);
@@ -194,7 +194,7 @@ const createRuntimePositionUtils = ({
         printStatusLine("Open Orders", `Grid=${managedOrders.grid.length} | TP=${managedOrders.tp.length} | SL=${managedOrders.sl.length}`);
         if (gridSummary.hasLockedGrid) printStatusLine("Locked Grid", `${gridSummary.lockedRangeLabel} | Step=${gridSummary.stepLabel}`);
         if (openExchangePositions.length !== activeEntries.length) {
-            console.warn(`[STATUS] Position mismatch detected: local=${activeEntries.length} vs exchange=${openExchangePositions.length}`);
+            console.warn(`[STATUS][WARN] Position mismatch detected: local=${activeEntries.length} vs exchange=${openExchangePositions.length}`);
         }
         printOrderSample(managedOrders.grid, "GRID");
         printOrderSample(managedOrders.tp, "TP");

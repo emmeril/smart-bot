@@ -6,7 +6,6 @@ const createGridRuntimeHelpers = ({
     getSaveDB,
     defaultConfig,
     validMarginModes,
-    normalizeConfig,
     normalizeSymbol,
     toFiniteNumber,
     clamp,
@@ -18,7 +17,6 @@ const createGridRuntimeHelpers = ({
     isHedgeModeEnabled,
     getActivePositionsList,
     getExchangePositionSide,
-    getOrderTriggerPrice,
     gridClientOrderPrefix,
     tpClientOrderPrefix,
     slClientOrderPrefix
@@ -454,7 +452,7 @@ const createGridRuntimeHelpers = ({
         if (!nextState) return null;
 
         const rebuildReason = !persistedState ? "INIT" : (!priceInsideLockedRange ? "PRICE_OUT_OF_RANGE" : "PARAM_CHANGE");
-        console.log(`[GRID] ${rebuildReason}: locking range ${nextState.lowerBound.toFixed(6)} - ${nextState.upperBound.toFixed(6)} | step ${nextState.step.toFixed(6)}`);
+        console.log(`[GRID][INFO] ${rebuildReason}: locking range ${nextState.lowerBound.toFixed(6)} - ${nextState.upperBound.toFixed(6)} | step ${nextState.step.toFixed(6)}`);
 
         if (hasGridStateChanged(persistedState, nextState)) {
             db.activeGridState = nextState;
@@ -507,7 +505,7 @@ const createGridRuntimeHelpers = ({
             const orderPlan = { targetPrice, stopLossPrice };
             if (Number.isFinite(price) && price > 0 && price < minBuyPrice) {
                 if (!isDirectionalOrderPlanValid("buy", price, orderPlan)) {
-                    console.warn(`[GRID] Skipping BUY level ${i} @ ${price} because TP/SL would be invalid after precision rounding.`);
+                    console.warn(`[GRID][WARN] Skipping BUY level ${i} @ ${price} because TP/SL would be invalid after precision rounding.`);
                     continue;
                 }
                 buyOrders.push({ side: "buy", price, orderSizeUsdt, targetPrice, stopLossPrice, levelIndex: i, clientOrderId: getGridClientOrderId("buy", i, price) });
@@ -523,7 +521,7 @@ const createGridRuntimeHelpers = ({
             const orderPlan = { targetPrice, stopLossPrice };
             if (Number.isFinite(price) && price > 0 && price > maxSellPrice) {
                 if (!isDirectionalOrderPlanValid("sell", price, orderPlan)) {
-                    console.warn(`[GRID] Skipping SELL level ${i} @ ${price} because TP/SL would be invalid after precision rounding.`);
+                    console.warn(`[GRID][WARN] Skipping SELL level ${i} @ ${price} because TP/SL would be invalid after precision rounding.`);
                     continue;
                 }
                 sellOrders.push({ side: "sell", price, orderSizeUsdt, targetPrice, stopLossPrice, levelIndex: i, clientOrderId: getGridClientOrderId("sell", i, price) });
@@ -545,7 +543,7 @@ const createGridRuntimeHelpers = ({
             deduped.push(order);
         }
         if (duplicateCount > 0) {
-            console.warn(`[GRID] Deduped ${duplicateCount} grid order(s) that collapsed to the same rounded price.`);
+            console.warn(`[GRID][WARN] Deduped ${duplicateCount} grid order(s) that collapsed to the same rounded price.`);
         }
         return deduped;
     };

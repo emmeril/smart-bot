@@ -39,34 +39,34 @@ const createTradeEntryHelpers = ({
             const targetPositionKey = getOrderPositionSide(side);
             if (getActivePositionByKey(targetPositionKey)) return;
             setIsPlacingOrder(true);
-            console.log(`\n[ORDER] Attempting to place ${side.toUpperCase()} order...`);
+            console.log(`[ORDER][INFO] Attempting to place ${side.toUpperCase()} order...`);
             await setMarginMode();
             const openExchangePositions = await fetchOpenExchangePositions();
             const conflictingExchangePosition = isHedgeModeEnabled()
                 ? openExchangePositions.find((position) => matchesTrackedPositionSide(position, { positionSide: targetPositionKey, side }))
                 : openExchangePositions[0] || null;
             if (conflictingExchangePosition) {
-                console.warn(`[WARN] Skipping ${side.toUpperCase()} order because an exchange position is already open for the same side.`);
+                console.warn(`[ORDER][WARN] Skipping ${side.toUpperCase()} order because an exchange position is already open for the same side.`);
                 return;
             }
             const managedOrdersSnapshot = await fetchManagedOpenOrdersSnapshot();
             if (managedOrdersSnapshot.triggerOrdersFetchFailed) {
-                console.warn(`[WARN] Skipping ${side.toUpperCase()} order because managed trigger-order snapshot could not be verified.`);
+                console.warn(`[ORDER][WARN] Skipping ${side.toUpperCase()} order because managed trigger-order snapshot could not be verified.`);
                 return;
             }
             const managedOrderCount = managedOrdersSnapshot.grid.length + managedOrdersSnapshot.tp.length + managedOrdersSnapshot.sl.length;
             if (managedOrderCount > 0) {
-                console.warn(`[WARN] Skipping ${side.toUpperCase()} order because ${managedOrderCount} managed order(s) are still open on the exchange.`);
+                console.warn(`[ORDER][WARN] Skipping ${side.toUpperCase()} order because ${managedOrderCount} managed order(s) are still open on the exchange.`);
                 return;
             }
             if (!(await setLeverage())) {
-                console.warn(`[WARN] Skipping ${side.toUpperCase()} order because leverage ${db.leverage}x could not be confirmed on ${db.pair}.`);
+                console.warn(`[ORDER][WARN] Skipping ${side.toUpperCase()} order because leverage ${db.leverage}x could not be confirmed on ${db.pair}.`);
                 return;
             }
 
             const tickerPrice = await getPrice(true);
             if (!Number.isFinite(tickerPrice) || tickerPrice <= 0) {
-                console.error("[ERROR] Invalid ticker price. Order skipped.");
+                console.error("[ORDER][ERROR] Invalid ticker price. Order skipped.");
                 return;
             }
 
@@ -92,7 +92,7 @@ const createTradeEntryHelpers = ({
             );
             logOrderPlan(strategyName, entryPrice, adjustedQty, orderPlan);
             if (!isDirectionalOrderPlanValid(side, entryPrice, orderPlan)) {
-                console.warn(`[WARN] Skipping ${side.toUpperCase()} order because TP/SL plan is not directional after rounding.`);
+                console.warn(`[ORDER][WARN] Skipping ${side.toUpperCase()} order because TP/SL plan is not directional after rounding.`);
                 return;
             }
 
@@ -122,7 +122,7 @@ const createTradeEntryHelpers = ({
             const closeSide = side === "buy" ? "sell" : "buy";
             const resolvedOrderPlan = actualPlanValid ? actualOrderPlan : (fallbackPlanValid ? orderPlan : null);
             if (!resolvedOrderPlan) {
-                console.error(`[ERROR] Unable to derive a valid TP/SL plan after fill for ${side.toUpperCase()} order. Closing position to avoid unmanaged exposure.`);
+                console.error(`[ORDER][ERROR] Unable to derive a valid TP/SL plan after fill for ${side.toUpperCase()} order. Closing position to avoid unmanaged exposure.`);
                 try {
                     await exchange.createOrder(
                         db.pair,
@@ -138,13 +138,13 @@ const createTradeEntryHelpers = ({
                     );
                     metrics.api.orders++;
                 } catch (closeError) {
-                    console.error(`[ERROR] Failed to immediately close invalid ${side.toUpperCase()} position: ${closeError.message}`);
+                    console.error(`[ORDER][ERROR] Failed to immediately close invalid ${side.toUpperCase()} position: ${closeError.message}`);
                 }
                 await syncPositionWithExchange();
                 return;
             }
             if (!actualPlanValid) {
-                console.warn(`[WARN] Actual fill produced an invalid directional TP/SL plan for ${side.toUpperCase()} order. Falling back to the pre-fill plan.`);
+                console.warn(`[ORDER][WARN] Actual fill produced an invalid directional TP/SL plan for ${side.toUpperCase()} order. Falling back to the pre-fill plan.`);
             }
 
             upsertActivePosition({
@@ -178,9 +178,9 @@ const createTradeEntryHelpers = ({
             await ensureReduceOnlyStopLossOrder(targetPositionKey, getActivePositionByKey(targetPositionKey));
             logTrade(side === "buy" ? "LONG" : "SHORT", actualEntryPrice, null, "OPEN", 0, strategyName);
             metrics.trades.opened++;
-            console.log(`\n[OK] ORDER PLACED: ${side.toUpperCase()} at ${actualEntryPrice}`);
+            console.log(`[ORDER][INFO] Placed ${side.toUpperCase()} order at ${actualEntryPrice}`);
         } catch (error) {
-            console.error("[ERROR] Order failed:", error.message);
+            console.error("[ORDER][ERROR] Order failed:", error.message);
         } finally {
             setIsPlacingOrder(false);
         }

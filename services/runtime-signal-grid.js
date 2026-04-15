@@ -128,10 +128,10 @@ const createRuntimeSignalGridHelpers = ({
         const safeCanLong = canLong && longPlanValid;
         const safeCanShort = canShort && shortPlanValid;
         if (canLong && !longPlanValid) {
-            console.warn("[GRID] Long setup rejected because TP/SL would be invalid after precision rounding.");
+            console.warn("[GRID][WARN] Long setup rejected because TP/SL would be invalid after precision rounding.");
         }
         if (canShort && !shortPlanValid) {
-            console.warn("[GRID] Short setup rejected because TP/SL would be invalid after precision rounding.");
+            console.warn("[GRID][WARN] Short setup rejected because TP/SL would be invalid after precision rounding.");
         }
 
         return {
@@ -192,6 +192,7 @@ const createRuntimeSignalGridHelpers = ({
 
     const logSignalDetails = (params, snapshot, signalState) => {
         const db = getDb();
+        const printSpacer = () => console.log("");
         const printSignalHeader = () => {
             console.log("\n" + "=".repeat(50));
             console.log(`${signalState.detailTitle} (${db.gridTimeframe}):`);
@@ -202,7 +203,7 @@ const createRuntimeSignalGridHelpers = ({
             console.log(`   ATR ${params.atrPeriod}: ${snapshot.currentATR.toFixed(6)}`);
         };
         const printSignalSection = (title, lines) => {
-            console.log("");
+            printSpacer();
             console.log(title);
             lines.forEach((line) => console.log(line));
         };
@@ -212,7 +213,7 @@ const createRuntimeSignalGridHelpers = ({
 
         printSignalHeader();
         printSignalSection("SETUP CONDITIONS:", signalState.extraDetailLines);
-        console.log("");
+        printSpacer();
         console.log("FINAL SIGNAL:");
         printFinalSignalLine("LONG", signalState.canLong);
         printFinalSignalLine("SHORT", signalState.canShort);
@@ -222,7 +223,7 @@ const createRuntimeSignalGridHelpers = ({
     const logGridSyncStatus = (desiredOrders, openGridOrders) => {
         const now = Date.now();
         if (now - getLastGridSyncLogAt() < gridSyncLogTtl) return;
-        console.log(`[GRID] Desired ladder=${desiredOrders.length} | Open grid orders=${openGridOrders.length}`);
+        console.log(`[GRID][INFO] Desired ladder=${desiredOrders.length} | Open grid orders=${openGridOrders.length}`);
         setLastGridSyncLogAt(now);
     };
 
@@ -246,20 +247,20 @@ const createRuntimeSignalGridHelpers = ({
             const strategy = String(db.strategy || "futures_grid").toLowerCase();
             const now = Date.now();
             if (now - getLastLogTime() > 5000) {
-                console.log(`\n[SIGNAL #${getSignalCount()}] Analyzing ${strategy.toUpperCase()} setup (${db.gridTimeframe})...`);
+                console.log(`[SIGNAL][INFO] #${getSignalCount()} Analyzing ${strategy.toUpperCase()} setup (${db.gridTimeframe})...`);
                 setLastLogTime(now);
             }
 
             const params = getSignalParameters();
             const ohlcv = await getOHLCV(params.neededCandles);
             if (ohlcv.length < params.neededCandles) {
-                console.log(`[WARN] Not enough OHLCV data: ${ohlcv.length} < ${params.neededCandles}`);
+                console.log(`[SIGNAL][WARN] Not enough OHLCV data: ${ohlcv.length} < ${params.neededCandles}`);
                 return {};
             }
 
             const snapshot = buildSignalSnapshot(ohlcv, params);
             if (!snapshot || snapshot.invalidAtr) {
-                console.log("[WARN] Invalid data for signal");
+                console.log("[SIGNAL][WARN] Invalid data for signal");
                 return {};
             }
 
@@ -299,7 +300,7 @@ const createRuntimeSignalGridHelpers = ({
                 stopLossPrice: finalState.canLong ? signalState.longPlan?.stopLossPrice : (finalState.canShort ? signalState.shortPlan?.stopLossPrice : null)
             };
         } catch (error) {
-            console.error("[ERROR] Signal analysis failed:", error.message);
+            console.error("[SIGNAL][ERROR] Signal analysis failed:", error.message);
             return {};
         }
     };
@@ -315,13 +316,13 @@ const createRuntimeSignalGridHelpers = ({
             const params = getSignalParameters();
             const ohlcv = await getOHLCV(params.neededCandles);
             if (ohlcv.length < params.neededCandles) {
-                console.log(`[GRID] Not enough OHLCV data to manage ladder: ${ohlcv.length} < ${params.neededCandles}`);
+                console.log(`[GRID][INFO] Not enough OHLCV data to manage ladder: ${ohlcv.length} < ${params.neededCandles}`);
                 return;
             }
 
             const snapshot = buildSignalSnapshot(ohlcv, params);
             if (!snapshot || snapshot.invalidAtr) {
-                console.log("[GRID] Invalid market snapshot. Ladder sync skipped.");
+                console.log("[GRID][INFO] Invalid market snapshot. Ladder sync skipped.");
                 return;
             }
 
@@ -394,7 +395,7 @@ const createRuntimeSignalGridHelpers = ({
 
             const lockedGridState = await resolveActiveGridState(snapshot, params);
             if (!lockedGridState) {
-                console.log("[GRID] Unable to resolve locked grid state. Ladder sync skipped.");
+                console.log("[GRID][INFO] Unable to resolve locked grid state. Ladder sync skipped.");
                 return;
             }
 
@@ -405,7 +406,7 @@ const createRuntimeSignalGridHelpers = ({
                 const exposureLogKey = `${accountPositionMode.label}:${desiredOrdersForRuntime.length}/${desiredOrdersRaw.length}`;
                 const now = Date.now();
                 if (exposureLogKey !== getLastGridExposureLogKey() || now - getLastGridExposureLogAt() >= gridSyncLogTtl) {
-                    console.log(`[GRID] Active position detected in ${accountPositionMode.label}. Keeping ${desiredOrdersForRuntime.length}/${desiredOrdersRaw.length} ladder order(s) aligned with the live exposure.`);
+                    console.log(`[GRID][INFO] Active position detected in ${accountPositionMode.label}. Keeping ${desiredOrdersForRuntime.length}/${desiredOrdersRaw.length} ladder order(s) aligned with the live exposure.`);
                     setLastGridExposureLogKey(exposureLogKey);
                     setLastGridExposureLogAt(now);
                 }
@@ -417,7 +418,7 @@ const createRuntimeSignalGridHelpers = ({
                 else desiredOrderMap.set(order.clientOrderId, order);
             }
             if (duplicateDesiredOrders.length > 0) {
-                console.warn(`[GRID] Deduped ${duplicateDesiredOrders.length} desired grid order(s) with colliding clientOrderId.`);
+                console.warn(`[GRID][WARN] Deduped ${duplicateDesiredOrders.length} desired grid order(s) with colliding clientOrderId.`);
             }
             const desiredOrders = [...desiredOrderMap.values()];
             logGridSyncStatus(desiredOrders, openGridOrders);

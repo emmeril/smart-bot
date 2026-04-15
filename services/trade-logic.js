@@ -168,10 +168,10 @@ const createTradeLogicHelpers = ({
         }
 
         if (Number.isFinite(entryPrice) && Number.isFinite(targetPrice) && targetPrice === entryPrice) {
-            console.warn(`[WARN] Rounded target price equals entry price for ${side} order. Review precision/minimum profit settings.`);
+            console.warn(`[ORDER][WARN] Rounded target price equals entry price for ${side} order. Review precision/minimum profit settings.`);
         }
         if (Number.isFinite(entryPrice) && Number.isFinite(stopLossPrice) && stopLossPrice === entryPrice) {
-            console.warn(`[WARN] Rounded stop loss price equals entry price for ${side} order. Review precision/minimum stop settings.`);
+            console.warn(`[ORDER][WARN] Rounded stop loss price equals entry price for ${side} order. Review precision/minimum stop settings.`);
         }
 
         return {
@@ -242,7 +242,6 @@ const createTradeLogicHelpers = ({
             const entryPrice = toFiniteNumber(position.entryPrice, NaN);
             const quantity = toFiniteNumber(position.quantity, NaN);
             if (Number.isFinite(entryPrice) && entryPrice > 0 && Number.isFinite(quantity) && quantity > 0 && Number.isFinite(effectiveStopLossUSDT)) {
-                // Optimasi: Selalu prioritaskan stopLossPrice yang sudah ada di state (misal dari Trailing Stop)
                 const derivedStopLossPrice = shouldUseStoredStopLossPrice(position)
                     ? position.stopLossPrice
                     : getDerivedStopLossPrice(position, entryPrice, effectiveStopLossUSDT, quantity);
@@ -459,7 +458,7 @@ const createTradeLogicHelpers = ({
 
         if (Date.now() - getLastPnlLog() > pnlLogInterval) {
             const { displayProfitUSDT, displayProfitPercent } = getDisplayPnlValues(pnlState);
-            console.log(`\n[PNL] ${displayProfitUSDT.toFixed(4)} USDT (${displayProfitPercent.toFixed(2)}%)`);
+            console.log(`[PNL] ${displayProfitUSDT.toFixed(4)} USDT (${displayProfitPercent.toFixed(2)}%)`);
             setLastPnlLog(Date.now());
         }
     };
@@ -487,8 +486,6 @@ const createTradeLogicHelpers = ({
 };
 
 module.exports = { createTradeLogicHelpers };
-
-
 
 
 

@@ -141,7 +141,7 @@ const createRuntimeDashboardHelpers = ({
 
         return await new Promise((resolve, reject) => {
             const server = app.listen(port, host, () => {
-                console.log(`[WEB] Dashboard available at http://localhost:${port}`);
+                console.log(`[WEB][INFO] Dashboard available at http://localhost:${port}`);
                 resolve(server);
             });
             server.on("error", (error) => {
