@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+	  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Smart Bot Trading Console</title>
   <meta name="description" content="Dashboard konfigurasi untuk Smart Bot">
     <style>
@@ -103,21 +103,25 @@
     .brand-copy {
       min-width: 0;
     }
-    .brand-copy strong,
-    .topbar-meta strong {
-      display: block;
-      font-size: 0.96rem;
-      letter-spacing: 0.01em;
-    }
-    .brand-copy span,
-    .topbar-meta span {
-      display: block;
-      color: var(--muted);
-      font-size: 0.8rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
+	    .brand-copy strong,
+	    .topbar-meta strong {
+	      display: block;
+	      font-size: 0.96rem;
+	      letter-spacing: 0.01em;
+	    }
+	    .topbar-meta,
+	    .brand-copy {
+	      min-width: 0;
+	    }
+	    .brand-copy span,
+	    .topbar-meta span {
+	      display: block;
+	      color: var(--muted);
+	      font-size: 0.8rem;
+	      white-space: nowrap;
+	      overflow: hidden;
+	      text-overflow: ellipsis;
+	    }
     .topbar-status {
       display: flex;
       align-items: center;
@@ -177,7 +181,10 @@
       flex-wrap: wrap;
       gap: 10px;
     }
-    .hero-actions { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 10px; }
+	    .hero-actions { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; }
+	    .hero-actions form {
+	      margin: 0;
+	    }
     .btn {
       border: 0; border-radius: 999px; padding: 12px 18px; font: inherit; font-weight: 700;
       cursor: pointer; transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
@@ -260,10 +267,10 @@
     .field-control:focus { border-color: rgba(32, 201, 151, 0.5); box-shadow: 0 0 0 4px rgba(32, 201, 151, 0.12); }
     .field-control::placeholder { color: #6d8591; }
     .field-note { color: var(--muted); font-size: 0.82rem; line-height: 1.5; }
-    .config-actions {
-      position: sticky;
-      bottom: 14px;
-      z-index: 2;
+	    .config-actions {
+	      position: sticky;
+	      bottom: 14px;
+	      z-index: 2;
       margin-top: 18px;
       display: flex;
       justify-content: flex-end;
@@ -271,11 +278,11 @@
       padding: 12px;
       border-radius: 18px;
       background: rgba(7, 15, 21, 0.88);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      backdrop-filter: blur(12px);
-    }
-    .footer-panel { padding: 18px 20px; display: flex; justify-content: space-between; gap: 16px; align-items: center; }
-    .toast { min-width: 220px; max-width: 50%; text-align: right; color: var(--muted); font-size: 0.92rem; }
+	      border: 1px solid rgba(255, 255, 255, 0.08);
+	      backdrop-filter: blur(12px);
+	    }
+	    .footer-panel { padding: 18px 20px; display: flex; justify-content: space-between; gap: 16px; align-items: center; }
+	    .toast { min-width: 220px; max-width: 50%; text-align: right; color: var(--muted); font-size: 0.92rem; }
     .toast.success { color: #9af2cc; }
     .toast.error { color: #ffb4b4; }
     .toast.info { color: #d3e6ef; }
@@ -347,45 +354,148 @@
       .hero { grid-template-columns: 1fr; }
       .hero-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     }
-    @media (max-width: 840px) {
-      .live-grid,
-      .live-lists,
-      .config-grid,
-      .status-strip { grid-template-columns: 1fr; }
+	    @media (max-width: 840px) {
+	      .live-grid,
+	      .live-lists,
+	      .config-grid,
+	      .status-strip { grid-template-columns: 1fr; }
       .topbar {
         border-radius: 24px;
         align-items: flex-start;
         flex-direction: column;
       }
-      .topbar-status {
-        justify-content: flex-start;
-      }
-      .hero-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .panel-head,
-      .footer-panel { flex-direction: column; align-items: start; }
-      .config-actions {
-        justify-content: stretch;
-      }
-    }
-    @media (max-width: 640px) {
-      .shell { width: min(100% - 14px, 100%); margin: 8px auto 20px; }
-      .hero, .form-panel { padding: 16px; }
-      .terminal-strip { padding: 16px; }
-      .hero-metrics { grid-template-columns: 1fr; }
-      .hero-actions { flex-direction: column; }
-      .btn { width: 100%; }
-      .config-actions {
-        bottom: 8px;
-        flex-direction: column;
-      }
-      .status-strip { padding: 16px; }
-      .live-panel, .footer-panel { padding: 16px; }
-      .field-row { flex-direction: column; align-items: stretch; }
-      .field-row input[type="checkbox"] { align-self: flex-start; }
-      .live-table-head,
-      .live-table-row { min-width: 500px; }
-    }
-  </style>
+	      .topbar-status {
+	        justify-content: flex-start;
+	        width: 100%;
+	      }
+	      .hero-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	      .panel-head,
+	      .footer-panel { flex-direction: column; align-items: start; }
+	      .config-actions {
+	        justify-content: stretch;
+	      }
+	      .toast {
+	        min-width: 0;
+	        max-width: 100%;
+	        width: 100%;
+	        text-align: left;
+	      }
+	    }
+	    @media (max-width: 640px) {
+	      body {
+	        padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+	      }
+	      .shell { width: min(100% - 12px, 100%); margin: 6px auto 16px; gap: 12px; }
+	      .topbar {
+	        padding: 12px 14px;
+	        gap: 12px;
+	      }
+	      .brand {
+	        width: 100%;
+	      }
+	      .brand-mark {
+	        width: 36px;
+	        height: 36px;
+	        border-radius: 12px;
+	      }
+	      .brand-copy strong,
+	      .topbar-meta strong {
+	        font-size: 0.9rem;
+	      }
+	      .brand-copy span,
+	      .topbar-meta span {
+	        white-space: normal;
+	        overflow: visible;
+	        text-overflow: initial;
+	        line-height: 1.45;
+	      }
+	      .hero, .form-panel { padding: 16px; }
+	      .terminal-strip { padding: 16px; }
+	      .hero-copy h1 {
+	        font-size: clamp(1.8rem, 9vw, 2.5rem);
+	        max-width: none;
+	      }
+	      .hero-badges {
+	        gap: 8px;
+	      }
+	      .signal-chip {
+	        width: 100%;
+	        justify-content: space-between;
+	        border-radius: 14px;
+	      }
+	      .hero-metrics { grid-template-columns: 1fr; }
+	      .hero-actions { flex-direction: column; }
+	      .hero-actions > * {
+	        width: 100%;
+	      }
+	      .hero-actions form button,
+	      .btn { width: 100%; }
+	      .config-actions {
+	        bottom: max(8px, env(safe-area-inset-bottom, 0px));
+	        flex-direction: column;
+	        padding: 10px;
+	        border-radius: 16px;
+	      }
+	      .status-strip { padding: 16px; }
+	      .live-panel, .footer-panel { padding: 16px; }
+	      .metric-card,
+	      .live-card,
+	      .live-list,
+	      .section-card,
+	      .terminal-card,
+	      .status-item {
+	        padding: 14px;
+	      }
+	      .panel-head {
+	        gap: 10px;
+	        margin-bottom: 14px;
+	      }
+	      .field-row { flex-direction: column; align-items: stretch; }
+	      .field-row input[type="checkbox"] { align-self: flex-start; }
+	      .live-table-head,
+	      .live-table-row {
+	        min-width: 0;
+	      }
+	      .live-table-head {
+	        display: none;
+	      }
+	      .live-table {
+	        overflow-x: visible;
+	      }
+	      .live-table-row {
+	        grid-template-columns: repeat(2, minmax(0, 1fr));
+	        padding: 10px;
+	        font-size: 0.82rem;
+	        word-break: break-word;
+	      }
+	      .live-table-row > div {
+	        min-width: 0;
+	      }
+	      .live-sparkline {
+	        height: 56px;
+	      }
+	    }
+	    @media (max-width: 420px) {
+	      .shell {
+	        width: min(100% - 10px, 100%);
+	      }
+	      .eyebrow {
+	        letter-spacing: 0.16em;
+	        font-size: 0.68rem;
+	      }
+	      .hero,
+	      .live-panel,
+	      .form-panel,
+	      .terminal-strip,
+	      .footer-panel,
+	      .status-strip {
+	        padding: 14px;
+	      }
+	      .live-table-row {
+	        grid-template-columns: 1fr;
+	      }
+	    }
+	  </style>
 </head>
 <body>
   <div class="bg-orb bg-orb-a"></div>
@@ -1039,7 +1149,6 @@
   </script>
 </body>
 </html>
-
 
 
 
