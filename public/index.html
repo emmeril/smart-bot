@@ -3,21 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Smart Bot Dashboard</title>
+  <title>Smart Bot Trading Console</title>
   <meta name="description" content="Dashboard konfigurasi untuk Smart Bot">
     <style>
     :root {
       color-scheme: dark;
-      --bg: #081118;
-      --bg-2: #0d1720;
-      --panel: rgba(14, 24, 33, 0.88);
-      --line: rgba(164, 194, 210, 0.16);
-      --text: #edf4f7;
-      --muted: #9cb0bb;
-      --accent: #20c997;
-      --accent-2: #f7b955;
-      --danger: #ff6b6b;
-      --shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+      --bg: #061018;
+      --bg-2: #0b1722;
+      --panel: rgba(11, 22, 30, 0.9);
+      --panel-2: rgba(7, 15, 21, 0.92);
+      --line: rgba(114, 152, 170, 0.18);
+      --line-strong: rgba(72, 226, 174, 0.24);
+      --text: #eef7fb;
+      --muted: #8ea5b3;
+      --accent: #48e2ae;
+      --accent-2: #f6c667;
+      --danger: #ff7c7c;
+      --info: #7fd7ff;
+      --shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
       --radius-xl: 28px;
       --radius-lg: 20px;
       --radius-md: 14px;
@@ -30,9 +33,22 @@
       color: var(--text);
       overflow-x: hidden;
       background:
-        radial-gradient(circle at top left, rgba(32, 201, 151, 0.16), transparent 32%),
-        radial-gradient(circle at top right, rgba(247, 185, 85, 0.14), transparent 28%),
+        linear-gradient(180deg, rgba(72, 226, 174, 0.05), transparent 24%),
+        radial-gradient(circle at top left, rgba(72, 226, 174, 0.14), transparent 32%),
+        radial-gradient(circle at top right, rgba(246, 198, 103, 0.12), transparent 28%),
         linear-gradient(160deg, var(--bg), var(--bg-2));
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 72px 72px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,0.48), transparent 92%);
+      z-index: 0;
     }
     .bg-orb {
       position: fixed;
@@ -52,10 +68,73 @@
       width: min(1240px, calc(100% - 32px));
       margin: 24px auto 40px;
       display: grid;
-      gap: 18px;
+      gap: 16px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      border-radius: 999px;
+      background: rgba(7, 16, 23, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(14px);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.22);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+    .brand-mark {
+      width: 40px;
+      height: 40px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      color: #04100c;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      background: linear-gradient(135deg, var(--accent), #7df1ca);
+      box-shadow: 0 12px 28px rgba(72, 226, 174, 0.22);
+    }
+    .brand-copy {
+      min-width: 0;
+    }
+    .brand-copy strong,
+    .topbar-meta strong {
+      display: block;
+      font-size: 0.96rem;
+      letter-spacing: 0.01em;
+    }
+    .brand-copy span,
+    .topbar-meta span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.8rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .topbar-status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .pulse-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 0 rgba(72, 226, 174, 0.45);
+      animation: pulse 1.8s infinite;
     }
     .panel {
-      background: linear-gradient(180deg, var(--panel), rgba(8, 17, 24, 0.92));
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
       border: 1px solid var(--line);
       border-radius: var(--radius-xl);
       box-shadow: var(--shadow);
@@ -68,6 +147,16 @@
       padding: 28px;
       overflow: hidden;
     }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto 24px 24px auto;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(72, 226, 174, 0.12), transparent 68%);
+      pointer-events: none;
+    }
     .hero-copy,
     .hero-metrics,
     .metric-card,
@@ -79,9 +168,15 @@
       min-width: 0;
     }
     .hero-copy h1, .panel-head h2 { margin: 0; line-height: 1.02; letter-spacing: -0.03em; }
-    .hero-copy h1 { font-size: clamp(2.2rem, 5vw, 4rem); max-width: 10ch; }
+    .hero-copy h1 { font-size: clamp(2.3rem, 5vw, 4.1rem); max-width: 12ch; }
     .lede { margin: 14px 0 0; max-width: 62ch; color: var(--muted); font-size: 1rem; line-height: 1.7; }
     .eyebrow { margin: 0 0 10px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.74rem; font-weight: 700; }
+    .hero-badges {
+      margin-top: 18px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
     .hero-actions { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 10px; }
     .btn {
       border: 0; border-radius: 999px; padding: 12px 18px; font: inherit; font-weight: 700;
@@ -90,13 +185,15 @@
     .btn:hover { transform: translateY(-1px); }
     .btn:active { transform: translateY(1px); }
     .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-    .btn-primary { background: linear-gradient(135deg, var(--accent), #40e0aa); color: #05110d; box-shadow: 0 16px 30px rgba(32, 201, 151, 0.24); }
+    .btn-primary { background: linear-gradient(135deg, var(--accent), #83f2cd); color: #04110c; box-shadow: 0 16px 30px rgba(72, 226, 174, 0.24); }
     .btn-secondary { background: rgba(255, 255, 255, 0.06); color: var(--text); border: 1px solid rgba(255, 255, 255, 0.12); }
     .btn-danger { background: rgba(255, 107, 107, 0.14); color: #ffd2d2; border: 1px solid rgba(255, 107, 107, 0.22); }
     .hero-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-content: start; }
     .metric-card {
       padding: 16px;
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025)),
+        linear-gradient(135deg, rgba(72, 226, 174, 0.04), transparent 60%);
       border: 1px solid rgba(255, 255, 255, 0.09);
       border-radius: var(--radius-lg);
     }
@@ -136,6 +233,10 @@
     .side-badge.flat { color: #d3e6ef; background: rgba(255, 255, 255, 0.08); }
     .status-item { padding: 12px 14px; border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.06); }
     .status-item strong { display: block; margin-top: 8px; font-size: 1rem; }
+    .status-item strong.pill {
+      display: inline-flex;
+      margin-top: 8px;
+    }
     .form-panel { padding: 24px; }
     .panel-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 18px; }
     .panel-head .muted, .footer-panel .muted { color: var(--muted); margin: 0; line-height: 1.6; }
@@ -171,7 +272,64 @@
     .pill.ok { color: #9af2cc; }
     .pill.warn { color: #ffd27f; }
     .pill.bad { color: #ffb4b4; }
+    .terminal-strip {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 14px;
+      padding: 18px 20px;
+    }
+    .terminal-card {
+      padding: 16px 18px;
+      border-radius: var(--radius-lg);
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .terminal-card h3 {
+      margin: 0 0 10px;
+      font-size: 0.94rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .terminal-log {
+      font-family: Consolas, "Cascadia Code", monospace;
+      font-size: 0.88rem;
+      line-height: 1.75;
+      color: #c9f8e7;
+      display: grid;
+      gap: 2px;
+    }
+    .terminal-log span {
+      color: var(--muted);
+    }
+    .terminal-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .signal-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 0.84rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .signal-chip strong {
+      color: var(--accent-2);
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(72, 226, 174, 0.45); }
+      70% { box-shadow: 0 0 0 10px rgba(72, 226, 174, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(72, 226, 174, 0); }
+    }
     @media (max-width: 1100px) {
+      .terminal-strip { grid-template-columns: 1fr; }
       .hero { grid-template-columns: 1fr; }
       .hero-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     }
@@ -180,6 +338,14 @@
       .live-lists,
       .config-grid,
       .status-strip { grid-template-columns: 1fr; }
+      .topbar {
+        border-radius: 24px;
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .topbar-status {
+        justify-content: flex-start;
+      }
       .hero-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .panel-head,
       .footer-panel { flex-direction: column; align-items: start; }
@@ -187,6 +353,7 @@
     @media (max-width: 640px) {
       .shell { width: min(100% - 14px, 100%); margin: 8px auto 20px; }
       .hero, .form-panel { padding: 16px; }
+      .terminal-strip { padding: 16px; }
       .hero-metrics { grid-template-columns: 1fr; }
       .hero-actions { flex-direction: column; }
       .btn { width: 100%; }
@@ -203,11 +370,32 @@
   <div class="bg-orb bg-orb-a"></div>
   <div class="bg-orb bg-orb-b"></div>
   <main class="shell">
+    <section class="topbar">
+      <div class="brand">
+        <div class="brand-mark">SB</div>
+        <div class="brand-copy">
+          <strong>Smart Bot Futures Grid</strong>
+          <span>Trading console untuk runtime, posisi, dan konfigurasi live</span>
+        </div>
+      </div>
+      <div class="topbar-status">
+        <div class="pulse-dot" aria-hidden="true"></div>
+        <div class="topbar-meta">
+          <strong id="topbarStatus">Connecting runtime...</strong>
+          <span id="topbarMeta">Memuat pair, mode, dan sinkronisasi bot</span>
+        </div>
+      </div>
+    </section>
     <header class="hero panel">
       <div class="hero-copy">
         <p class="eyebrow">Smart Bot Control Center</p>
-        <h1>Dashboard konfigurasi via web</h1>
-        <p class="lede">Atur parameter trading, risiko, grid, sesi, dan trailing stop langsung dari browser. Perubahan disimpan ke SQLite dan dipakai ulang oleh bot secara runtime.</p>
+        <h1>Console yang terasa seperti bot-nya langsung</h1>
+        <p class="lede">Pantau runtime, posisi, PnL, dan mesin grid dalam satu panel yang lebih dekat dengan karakter bot trading. Semua perubahan tetap tersimpan ke SQLite dan langsung dipakai runtime aktif.</p>
+        <div class="hero-badges">
+          <span class="signal-chip">Strategy <strong>futures_grid</strong></span>
+          <span class="signal-chip">Exchange <strong>Binance USDT-M</strong></span>
+          <span class="signal-chip">Mode <strong id="heroMode">Syncing...</strong></span>
+        </div>
         <div class="hero-actions">
           <button id="saveBtn" class="btn btn-primary" type="button">Simpan konfigurasi</button>
           <button id="refreshBtn" class="btn btn-secondary" type="button">Muat ulang</button>
@@ -225,6 +413,27 @@
       <div class="status-item"><span class="status-label">Pair aktif</span><strong id="pairStatus">-</strong></div>
       <div class="status-item"><span class="status-label">Mode margin</span><strong id="marginStatus">-</strong></div>
       <div class="status-item"><span class="status-label">Terakhir update</span><strong id="updatedStatus">-</strong></div>
+    </section>
+
+    <section class="panel terminal-strip">
+      <article class="terminal-card">
+        <h3>Runtime Feed</h3>
+        <div class="terminal-log">
+          <div><span>&gt;</span> Pair aktif: <strong id="runtimePair">-</strong></div>
+          <div><span>&gt;</span> Engine status: <strong id="runtimeEngine">Memuat...</strong></div>
+          <div><span>&gt;</span> Posisi lokal: <strong id="runtimePositions">-</strong></div>
+          <div><span>&gt;</span> Daily trades: <strong id="runtimeTrades">-</strong></div>
+        </div>
+      </article>
+      <article class="terminal-card">
+        <h3>Bot Signals</h3>
+        <div class="terminal-badges">
+          <span class="signal-chip">Leverage <strong id="signalLeverage">-</strong></span>
+          <span class="signal-chip">Position mode <strong id="signalPositionMode">-</strong></span>
+          <span class="signal-chip">Grid state <strong id="signalGridState">-</strong></span>
+          <span class="signal-chip">Exchange <strong id="signalExchange">-</strong></span>
+        </div>
+      </article>
     </section>
 
     <section class="panel live-panel">
@@ -302,6 +511,17 @@
     const pairStatus = document.getElementById("pairStatus");
     const marginStatus = document.getElementById("marginStatus");
     const updatedStatus = document.getElementById("updatedStatus");
+    const topbarStatus = document.getElementById("topbarStatus");
+    const topbarMeta = document.getElementById("topbarMeta");
+    const heroMode = document.getElementById("heroMode");
+    const runtimePair = document.getElementById("runtimePair");
+    const runtimeEngine = document.getElementById("runtimeEngine");
+    const runtimePositions = document.getElementById("runtimePositions");
+    const runtimeTrades = document.getElementById("runtimeTrades");
+    const signalLeverage = document.getElementById("signalLeverage");
+    const signalPositionMode = document.getElementById("signalPositionMode");
+    const signalGridState = document.getElementById("signalGridState");
+    const signalExchange = document.getElementById("signalExchange");
     const livePositionsCount = document.getElementById("livePositionsCount");
     const livePositionsMeta = document.getElementById("livePositionsMeta");
     const livePnlValue = document.getElementById("livePnlValue");
@@ -376,11 +596,17 @@
     }
 
     function renderMetrics(status) {
+      const botRunning = Boolean(status.botRunning);
+      const exchangeConnected = Boolean(status.exchangeConnected);
+      const gridState = status.activeGridState ? "Active" : "Idle";
+      const leverageValue = Number.isFinite(Number(status.leverage)) ? `${formatNumber(status.leverage)}x` : "-";
+      const positionModeValue = status.positionMode || "-";
+      const marginModeValue = String(status.marginMode || "-").toUpperCase();
       const cards = [
-        { label: "Bot", value: status.botRunning ? "Running" : "Stopped", note: status.exchangeConnected ? "Exchange connected" : "Exchange disconnected" },
+        { label: "Bot", value: botRunning ? "Running" : "Stopped", note: exchangeConnected ? "Exchange connected" : "Exchange disconnected" },
         { label: "Positions", value: String(status.activePositions), note: status.activeGridState ? "Grid state active" : "No local grid state" },
         { label: "Daily PnL", value: `${formatNumber(status.dailyPnL)} USDT`, note: `${status.dailyTrades} trades today` },
-        { label: "Leverage", value: `${formatNumber(status.leverage)}x`, note: `${String(status.marginMode || "-").toUpperCase()} | ${status.positionMode || "-"}` }
+        { label: "Leverage", value: leverageValue, note: `${marginModeValue} | ${positionModeValue}` }
       ];
       statusCards.innerHTML = cards.map((card) => `
         <article class="metric-card">
@@ -389,11 +615,22 @@
           <span>${card.note}</span>
         </article>
       `).join("");
-      botStatus.textContent = status.botRunning ? "Running" : "Stopped";
-      botStatus.className = formatPill(status.botRunning ? "running" : "stopped");
+      botStatus.textContent = botRunning ? "Running" : "Stopped";
+      botStatus.className = formatPill(botRunning ? "running" : "stopped");
       pairStatus.textContent = status.pair || "-";
-      marginStatus.textContent = `${String(status.marginMode || "-").toUpperCase()} / ${status.positionMode || "-"}`;
+      marginStatus.textContent = `${marginModeValue} / ${positionModeValue}`;
       updatedStatus.textContent = formatDateTime(status.lastUpdated);
+      topbarStatus.textContent = botRunning ? "Runtime bot aktif" : "Runtime bot berhenti";
+      topbarMeta.textContent = `${status.pair || "-"} | ${marginModeValue} | ${exchangeConnected ? "exchange connected" : "exchange disconnected"}`;
+      heroMode.textContent = `${marginModeValue} / ${positionModeValue}`;
+      runtimePair.textContent = status.pair || "-";
+      runtimeEngine.textContent = botRunning ? "Running" : "Stopped";
+      runtimePositions.textContent = String(status.activePositions ?? "-");
+      runtimeTrades.textContent = String(status.dailyTrades ?? "-");
+      signalLeverage.textContent = leverageValue;
+      signalPositionMode.textContent = positionModeValue;
+      signalGridState.textContent = gridState;
+      signalExchange.textContent = exchangeConnected ? "Connected" : "Offline";
     }
 
 
@@ -781,7 +1018,6 @@
   </script>
 </body>
 </html>
-
 
 
 
