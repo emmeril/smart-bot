@@ -1285,7 +1285,7 @@ const {
     editableKeys: DASHBOARD_EDITABLE_KEYS,
     applyAutoPresetToConfig: (config) => applyAutoPresetToConfig(config),
     getDefaultConfig: () => getDefaultConfig(),
-    saveDB: async () => { await saveDB(); },
+    saveDB: async (...args) => { await saveDB(...args); },
     reloadConfig: async (...args) => { await reloadConfig(...args); },
     refreshRuntimeSchedulers: () => { refreshRuntimeSchedulers(); },
     syncExchangeRuntimeSettings: async () => {

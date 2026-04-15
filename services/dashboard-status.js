@@ -44,13 +44,17 @@ const createDashboardStatusHelpers = ({
     const mapManagedOrder = (order) => ({
         id: order.id ?? null,
         clientOrderId: getExchangeClientOrderId(order) || null,
-        side: order.side ?? null,
-        positionSide: order.positionSide ?? null,
-        type: order.type ?? null,
-        reduceOnly: Boolean(order.reduceOnly),
-        price: Number.isFinite(Number(order.price)) ? Number(order.price) : null,
-        triggerPrice: Number.isFinite(Number(order.triggerPrice)) ? Number(order.triggerPrice) : null,
-        amount: Number.isFinite(Number(order.amount)) ? Number(order.amount) : null
+        side: order.side ?? order.info?.side ?? null,
+        positionSide: order.positionSide ?? order.info?.positionSide ?? null,
+        type: order.type ?? order.info?.type ?? null,
+        reduceOnly: Boolean(order.reduceOnly ?? order.info?.reduceOnly),
+        price: Number.isFinite(Number(order.price ?? order.info?.price)) ? Number(order.price ?? order.info?.price) : null,
+        triggerPrice: Number.isFinite(Number(order.triggerPrice ?? order.stopPrice ?? order.info?.triggerPrice ?? order.info?.stopPrice))
+            ? Number(order.triggerPrice ?? order.stopPrice ?? order.info?.triggerPrice ?? order.info?.stopPrice)
+            : null,
+        amount: Number.isFinite(Number(order.amount ?? order.info?.amount ?? order.info?.origQty))
+            ? Number(order.amount ?? order.info?.amount ?? order.info?.origQty)
+            : null
     });
 
     const buildLiveStatusPayload = async () => {

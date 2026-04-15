@@ -281,3 +281,79 @@ test("resolveEffectiveGridRangePercent and entry buffer adapt for DOGE", () => {
         gridLevels: 12
     }), 0.163);
 });
+
+test("applyAutoPairGridPreset clears stale activeGridState when fingerprint only matches by substring", () => {
+    const helpers = createGridRuntimeHelpers({
+        getDb: () => ({
+            pair: "DOGE/USDT:USDT",
+            leverage: 10,
+            gridLevels: 2,
+            gridOrdersPerSide: 2,
+            gridOrderSizeUsdt: 5,
+            gridRangePercent: 0,
+            gridEntryBufferPercent: 0,
+            gridLookbackCandles: 180,
+            gridTakeProfitLevels: 0,
+            gridStopLossLevels: 0,
+            gridTimeframe: "5m"
+        }),
+        getExchange: () => ({ markets: {} }),
+        getBalanceCache: () => ({ totalUSDT: 100, availableUSDT: 100 }),
+        getTickerCache: () => ({ price: 100 }),
+        getSaveDB: () => async () => {},
+        defaultConfig: {
+            volumePeriod: 20,
+            atrPeriod: 14,
+            gridLookbackCandles: 120,
+            gridLevels: 8,
+            gridTakeProfitLevels: 0,
+            gridOrdersPerSide: 2,
+            gridOrderSizeUsdt: 5,
+            gridRangePercent: 3.5,
+            gridEntryBufferPercent: 0.15,
+            gridStopLossLevels: 0,
+            gridTimeframe: "5m"
+        },
+        validMarginModes: ["isolated", "cross"],
+        normalizeConfig: (config) => config,
+        normalizeSymbol: (symbol) => String(symbol || "").toUpperCase(),
+        toFiniteNumber: (value, fallback) => {
+            const numericValue = Number(value);
+            return Number.isFinite(numericValue) ? numericValue : fallback;
+        },
+        clamp: (value, min, max) => Math.min(Math.max(value, min), max),
+        formatPriceToMarketPrecision: (_pair, price) => Number(Number(price).toFixed(4)),
+        formatAmountToMarketPrecision: (_pair, amount) => Number(Number(amount).toFixed(8)),
+        validateOrderSize: () => ({ valid: true }),
+        isDirectionalOrderPlanValid: () => true,
+        getClosePositionSide: () => "BOTH",
+        isHedgeModeEnabled: () => false,
+        getActivePositionsList: () => [],
+        getExchangePositionSide: (position) => position.side,
+        getOrderTriggerPrice: () => NaN,
+        gridClientOrderPrefix: "smartgrid",
+        tpClientOrderPrefix: "smarttp",
+        slClientOrderPrefix: "smartsl"
+    });
+
+    const result = helpers.applyAutoPairGridPreset({
+        strategy: "futures_grid",
+        pair: "DOGE/USDT:USDT",
+        marginMode: "isolated",
+        gridLevels: 2,
+        gridLookbackCandles: 180,
+        gridRangePercent: 0,
+        gridEntryBufferPercent: 0,
+        gridTakeProfitLevels: 0,
+        gridStopLossLevels: 0,
+        gridTimeframe: "5m",
+        activeGridState: {
+            fingerprint: "DOGE/USDT:USDT|5m|1|12|0|180|5.51|0|0|0",
+            lowerBound: 0.1,
+            upperBound: 0.2
+        }
+    }, { doge: {} });
+
+    assert.equal(result.config.activeGridState, null);
+    assert.equal(result.changed, true);
+});

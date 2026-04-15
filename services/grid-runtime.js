@@ -679,6 +679,35 @@ const createGridRuntimeHelpers = ({
         };
     };
 
+    const buildGridStateFingerprintForConfig = (config) => [
+        normalizeSymbol(config?.pair),
+        config?.gridTimeframe || "",
+        Math.max(0, Math.trunc(toFiniteNumber(config?.gridLevels, defaultConfig.gridLevels))),
+        resolveEffectiveGridLevels({
+            configuredGridLevels: config?.gridLevels,
+            pair: config?.pair,
+            gridTimeframe: config?.gridTimeframe,
+            gridRangePercent: resolveEffectiveGridRangePercent({
+                configuredGridRangePercent: config?.gridRangePercent,
+                pair: config?.pair,
+                gridTimeframe: config?.gridTimeframe,
+                gridLookbackCandles: config?.gridLookbackCandles
+            }),
+            gridLookbackCandles: config?.gridLookbackCandles
+        }),
+        Math.max(0, toFiniteNumber(config?.gridRangePercent, defaultConfig.gridRangePercent)),
+        Math.max(20, Math.trunc(toFiniteNumber(config?.gridLookbackCandles, defaultConfig.gridLookbackCandles))),
+        resolveEffectiveGridRangePercent({
+            configuredGridRangePercent: config?.gridRangePercent,
+            pair: config?.pair,
+            gridTimeframe: config?.gridTimeframe,
+            gridLookbackCandles: config?.gridLookbackCandles
+        }),
+        Math.max(0, toFiniteNumber(config?.gridEntryBufferPercent, defaultConfig.gridEntryBufferPercent)),
+        Math.max(0, Math.trunc(toFiniteNumber(config?.gridTakeProfitLevels, defaultConfig.gridTakeProfitLevels))),
+        Math.max(0, toFiniteNumber(config?.gridStopLossLevels, defaultConfig.gridStopLossLevels))
+    ].join("|");
+
     const applyAutoPairGridPreset = (config, autoPairGridPresets) => {
         if (!config || typeof config !== "object") return { config, changed: false, presetName: null };
         const strategy = String(config.strategy || "").toLowerCase();
@@ -710,7 +739,8 @@ const createGridRuntimeHelpers = ({
         if (validMarginModes.includes(rawMarginMode)) nextConfig.marginMode = rawMarginMode;
 
         const activeGridFingerprint = String(nextConfig.activeGridState?.fingerprint || "");
-        if (!activeGridFingerprint.includes(String(nextConfig.gridLevels)) || changed) {
+        const expectedGridFingerprint = buildGridStateFingerprintForConfig(nextConfig);
+        if (activeGridFingerprint !== expectedGridFingerprint || changed) {
             if (nextConfig.activeGridState !== null) changed = true;
             nextConfig.activeGridState = null;
         }
@@ -749,6 +779,7 @@ const createGridRuntimeHelpers = ({
         resolveAutoPairPresetName,
         getActiveAutoPairPresetName,
         getGridRuntimeSummary,
+        buildGridStateFingerprintForConfig,
         applyAutoPairGridPreset
     };
 };
