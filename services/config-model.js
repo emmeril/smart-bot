@@ -45,9 +45,9 @@ const createConfigModelHelpers = ({
             gridTargetProfitUsdt: { min: 0, allowZero: false }, dailyProfitTargetUsdt: { min: 0, allowZero: false },
             dailyMaxLossPercent: { min: 0, allowZero: false }, maxTradesPerDay: { min: 0, allowZero: false, integer: true },
             coolingPeriod: { min: 0, allowZero: true, integer: true }, monitoringInterval: { min: 200, allowZero: false, integer: true },
-            gridStopLossPercent: { min: 0, allowZero: false }, gridLevels: { min: 4, allowZero: false, integer: true },
-            gridLookbackCandles: { min: 20, allowZero: false, integer: true }, gridRangePercent: { min: 0.5, allowZero: false },
-            gridEntryBufferPercent: { min: 0.02, allowZero: false }, gridTakeProfitLevels: { min: 0, allowZero: true, integer: true },
+            gridStopLossPercent: { min: 0, allowZero: false }, gridLevels: { min: 0, allowZero: true, integer: true },
+            gridLookbackCandles: { min: 20, allowZero: false, integer: true }, gridRangePercent: { min: 0, allowZero: true },
+            gridEntryBufferPercent: { min: 0, allowZero: true }, gridTakeProfitLevels: { min: 0, allowZero: true, integer: true },
             gridOrdersPerSide: { min: 0, allowZero: true, integer: true },
             gridStopLossLevels: { min: 0, allowZero: true }, sessionStartUTC: { min: 0, allowZero: true, integer: true },
             sessionEndUTC: { min: 0, allowZero: true, integer: true }, volumePeriod: { min: 2, allowZero: false, integer: true },
@@ -68,16 +68,22 @@ const createConfigModelHelpers = ({
             const hasValue = rawValue !== undefined && rawValue !== null && rawValue !== "";
             if (!hasValue) { normalized[key] = defaults[key]; return; }
             const value = Number(rawValue);
+            const normalizedValue = rule.integer ? Math.trunc(value) : value;
             const invalidNumber = !Number.isFinite(value);
-            const invalidZero = !rule.allowZero && value === 0;
-            const belowMin = value < rule.min;
+            const invalidZero = !rule.allowZero && normalizedValue === 0;
+            const belowMin = normalizedValue < rule.min;
             if (invalidNumber || invalidZero || belowMin) {
                 console.warn(`[WARN] Invalid config '${key}' (${normalized[key]}). Using default ${defaults[key]}.`);
                 normalized[key] = defaults[key];
                 return;
             }
-            normalized[key] = rule.integer ? Math.trunc(value) : value;
+            normalized[key] = normalizedValue;
         });
+
+        if (normalized.gridLevels !== 0 && normalized.gridLevels < 4) {
+            console.warn(`[WARN] Invalid config 'gridLevels' (${normalized.gridLevels}). Using default ${defaults.gridLevels}.`);
+            normalized.gridLevels = defaults.gridLevels;
+        }
 
         const isValidTimeframe = (value) => typeof value === "string" && /^[1-9]\d*[mhdwM]$/.test(value.trim());
         const rawPair = typeof normalized.pair === "string" ? normalized.pair.trim() : "";
@@ -122,8 +128,9 @@ const createConfigModelHelpers = ({
         }
         normalized.sessionStartUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionStartUTC, defaults.sessionStartUTC)), 0, 23);
         normalized.sessionEndUTC = clamp(Math.trunc(toFiniteNumber(normalized.sessionEndUTC, defaults.sessionEndUTC)), 0, 23);
-        normalized.gridTakeProfitLevels = clamp(normalized.gridTakeProfitLevels, 0, Math.max(1, normalized.gridLevels - 1));
-        normalized.gridOrdersPerSide = clamp(normalized.gridOrdersPerSide, 0, Math.max(1, normalized.gridLevels - 1));
+        const gridLevelsCap = normalized.gridLevels > 0 ? normalized.gridLevels : Math.max(defaults.gridLevels, 18);
+        normalized.gridTakeProfitLevels = clamp(normalized.gridTakeProfitLevels, 0, Math.max(1, gridLevelsCap - 1));
+        normalized.gridOrdersPerSide = clamp(normalized.gridOrdersPerSide, 0, Math.max(1, gridLevelsCap - 1));
 
         return normalized;
     };

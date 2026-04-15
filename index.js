@@ -210,7 +210,16 @@ const printStartupBanner = (totalUSDT) => {
     console.log(`Strategy: ${String(db.strategy || "futures_grid").toUpperCase()} on ${db.gridTimeframe}`);
     console.log(`Preset Profile: ${gridSummary.presetName.toUpperCase()}`);
     console.log(`Position Mode: ${accountPositionMode.label}`);
-    console.log(`Grid: ${db.gridLevels} levels | lookback ${db.gridLookbackCandles} candles | range ${db.gridRangePercent}%`);
+    const gridLevelsLabel = gridSummary.gridLevelsMode === "AUTO"
+        ? `AUTO ${gridSummary.effectiveGridLevels} levels`
+        : `${gridSummary.effectiveGridLevels} levels`;
+    const gridRangeLabel = gridSummary.gridRangeMode === "AUTO"
+        ? `AUTO ${gridSummary.effectiveGridRangePercent}%`
+        : `${gridSummary.effectiveGridRangePercent}%`;
+    const gridBufferLabel = gridSummary.gridEntryBufferMode === "AUTO"
+        ? `AUTO ${gridSummary.effectiveGridEntryBufferPercent}%`
+        : `${gridSummary.effectiveGridEntryBufferPercent}%`;
+    console.log(`Grid: ${gridLevelsLabel} | lookback ${db.gridLookbackCandles} candles | range ${gridRangeLabel} | buffer ${gridBufferLabel}`);
     const tpLabel = formatGridTpSlLabel(db.gridTakeProfitLevels, "AUTO_NEXT_GRID", "level(s)");
     const slLabel = formatGridTpSlLabel(db.gridStopLossLevels, "AUTO_RANGE", "step(s)");
     console.log(`Grid TP/SL: ${tpLabel} / ${slLabel} | mode ${gridSummary.ordersMode} ${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} order(s) per side`);
@@ -474,8 +483,9 @@ const evaluateGridSignal = (snapshot, params, gridState = null) => {
         shortPlan: safeCanShort ? { targetPrice: shortTargetPrice, stopLossPrice: shortStopPrice, gridIndex: upperIndex } : null,
         extraDetailLines: [
             `   Reference Price: ${referencePrice.toFixed(6)}`,
-            `   Grid Range: ${lowerBound.toFixed(6)} - ${upperBound.toFixed(6)}`,
-            `   Grid Levels: ${params.gridLevels} | Step: ${step.toFixed(6)}`,
+            `   Grid Range: ${lowerBound.toFixed(6)} - ${upperBound.toFixed(6)} | Width ${params.configuredGridRangePercent <= 0 ? `AUTO ${params.gridRangePercent}%` : `${params.gridRangePercent}%`}`,
+            `   Grid Levels: ${params.configuredGridLevels <= 0 ? `AUTO ${params.gridLevels}` : params.gridLevels} | Step: ${step.toFixed(6)}`,
+            `   Entry Buffer: ${params.configuredGridEntryBufferPercent <= 0 ? `AUTO ${params.gridEntryBufferPercent}%` : `${params.gridEntryBufferPercent}%`}`,
             `   TP/SL Mode: TP ${params.gridTakeProfitLevels <= 0 ? "AUTO_NEXT_GRID" : `${resolveEffectiveGridTakeProfitLevels(params.gridTakeProfitLevels)} GRID`} | SL ${params.gridStopLossLevels <= 0 ? `AUTO_RANGE ${longExitPlan.stopLossSteps.toFixed(2)} step` : `${resolveEffectiveGridStopLossSteps(params.gridStopLossLevels, step, snapshot.currentATR).toFixed(2)} step`}`,
             `   Current Slot: ${lowerIndex}/${params.gridLevels} (${currentLevelLow.toFixed(6)} - ${currentLevelHigh.toFixed(6)})`,
             `   Distance From Mid: ${distanceFromMidSteps.toFixed(2)} steps`,
@@ -884,7 +894,7 @@ const printDetailedStatus = async () => {
     const recoveryReason = getExchangeRecoveryReason();
 
     console.log(`\n[STATUS] Mode=${accountPositionMode.label} | Pair=${db.pair} | Price=${Number.isFinite(currentPrice) ? currentPrice : "N/A"} | LocalActive=${activeEntries.length} | ExchangePos=${openExchangePositions.length}`);
-    printStatusLine("Profile", `${gridSummary.presetName.toUpperCase()} | Grid Slot=${gridSummary.slotLabel} | Ladder=${gridSummary.ladderLabel}`);
+    printStatusLine("Profile", `${gridSummary.presetName.toUpperCase()} | Grid=${gridSummary.gridLevelsMode === "AUTO" ? `AUTO ${gridSummary.effectiveGridLevels}` : gridSummary.effectiveGridLevels} | Range=${gridSummary.gridRangeMode === "AUTO" ? `AUTO ${gridSummary.effectiveGridRangePercent}%` : `${gridSummary.effectiveGridRangePercent}%`} | Buffer=${gridSummary.gridEntryBufferMode === "AUTO" ? `AUTO ${gridSummary.effectiveGridEntryBufferPercent}%` : `${gridSummary.effectiveGridEntryBufferPercent}%`} | Slot=${gridSummary.slotLabel} | Ladder=${gridSummary.ladderLabel}`);
     printStatusLine("Side Orders", `${gridSummary.ordersMode}=${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} | Size ${gridSummary.sizeMode}=${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT | Min Valid=${gridSummary.minOrderSizeUsdt.toFixed(4)} USDT | Available USDT=${gridSummary.availableUsdtLabel}`);
     printStatusLine("Daily P&L", `${db.dailyPnL.toFixed(2)} USDT | Trades=${db.dailyTrades}`);
     printStatusLine("Runtime", `placing=${isPlacingOrder ? "Y" : "N"} closing=${isClosingPosition ? "Y" : "N"} posSync=${isSyncingPosition ? "Y" : "N"} gridSync=${isSyncingGridOrders ? "Y" : "N"}`);

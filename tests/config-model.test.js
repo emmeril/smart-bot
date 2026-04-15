@@ -98,3 +98,21 @@ test("normalizeConfig still accepts valid integer-like numeric strings", () => {
     assert.equal(normalized.monitoringInterval, 900);
     assert.equal(normalized.gridLevels, 10);
 });
+
+test("normalizeConfig allows gridLevels zero for automatic mode", () => {
+    const helpers = createHelpers();
+
+    const normalized = helpers.normalizeConfig({
+        gridLevels: 0,
+        gridRangePercent: 0,
+        gridEntryBufferPercent: 0,
+        gridTakeProfitLevels: 0,
+        gridOrdersPerSide: 0
+    });
+
+    assert.equal(normalized.gridLevels, 0);
+    assert.equal(normalized.gridRangePercent, 0);
+    assert.equal(normalized.gridEntryBufferPercent, 0);
+    assert.equal(normalized.gridTakeProfitLevels, 0);
+    assert.equal(normalized.gridOrdersPerSide, 0);
+});
