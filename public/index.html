@@ -169,14 +169,8 @@
     }
     .hero-copy h1, .panel-head h2 { margin: 0; line-height: 1.02; letter-spacing: -0.03em; }
     .hero-copy h1 { font-size: clamp(2.3rem, 5vw, 4.1rem); max-width: 12ch; }
-    .lede { margin: 14px 0 0; max-width: 62ch; color: var(--muted); font-size: 1rem; line-height: 1.7; }
+    .lede { margin: 14px 0 0; max-width: 46ch; color: var(--muted); font-size: 0.96rem; line-height: 1.6; }
     .eyebrow { margin: 0 0 10px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.74rem; font-weight: 700; }
-    .hero-badges {
-      margin-top: 18px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
     .hero-actions { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 10px; }
     .btn {
       border: 0; border-radius: 999px; padding: 12px 18px; font: inherit; font-weight: 700;
@@ -272,42 +266,6 @@
     .pill.ok { color: #9af2cc; }
     .pill.warn { color: #ffd27f; }
     .pill.bad { color: #ffb4b4; }
-    .terminal-strip {
-      display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
-      gap: 14px;
-      padding: 18px 20px;
-    }
-    .terminal-card {
-      padding: 16px 18px;
-      border-radius: var(--radius-lg);
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    .terminal-card h3 {
-      margin: 0 0 10px;
-      font-size: 0.94rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--accent);
-    }
-    .terminal-log {
-      font-family: Consolas, "Cascadia Code", monospace;
-      font-size: 0.88rem;
-      line-height: 1.75;
-      color: #c9f8e7;
-      display: grid;
-      gap: 2px;
-    }
-    .terminal-log span {
-      color: var(--muted);
-    }
-    .terminal-badges {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: flex-start;
-    }
     .signal-chip {
       display: inline-flex;
       align-items: center;
@@ -329,7 +287,6 @@
       100% { box-shadow: 0 0 0 0 rgba(72, 226, 174, 0); }
     }
     @media (max-width: 1100px) {
-      .terminal-strip { grid-template-columns: 1fr; }
       .hero { grid-template-columns: 1fr; }
       .hero-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     }
@@ -353,7 +310,6 @@
     @media (max-width: 640px) {
       .shell { width: min(100% - 14px, 100%); margin: 8px auto 20px; }
       .hero, .form-panel { padding: 16px; }
-      .terminal-strip { padding: 16px; }
       .hero-metrics { grid-template-columns: 1fr; }
       .hero-actions { flex-direction: column; }
       .btn { width: 100%; }
@@ -375,27 +331,22 @@
         <div class="brand-mark">SB</div>
         <div class="brand-copy">
           <strong>Smart Bot Futures Grid</strong>
-          <span>Trading console untuk runtime, posisi, dan konfigurasi live</span>
+          <span>Trading console</span>
         </div>
       </div>
       <div class="topbar-status">
         <div class="pulse-dot" aria-hidden="true"></div>
         <div class="topbar-meta">
-          <strong id="topbarStatus">Connecting runtime...</strong>
-          <span id="topbarMeta">Memuat pair, mode, dan sinkronisasi bot</span>
+          <strong id="topbarStatus">Connecting...</strong>
+          <span id="topbarMeta">Memuat status</span>
         </div>
       </div>
     </section>
     <header class="hero panel">
       <div class="hero-copy">
         <p class="eyebrow">Smart Bot Control Center</p>
-        <h1>Console yang terasa seperti bot-nya langsung</h1>
-        <p class="lede">Pantau runtime, posisi, PnL, dan mesin grid dalam satu panel yang lebih dekat dengan karakter bot trading. Semua perubahan tetap tersimpan ke SQLite dan langsung dipakai runtime aktif.</p>
-        <div class="hero-badges">
-          <span class="signal-chip">Strategy <strong>futures_grid</strong></span>
-          <span class="signal-chip">Exchange <strong>Binance USDT-M</strong></span>
-          <span class="signal-chip">Mode <strong id="heroMode">Syncing...</strong></span>
-        </div>
+        <h1>Trading console</h1>
+        <p class="lede">Pantau status bot dan ubah konfigurasi dari satu panel.</p>
         <div class="hero-actions">
           <button id="saveBtn" class="btn btn-primary" type="button">Simpan konfigurasi</button>
           <button id="refreshBtn" class="btn btn-secondary" type="button">Muat ulang</button>
@@ -415,34 +366,12 @@
       <div class="status-item"><span class="status-label">Terakhir update</span><strong id="updatedStatus">-</strong></div>
     </section>
 
-    <section class="panel terminal-strip">
-      <article class="terminal-card">
-        <h3>Runtime Feed</h3>
-        <div class="terminal-log">
-          <div><span>&gt;</span> Pair aktif: <strong id="runtimePair">-</strong></div>
-          <div><span>&gt;</span> Engine status: <strong id="runtimeEngine">Memuat...</strong></div>
-          <div><span>&gt;</span> Posisi lokal: <strong id="runtimePositions">-</strong></div>
-          <div><span>&gt;</span> Daily trades: <strong id="runtimeTrades">-</strong></div>
-        </div>
-      </article>
-      <article class="terminal-card">
-        <h3>Bot Signals</h3>
-        <div class="terminal-badges">
-          <span class="signal-chip">Leverage <strong id="signalLeverage">-</strong></span>
-          <span class="signal-chip">Position mode <strong id="signalPositionMode">-</strong></span>
-          <span class="signal-chip">Grid state <strong id="signalGridState">-</strong></span>
-          <span class="signal-chip">Exchange <strong id="signalExchange">-</strong></span>
-        </div>
-      </article>
-    </section>
-
     <section class="panel live-panel">
       <div class="panel-head">
         <div>
           <p class="eyebrow">Live Status</p>
           <h2>Posisi, PnL, dan Order</h2>
         </div>
-        <p class="muted">Diperbarui otomatis dari runtime bot.</p>
       </div>
       <div class="live-grid">
         <article class="live-card">
@@ -479,16 +408,10 @@
           <p class="eyebrow">Konfigurasi</p>
           <h2>Parameter trading</h2>
         </div>
-        <p class="muted">Semua field di bawah akan divalidasi kembali di sisi server sebelum disimpan.</p>
       </div>
       <form id="configForm" class="config-grid"></form>
     </section>
-
     <section class="panel footer-panel">
-      <div>
-        <p class="eyebrow">Catatan</p>
-        <p class="muted">Dashboard ini fokus ke konfigurasi. Status posisi aktif dan nilai harian tetap dibaca dari runtime bot.</p>
-      </div>
       <div id="toast" class="toast" aria-live="polite"></div>
     </section>
   </main>
@@ -513,15 +436,6 @@
     const updatedStatus = document.getElementById("updatedStatus");
     const topbarStatus = document.getElementById("topbarStatus");
     const topbarMeta = document.getElementById("topbarMeta");
-    const heroMode = document.getElementById("heroMode");
-    const runtimePair = document.getElementById("runtimePair");
-    const runtimeEngine = document.getElementById("runtimeEngine");
-    const runtimePositions = document.getElementById("runtimePositions");
-    const runtimeTrades = document.getElementById("runtimeTrades");
-    const signalLeverage = document.getElementById("signalLeverage");
-    const signalPositionMode = document.getElementById("signalPositionMode");
-    const signalGridState = document.getElementById("signalGridState");
-    const signalExchange = document.getElementById("signalExchange");
     const livePositionsCount = document.getElementById("livePositionsCount");
     const livePositionsMeta = document.getElementById("livePositionsMeta");
     const livePnlValue = document.getElementById("livePnlValue");
@@ -598,7 +512,6 @@
     function renderMetrics(status) {
       const botRunning = Boolean(status.botRunning);
       const exchangeConnected = Boolean(status.exchangeConnected);
-      const gridState = status.activeGridState ? "Active" : "Idle";
       const leverageValue = Number.isFinite(Number(status.leverage)) ? `${formatNumber(status.leverage)}x` : "-";
       const positionModeValue = status.positionMode || "-";
       const marginModeValue = String(status.marginMode || "-").toUpperCase();
@@ -621,16 +534,7 @@
       marginStatus.textContent = `${marginModeValue} / ${positionModeValue}`;
       updatedStatus.textContent = formatDateTime(status.lastUpdated);
       topbarStatus.textContent = botRunning ? "Runtime bot aktif" : "Runtime bot berhenti";
-      topbarMeta.textContent = `${status.pair || "-"} | ${marginModeValue} | ${exchangeConnected ? "exchange connected" : "exchange disconnected"}`;
-      heroMode.textContent = `${marginModeValue} / ${positionModeValue}`;
-      runtimePair.textContent = status.pair || "-";
-      runtimeEngine.textContent = botRunning ? "Running" : "Stopped";
-      runtimePositions.textContent = String(status.activePositions ?? "-");
-      runtimeTrades.textContent = String(status.dailyTrades ?? "-");
-      signalLeverage.textContent = leverageValue;
-      signalPositionMode.textContent = positionModeValue;
-      signalGridState.textContent = gridState;
-      signalExchange.textContent = exchangeConnected ? "Connected" : "Offline";
+      topbarMeta.textContent = `${status.pair || "-"} | ${exchangeConnected ? "connected" : "offline"}`;
     }
 
 
@@ -1018,7 +922,6 @@
   </script>
 </body>
 </html>
-
 
 
 
