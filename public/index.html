@@ -1166,7 +1166,7 @@
       try {
         const data = await api("/api/config/reset", { method: "POST" });
         applyPayload(data);
-        await loadLiveStatus(true);
+        await loadDashboard(true);
         showToast(data.message || "Konfigurasi direset", "success");
       } catch (error) {
         showToast(error.message || "Gagal reset konfigurasi", "error");
