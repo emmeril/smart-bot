@@ -534,7 +534,8 @@ const {
     setActivePositionsMap,
     upsertActivePosition,
     removeActivePositionByKey,
-    mergeTrackedPositions
+    mergeTrackedPositions,
+    mergeMatchedTrackedPositions
 } = createPositionStateHelpers({
     getDb: () => db,
     isLegacySinglePosition,
@@ -864,6 +865,7 @@ const {
     getDefaultConfig: () => getDefaultConfig(),
     saveDB: async (...args) => { await saveDB(...args); },
     reloadConfig: async (...args) => { await reloadConfig(...args); },
+    runConfigMutation: async (...args) => await runConfigMutation(...args),
     refreshRuntimeSchedulers: () => { refreshRuntimeSchedulers(); },
     syncExchangeRuntimeSettings: async () => {
         if (!exchange) return;
@@ -999,6 +1001,7 @@ const {
     initializeDB,
     reloadConfig,
     saveDB,
+    runConfigMutation,
     startConfigAutoReload
 } = createConfigRuntimeHelpers({
     getDb: () => db,
@@ -1072,12 +1075,21 @@ const syncPositionWithExchange = async () => {
             await clearMissingPositionState(removedPosition, "POSITION_SYNC_REMOVED", removedKey);
         }
 
-        setActivePositionsMap(nextPositionsMap);
-        await saveDB();
-        if (getPositionMapCount(nextPositionsMap) === 0) console.log("[SYNC][INFO] Cleared local active positions from exchange state");
-        else console.log(`[SYNC][INFO] Synced active positions: ${getPositionMapKeys(nextPositionsMap).join(", ")}`);
+        const mergedPositionsMap = mergeMatchedTrackedPositions(getActivePositionsMap(), nextPositionsMap) || {};
+        Object.keys(mergedPositionsMap).forEach((key) => {
+            if (!nextPositionsMap[key]) return;
+            mergedPositionsMap[key].exchangePnlSnapshot = nextPositionsMap[key].exchangePnlSnapshot;
+            if (Number.isFinite(nextPositionsMap[key].leverageAtEntry)) {
+                mergedPositionsMap[key].leverageAtEntry = nextPositionsMap[key].leverageAtEntry;
+            }
+        });
 
-        for (const [positionKey, syncedPosition] of Object.entries(nextPositionsMap)) {
+        setActivePositionsMap(mergedPositionsMap);
+        await saveDB();
+        if (getPositionMapCount(mergedPositionsMap) === 0) console.log("[SYNC][INFO] Cleared local active positions from exchange state");
+        else console.log(`[SYNC][INFO] Synced active positions: ${getPositionMapKeys(mergedPositionsMap).join(", ")}`);
+
+        for (const [positionKey, syncedPosition] of Object.entries(mergedPositionsMap)) {
             await ensureReduceOnlyTakeProfitOrder(positionKey, syncedPosition);
             await ensureReduceOnlyStopLossOrder(positionKey, syncedPosition);
         }

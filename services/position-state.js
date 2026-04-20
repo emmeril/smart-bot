@@ -62,6 +62,17 @@ const createPositionStateHelpers = ({ getDb, isLegacySinglePosition, toPositionM
         return getPositionMapCount(mergedPositionsMap) > 0 ? mergedPositionsMap : null;
     };
 
+    const mergeMatchedTrackedPositions = (currentPositionsMap, nextPositionsMap) => {
+        const mergedPositionsMap = { ...(nextPositionsMap || {}) };
+        Object.entries(mergedPositionsMap).forEach(([key, nextPosition]) => {
+            const currentPosition = currentPositionsMap?.[key];
+            if (currentPosition && isSameTrackedPosition(currentPosition, nextPosition)) {
+                mergedPositionsMap[key] = { ...nextPosition, ...currentPosition };
+            }
+        });
+        return getPositionMapCount(mergedPositionsMap) > 0 ? mergedPositionsMap : null;
+    };
+
     return {
         getActivePositionsMap,
         getPositionMapKeys,
@@ -75,9 +86,9 @@ const createPositionStateHelpers = ({ getDb, isLegacySinglePosition, toPositionM
         setActivePositionsMap,
         upsertActivePosition,
         removeActivePositionByKey,
-        mergeTrackedPositions
+        mergeTrackedPositions,
+        mergeMatchedTrackedPositions
     };
 };
 
 module.exports = { createPositionStateHelpers };
-

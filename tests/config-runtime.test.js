@@ -193,3 +193,53 @@ test("reloadConfig persists auto preset changes with full save mode when runtime
     assert.equal(persistedWrites[0].pair, "BTC/USDT:USDT");
     assert.equal(persistedWrites[0].gridLevels, 14);
 });
+
+test("runConfigMutation serializes overlapping config mutations", async () => {
+    const executionOrder = [];
+    let releaseFirstMutation;
+
+    const helpers = createConfigRuntimeHelpers({
+        getDb: () => ({ id: 1, pair: "DOGE/USDT:USDT", gridLevels: 8 }),
+        setDb: () => {},
+        getIsShuttingDown: () => false,
+        getIsProcessing: () => false,
+        hasRuntimePositionMutationInFlight: () => false,
+        getConfigReloadTimer: () => null,
+        setConfigReloadTimer: () => {},
+        loadPersistedConfig: async () => null,
+        ensureConfigRow: async () => null,
+        persistConfig: async () => {},
+        ensureConfigSchema: async () => {},
+        applyAutoPresetToConfig: (config) => ({ config, autoPresetResult: { changed: false, presetName: null } }),
+        hydrateConfig: (config) => config,
+        mergeRuntimeConfig: () => {},
+        applyRuntimeConfigChanges: async () => false,
+        hasAnyActivePosition: () => false,
+        dashboardEditableFields: [{ key: "pair" }],
+        configAutoReloadIntervalMs: 5000
+    });
+
+    const firstMutation = helpers.runConfigMutation(async () => {
+        executionOrder.push("first:start");
+        await new Promise((resolve) => { releaseFirstMutation = resolve; });
+        executionOrder.push("first:end");
+    });
+
+    const secondMutation = helpers.runConfigMutation(async () => {
+        executionOrder.push("second:start");
+        executionOrder.push("second:end");
+    });
+
+    await Promise.resolve();
+    assert.deepEqual(executionOrder, ["first:start"]);
+
+    releaseFirstMutation();
+    await Promise.all([firstMutation, secondMutation]);
+
+    assert.deepEqual(executionOrder, [
+        "first:start",
+        "first:end",
+        "second:start",
+        "second:end"
+    ]);
+});

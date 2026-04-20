@@ -22,6 +22,10 @@ test("applyDashboardConfigUpdate persists full config changes before reloading r
         getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", gridLevels: 8 }),
         saveDB: async (options) => { saveCalls.push(options || null); },
         reloadConfig: async (previousConfig) => { reloadCalls.push(previousConfig); },
+        runConfigMutation: async (callback) => callback({
+            saveDB: async (options) => { saveCalls.push(options || null); },
+            reloadConfig: async (previousConfig) => { reloadCalls.push(previousConfig); }
+        }),
         refreshRuntimeSchedulers: () => {},
         syncExchangeRuntimeSettings: async () => {},
         buildDashboardPayload: () => ({ pair: runtimeDb.pair, gridLevels: runtimeDb.gridLevels }),
@@ -64,6 +68,10 @@ test("applyDashboardConfigUpdate preserves activeGridState until runtime decides
         getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", gridLevels: 8, trailingEnabled: true }),
         saveDB: async () => {},
         reloadConfig: async () => {},
+        runConfigMutation: async (callback) => callback({
+            saveDB: async () => {},
+            reloadConfig: async () => {}
+        }),
         refreshRuntimeSchedulers: () => {},
         syncExchangeRuntimeSettings: async () => {},
         buildDashboardPayload: () => ({ activeGridState: runtimeDb.activeGridState }),
@@ -107,6 +115,10 @@ test("resetDashboardConfig persists full config changes before reloading runtime
         getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", gridLevels: 8 }),
         saveDB: async (options) => { saveCalls.push(options || null); },
         reloadConfig: async (previousConfig) => { reloadCalls.push(previousConfig); },
+        runConfigMutation: async (callback) => callback({
+            saveDB: async (options) => { saveCalls.push(options || null); },
+            reloadConfig: async (previousConfig) => { reloadCalls.push(previousConfig); }
+        }),
         refreshRuntimeSchedulers: () => {},
         syncExchangeRuntimeSettings: async () => {},
         buildDashboardPayload: () => ({ pair: runtimeDb.pair, gridLevels: runtimeDb.gridLevels }),
