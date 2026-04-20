@@ -6,16 +6,11 @@ const createDashboardConfigHelpers = ({
     getDefaultConfig,
     saveDB,
     reloadConfig,
-    runConfigMutation,
     refreshRuntimeSchedulers,
     syncExchangeRuntimeSettings,
     buildDashboardPayload,
     applyAutoPresetToConfig
 }) => {
-    const mutateConfig = typeof runConfigMutation === "function"
-        ? runConfigMutation
-        : async (callback) => callback({ saveDB, reloadConfig });
-
     const applyDashboardRuntimeState = (nextConfig, currentConfig = getDb()) => {
         nextConfig.activePosition = currentConfig.activePosition;
         nextConfig.dailyPnL = currentConfig.dailyPnL;
@@ -35,12 +30,10 @@ const createDashboardConfigHelpers = ({
     };
 
     const persistRuntimeConfigChanges = async (previousConfig = null) => {
-        await mutateConfig(async ({ saveDB: persistConfig, reloadConfig: reloadRuntimeConfig }) => {
-            await persistConfig({ mode: "full" });
-            await reloadRuntimeConfig(previousConfig);
-            refreshRuntimeSchedulers();
-            await syncExchangeRuntimeSettings();
-        });
+        await saveDB({ mode: "full" });
+        await reloadConfig(previousConfig);
+        refreshRuntimeSchedulers();
+        await syncExchangeRuntimeSettings();
     };
 
     const applyDashboardConfigUpdate = async (incoming) => {

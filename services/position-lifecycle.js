@@ -38,24 +38,6 @@ const createPositionLifecycleHelpers = ({
     getPositionSyncQtyTolerance,
     getOrderFillSnapshot
 }) => {
-    const getUtcDateKey = (timestamp) => {
-        const parsed = Number(timestamp);
-        return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : "";
-    };
-
-    const rollDailyMetricsWindowIfNeeded = (timestamp = Date.now()) => {
-        const db = getDb();
-        if (!db) return false;
-        const now = Number.isFinite(Number(timestamp)) ? Number(timestamp) : Date.now();
-        const currentDayKey = getUtcDateKey(now);
-        const lastResetDayKey = getUtcDateKey(db.lastDailyReset);
-        if (!currentDayKey || currentDayKey === lastResetDayKey) return false;
-        db.dailyPnL = 0;
-        db.dailyTrades = 0;
-        db.lastDailyReset = now;
-        return true;
-    };
-
     const shouldCancelGridOrdersForPositionCleanup = () => {
         if (!isHedgeModeEnabled()) return true;
         const activeEntries = typeof getActivePositionEntries === "function" ? getActivePositionEntries() : [];
@@ -73,7 +55,6 @@ const createPositionLifecycleHelpers = ({
         removeActivePositionByKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position));
         const estimatedExitPrice = await getPrice(true);
         if (Number.isFinite(estimatedExitPrice) && estimatedExitPrice > 0) {
-            rollDailyMetricsWindowIfNeeded();
             const estimatedPnL = calculatePositionPnL(position, estimatedExitPrice);
             db.dailyPnL += estimatedPnL.realizedProfitUSDT;
             db.dailyTrades++;
@@ -113,7 +94,6 @@ const createPositionLifecycleHelpers = ({
             if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "POSITION_CLOSED");
         }
         await cancelManagedOrdersForPosition(position, "POSITION_CLOSED");
-        rollDailyMetricsWindowIfNeeded();
         db.dailyPnL += netProfitUSDT;
         db.dailyTrades++;
 
@@ -142,7 +122,6 @@ const createPositionLifecycleHelpers = ({
         const db = getDb();
         if (!Number.isFinite(exitPrice) || exitPrice <= 0) return;
         if (!Number.isFinite(closedQuantity) || closedQuantity <= 0) return;
-        rollDailyMetricsWindowIfNeeded();
         const partialPnl = calculatePositionPnL(position, exitPrice, closedQuantity);
         db.dailyPnL += partialPnl.realizedProfitUSDT;
         logTrade(
@@ -319,3 +298,4 @@ const createPositionLifecycleHelpers = ({
 };
 
 module.exports = { createPositionLifecycleHelpers };
+

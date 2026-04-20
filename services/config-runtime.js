@@ -19,7 +19,6 @@ const createConfigRuntimeHelpers = ({
     configAutoReloadIntervalMs
 }) => {
     let lastKnownDashboardConfigSignature = "";
-    let configMutationQueue = Promise.resolve();
 
     const buildDashboardConfigSignature = (config) => JSON.stringify(
         dashboardEditableFields.map((field) => [field.key, config && Object.prototype.hasOwnProperty.call(config, field.key) ? config[field.key] : null])
@@ -53,7 +52,7 @@ const createConfigRuntimeHelpers = ({
         return nextConfig;
     };
 
-    const saveDBUnsafe = async (options = {}) => {
+    const saveDB = async (options = {}) => {
         try {
             const configToPersist = await buildPersistableConfig(options);
             if (!configToPersist) return;
@@ -74,7 +73,7 @@ const createConfigRuntimeHelpers = ({
             setDb(hydratedConfig);
             syncDashboardConfigSignature();
             if (autoPresetResult.changed) {
-                await saveDBUnsafe({ mode: "full" });
+                await saveDB({ mode: "full" });
                 console.log(`[PRESET][INFO] Auto-applied ${autoPresetResult.presetName} profile for ${getDb().pair}`);
             }
             console.log("[DB][INFO] Runtime DB initialized successfully");
@@ -86,7 +85,7 @@ const createConfigRuntimeHelpers = ({
         }
     };
 
-    const reloadConfigUnsafe = async (previousRuntimeConfig = null) => {
+    const reloadConfig = async (previousRuntimeConfig = null) => {
         try {
             const db = getDb();
             if (!db) return false;
@@ -100,7 +99,7 @@ const createConfigRuntimeHelpers = ({
             await applyRuntimeConfigChanges(runtimeSnapshot);
             syncDashboardConfigSignature();
             if (autoPresetResult.changed && !hasAnyActivePosition()) {
-                await saveDBUnsafe({ mode: "full" });
+                await saveDB({ mode: "full" });
                 console.log(`[PRESET][INFO] Auto-refreshed ${autoPresetResult.presetName} profile for ${getDb().pair}`);
             }
             return true;
@@ -110,7 +109,7 @@ const createConfigRuntimeHelpers = ({
         }
     };
 
-    const reloadConfigIfChangedUnsafe = async () => {
+    const reloadConfigIfChanged = async () => {
         if (!getDb() || getIsShuttingDown()) return false;
         try {
             const persistedConfig = await loadPersistedConfig();
@@ -118,7 +117,7 @@ const createConfigRuntimeHelpers = ({
             const persistedSignature = buildDashboardConfigSignature(persistedConfig);
             if (persistedSignature === lastKnownDashboardConfigSignature) return false;
             console.log("[CONFIG][INFO] Detected dashboard config change. Reloading...");
-            const reloaded = await reloadConfigUnsafe();
+            const reloaded = await reloadConfig();
             if (reloaded) syncDashboardConfigSignature();
             return reloaded;
         } catch (error) {
@@ -126,33 +125,6 @@ const createConfigRuntimeHelpers = ({
             return false;
         }
     };
-
-    const runConfigMutation = async (callback) => {
-        const operation = configMutationQueue.then(
-            () => callback({
-                saveDB: saveDBUnsafe,
-                reloadConfig: reloadConfigUnsafe,
-                reloadConfigIfChanged: reloadConfigIfChangedUnsafe
-            }),
-            () => callback({
-                saveDB: saveDBUnsafe,
-                reloadConfig: reloadConfigUnsafe,
-                reloadConfigIfChanged: reloadConfigIfChangedUnsafe
-            })
-        );
-        configMutationQueue = operation.catch(() => {});
-        return operation;
-    };
-
-    const saveDB = async (options = {}) => runConfigMutation(async ({ saveDB }) => saveDB(options));
-
-    const reloadConfig = async (previousRuntimeConfig = null) => runConfigMutation(
-        async ({ reloadConfig }) => reloadConfig(previousRuntimeConfig)
-    );
-
-    const reloadConfigIfChanged = async () => runConfigMutation(
-        async ({ reloadConfigIfChanged }) => reloadConfigIfChanged()
-    );
 
     const startConfigAutoReload = () => {
         if (getConfigReloadTimer()) return;
@@ -167,7 +139,6 @@ const createConfigRuntimeHelpers = ({
         buildDashboardConfigSignature,
         syncDashboardConfigSignature,
         buildPersistableConfig,
-        runConfigMutation,
         saveDB,
         initializeDB,
         reloadConfig,
