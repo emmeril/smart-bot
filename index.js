@@ -30,9 +30,7 @@ const {
     DASHBOARD_SESSION_SECRET,
     DASHBOARD_SESSION_COOKIE,
     DASHBOARD_SESSION_TTL_MS,
-    CONFIG_AUTO_RELOAD_INTERVAL_MS,
-    BOT_VERSION,
-    BOT_BUILD
+    CONFIG_AUTO_RELOAD_INTERVAL_MS
 } = require("./services/database-config");
 const { createDashboardConfigHelpers } = require("./services/dashboard-config");
 const { createDashboardStatusHelpers } = require("./services/dashboard-status");

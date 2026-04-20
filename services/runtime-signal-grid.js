@@ -254,7 +254,7 @@ const createRuntimeSignalGridHelpers = ({
         try {
             const db = getDb();
             const metrics = getMetrics();
-            if (!db) return { ok: false, error: "db_not_ready", canLong: false, canShort: false };
+            if (!db) return {};
             setSignalCount(getSignalCount() + 1);
             metrics.signals.analyzed++;
             const strategy = String(db.strategy || "futures_grid").toLowerCase();
@@ -268,13 +268,13 @@ const createRuntimeSignalGridHelpers = ({
             const ohlcv = await getOHLCV(params.neededCandles);
             if (ohlcv.length < params.neededCandles) {
                 console.log(`[SIGNAL][WARN] Not enough OHLCV data: ${ohlcv.length} < ${params.neededCandles}`);
-                return { ok: false, error: "insufficient_ohlcv", canLong: false, canShort: false, hasSignal: false };
+                return {};
             }
 
             const snapshot = buildSignalSnapshot(ohlcv, params);
             if (!snapshot || snapshot.invalidAtr) {
                 console.log("[SIGNAL][WARN] Invalid data for signal");
-                return { ok: false, error: "invalid_snapshot", canLong: false, canShort: false, hasSignal: false };
+                return {};
             }
 
             const signalState = strategy === "futures_grid"
@@ -302,7 +302,6 @@ const createRuntimeSignalGridHelpers = ({
             }
 
             return {
-                ok: true,
                 canLong: finalState.canLong,
                 canShort: finalState.canShort,
                 price: snapshot.currentPrice,
@@ -315,7 +314,7 @@ const createRuntimeSignalGridHelpers = ({
             };
         } catch (error) {
             console.error("[SIGNAL][ERROR] Signal analysis failed:", error.message);
-            return { ok: false, error: error.message, canLong: false, canShort: false, hasSignal: false };
+            return {};
         }
     };
 

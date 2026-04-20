@@ -36,29 +36,15 @@ const createRuntimeReportingHelpers = ({
         const formatTrailingLabel = () => (
             db.trailingEnabled ? `${db.trailingActivateATR}/${db.trailingOffsetATR}x` : "OFF"
         );
-        const version = "v1.0.0";
-        const timestamp = new Date().toISOString();
 
         console.log("\n" + "=".repeat(70));
-        console.log("  ██████╗ ███████╗███████╗██╗     ██╗███╗   ██╗███████╗");
-        console.log("  ██╔══██╗██╔════╝██╔════╝██║     ██║████╗  ██║██╔════╝");
-        console.log("  ██║  ██║█████╗  █████╗  ██║     ██║██╔██╗ ██║█████╗  ");
-        console.log("  ██║  ██║██╔══╝  ██╔══╝  ██║     ██║██║╚██╗██║██╔══╝  ");
-        console.log("  ██████╔╝███████╗███████╗███████╗██║██║ ╚████║███████╗");
-        console.log("  ╚═════╝ ╚══════╝╚══════╝╚══════╝╚═╝╚═╝  ╚═══╝╚══════╝");
+        console.log("BINANCE-STYLE FUTURES GRID BOT");
         console.log("=".repeat(70));
-        console.log(`  Automated Futures Grid Trading System ${version}`);
-        console.log(`  Started: ${timestamp}`);
-        console.log("=".repeat(70));
-        console.log("  [CONFIGURATION]");
-        console.log(`  ├─ Exchange       : Binance USDT-M Futures`);
-        console.log(`  ├─ Symbol         : ${db.pair}`);
-        console.log(`  ├─ Strategy       : ${String(db.strategy || "futures_grid").toUpperCase()}`);
-        console.log(`  ├─ Timeframe      : ${db.gridTimeframe}`);
-        console.log(`  ├─ Leverage       : ${db.leverage}x`);
-        console.log(`  ├─ Margin Mode    : ${String(db.marginMode || "isolated").toUpperCase()}`);
-        console.log(`  └─ Position Mode  : ${accountPositionMode.label}`);
-        console.log("  [GRID PARAMETERS]");
+        console.log(`Balance: $${totalUSDT.toFixed(2)}`);
+        console.log(`Pair: ${db.pair}`);
+        console.log(`Strategy: ${String(db.strategy || "futures_grid").toUpperCase()} on ${db.gridTimeframe}`);
+        console.log(`Preset Profile: ${gridSummary.presetName.toUpperCase()}`);
+        console.log(`Position Mode: ${accountPositionMode.label}`);
         const gridLevelsLabel = gridSummary.gridLevelsMode === "AUTO"
             ? `AUTO ${gridSummary.effectiveGridLevels} levels`
             : `${gridSummary.effectiveGridLevels} levels`;
@@ -68,35 +54,23 @@ const createRuntimeReportingHelpers = ({
         const gridBufferLabel = gridSummary.gridEntryBufferMode === "AUTO"
             ? `AUTO ${gridSummary.effectiveGridEntryBufferPercent}%`
             : `${gridSummary.effectiveGridEntryBufferPercent}%`;
-        console.log(`  ├─ Levels         : ${gridLevelsLabel}`);
-        console.log(`  ├─ Lookback       : ${db.gridLookbackCandles} candles`);
-        console.log(`  ├─ Range          : ${gridRangeLabel}`);
-        console.log(`  ├─ Entry Buffer   : ${gridBufferLabel}`);
+        console.log(`Grid: ${gridLevelsLabel} | lookback ${db.gridLookbackCandles} candles | range ${gridRangeLabel} | buffer ${gridBufferLabel}`);
         const tpLabel = formatGridTpSlLabel(db.gridTakeProfitLevels, "AUTO_NEXT_GRID", "level(s)");
         const slLabel = formatGridTpSlLabel(db.gridStopLossLevels, "AUTO_RANGE", "step(s)");
-        console.log(`  ├─ Take Profit    : ${tpLabel}`);
-        console.log(`  ├─ Stop Loss      : ${slLabel}`);
-        console.log(`  ├─ Orders/Side    : ${gridSummary.ordersMode} ${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap}`);
-        console.log(`  └─ Order Size     : ${gridSummary.sizeMode} ${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT`);
+        console.log(`Grid TP/SL: ${tpLabel} / ${slLabel} | mode ${gridSummary.ordersMode} ${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} order(s) per side`);
+        console.log(`Grid Order Size: mode ${gridSummary.sizeMode} ${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT`);
+        console.log(`Min Valid Order Size: ${gridSummary.minOrderSizeUsdt.toFixed(4)} USDT`);
+        console.log(`Available USDT: ${gridSummary.availableUsdtLabel}`);
         if (gridSummary.hasLockedGrid) {
-            console.log("  [LOCKED GRID]");
-            console.log(`  ├─ Range: ${gridSummary.lockedRangeLabel}`);
-            console.log(`  └─ Step : ${gridSummary.stepLabel}`);
+            console.log(`Locked Grid Range: ${gridSummary.lockedRangeLabel}`);
+            console.log(`Grid Step: ${gridSummary.stepLabel}`);
         }
-        console.log("  [RISK MANAGEMENT]");
-        console.log(`  ├─ Min Order Size : ${gridSummary.minOrderSizeUsdt.toFixed(4)} USDT`);
-        console.log(`  ├─ Available USDT : ${gridSummary.availableUsdtLabel}`);
-        console.log(`  ├─ Daily Target   : $${db.dailyProfitTargetUsdt}`);
-        console.log(`  ├─ Max Daily Loss : ${db.dailyMaxLossPercent}%`);
-        console.log(`  ├─ Max Trades     : ${db.maxTradesPerDay} per day`);
-        console.log(`  ├─ Volume Filter  : ${db.minVolumeRatio}x over ${db.volumePeriod} periods`);
-        console.log(`  ├─ Trailing ATR   : ${formatTrailingLabel()}`);
-        console.log(`  ├─ Session        : ${db.sessionStartUTC}-${db.sessionEndUTC} UTC`);
-        console.log(`  └─ Preset Profile : ${gridSummary.presetName.toUpperCase()}`);
-        console.log("  [ACCOUNT]");
-        console.log(`  └─ Total Balance  : $${totalUSDT.toFixed(2)} USDT`);
-        console.log("=".repeat(70));
-        console.log("  Bot is initializing... Dashboard available at http://localhost:3000");
+        console.log(`Volume filter: ${db.minVolumeRatio}x over ${db.volumePeriod} periods`);
+        console.log(`Session: ${db.sessionStartUTC}-${db.sessionEndUTC} UTC`);
+        console.log(`Trailing ATR: ${formatTrailingLabel()}`);
+        console.log(`Leverage: ${db.leverage}x`);
+        console.log(`Margin Mode: ${String(db.marginMode || "isolated").toUpperCase()}`);
+        console.log(`Daily target: $${db.dailyProfitTargetUsdt} (max ${db.maxTradesPerDay} trades)`);
         console.log("=".repeat(70) + "\n");
     };
 

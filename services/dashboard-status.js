@@ -17,16 +17,11 @@ const createDashboardStatusHelpers = ({
     fetchManagedOpenOrdersSnapshot,
     calculatePositionPnL
 }) => {
-    const BOT_VERSION = "1.0.0";
-    const BOT_BUILD = "2026.04.20";
-
     const buildDashboardStatus = () => {
         const db = getDb();
         const exchangeHealth = getExchangeHealth();
         const activePositionsMap = getActivePositionsMap(db?.activePosition);
         return {
-            botVersion: BOT_VERSION,
-            botBuild: BOT_BUILD,
             botRunning: !getIsShuttingDown(),
             exchangeConnected: Boolean(getExchange()),
             exchangeHealthy: exchangeHealth.isHealthy,

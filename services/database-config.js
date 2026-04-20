@@ -59,8 +59,6 @@ const Config = sequelize.define("Config", {
 
 const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort", "autoTargetProfitEnabled", "autoStopLossEnabled"];
 const VALID_MARGIN_MODES = ["cross", "isolated"];
-const BOT_VERSION = "1.0.0";
-const BOT_BUILD = "2026.04.20";
 const DEFAULT_CONFIG = {
     strategy: "futures_grid",
     pair: "DOGE/USDT:USDT",
@@ -162,8 +160,6 @@ module.exports = {
     Config,
     BOOLEAN_CONFIG_KEYS,
     VALID_MARGIN_MODES,
-    BOT_VERSION,
-    BOT_BUILD,
     DEFAULT_CONFIG,
     DASHBOARD_EDITABLE_FIELDS,
     DASHBOARD_EDITABLE_KEYS,
