@@ -42,7 +42,6 @@ const createRuntimeMonitoringHelpers = ({
     setIsShuttingDown,
     getIsPlacingOrderState,
     getIsClosingPositionState,
-    stopTerminalDashboard,
     unregisterRuntimeCommands,
     exitProcess
 }) => {
@@ -133,7 +132,6 @@ const createRuntimeMonitoringHelpers = ({
         console.log(`[SHUTDOWN][INFO] Received ${signal}. Stopping bot...`);
         unregisterRuntimeCommands();
         clearRuntimeTimers();
-        stopTerminalDashboard();
 
         if (getWebServer()) {
             try {
