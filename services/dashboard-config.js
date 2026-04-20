@@ -11,6 +11,22 @@ const createDashboardConfigHelpers = ({
     buildDashboardPayload,
     applyAutoPresetToConfig
 }) => {
+    let dashboardConfigOperationChain = Promise.resolve();
+
+    const runDashboardConfigOperation = async (operation) => {
+        const previousOperation = dashboardConfigOperationChain.catch(() => {});
+        let releaseOperation = () => {};
+        dashboardConfigOperationChain = new Promise((resolve) => {
+            releaseOperation = resolve;
+        });
+        await previousOperation;
+        try {
+            return await operation();
+        } finally {
+            releaseOperation();
+        }
+    };
+
     const applyDashboardRuntimeState = (nextConfig, currentConfig = getDb()) => {
         nextConfig.activePosition = currentConfig.activePosition;
         nextConfig.dailyPnL = currentConfig.dailyPnL;
@@ -36,7 +52,7 @@ const createDashboardConfigHelpers = ({
         await syncExchangeRuntimeSettings();
     };
 
-    const applyDashboardConfigUpdate = async (incoming) => {
+    const applyDashboardConfigUpdate = async (incoming) => await runDashboardConfigOperation(async () => {
         const currentDb = getDb();
         if (!currentDb) throw new Error("Config is not ready yet");
 
@@ -65,9 +81,9 @@ const createDashboardConfigHelpers = ({
         Object.assign(currentDb, nextConfig);
         await persistRuntimeConfigChanges(current);
         return buildDashboardPayload();
-    };
+    });
 
-    const resetDashboardConfig = async () => {
+    const resetDashboardConfig = async () => await runDashboardConfigOperation(async () => {
         const currentDb = getDb();
         if (!currentDb) throw new Error("Config is not ready yet");
         
@@ -82,7 +98,7 @@ const createDashboardConfigHelpers = ({
         Object.assign(currentDb, nextConfig);
         await persistRuntimeConfigChanges(current);
         return buildDashboardPayload();
-    };
+    });
 
     return {
         applyDashboardConfigUpdate,
@@ -91,5 +107,4 @@ const createDashboardConfigHelpers = ({
 };
 
 module.exports = { createDashboardConfigHelpers };
-
 

@@ -107,3 +107,85 @@ test("placeReduceOnlyStopLossOrder preserves replacement clientOrderId when exch
     assert.equal(order.info.clientOrderId, "smartsl_old_new");
     assert.equal(order.info.origClientOrderId, "smartsl_old_new");
 });
+
+test("ensureReduceOnlyTakeProfitOrder serializes concurrent sync for the same position", async () => {
+    const openOrders = [];
+    let createCalls = 0;
+    const serializedHelpers = createOrderExecutionHelpers({
+        getExchange: () => ({
+            markets: {
+                "DOGE/USDT:USDT": {}
+            },
+            createOrder: async (_pair, _type, _side, qty, price, params) => {
+                createCalls += 1;
+                await new Promise((resolve) => setImmediate(resolve));
+                const order = {
+                    id: `tp-order-${createCalls}`,
+                    amount: qty,
+                    price,
+                    clientOrderId: params.newClientOrderId,
+                    info: {
+                        clientOrderId: params.newClientOrderId,
+                        origClientOrderId: params.newClientOrderId
+                    }
+                };
+                openOrders.push(order);
+                return order;
+            }
+        }),
+        getMetrics: () => ({ api: { orders: 0 } }),
+        getDb: () => ({ pair: "DOGE/USDT:USDT", leverage: 10 }),
+        isHedgeModeEnabled: () => false,
+        toFiniteNumber: (value, fallback = NaN) => {
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? numeric : fallback;
+        },
+        formatAmountToMarketPrecision: (_pair, amount) => amount,
+        formatPriceToMarketPrecision: (_pair, price) => price,
+        validateOrderSize: () => ({ valid: true }),
+        buildExchangeOrderParams: ({ side, reduceOnly = false, positionSide, closePosition = false } = {}) => ({
+            side,
+            reduceOnly,
+            positionSide,
+            closePosition
+        }),
+        getOrderPositionSide: (side) => side === "buy" ? "LONG" : "SHORT",
+        getClosePositionSide: (position) => position.positionSide || "BOTH",
+        findOpenGridOrderByClientOrderId: async () => null,
+        findOpenOrderByClientOrderId: async (clientOrderId) => openOrders.find((order) => order.clientOrderId === clientOrderId) || null,
+        isDuplicateClientOrderIdError: (error) => String(error?.message || "").includes("duplicated"),
+        cancelOrderByClientOrderId: async () => false,
+        syncPositionWithExchange: async () => {},
+        getExchangeClientOrderId: (order) => order?.clientOrderId || order?.info?.clientOrderId || order?.info?.origClientOrderId || "",
+        getTpClientOrderId: () => "smarttp_same",
+        getSlClientOrderId: () => "smartsl_old",
+        fetchOpenTpOrders: async () => openOrders,
+        fetchOpenSlOrders: async () => [],
+        matchesOrderToTrackedPosition: () => true,
+        getOrderQuantity: (order) => order?.amount,
+        getOrderTriggerPrice: (order) => order?.stopPrice ?? order?.info?.stopPrice ?? NaN,
+        isManagedOrderPriceMatch: (a, b) => a === b,
+        getPositionSyncQtyTolerance: () => 0.001,
+        upsertActivePosition: () => {},
+        saveDB: async () => {},
+        cancelTpOrders: async () => {},
+        cancelSlOrders: async () => {},
+        buildReplacementClientOrderId: (clientOrderId) => `${clientOrderId}_new`
+    });
+
+    const position = {
+        side: "buy",
+        quantity: 10,
+        targetPrice: 0.25,
+        positionSide: "BOTH",
+        tpClientOrderId: "smarttp_same"
+    };
+
+    await Promise.all([
+        serializedHelpers.ensureReduceOnlyTakeProfitOrder("BOTH", position),
+        serializedHelpers.ensureReduceOnlyTakeProfitOrder("BOTH", position)
+    ]);
+
+    assert.equal(createCalls, 1);
+    assert.equal(openOrders.length, 1);
+});

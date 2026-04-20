@@ -116,6 +116,10 @@ const createDashboardStatusHelpers = ({
             pair: db.pair,
             currentPrice: Number.isFinite(currentPrice) ? currentPrice : null,
             botRunning: !getIsShuttingDown(),
+            exchangeConnected: Boolean(getExchange()),
+            exchangeHealthy: Boolean(getExchangeHealth()?.isHealthy),
+            needsRecoverySync: Boolean(getExchangeHealth()?.needsRecoverySync),
+            exchangeRecoveryReason: getExchangeRecoveryReason() || null,
             positionMode: getAccountPositionMode()?.label || "UNKNOWN",
             dailyPnL: toFiniteNumber(db.dailyPnL, 0),
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(db.dailyTrades, 0))),
@@ -127,7 +131,8 @@ const createDashboardStatusHelpers = ({
                 tp: openOrders.tp.length,
                 sl: openOrders.sl.length,
                 total: openOrders.grid.length + openOrders.tp.length + openOrders.sl.length
-            }
+            },
+            triggerOrdersFetchFailed: Boolean(managedOrders.triggerOrdersFetchFailed)
         };
     };
 

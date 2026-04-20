@@ -122,3 +122,56 @@ test("resetDashboardConfig persists full config changes before reloading runtime
     assert.equal(runtimeDb.gridLevels, 8);
     assert.deepEqual(result, { pair: "DOGE/USDT:USDT", gridLevels: 8 });
 });
+
+test("applyDashboardConfigUpdate serializes concurrent updates", async () => {
+    const runtimeDb = {
+        id: 1,
+        pair: "DOGE/USDT:USDT",
+        gridLevels: 8,
+        dailyPnL: 0,
+        activePosition: null
+    };
+    const saveCalls = [];
+    let releaseFirstSave;
+    let firstSavePending = true;
+
+    const helpers = createDashboardConfigHelpers({
+        getDb: () => runtimeDb,
+        hasAnyActivePosition: () => false,
+        protectedKeys: new Set(["pair"]),
+        editableKeys: new Set(["pair", "gridLevels"]),
+        getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", gridLevels: 8 }),
+        saveDB: async (options) => {
+            saveCalls.push({ options, snapshot: { ...runtimeDb } });
+            if (!firstSavePending) return;
+            firstSavePending = false;
+            await new Promise((resolve) => { releaseFirstSave = resolve; });
+        },
+        reloadConfig: async () => {},
+        refreshRuntimeSchedulers: () => {},
+        syncExchangeRuntimeSettings: async () => {},
+        buildDashboardPayload: () => ({ pair: runtimeDb.pair, gridLevels: runtimeDb.gridLevels }),
+        applyAutoPresetToConfig: (config) => ({ config })
+    });
+
+    const firstUpdate = helpers.applyDashboardConfigUpdate({ pair: "BTC/USDT:USDT" });
+    await new Promise((resolve) => setImmediate(resolve));
+    const secondUpdate = helpers.applyDashboardConfigUpdate({ gridLevels: 12 });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(saveCalls.length, 1);
+    assert.equal(saveCalls[0].snapshot.pair, "BTC/USDT:USDT");
+    assert.equal(saveCalls[0].snapshot.gridLevels, 8);
+
+    releaseFirstSave();
+    const firstResult = await firstUpdate;
+    const secondResult = await secondUpdate;
+
+    assert.equal(saveCalls.length, 2);
+    assert.equal(saveCalls[1].snapshot.pair, "BTC/USDT:USDT");
+    assert.equal(saveCalls[1].snapshot.gridLevels, 12);
+    assert.deepEqual(firstResult, { pair: "BTC/USDT:USDT", gridLevels: 8 });
+    assert.deepEqual(secondResult, { pair: "BTC/USDT:USDT", gridLevels: 12 });
+    assert.equal(runtimeDb.pair, "BTC/USDT:USDT");
+    assert.equal(runtimeDb.gridLevels, 12);
+});

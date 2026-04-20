@@ -58,6 +58,19 @@ const createRuntimeSignalGridHelpers = ({
     getActivePositionByKey,
     placeOrder
 }) => {
+    const buildGridExposureSignature = (openPositions = [], trackedPositions = getActivePositionsList()) => JSON.stringify({
+        mode: getAccountPositionMode()?.label || "UNKNOWN",
+        exchange: (openPositions || []).map((position) => ({
+            side: String(position?.side || position?.positionSide || ""),
+            contracts: Number(position?.contracts ?? position?.amount ?? position?.info?.positionAmt ?? 0)
+        })),
+        tracked: (trackedPositions || []).map((position) => ({
+            side: String(position?.side || position?.positionSide || ""),
+            quantity: Number(position?.quantity ?? 0),
+            entryTime: Number(position?.entryTime ?? 0)
+        }))
+    });
+
     const evaluateGridSignal = (snapshot, params, gridState = null) => {
         const db = getDb();
         const recentClose = snapshot.close.slice(-(params.gridLookbackCandles));
@@ -392,6 +405,7 @@ const createRuntimeSignalGridHelpers = ({
 
             const openPositions = await fetchOpenExchangePositions();
             const trackedPositions = getActivePositionsList();
+            const plannedExposureSignature = buildGridExposureSignature(openPositions, trackedPositions);
 
             const lockedGridState = await resolveActiveGridState(snapshot, params);
             if (!lockedGridState) {
@@ -423,6 +437,14 @@ const createRuntimeSignalGridHelpers = ({
             const desiredOrders = [...desiredOrderMap.values()];
             logGridSyncStatus(desiredOrders, openGridOrders);
 
+            const latestOpenPositions = await fetchOpenExchangePositions();
+            const latestTrackedPositions = getActivePositionsList();
+            const latestExposureSignature = buildGridExposureSignature(latestOpenPositions, latestTrackedPositions);
+            if (latestExposureSignature !== plannedExposureSignature) {
+                console.log("[GRID][INFO] Exposure changed during ladder planning. Grid sync aborted and will retry next cycle.");
+                return;
+            }
+
             const desiredIds = new Set(desiredOrders.map((order) => order.clientOrderId));
             const staleOrders = openGridOrders.filter((order) => !desiredIds.has(getExchangeClientOrderId(order)));
             if (staleOrders.length > 0) await cancelGridOrders(staleOrders, "REBUILD");
@@ -430,6 +452,14 @@ const createRuntimeSignalGridHelpers = ({
             if (staleOrders.length > 0) {
                 openGridOrders = await fetchOpenGridOrders();
                 openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
+            }
+
+            const placementOpenPositions = await fetchOpenExchangePositions();
+            const placementTrackedPositions = getActivePositionsList();
+            const placementExposureSignature = buildGridExposureSignature(placementOpenPositions, placementTrackedPositions);
+            if (placementExposureSignature !== plannedExposureSignature) {
+                console.log("[GRID][INFO] Exposure changed before ladder placement. Grid sync aborted and will retry next cycle.");
+                return;
             }
 
             const openOrderIds = new Set(openGridOrders.map((order) => getExchangeClientOrderId(order)));

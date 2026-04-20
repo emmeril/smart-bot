@@ -19,6 +19,21 @@ const createConfigRuntimeHelpers = ({
     configAutoReloadIntervalMs
 }) => {
     let lastKnownDashboardConfigSignature = "";
+    let configOperationChain = Promise.resolve();
+
+    const runConfigOperation = async (operation) => {
+        const previousOperation = configOperationChain.catch(() => {});
+        let releaseOperation = () => {};
+        configOperationChain = new Promise((resolve) => {
+            releaseOperation = resolve;
+        });
+        await previousOperation;
+        try {
+            return await operation();
+        } finally {
+            releaseOperation();
+        }
+    };
 
     const buildDashboardConfigSignature = (config) => JSON.stringify(
         dashboardEditableFields.map((field) => [field.key, config && Object.prototype.hasOwnProperty.call(config, field.key) ? config[field.key] : null])
@@ -52,7 +67,7 @@ const createConfigRuntimeHelpers = ({
         return nextConfig;
     };
 
-    const saveDB = async (options = {}) => {
+    const saveDBInternal = async (options = {}) => {
         try {
             const configToPersist = await buildPersistableConfig(options);
             if (!configToPersist) return;
@@ -63,7 +78,9 @@ const createConfigRuntimeHelpers = ({
         }
     };
 
-    const initializeDB = async () => {
+    const saveDB = async (options = {}) => await runConfigOperation(async () => await saveDBInternal(options));
+
+    const initializeDB = async () => await runConfigOperation(async () => {
         try {
             await ensureConfigSchema();
             console.log("[DB][INFO] Database synced");
@@ -73,7 +90,7 @@ const createConfigRuntimeHelpers = ({
             setDb(hydratedConfig);
             syncDashboardConfigSignature();
             if (autoPresetResult.changed) {
-                await saveDB({ mode: "full" });
+                await saveDBInternal({ mode: "full" });
                 console.log(`[PRESET][INFO] Auto-applied ${autoPresetResult.presetName} profile for ${getDb().pair}`);
             }
             console.log("[DB][INFO] Runtime DB initialized successfully");
@@ -83,9 +100,9 @@ const createConfigRuntimeHelpers = ({
             setDb(null);
             return false;
         }
-    };
+    });
 
-    const reloadConfig = async (previousRuntimeConfig = null) => {
+    const reloadConfigInternal = async (previousRuntimeConfig = null) => {
         try {
             const db = getDb();
             if (!db) return false;
@@ -99,7 +116,7 @@ const createConfigRuntimeHelpers = ({
             await applyRuntimeConfigChanges(runtimeSnapshot);
             syncDashboardConfigSignature();
             if (autoPresetResult.changed && !hasAnyActivePosition()) {
-                await saveDB({ mode: "full" });
+                await saveDBInternal({ mode: "full" });
                 console.log(`[PRESET][INFO] Auto-refreshed ${autoPresetResult.presetName} profile for ${getDb().pair}`);
             }
             return true;
@@ -109,7 +126,9 @@ const createConfigRuntimeHelpers = ({
         }
     };
 
-    const reloadConfigIfChanged = async () => {
+    const reloadConfig = async (previousRuntimeConfig = null) => await runConfigOperation(async () => await reloadConfigInternal(previousRuntimeConfig));
+
+    const reloadConfigIfChanged = async () => await runConfigOperation(async () => {
         if (!getDb() || getIsShuttingDown()) return false;
         try {
             const persistedConfig = await loadPersistedConfig();
@@ -117,14 +136,14 @@ const createConfigRuntimeHelpers = ({
             const persistedSignature = buildDashboardConfigSignature(persistedConfig);
             if (persistedSignature === lastKnownDashboardConfigSignature) return false;
             console.log("[CONFIG][INFO] Detected dashboard config change. Reloading...");
-            const reloaded = await reloadConfig();
+            const reloaded = await reloadConfigInternal();
             if (reloaded) syncDashboardConfigSignature();
             return reloaded;
         } catch (error) {
             console.error("[CONFIG][ERROR] Auto config reload failed:", error.message);
             return false;
         }
-    };
+    });
 
     const startConfigAutoReload = () => {
         if (getConfigReloadTimer()) return;

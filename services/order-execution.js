@@ -31,6 +31,27 @@ const createOrderExecutionHelpers = ({
     cancelSlOrders,
     buildReplacementClientOrderId
 }) => {
+    const managedOrderSyncChains = new Map();
+
+    const runManagedOrderSync = async (key, operation) => {
+        const chainKey = String(key || "");
+        const previousOperation = (managedOrderSyncChains.get(chainKey) || Promise.resolve()).catch(() => {});
+        let releaseOperation = () => {};
+        const nextOperation = new Promise((resolve) => {
+            releaseOperation = resolve;
+        });
+        managedOrderSyncChains.set(chainKey, nextOperation);
+        await previousOperation;
+        try {
+            return await operation();
+        } finally {
+            releaseOperation();
+            if (managedOrderSyncChains.get(chainKey) === nextOperation) {
+                managedOrderSyncChains.delete(chainKey);
+            }
+        }
+    };
+
     const describeError = (error) => String(error?.message || error || "Unknown error");
     const attachClientOrderIdFallback = (order, clientOrderId) => {
         if (!order || !clientOrderId) return order;
@@ -414,73 +435,77 @@ const createOrderExecutionHelpers = ({
     };
 
     const ensureReduceOnlyTakeProfitOrder = async (positionKey, sourcePosition) => {
-        const position = { ...sourcePosition };
-        if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
-        const matchingTpOrders = (await fetchOpenTpOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
-        const adoptableOrder = matchingTpOrders.find((order) => {
-            const orderAmount = getOrderQuantity(order);
-            return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
-        }) || null;
-        const matchingOrder = matchingTpOrders.find((order) => {
-            const orderPrice = toFiniteNumber(order.price, NaN);
-            const orderAmount = getOrderQuantity(order);
-            return isManagedOrderPriceMatch(position.targetPrice, orderPrice) && Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
-        });
-        return syncManagedReduceOnlyOrder({
-            positionKey,
-            position,
-            matchingOrders: matchingTpOrders,
-            matchingOrder,
-            adoptableOrder,
-            priceKey: "targetPrice",
-            orderIdKey: "tpOrderId",
-            clientIdKey: "tpClientOrderId",
-            label: "TP",
-            syncPrice: (order) => toFiniteNumber(order.price, position.targetPrice),
-            placeReplacement: placeReduceOnlyTakeProfitOrder,
-            buildClientOrderId: getTpClientOrderId,
-            cancelDuplicates: cancelTpOrders,
-            cancelReason: "TP_DUPLICATE",
-            syncLogPrefix: "[TP]",
-            attachLogPrefix: "[TP]"
+        return await runManagedOrderSync(`TP:${positionKey}`, async () => {
+            const position = { ...sourcePosition };
+            if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
+            const matchingTpOrders = (await fetchOpenTpOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
+            const adoptableOrder = matchingTpOrders.find((order) => {
+                const orderAmount = getOrderQuantity(order);
+                return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
+            }) || null;
+            const matchingOrder = matchingTpOrders.find((order) => {
+                const orderPrice = toFiniteNumber(order.price, NaN);
+                const orderAmount = getOrderQuantity(order);
+                return isManagedOrderPriceMatch(position.targetPrice, orderPrice) && Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
+            });
+            return syncManagedReduceOnlyOrder({
+                positionKey,
+                position,
+                matchingOrders: matchingTpOrders,
+                matchingOrder,
+                adoptableOrder,
+                priceKey: "targetPrice",
+                orderIdKey: "tpOrderId",
+                clientIdKey: "tpClientOrderId",
+                label: "TP",
+                syncPrice: (order) => toFiniteNumber(order.price, position.targetPrice),
+                placeReplacement: placeReduceOnlyTakeProfitOrder,
+                buildClientOrderId: getTpClientOrderId,
+                cancelDuplicates: cancelTpOrders,
+                cancelReason: "TP_DUPLICATE",
+                syncLogPrefix: "[TP]",
+                attachLogPrefix: "[TP]"
+            });
         });
     };
 
     const ensureReduceOnlyStopLossOrder = async (positionKey, sourcePosition) => {
-        const position = { ...sourcePosition };
-        if (!position || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
-        const matchingSlOrders = (await fetchOpenSlOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
-        const adoptableOrder = matchingSlOrders.find((order) => {
-            const orderAmount = getOrderQuantity(order);
-            const closePositionOrder = Boolean(order?.closePosition || order?.info?.closePosition || !Number.isFinite(orderAmount) || orderAmount <= 0);
-            if (closePositionOrder) return true;
-            return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
-        }) || null;
-        const matchingOrder = matchingSlOrders.find((order) => {
-            const orderStopPrice = getOrderTriggerPrice(order);
-            const orderAmount = getOrderQuantity(order);
-            const closePositionOrder = Boolean(order?.closePosition || order?.info?.closePosition || !Number.isFinite(orderAmount) || orderAmount <= 0);
-            if (!isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice)) return false;
-            if (closePositionOrder) return true;
-            return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
-        });
-        return syncManagedReduceOnlyOrder({
-            positionKey,
-            position,
-            matchingOrders: matchingSlOrders,
-            matchingOrder,
-            adoptableOrder,
-            priceKey: "stopLossPrice",
-            orderIdKey: "slOrderId",
-            clientIdKey: "slClientOrderId",
-            label: "SL",
-            syncPrice: getOrderTriggerPrice,
-            placeReplacement: placeReduceOnlyStopLossOrder,
-            buildClientOrderId: getSlClientOrderId,
-            cancelDuplicates: cancelSlOrders,
-            cancelReason: "SL_DUPLICATE",
-            syncLogPrefix: "[SL]",
-            attachLogPrefix: "[SL]"
+        return await runManagedOrderSync(`SL:${positionKey}`, async () => {
+            const position = { ...sourcePosition };
+            if (!position || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
+            const matchingSlOrders = (await fetchOpenSlOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
+            const adoptableOrder = matchingSlOrders.find((order) => {
+                const orderAmount = getOrderQuantity(order);
+                const closePositionOrder = Boolean(order?.closePosition || order?.info?.closePosition || !Number.isFinite(orderAmount) || orderAmount <= 0);
+                if (closePositionOrder) return true;
+                return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
+            }) || null;
+            const matchingOrder = matchingSlOrders.find((order) => {
+                const orderStopPrice = getOrderTriggerPrice(order);
+                const orderAmount = getOrderQuantity(order);
+                const closePositionOrder = Boolean(order?.closePosition || order?.info?.closePosition || !Number.isFinite(orderAmount) || orderAmount <= 0);
+                if (!isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice)) return false;
+                if (closePositionOrder) return true;
+                return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
+            });
+            return syncManagedReduceOnlyOrder({
+                positionKey,
+                position,
+                matchingOrders: matchingSlOrders,
+                matchingOrder,
+                adoptableOrder,
+                priceKey: "stopLossPrice",
+                orderIdKey: "slOrderId",
+                clientIdKey: "slClientOrderId",
+                label: "SL",
+                syncPrice: getOrderTriggerPrice,
+                placeReplacement: placeReduceOnlyStopLossOrder,
+                buildClientOrderId: getSlClientOrderId,
+                cancelDuplicates: cancelSlOrders,
+                cancelReason: "SL_DUPLICATE",
+                syncLogPrefix: "[SL]",
+                attachLogPrefix: "[SL]"
+            });
         });
     };
 
@@ -494,7 +519,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
 

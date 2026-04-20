@@ -38,6 +38,30 @@ const createPositionLifecycleHelpers = ({
     getPositionSyncQtyTolerance,
     getOrderFillSnapshot
 }) => {
+    const getLifecyclePositionKey = (positionKey = null, position = null) => (
+        toPositionMapKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position))
+    );
+
+    const getLifecycleIdentity = (position) => JSON.stringify([
+        String(position?.positionSide || getTrackedPositionSideLabel(position) || ""),
+        String(position?.side || ""),
+        Number.isFinite(Number(position?.entryTime)) ? Number(position.entryTime) : null,
+        String(position?.orderId || ""),
+        Number.isFinite(Number(position?.entryPrice)) ? Number(position.entryPrice) : null,
+        Number.isFinite(Number(position?.quantity)) ? Number(position.quantity) : null
+    ]);
+
+    const isSameLifecyclePosition = (leftPosition, rightPosition) => (
+        getLifecycleIdentity(leftPosition) === getLifecycleIdentity(rightPosition)
+    );
+
+    const canMutateTrackedPosition = (position, positionKey = null) => {
+        const trackedKey = getLifecyclePositionKey(positionKey, position);
+        const currentTrackedPosition = getActivePositionByKey(trackedKey);
+        if (!currentTrackedPosition) return false;
+        return isSameLifecyclePosition(currentTrackedPosition, position);
+    };
+
     const shouldCancelGridOrdersForPositionCleanup = () => {
         if (!isHedgeModeEnabled()) return true;
         const activeEntries = typeof getActivePositionEntries === "function" ? getActivePositionEntries() : [];
@@ -47,12 +71,21 @@ const createPositionLifecycleHelpers = ({
     const clearMissingPositionState = async (position, reason, positionKey = null) => {
         const db = getDb();
         const metrics = getMetrics();
+        const trackedKey = getLifecyclePositionKey(positionKey, position);
+        if (!canMutateTrackedPosition(position, trackedKey)) {
+            console.log(`[POSITION][INFO] Skipping stale missing-position cleanup for ${trackedKey}.`);
+            return false;
+        }
         if (shouldCancelGridOrdersForPositionCleanup()) {
             const openGridOrders = await fetchOpenGridOrders();
             if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, reason);
         }
         await cancelManagedOrdersForPosition(position, reason);
-        removeActivePositionByKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position));
+        if (!canMutateTrackedPosition(position, trackedKey)) {
+            console.log(`[POSITION][INFO] Missing-position cleanup for ${trackedKey} became stale before local removal. Skipping.`);
+            return false;
+        }
+        removeActivePositionByKey(trackedKey);
         const estimatedExitPrice = await getPrice(true);
         if (Number.isFinite(estimatedExitPrice) && estimatedExitPrice > 0) {
             const estimatedPnL = calculatePositionPnL(position, estimatedExitPrice);
@@ -71,7 +104,7 @@ const createPositionLifecycleHelpers = ({
             );
             await saveDB();
             console.warn(`[POSITION][WARN] Removed local position using estimated exit price because no confirmed exchange exit price was available (${reason}).`);
-            return;
+            return true;
         }
 
         await saveDB();
@@ -84,16 +117,26 @@ const createPositionLifecycleHelpers = ({
             position.strategy || null
         );
         console.warn(`[POSITION][WARN] Removed local position without realizing P&L because no confirmed exchange exit price was available (${reason}).`);
+        return true;
     };
 
     const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, reason, exitPrice = null, positionKey = null) => {
         const db = getDb();
         const metrics = getMetrics();
+        const trackedKey = getLifecyclePositionKey(positionKey, position);
+        if (!canMutateTrackedPosition(position, trackedKey)) {
+            console.log(`[POSITION][INFO] Skipping stale finalize-close for ${trackedKey}.`);
+            return false;
+        }
         if (shouldCancelGridOrdersForPositionCleanup()) {
             const openGridOrders = await fetchOpenGridOrders();
             if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "POSITION_CLOSED");
         }
         await cancelManagedOrdersForPosition(position, "POSITION_CLOSED");
+        if (!canMutateTrackedPosition(position, trackedKey)) {
+            console.log(`[POSITION][INFO] Finalize-close for ${trackedKey} became stale before bookkeeping. Skipping.`);
+            return false;
+        }
         db.dailyPnL += netProfitUSDT;
         db.dailyTrades++;
 
@@ -111,11 +154,12 @@ const createPositionLifecycleHelpers = ({
         console.log(`   Realized P&L: ${netProfitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
         console.log(`   Daily Total Realized P&L: ${db.dailyPnL.toFixed(4)} USDT / ${db.dailyTrades} trades`);
 
-        removeActivePositionByKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position));
+        removeActivePositionByKey(trackedKey);
         await saveDB();
         metrics.trades.closed++;
         if (netProfitUSDT > 0) metrics.trades.wins++;
         else if (netProfitUSDT < 0) metrics.trades.losses++;
+        return true;
     };
 
     const recordPartialClose = async (position, exitPrice, closedQuantity, reason) => {
@@ -298,4 +342,3 @@ const createPositionLifecycleHelpers = ({
 };
 
 module.exports = { createPositionLifecycleHelpers };
-

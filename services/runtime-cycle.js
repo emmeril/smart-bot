@@ -106,11 +106,11 @@ const createRuntimeCycleHelpers = ({
 
     const runTradingCycle = async () => {
         const db = getDb();
+        if (hasRuntimePositionMutationInFlight()) return;
         await reloadConfig();
         refreshRuntimeSchedulers();
         const strategy = String(db?.strategy || "futures_grid").toLowerCase();
 
-        if (hasRuntimePositionMutationInFlight()) return;
         await resetDailyStateIfNeeded(Date.now());
         if (!canOpenNewPositions()) {
             logExchangeRecoveryBlock(strategy === "futures_grid" ? "grid entries" : "new position entries");
