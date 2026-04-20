@@ -547,7 +547,7 @@
         <div class="brand-mark">SB</div>
         <div class="brand-copy">
           <strong>Smart Bot Futures Grid</strong>
-          <span>Trading console untuk runtime, posisi, dan konfigurasi live</span>
+          <span>Trading console untuk runtime, posisi, dan konfigurasi live <span id="botVersion"></span></span>
         </div>
       </div>
       <div class="topbar-status">
@@ -562,6 +562,7 @@
       <div class="hero-copy">
         <p class="eyebrow">Smart Bot Control Center</p>
         <div class="hero-badges">
+          <span class="signal-chip">Smart Bot <strong>Futures Grid</strong></span>
           <span class="signal-chip">Strategy <strong>futures_grid</strong></span>
           <span class="signal-chip">Exchange <strong>Binance USDT-M</strong></span>
           <span class="signal-chip">Mode <strong id="heroMode">Syncing...</strong></span>
@@ -692,6 +693,7 @@
     const topbarStatus = document.getElementById("topbarStatus");
     const topbarMeta = document.getElementById("topbarMeta");
     const heroMode = document.getElementById("heroMode");
+    const botVersion = document.getElementById("botVersion");
     const runtimePair = document.getElementById("runtimePair");
     const runtimeEngine = document.getElementById("runtimeEngine");
     const runtimePositions = document.getElementById("runtimePositions");
@@ -841,6 +843,11 @@
       const exchangeLabel = !exchangeConnected
         ? "Offline"
         : (needsRecoverySync ? "Recovery sync" : (exchangeHealthy ? "Healthy" : "Degraded"));
+      
+      if (botVersion) {
+        botVersion.textContent = status.botVersion ? `v${status.botVersion}` : "";
+      }
+      
       const cards = [
         { label: "Bot", value: runtimeStatus.label, note: runtimeStatus.description },
         { label: "Positions", value: String(status.activePositions), note: status.activeGridState ? "Grid state active" : "No local grid state" },

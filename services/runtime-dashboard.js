@@ -32,23 +32,79 @@ const createRuntimeDashboardHelpers = ({
         app.disable("x-powered-by");
         app.use(express.json({ limit: "1mb" }));
         app.use(express.urlencoded({ extended: false }));
+        app.use((req, res, next) => {
+            res.setHeader("X-Content-Type-Options", "nosniff");
+            res.setHeader("X-Frame-Options", "DENY");
+            res.setHeader("X-XSS-Protection", "1; mode=block");
+            res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+            next();
+        });
+
+        const loginAttempts = new Map();
+        const MAX_LOGIN_ATTEMPTS = 5;
+        const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
+
+        const checkLoginRateLimit = (ip) => {
+            const record = loginAttempts.get(ip);
+            if (!record) return { allowed: true };
+            if (Date.now() - record.lockedAt > LOGIN_LOCKOUT_MS) {
+                loginAttempts.delete(ip);
+                return { allowed: true };
+            }
+            if (record.attempts >= MAX_LOGIN_ATTEMPTS) {
+                return { allowed: false, remaining: Math.ceil((record.lockedAt + LOGIN_LOCKOUT_MS - Date.now()) / 1000) };
+            }
+            return { allowed: true };
+        };
+
+        const recordLoginAttempt = (ip, success) => {
+            if (success) {
+                loginAttempts.delete(ip);
+                return;
+            }
+            const record = loginAttempts.get(ip) || { attempts: 0, lockedAt: 0 };
+            record.attempts += 1;
+            if (record.attempts >= MAX_LOGIN_ATTEMPTS) {
+                record.lockedAt = Date.now();
+            }
+            loginAttempts.set(ip, record);
+        };
 
         app.get("/login", (req, res) => {
             if (isDashboardAuthenticated(req)) {
                 res.redirect("/dashboard");
                 return;
             }
+            const clientIp = req.ip || req.connection.remoteAddress;
+            const rateCheck = checkLoginRateLimit(clientIp);
+            if (!rateCheck.allowed) {
+                res.status(429).send(`<html><body><h1>Too Many Attempts</h1><p>Please wait ${rateCheck.remaining} seconds before trying again.</p><a href="/login">Back to Login</a></body></html>`);
+                return;
+            }
             res.sendFile(path.join(publicDir, "login.html"));
         });
 
         app.post("/login", (req, res) => {
+            const clientIp = req.ip || req.connection.remoteAddress;
+            const rateCheck = checkLoginRateLimit(clientIp);
+            if (!rateCheck.allowed) {
+                res.status(429).send(`<html><body><h1>Too Many Attempts</h1><p>Please wait ${rateCheck.remaining} seconds before trying again.</p><a href="/login">Back to Login</a></body></html>`);
+                return;
+            }
             const username = String(req.body?.username || "").trim();
             const password = String(req.body?.password || "");
+            if (!username || !password) {
+                recordLoginAttempt(clientIp, false);
+                res.redirect("/login?error=1");
+                return;
+            }
             if (isDashboardLoginValid(username, password)) {
+                recordLoginAttempt(clientIp, true);
                 setDashboardSessionCookie(res, username);
                 res.redirect("/dashboard");
                 return;
             }
+            recordLoginAttempt(clientIp, false);
             res.redirect("/login?error=1");
         });
 
@@ -69,10 +125,22 @@ const createRuntimeDashboardHelpers = ({
 
         app.use(express.static(publicDir));
 
+        app.use((err, req, res, next) => {
+            console.error("[SERVER][ERROR] Unhandled error:", err.message);
+            if (req.path.startsWith("/api")) {
+                res.status(500).json({ ok: false, error: "Internal server error" });
+                return;
+            }
+            res.status(500).sendFile(path.join(publicDir, "index.html"));
+        });
+
         app.get("/api/health", (req, res) => {
             const exchangeHealth = getExchangeHealth();
             res.json({
                 ok: true,
+                botName: "Smart Bot Futures Grid",
+                botVersion: "1.0.0",
+                botBuild: "2026.04.20",
                 botRunning: !getIsShuttingDown(),
                 databaseReady: Boolean(getDb()),
                 exchangeReady: Boolean(getExchange()),
