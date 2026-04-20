@@ -128,14 +128,24 @@ const createRuntimeCycleHelpers = ({
         }
 
         if (strategy === "futures_grid") {
-            await syncGridOrders();
+            const syncResult = await syncGridOrders();
+            if (!syncResult) {
+                console.log(`[CYCLE][WARN] Grid sync returned no result at ${new Date().toISOString()}`);
+            }
             return;
         }
 
         const coolingBlocked = isCoolingDown() && (!isHedgeModeEnabled() || !hasAnyActivePosition());
-        if ((!isHedgeModeEnabled() && hasAnyActivePosition()) || coolingBlocked) return;
+        if ((!isHedgeModeEnabled() && hasAnyActivePosition()) || coolingBlocked) {
+            console.log(`[CYCLE][INFO] Position block active at ${new Date().toISOString()}`);
+            return;
+        }
 
         const signal = await analyzeSignal();
+        if (!signal || !signal.ok) {
+            console.log(`[CYCLE][INFO] Signal analysis failed: ${signal?.error || "unknown error"} at ${new Date().toISOString()}`);
+            return;
+        }
         if (signal.canLong && !getActivePositionByKey(isHedgeModeEnabled() ? "LONG" : "BOTH")) await placeOrder("buy", signal);
         if (signal.canShort && !getActivePositionByKey(isHedgeModeEnabled() ? "SHORT" : "BOTH")) await placeOrder("sell", signal);
     };

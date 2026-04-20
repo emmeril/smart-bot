@@ -32,6 +32,16 @@ const createOrderExecutionHelpers = ({
     buildReplacementClientOrderId
 }) => {
     const managedOrderSyncChains = new Map();
+    const ORDER_SYNC_TIMEOUT_MS = 8000;
+
+    const withTimeout = (promise, ms, label) => {
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => 
+                setTimeout(() => reject(new Error(`[TIMEOUT] ${label} exceeded ${ms}ms`)), ms)
+            )
+        ]);
+    };
 
     const runManagedOrderSync = async (key, operation) => {
         const chainKey = String(key || "");
@@ -43,7 +53,10 @@ const createOrderExecutionHelpers = ({
         managedOrderSyncChains.set(chainKey, nextOperation);
         await previousOperation;
         try {
-            return await operation();
+            return await withTimeout(operation(), ORDER_SYNC_TIMEOUT_MS, `ManagedOrderSync:${chainKey}`);
+        } catch (error) {
+            console.error(`[ORDER][ERROR] Sync chain ${chainKey} failed: ${error.message}`);
+            throw error;
         } finally {
             releaseOperation();
             if (managedOrderSyncChains.get(chainKey) === nextOperation) {
@@ -448,7 +461,7 @@ const createOrderExecutionHelpers = ({
                 const orderAmount = getOrderQuantity(order);
                 return isManagedOrderPriceMatch(position.targetPrice, orderPrice) && Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
             });
-            return syncManagedReduceOnlyOrder({
+            const syncResult = await syncManagedReduceOnlyOrder({
                 positionKey,
                 position,
                 matchingOrders: matchingTpOrders,
@@ -466,6 +479,14 @@ const createOrderExecutionHelpers = ({
                 syncLogPrefix: "[TP]",
                 attachLogPrefix: "[TP]"
             });
+            if (syncResult === undefined) return;
+            const verifiedOrder = await findOpenOrderByClientOrderId(position.tpClientOrderId, getDb()?.pair);
+            if (!verifiedOrder) {
+                console.warn(`[TP][WARN] TP order placement verification failed for ${positionKey}`);
+                await syncPositionWithExchange();
+                return;
+            }
+            console.log(`[TP][INFO] TP order verified for ${positionKey}`);
         });
     };
 
@@ -488,7 +509,7 @@ const createOrderExecutionHelpers = ({
                 if (closePositionOrder) return true;
                 return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
             });
-            return syncManagedReduceOnlyOrder({
+            const syncResult = await syncManagedReduceOnlyOrder({
                 positionKey,
                 position,
                 matchingOrders: matchingSlOrders,
@@ -506,6 +527,14 @@ const createOrderExecutionHelpers = ({
                 syncLogPrefix: "[SL]",
                 attachLogPrefix: "[SL]"
             });
+            if (syncResult === undefined) return;
+            const verifiedOrder = await findOpenOrderByClientOrderId(position.slClientOrderId, getDb()?.pair);
+            if (!verifiedOrder) {
+                console.warn(`[SL][WARN] SL order placement verification failed for ${positionKey}`);
+                await syncPositionWithExchange();
+                return;
+            }
+            console.log(`[SL][INFO] SL order verified for ${positionKey}`);
         });
     };
 

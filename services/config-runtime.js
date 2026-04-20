@@ -103,8 +103,9 @@ const createConfigRuntimeHelpers = ({
     });
 
     const reloadConfigInternal = async (previousRuntimeConfig = null) => {
+        const db = getDb();
+        const configBackup = db ? { ...db } : null;
         try {
-            const db = getDb();
             if (!db) return false;
             const runtimeSnapshot = previousRuntimeConfig && typeof previousRuntimeConfig === "object"
                 ? { ...previousRuntimeConfig }
@@ -122,6 +123,10 @@ const createConfigRuntimeHelpers = ({
             return true;
         } catch (error) {
             console.error("[CONFIG][ERROR] Failed to reload config:", error.message);
+            if (configBackup && typeof configBackup === "object") {
+                console.log("[CONFIG][INFO] Rolling back config to previous state due to error");
+                setDb(configBackup);
+            }
             return false;
         }
     };
