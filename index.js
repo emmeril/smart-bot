@@ -9,6 +9,7 @@ const { createRuntimeExchangeUtils } = require("./services/runtime-exchange-util
 const { createRuntimeConfigHelpers } = require("./services/runtime-config");
 const { createRuntimeReportingHelpers } = require("./services/runtime-reporting");
 const { createRuntimeDashboardHelpers } = require("./services/runtime-dashboard");
+const { createRuntimeTerminalDashboardHelpers } = require("./services/runtime-terminal-dashboard");
 const { createRuntimeExchangeBootstrapHelpers } = require("./services/runtime-exchange-bootstrap");
 const { createRuntimeCycleHelpers } = require("./services/runtime-cycle");
 const { createRuntimeMonitoringHelpers } = require("./services/runtime-monitoring");
@@ -80,6 +81,7 @@ let isShuttingDown = false;
 let accountPositionMode = { hedged: false, label: "ONE_WAY" };
 let runtimeCommandsRegistered = false;
 let webServer = null;
+let terminalDashboard = null;
 let configReloadTimer = null;
 let exchangeHealth = {
     isHealthy: false,
@@ -392,6 +394,29 @@ const printPositionLine = (positionKey, position, currentPrice) => {
         console.log(`   [${positionKey}] pnl=${displayProfitUSDT.toFixed(4)} USDT (${displayProfitPercent.toFixed(2)}%)`);
     }
 };
+
+terminalDashboard = createRuntimeTerminalDashboardHelpers({
+    getDb: () => db,
+    getMetrics: () => metrics,
+    getBalanceCache: () => balanceCache,
+    getTickerCache: () => tickerCache,
+    getGridRuntimeSummary: (...args) => getGridRuntimeSummary(...args),
+    getAccountPositionMode: () => accountPositionMode,
+    getExchangeHealth: () => exchangeHealth,
+    getExchangeRecoveryReason: () => getExchangeRecoveryReason(),
+    getIsPlacingOrder: () => isPlacingOrder,
+    getIsClosingPosition: () => isClosingPosition,
+    getIsSyncingPosition: () => isSyncingPosition,
+    getIsSyncingGridOrders: () => isSyncingGridOrders,
+    getIsMonitoringPnL: () => isMonitoringPnL,
+    getLastTradeAt: () => lastTradeAt,
+    formatStatusTimestamp,
+    getActivePositionEntries: (...args) => getActivePositionEntries(...args),
+    calculatePositionPnL: (...args) => calculatePositionPnL(...args),
+    fetchManagedOpenOrdersSnapshot: (...args) => fetchManagedOpenOrdersSnapshot(...args),
+    formatOrderSummary: (...args) => formatOrderSummary(...args),
+    toFiniteNumber
+});
 
 const buildRiskOverrides = () => ({
     trailingActivateATR: toFiniteNumber(db.trailingActivateATR, 1.2),
@@ -1256,6 +1281,7 @@ const {
     setIsShuttingDown: (value) => { isShuttingDown = value; },
     getIsPlacingOrderState: () => isPlacingOrder,
     getIsClosingPositionState: () => isClosingPosition,
+    stopTerminalDashboard: () => { if (terminalDashboard) terminalDashboard.stop(); },
     unregisterRuntimeCommands: () => unregisterRuntimeCommands(),
     exitProcess: (code) => process.exit(code)
 });
@@ -1266,6 +1292,7 @@ const {
         webServer = await startWebDashboard(webServer);
         await bootstrapRuntime();
         const totalUSDT = await getTotalUSDTBalance(true);
+        await terminalDashboard.start();
         printStartupBanner(totalUSDT);
         lastTradeAt = getLastTradeTimestampFromLog();
 
