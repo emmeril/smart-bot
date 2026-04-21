@@ -153,9 +153,11 @@ const formatPriceToMarketPrecision = (symbol, price) => {
 };
 
 const calcATR = (highs, lows, closes, period) => {
-    const out = Array(closes.length).fill(null);
-    if (!Array.isArray(highs) || !Array.isArray(lows) || !Array.isArray(closes) || closes.length <= period) return out;
+    if (!Number.isFinite(period) || period <= 0 || !Array.isArray(highs) || !Array.isArray(lows) || !Array.isArray(closes) || closes.length <= period) {
+        return Array.isArray(closes) ? Array(closes.length).fill(null) : [];
+    }
 
+    const out = Array(closes.length).fill(null);
     const tr = Array(closes.length).fill(0);
     for (let i = 1; i < closes.length; i++) {
         const hl = highs[i] - lows[i];
@@ -393,10 +395,13 @@ const printPositionLine = (positionKey, position, currentPrice) => {
     }
 };
 
-const buildRiskOverrides = () => ({
-    trailingActivateATR: toFiniteNumber(db.trailingActivateATR, 1.2),
-    trailingOffsetATR: toFiniteNumber(db.trailingOffsetATR, 0.6)
-});
+const buildRiskOverrides = () => {
+    const currentDb = getDb();
+    return {
+        trailingActivateATR: toFiniteNumber(currentDb?.trailingActivateATR, 1.2),
+        trailingOffsetATR: toFiniteNumber(currentDb?.trailingOffsetATR, 0.6)
+    };
+};
 
 const {
     parseSignalOrderData,
@@ -419,6 +424,9 @@ const {
 
 const validateOrderSize = (market, quantity, referencePrice, options = {}) => {
     const { allowReduceOnlyClose = false } = options;
+    if (!market || !Number.isFinite(referencePrice) || referencePrice <= 0) {
+        return { valid: false, reason: "[ORDER][ERROR] Invalid market or reference price." };
+    }
     if (!Number.isFinite(quantity) || quantity <= 0) {
         return { valid: false, reason: "[ORDER][ERROR] Invalid order quantity after precision adjustment." };
     }
@@ -631,7 +639,7 @@ const {
 });
 
 const mergeRuntimeConfig = (nextConfig) => {
-    const currentPositionsMap = getActivePositionsMap(db.activePosition);
+    const currentPositionsMap = getActivePositionsMap();
     const nextPositionsMap = getActivePositionsMap(nextConfig.activePosition);
     const hasActiveTradeState = getPositionMapCount(currentPositionsMap) > 0;
     nextConfig.activePosition = mergeTrackedPositions(currentPositionsMap, nextPositionsMap);
