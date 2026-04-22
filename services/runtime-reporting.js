@@ -70,7 +70,7 @@ const createRuntimeReportingHelpers = ({
         console.log(`Trailing ATR: ${formatTrailingLabel()}`);
         console.log(`Leverage: ${db.leverage}x`);
         console.log(`Margin Mode: ${String(db.marginMode || "isolated").toUpperCase()}`);
-        console.log(`Daily target: $${db.dailyProfitTargetUsdt} (max ${db.maxTradesPerDay} trades)`);
+        console.log(`Max trades per day: ${db.maxTradesPerDay}`);
         console.log("=".repeat(70) + "\n");
     };
 

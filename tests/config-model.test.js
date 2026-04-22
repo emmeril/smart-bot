@@ -13,8 +13,6 @@ const defaultConfig = {
     gridOrdersPerSide: 0,
     gridOrderSizeUsdt: 0,
     gridTargetProfitUsdt: 0.5,
-    dailyProfitTargetUsdt: 1,
-    dailyMaxLossPercent: 10,
     coolingPeriod: 3000,
     gridStopLossPercent: 5,
     gridRangePercent: 3.5,
