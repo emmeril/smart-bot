@@ -43,7 +43,7 @@ const createRuntimeReportingHelpers = ({
         console.log(`Balance: $${totalUSDT.toFixed(2)}`);
         console.log(`Pair: ${db.pair}`);
         console.log(`Strategy: ${String(db.strategy || "futures_grid").toUpperCase()} on ${db.gridTimeframe}`);
-        console.log(`Preset Profile: ${gridSummary.presetName.toUpperCase()}`);
+        console.log(`Preset Profile: ${gridSummary.presetName.toUpperCase()} | Mode ${gridSummary.botMode}/${gridSummary.gridType}`);
         console.log(`Position Mode: ${accountPositionMode.label}`);
         const gridLevelsLabel = gridSummary.gridLevelsMode === "AUTO"
             ? `AUTO ${gridSummary.effectiveGridLevels} levels`

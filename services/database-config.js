@@ -10,6 +10,12 @@ const sequelize = new Sequelize({
 const Config = sequelize.define("Config", {
     strategy: { type: DataTypes.STRING, defaultValue: "futures_grid" },
     pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
+    binanceBotMode: { type: DataTypes.STRING, defaultValue: "auto" },
+    binanceGridType: { type: DataTypes.STRING, defaultValue: "arithmetic" },
+    binanceDirection: { type: DataTypes.STRING, defaultValue: "neutral" },
+    binanceLowerPrice: { type: DataTypes.FLOAT, defaultValue: 0 },
+    binanceUpperPrice: { type: DataTypes.FLOAT, defaultValue: 0 },
+    binanceInvestmentUsdt: { type: DataTypes.FLOAT, defaultValue: 0 },
     gridOrderSizeUsdt: { type: DataTypes.FLOAT, defaultValue: 0 },
     leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
     gridTargetProfitUsdt: { type: DataTypes.FLOAT, defaultValue: 0.5 },
@@ -65,6 +71,12 @@ const VALID_MARGIN_MODES = ["cross", "isolated"];
 const DEFAULT_CONFIG = {
     strategy: "futures_grid",
     pair: "DOGE/USDT:USDT",
+    binanceBotMode: "auto",
+    binanceGridType: "arithmetic",
+    binanceDirection: "neutral",
+    binanceLowerPrice: 0,
+    binanceUpperPrice: 0,
+    binanceInvestmentUsdt: 100,
     gridOrderSizeUsdt: 25,
     leverage: 10,
     gridTargetProfitUsdt: 0.5,
@@ -111,9 +123,56 @@ const DEFAULT_CONFIG = {
 };
 
 const DASHBOARD_EDITABLE_FIELDS = [
-    { key: "pair", label: "Trading Pair", section: "Core", type: "text", placeholder: "BTC/USDT:USDT", description: "Perpetual futures pair traded by the bot." },
-    { key: "gridOrderSizeUsdt", label: "Order Amount (USDT)", section: "Core", type: "number", min: 0.1, step: 0.1, description: "Margin allocated to each grid order before leverage." },
-    { key: "leverage", label: "Leverage", section: "Core", type: "number", min: 1, step: 1, description: "Exchange leverage applied to the grid strategy." }
+    { key: "pair", label: "Trading Pair", section: "Market", type: "text", placeholder: "BTC/USDT:USDT", description: "Perpetual futures pair traded by the bot." },
+    {
+        key: "binanceBotMode",
+        label: "Bot Mode",
+        section: "Strategy",
+        type: "select",
+        options: [
+            { value: "auto", label: "Auto" },
+            { value: "manual", label: "Manual" }
+        ],
+        description: "Auto derives the grid from live volatility. Manual uses your explicit range and grid count."
+    },
+    {
+        key: "binanceGridType",
+        label: "Grid Type",
+        section: "Strategy",
+        type: "select",
+        options: [
+            { value: "arithmetic", label: "Arithmetic" },
+            { value: "geometric", label: "Geometric" }
+        ],
+        description: "Arithmetic uses equal price spacing. Geometric uses equal percentage spacing."
+    },
+    {
+        key: "binanceDirection",
+        label: "Direction",
+        section: "Strategy",
+        type: "select",
+        options: [
+            { value: "neutral", label: "Neutral" },
+            { value: "long", label: "Long" },
+            { value: "short", label: "Short" }
+        ],
+        description: "Controls whether the bot trades both sides, long-only, or short-only."
+    },
+    { key: "leverage", label: "Leverage", section: "Capital", type: "number", min: 1, step: 1, description: "Exchange leverage applied to the grid strategy." },
+    { key: "binanceInvestmentUsdt", label: "Investment (USDT)", section: "Capital", type: "number", min: 0, step: 0.1, description: "Total margin budget used to derive grid order allocation." },
+    { key: "binanceLowerPrice", label: "Lower Price", section: "Manual Grid", type: "number", min: 0, step: "any", description: "Manual mode lower bound for the grid range." },
+    { key: "binanceUpperPrice", label: "Upper Price", section: "Manual Grid", type: "number", min: 0, step: "any", description: "Manual mode upper bound for the grid range." },
+    { key: "gridLevels", label: "Grid Count", section: "Manual Grid", type: "number", min: 2, step: 1, description: "Number of grid intervals across the selected range." },
+    { key: "gridTimeframe", label: "Timeframe", section: "Strategy", type: "select", options: [
+        { value: "1m", label: "1m" },
+        { value: "3m", label: "3m" },
+        { value: "5m", label: "5m" },
+        { value: "15m", label: "15m" },
+        { value: "30m", label: "30m" },
+        { value: "1h", label: "1h" },
+        { value: "4h", label: "4h" },
+        { value: "1d", label: "1d" }
+    ], description: "Candle interval used for auto parameter derivation and signal analysis." }
 ];
 
 const DASHBOARD_EDITABLE_KEYS = new Set(DASHBOARD_EDITABLE_FIELDS.map((field) => field.key));

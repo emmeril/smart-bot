@@ -96,14 +96,20 @@ const createRuntimeSignalGridHelpers = ({
                 extraDetailLines: ["   Grid step is too small to evaluate safely."]
             };
         }
-        const rawIndex = (snapshot.currentPrice - lowerBound) / step;
-        const clampedIndex = clamp(rawIndex, 0, levels.length - 1);
-        const lowerIndex = clamp(Math.floor(clampedIndex), 0, levels.length - 2);
+        let lowerIndex = 0;
+        for (let index = 0; index < levels.length - 1; index += 1) {
+            if (snapshot.currentPrice >= levels[index] && snapshot.currentPrice <= levels[index + 1]) {
+                lowerIndex = index;
+                break;
+            }
+            if (snapshot.currentPrice > levels[index + 1]) lowerIndex = Math.min(index + 1, Math.max(0, levels.length - 2));
+        }
+        lowerIndex = clamp(lowerIndex, 0, levels.length - 2);
         const upperIndex = clamp(lowerIndex + 1, 1, levels.length - 1);
         const currentLevelLow = levels[lowerIndex];
         const currentLevelHigh = levels[upperIndex];
         const buffer = snapshot.currentPrice * (params.gridEntryBufferPercent / 100);
-        const distanceFromMidSteps = (snapshot.currentPrice - referencePrice) / step;
+        const distanceFromMidSteps = step > 0 ? (snapshot.currentPrice - referencePrice) / step : 0;
         const volumeOk = snapshot.volumeRatio >= db.minVolumeRatio;
         const sessionOk = db.sessionStartUTC <= db.sessionEndUTC
             ? snapshot.hourUTC >= db.sessionStartUTC && snapshot.hourUTC <= db.sessionEndUTC
@@ -157,6 +163,7 @@ const createRuntimeSignalGridHelpers = ({
             longPlan: safeCanLong ? { targetPrice: longTargetPrice, stopLossPrice: longStopPrice, gridIndex: lowerIndex } : null,
             shortPlan: safeCanShort ? { targetPrice: shortTargetPrice, stopLossPrice: shortStopPrice, gridIndex: upperIndex } : null,
             extraDetailLines: [
+                `   Bot Mode: ${String(params.binanceBotMode || "auto").toUpperCase()} | Grid Type: ${String(params.binanceGridType || "arithmetic").toUpperCase()} | Direction: ${String(params.binanceDirection || "neutral").toUpperCase()}`,
                 `   Reference Price: ${referencePrice.toFixed(6)}`,
                 `   Grid Range: ${lowerBound.toFixed(6)} - ${upperBound.toFixed(6)} | Width ${params.configuredGridRangePercent <= 0 ? `AUTO ${params.gridRangePercent}%` : `${params.gridRangePercent}%`}`,
                 `   Grid Levels: ${params.configuredGridLevels <= 0 ? `AUTO ${params.gridLevels}` : params.gridLevels} | Step: ${step.toFixed(6)}`,

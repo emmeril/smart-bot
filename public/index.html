@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Smart Bot Grid Console</title>
+  <title>Binance Futures Grid Console</title>
   <style>
     :root {
       color-scheme: dark;
@@ -69,11 +69,26 @@
       display: grid;
       gap: 8px;
     }
+    .field small {
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .field.hidden {
+      display: none;
+    }
+    .section-title {
+      grid-column: 1 / -1;
+      padding-top: 6px;
+      font-size: 0.82rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #b8cad5;
+    }
     label {
       font-size: 0.88rem;
       color: var(--muted);
     }
-    input {
+    input, select {
       width: 100%;
       padding: 14px 15px;
       border-radius: 14px;
@@ -83,7 +98,7 @@
       font: inherit;
       outline: none;
     }
-    input:focus {
+    input:focus, select:focus {
       border-color: rgba(87, 212, 163, 0.52);
       box-shadow: 0 0 0 4px rgba(87, 212, 163, 0.12);
     }
@@ -171,8 +186,8 @@
     <section class="panel">
       <div class="header">
         <div>
-          <h1>Binance-Style Grid Bot</h1>
-          <p class="muted">Only set pair, per-order margin, and leverage. Price range, grid count, take profit, stop loss, and ladder depth are derived automatically from live volatility.</p>
+          <h1>Binance Futures Grid Console</h1>
+          <p class="muted">Configure the bot with Binance-style futures grid controls: auto or manual mode, arithmetic or geometric spacing, direction, investment, leverage, and manual range inputs.</p>
         </div>
         <div class="pill" id="runtimePill">Loading</div>
       </div>
@@ -243,24 +258,56 @@
       runtimePill.textContent = running ? (exchange ? "Runtime Active" : "Runtime Waiting") : "Runtime Idle";
     }
 
+    function isFieldVisible(field) {
+      const mode = String(state.config.binanceBotMode || "auto").toLowerCase();
+      if (field.section === "Manual Grid") return mode === "manual";
+      return true;
+    }
+
     function renderForm() {
       form.innerHTML = "";
+      let lastSection = "";
       state.schema.forEach((field) => {
+        if (field.section && field.section !== lastSection) {
+          lastSection = field.section;
+          const title = document.createElement("div");
+          title.className = "section-title";
+          title.textContent = field.section;
+          form.appendChild(title);
+        }
         const wrapper = document.createElement("div");
         wrapper.className = "field";
+        if (!isFieldVisible(field)) wrapper.classList.add("hidden");
         const label = document.createElement("label");
         label.htmlFor = field.key;
         label.textContent = field.label;
-        const input = document.createElement("input");
+        let input;
+        if (field.type === "select") {
+          input = document.createElement("select");
+          (field.options || []).forEach((option) => {
+            const item = document.createElement("option");
+            item.value = option.value;
+            item.textContent = option.label;
+            input.appendChild(item);
+          });
+          input.value = state.config[field.key] ?? field.options?.[0]?.value ?? "";
+        } else {
+          input = document.createElement("input");
+          input.type = field.type === "number" ? "number" : "text";
+          input.placeholder = field.placeholder || "";
+          if (field.min !== undefined) input.min = field.min;
+          if (field.step !== undefined) input.step = field.step;
+          input.value = state.config[field.key] ?? "";
+        }
         input.id = field.key;
         input.name = field.key;
-        input.type = field.type === "number" ? "number" : "text";
-        input.placeholder = field.placeholder || "";
-        if (field.min !== undefined) input.min = field.min;
-        if (field.step !== undefined) input.step = field.step;
-        input.value = state.config[field.key] ?? "";
         wrapper.appendChild(label);
         wrapper.appendChild(input);
+        if (field.description) {
+          const hint = document.createElement("small");
+          hint.textContent = field.description;
+          wrapper.appendChild(hint);
+        }
         form.appendChild(wrapper);
       });
     }
@@ -280,8 +327,9 @@
       const autoGrid = live.autoGrid || {};
       const cards = [
         { label: "Pair", value: state.config.pair || "-" },
-        { label: "Order", value: `${formatNumber(state.config.gridOrderSizeUsdt, 2)} USDT` },
+        { label: "Mode", value: `${String(state.config.binanceBotMode || "auto").toUpperCase()} / ${String(state.config.binanceGridType || "arithmetic").toUpperCase()}` },
         { label: "Leverage", value: `${formatNumber(state.config.leverage, 0)}x` },
+        { label: "Investment", value: `${formatNumber(state.config.binanceInvestmentUsdt, 2)} USDT` },
         { label: "Volatility", value: autoGrid.volatilityScore !== undefined && autoGrid.volatilityScore !== null ? formatNumber(autoGrid.volatilityScore, 3) : "-" }
       ];
       headlineCards.innerHTML = cards.map((card) => `
@@ -300,10 +348,12 @@
       }
 
       const rows = [
+        ["Bot Mode", `${autoGrid.botMode || "-"} | ${autoGrid.gridType || "-"} | ${autoGrid.direction || "-"}`],
         ["Range", `${formatNumber(autoGrid.lowerBound)} to ${formatNumber(autoGrid.upperBound)}`],
         ["Range Width", `${formatNumber(autoGrid.rangePercent, 2)}%`],
         ["Grid Number", String(autoGrid.gridLevels ?? "-")],
         ["Grid Step", Number.isFinite(Number(autoGrid.step)) ? formatNumber(autoGrid.step) : "-"],
+        ["Investment", `${formatNumber(autoGrid.investmentUsdt, 2)} USDT`],
         ["Take Profit", `${formatNumber(autoGrid.takeProfitLevels, 0)} level`],
         ["Stop Loss", `${formatNumber(autoGrid.stopLossLevels, 2)} levels | ${formatNumber(autoGrid.stopLossPercent, 2)}%`],
         ["Orders Per Side", String(autoGrid.ordersPerSide ?? "-")],
@@ -381,6 +431,12 @@
     }
 
     saveBtn.addEventListener("click", saveConfig);
+    form.addEventListener("change", (event) => {
+      if (event.target?.name === "binanceBotMode") {
+        state.config.binanceBotMode = event.target.value;
+        renderForm();
+      }
+    });
     refreshBtn.addEventListener("click", async () => {
       await loadConfig(true);
       await loadStatus(true);

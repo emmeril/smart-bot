@@ -335,8 +335,14 @@ const buildAutoGridPreview = async () => {
 
     const availableUsdt = await getAvailableUSDTBalance();
     const adaptiveParams = resolveAdaptiveGridParameters({ params, snapshot, availableUsdt });
-    const projectedLowerBound = snapshot.currentPrice * (1 - (adaptiveParams.gridRangePercent / 100));
-    const projectedUpperBound = snapshot.currentPrice * (1 + (adaptiveParams.gridRangePercent / 100));
+    const manualMode = String(params.binanceBotMode || "auto").toLowerCase() === "manual";
+    const hasManualBounds = Number(params.binanceLowerPrice) > 0 && Number(params.binanceUpperPrice) > Number(params.binanceLowerPrice);
+    const projectedLowerBound = manualMode && hasManualBounds
+        ? Number(params.binanceLowerPrice)
+        : snapshot.currentPrice * (1 - (adaptiveParams.gridRangePercent / 100));
+    const projectedUpperBound = manualMode && hasManualBounds
+        ? Number(params.binanceUpperPrice)
+        : snapshot.currentPrice * (1 + (adaptiveParams.gridRangePercent / 100));
     const persistedGridState = adaptiveParams.gridLevels > 1
         ? sanitizeGridState(db?.activeGridState, adaptiveParams)
         : null;
@@ -351,10 +357,14 @@ const buildAutoGridPreview = async () => {
 
     return {
         mode: adaptiveParams.autoGrid?.mode || "ADAPTIVE_OFFICIAL",
+        botMode: String(params.binanceBotMode || "auto").toUpperCase(),
+        gridType: String(params.binanceGridType || "arithmetic").toUpperCase(),
+        direction: String(params.binanceDirection || "neutral").toUpperCase(),
         presetName: adaptiveParams.autoGrid?.presetName || resolveAutoPairPresetName(db.pair),
         currentPrice: snapshot.currentPrice,
         atr: snapshot.currentATR,
         availableUsdt,
+        investmentUsdt: Number(params.binanceInvestmentUsdt || 0),
         orderSizeUsdt: adaptiveParams.gridOrderSizeUsdt,
         minimumOrderSizeUsdt: adaptiveParams.autoGrid?.minimumOrderSizeUsdt || 0,
         volatilityScore: adaptiveParams.autoGrid?.volatilityScore ?? null,
@@ -1124,7 +1134,13 @@ const applyAutoPresetToConfig = (config) => {
         strategy: "futures_grid",
         pair: incoming.pair,
         leverage: incoming.leverage,
-        gridOrderSizeUsdt: incoming.gridOrderSizeUsdt
+        gridOrderSizeUsdt: incoming.gridOrderSizeUsdt,
+        binanceBotMode: incoming.binanceBotMode,
+        binanceGridType: incoming.binanceGridType,
+        binanceDirection: incoming.binanceDirection,
+        binanceLowerPrice: incoming.binanceLowerPrice,
+        binanceUpperPrice: incoming.binanceUpperPrice,
+        binanceInvestmentUsdt: incoming.binanceInvestmentUsdt
     };
     const autoPresetResult = applyAutoPairGridPreset(baseConfig, AUTO_PAIR_GRID_PRESETS);
     return {
