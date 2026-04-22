@@ -1,5 +1,3 @@
-const fs = require("fs");
-
 const createConfigRuntimeHelpers = ({
     getDb,
     setDb,
@@ -8,10 +6,6 @@ const createConfigRuntimeHelpers = ({
     hasRuntimePositionMutationInFlight,
     getConfigReloadTimer,
     setConfigReloadTimer,
-    getConfigReloadRetryTimer = () => null,
-    setConfigReloadRetryTimer = () => {},
-    getConfigReloadWatcher = () => null,
-    setConfigReloadWatcher = () => {},
     loadPersistedConfig,
     ensureConfigRow,
     persistConfig,
@@ -22,15 +16,10 @@ const createConfigRuntimeHelpers = ({
     applyRuntimeConfigChanges,
     hasAnyActivePosition,
     dashboardEditableFields,
-    configAutoReloadIntervalMs,
-    configAutoReloadFilePath = "",
-    onHotReloadApplied = async () => {},
-    watchConfigFile = (...args) => fs.watch(...args)
+    configAutoReloadIntervalMs
 }) => {
     let lastKnownDashboardConfigSignature = "";
     let configOperationChain = Promise.resolve();
-    const configHotReloadRetryDelayMs = 100;
-    let lastDeferredReloadReason = "";
 
     const runConfigOperation = async (operation) => {
         const previousOperation = configOperationChain.catch(() => {});
@@ -139,20 +128,16 @@ const createConfigRuntimeHelpers = ({
 
     const reloadConfig = async (previousRuntimeConfig = null) => await runConfigOperation(async () => await reloadConfigInternal(previousRuntimeConfig));
 
-    const reloadConfigIfChanged = async (reason = "poll") => await runConfigOperation(async () => {
+    const reloadConfigIfChanged = async () => await runConfigOperation(async () => {
         if (!getDb() || getIsShuttingDown()) return false;
         try {
             const persistedConfig = await loadPersistedConfig();
             if (!persistedConfig) return false;
             const persistedSignature = buildDashboardConfigSignature(persistedConfig);
             if (persistedSignature === lastKnownDashboardConfigSignature) return false;
-            console.log(`[CONFIG][INFO] Detected dashboard config change via ${reason}. Reloading...`);
+            console.log("[CONFIG][INFO] Detected dashboard config change. Reloading...");
             const reloaded = await reloadConfigInternal();
-            if (reloaded) {
-                syncDashboardConfigSignature();
-                await onHotReloadApplied();
-                console.log(`[CONFIG][INFO] Hot reload applied via ${reason}. Runtime state refreshed.`);
-            }
+            if (reloaded) syncDashboardConfigSignature();
             return reloaded;
         } catch (error) {
             console.error("[CONFIG][ERROR] Auto config reload failed:", error.message);
@@ -160,55 +145,13 @@ const createConfigRuntimeHelpers = ({
         }
     });
 
-    const scheduleConfigReloadCheck = (reason = "poll", delayMs = 0) => {
-        if (getConfigReloadRetryTimer()) return false;
-
-        const timer = setTimeout(async () => {
-            setConfigReloadRetryTimer(null);
-            if (!getDb() || getIsShuttingDown()) return;
-
-            if (hasRuntimePositionMutationInFlight()) {
-                if (lastDeferredReloadReason !== reason) {
-                    console.log(`[CONFIG][INFO] Hot reload detected via ${reason}, waiting for active runtime mutation to finish...`);
-                    lastDeferredReloadReason = reason;
-                }
-                scheduleConfigReloadCheck(reason, configHotReloadRetryDelayMs);
-                return;
-            }
-
-            lastDeferredReloadReason = "";
-            await reloadConfigIfChanged(reason);
-        }, Math.max(0, Math.trunc(Number(delayMs) || 0)));
-
-        if (typeof timer.unref === "function") timer.unref();
-        setConfigReloadRetryTimer(timer);
-        return true;
-    };
-
     const startConfigAutoReload = () => {
-        if (!getConfigReloadTimer()) {
-            const timer = setInterval(() => {
-                if (getIsShuttingDown()) return;
-                scheduleConfigReloadCheck("poll");
-            }, configAutoReloadIntervalMs);
-            setConfigReloadTimer(timer);
-        }
-
-        if (configAutoReloadFilePath && !getConfigReloadWatcher()) {
-            try {
-                const watcher = watchConfigFile(configAutoReloadFilePath, { persistent: false }, () => {
-                    scheduleConfigReloadCheck("file-watch");
-                });
-                if (watcher && typeof watcher.on === "function") {
-                    watcher.on("error", (error) => {
-                        console.error("[CONFIG][ERROR] Config watcher failed:", error.message);
-                    });
-                }
-                setConfigReloadWatcher(watcher);
-            } catch (error) {
-                console.error("[CONFIG][WARN] Failed to start config watcher:", error.message);
-            }
-        }
+        if (getConfigReloadTimer()) return;
+        const timer = setInterval(async () => {
+            if (getIsShuttingDown() || getIsProcessing() || hasRuntimePositionMutationInFlight()) return;
+            await reloadConfigIfChanged();
+        }, configAutoReloadIntervalMs);
+        setConfigReloadTimer(timer);
     };
 
     return {
@@ -219,7 +162,6 @@ const createConfigRuntimeHelpers = ({
         initializeDB,
         reloadConfig,
         reloadConfigIfChanged,
-        scheduleConfigReloadCheck,
         startConfigAutoReload
     };
 };

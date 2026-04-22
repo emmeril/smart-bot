@@ -1,5 +1,4 @@
 require("dotenv").config();
-const fs = require("fs");
 const path = require("path");
 const { createConfigModelHelpers } = require("./services/config-model");
 const { createConfigPersistenceHelpers } = require("./services/config-persistence");
@@ -82,8 +81,6 @@ let accountPositionMode = { hedged: false, label: "ONE_WAY" };
 let runtimeCommandsRegistered = false;
 let webServer = null;
 let configReloadTimer = null;
-let configReloadRetryTimer = null;
-let configReloadWatcher = null;
 let exchangeHealth = {
     isHealthy: false,
     needsRecoverySync: true,
@@ -184,18 +181,12 @@ const clearRuntimeTimers = () => {
         [positionSyncTimer, () => { positionSyncTimer = null; }],
         [mainLoopTimer, () => { mainLoopTimer = null; }],
         [metricsTimer, () => { metricsTimer = null; }],
-        [configReloadTimer, () => { configReloadTimer = null; }],
-        [configReloadRetryTimer, () => { configReloadRetryTimer = null; }]
+        [configReloadTimer, () => { configReloadTimer = null; }]
     ];
     for (const [timer, resetTimer] of timers) {
         if (!timer) continue;
         clearInterval(timer);
         resetTimer();
-    }
-
-    if (configReloadWatcher) {
-        try { configReloadWatcher.close(); } catch {}
-        configReloadWatcher = null;
     }
 };
 
@@ -882,7 +873,11 @@ const {
     saveDB: async (...args) => { await saveDB(...args); },
     reloadConfig: async (...args) => { await reloadConfig(...args); },
     refreshRuntimeSchedulers: () => { refreshRuntimeSchedulers(); },
-    syncExchangeRuntimeSettings: async () => { await applyHotReloadRuntimeEffects(); },
+    syncExchangeRuntimeSettings: async () => {
+        if (!exchange) return;
+        await setMarginMode();
+        await setLeverage();
+    },
     buildDashboardPayload
 });
 
@@ -1008,13 +1003,6 @@ const applyAutoPresetToConfig = (config) => {
     };
 };
 
-const applyHotReloadRuntimeEffects = async () => {
-    refreshRuntimeSchedulers();
-    if (!exchange) return;
-    await setMarginMode();
-    await setLeverage();
-};
-
 const {
     initializeDB,
     reloadConfig,
@@ -1028,10 +1016,6 @@ const {
     hasRuntimePositionMutationInFlight,
     getConfigReloadTimer: () => configReloadTimer,
     setConfigReloadTimer: (value) => { configReloadTimer = value; },
-    getConfigReloadRetryTimer: () => configReloadRetryTimer,
-    setConfigReloadRetryTimer: (value) => { configReloadRetryTimer = value; },
-    getConfigReloadWatcher: () => configReloadWatcher,
-    setConfigReloadWatcher: (value) => { configReloadWatcher = value; },
     loadPersistedConfig,
     ensureConfigRow,
     persistConfig,
@@ -1042,10 +1026,7 @@ const {
     applyRuntimeConfigChanges,
     hasAnyActivePosition,
     dashboardEditableFields: DASHBOARD_EDITABLE_FIELDS,
-    configAutoReloadIntervalMs: CONFIG_AUTO_RELOAD_INTERVAL_MS,
-    configAutoReloadFilePath: sequelize.options.storage,
-    onHotReloadApplied: async () => { await applyHotReloadRuntimeEffects(); },
-    watchConfigFile: (...args) => fs.watch(...args)
+    configAutoReloadIntervalMs: CONFIG_AUTO_RELOAD_INTERVAL_MS
 });
 
 const syncPositionWithExchange = async () => {
