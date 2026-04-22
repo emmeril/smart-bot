@@ -31,6 +31,8 @@ const createDashboardConfigHelpers = ({
         nextConfig.activePosition = currentConfig.activePosition;
         nextConfig.dailyPnL = currentConfig.dailyPnL;
         nextConfig.dailyTrades = currentConfig.dailyTrades;
+        nextConfig.dailyPnlSource = currentConfig.dailyPnlSource;
+        nextConfig.dailyPnlSyncedAt = currentConfig.dailyPnlSyncedAt;
         nextConfig.lastDailyReset = currentConfig.lastDailyReset;
         nextConfig.id = currentConfig.id;
         return nextConfig;
@@ -107,4 +109,3 @@ const createDashboardConfigHelpers = ({
 };
 
 module.exports = { createDashboardConfigHelpers };
-

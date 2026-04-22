@@ -7,6 +7,8 @@ const createRuntimeCycleHelpers = ({
     getUTCDateKey,
     resetDailyTradeMetrics,
     saveDB,
+    resetDailyPnlState,
+    syncDailyPnlWithExchange,
     getTotalUSDTBalance,
     reloadConfig,
     refreshRuntimeSchedulers,
@@ -42,11 +44,14 @@ const createRuntimeCycleHelpers = ({
         const db = getDb();
         if (!isNewTradingDay(now)) return false;
         console.log("[DAILY][INFO] Daily reset");
-        db.dailyPnL = 0;
-        db.dailyTrades = 0;
-        db.lastDailyReset = toFiniteNumber(now, Date.now());
         resetDailyTradeMetrics();
-        await saveDB();
+        if (typeof resetDailyPnlState === "function") await resetDailyPnlState(now);
+        else {
+            db.dailyPnL = 0;
+            db.dailyTrades = 0;
+            db.lastDailyReset = toFiniteNumber(now, Date.now());
+            await saveDB();
+        }
         return true;
     };
 
@@ -112,6 +117,7 @@ const createRuntimeCycleHelpers = ({
         const strategy = String(db?.strategy || "futures_grid").toLowerCase();
 
         await resetDailyStateIfNeeded(Date.now());
+        if (typeof syncDailyPnlWithExchange === "function") await syncDailyPnlWithExchange();
         if (!canOpenNewPositions()) {
             logExchangeRecoveryBlock(strategy === "futures_grid" ? "grid entries" : "new position entries");
             return;

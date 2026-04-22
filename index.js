@@ -39,6 +39,7 @@ const { createExchangePositionHelpers } = require("./services/exchange-position"
 const { createManagedOrdersHelpers } = require("./services/managed-orders");
 const { createOrderExecutionHelpers } = require("./services/order-execution");
 const { createPositionLifecycleHelpers } = require("./services/position-lifecycle");
+const { createPnlTrackerHelpers } = require("./services/pnl-tracker");
 const { createTradeEntryHelpers } = require("./services/trade-entry");
 const { createTradeLogicHelpers } = require("./services/trade-logic");
 const { createPositionStateHelpers } = require("./services/position-state");
@@ -217,6 +218,18 @@ const {
     clamp,
     isLegacySinglePosition: (...args) => isLegacySinglePosition(...args),
     toPositionMapKey: (...args) => toPositionMapKey(...args)
+});
+
+const {
+    buildDailyPnlSnapshot,
+    applyDailyPnlDelta,
+    resetDailyPnlState,
+    syncDailyPnlWithExchange
+} = createPnlTrackerHelpers({
+    getDb: () => db,
+    getExchange: () => exchange,
+    toFiniteNumber,
+    saveDB: async (...args) => await saveDB(...args)
 });
 
 const {
@@ -612,6 +625,7 @@ const {
     cancelManagedOrdersForPosition,
     removeActivePositionByKey,
     saveDB: (...args) => saveDB(...args),
+    applyDailyPnlDelta: (...args) => applyDailyPnlDelta(...args),
     logTrade: (...args) => logTrade(...args),
     getTrackedPositionSideLabel,
     getPrice: (...args) => getPrice(...args),
@@ -671,6 +685,8 @@ const mergeRuntimeConfig = (nextConfig) => {
         nextConfig.lastDailyReset = currentLastDailyReset;
         nextConfig.dailyPnL = toFiniteNumber(db.dailyPnL, 0);
         nextConfig.dailyTrades = currentDailyTrades;
+        nextConfig.dailyPnlSource = String(db.dailyPnlSource || "local").toLowerCase();
+        nextConfig.dailyPnlSyncedAt = toFiniteNumber(db.dailyPnlSyncedAt, 0);
     }
 
     Object.keys(nextConfig).forEach((key) => { db[key] = nextConfig[key]; });
@@ -800,6 +816,8 @@ const {
     getUTCDateKey,
     resetDailyTradeMetrics,
     saveDB: (...args) => saveDB(...args),
+    resetDailyPnlState: (...args) => resetDailyPnlState(...args),
+    syncDailyPnlWithExchange: (...args) => syncDailyPnlWithExchange(...args),
     getTotalUSDTBalance: (...args) => getTotalUSDTBalance(...args),
     reloadConfig: (...args) => reloadConfig(...args),
     refreshRuntimeSchedulers: () => refreshRuntimeSchedulers(),
@@ -843,7 +861,9 @@ const {
     getPrice: async (...args) => getPrice(...args),
     fetchOpenExchangePositions: async (...args) => fetchOpenExchangePositions(...args),
     fetchManagedOpenOrdersSnapshot: async (...args) => fetchManagedOpenOrdersSnapshot(...args),
-    calculatePositionPnL
+    calculatePositionPnL,
+    buildDailyPnlSnapshot: (...args) => buildDailyPnlSnapshot(...args),
+    syncDailyPnlWithExchange: (...args) => syncDailyPnlWithExchange(...args)
 });
 
 const {

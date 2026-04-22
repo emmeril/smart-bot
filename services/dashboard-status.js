@@ -15,7 +15,9 @@ const createDashboardStatusHelpers = ({
     getPrice,
     fetchOpenExchangePositions,
     fetchManagedOpenOrdersSnapshot,
-    calculatePositionPnL
+    calculatePositionPnL,
+    buildDailyPnlSnapshot,
+    syncDailyPnlWithExchange
 }) => {
     const buildDashboardStatus = () => {
         const db = getDb();
@@ -32,6 +34,8 @@ const createDashboardStatusHelpers = ({
             activeGridState: Boolean(db?.activeGridState),
             dailyPnL: toFiniteNumber(db?.dailyPnL, 0),
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(db?.dailyTrades, 0))),
+            dailyPnlSource: String(db?.dailyPnlSource || "local").toLowerCase(),
+            dailyPnlSyncedAt: toFiniteNumber(db?.dailyPnlSyncedAt, 0),
             lastUpdated: toFiniteNumber(db?.lastUpdated, 0),
             lastDailyReset: toFiniteNumber(db?.lastDailyReset, 0),
             pair: db?.pair || defaultConfig.pair,
@@ -66,6 +70,23 @@ const createDashboardStatusHelpers = ({
             };
         }
 
+        let dailyPnlSnapshot = typeof buildDailyPnlSnapshot === "function"
+            ? buildDailyPnlSnapshot(db)
+            : {
+                dailyPnL: toFiniteNumber(db.dailyPnL, 0),
+                dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(db.dailyTrades, 0))),
+                dailyPnlSource: String(db.dailyPnlSource || "local").toLowerCase(),
+                dailyPnlSyncedAt: toFiniteNumber(db.dailyPnlSyncedAt, 0)
+            };
+
+        if (typeof syncDailyPnlWithExchange === "function") {
+            try {
+                dailyPnlSnapshot = await syncDailyPnlWithExchange();
+            } catch (error) {
+                console.warn(`[STATUS][WARN] Failed to refresh daily PnL snapshot: ${error.message}`);
+            }
+        }
+
         let currentPrice = NaN;
         let exchangePositions = [];
         let managedOrders = { grid: [], tp: [], sl: [] };
@@ -97,7 +118,7 @@ const createDashboardStatusHelpers = ({
                 entryPrice: toFiniteNumber(position.entryPrice, 0),
                 targetPrice: Number.isFinite(position.targetPrice) ? position.targetPrice : null,
                 stopLossPrice: Number.isFinite(position.stopLossPrice) ? position.stopLossPrice : null,
-                pnlUSDT: pnlState ? toFiniteNumber(pnlState.netProfitUSDT, 0) : null,
+                pnlUSDT: pnlState ? toFiniteNumber(pnlState.displayProfitUSDT ?? pnlState.netProfitUSDT, 0) : null,
                 pnlPercent: pnlState ? toFiniteNumber(pnlState.displayProfitPercent ?? pnlState.profitPercent, 0) : null,
                 currentPrice: Number.isFinite(currentPrice) ? currentPrice : null,
                 strategy: position.strategy || null
@@ -121,8 +142,10 @@ const createDashboardStatusHelpers = ({
             needsRecoverySync: Boolean(getExchangeHealth()?.needsRecoverySync),
             exchangeRecoveryReason: getExchangeRecoveryReason() || null,
             positionMode: getAccountPositionMode()?.label || "UNKNOWN",
-            dailyPnL: toFiniteNumber(db.dailyPnL, 0),
-            dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(db.dailyTrades, 0))),
+            dailyPnL: toFiniteNumber(dailyPnlSnapshot.dailyPnL, 0),
+            dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(dailyPnlSnapshot.dailyTrades, 0))),
+            dailyPnlSource: String(dailyPnlSnapshot.dailyPnlSource || "local").toLowerCase(),
+            dailyPnlSyncedAt: toFiniteNumber(dailyPnlSnapshot.dailyPnlSyncedAt, 0),
             activePositions,
             exchangePositionsCount: exchangePositions.length,
             openOrders,

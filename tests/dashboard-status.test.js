@@ -97,3 +97,59 @@ test("buildLiveStatusPayload exposes exchange health fields for the dashboard UI
     assert.equal(payload.exchangeRecoveryReason, "Waiting for successful recovery sync");
     assert.equal(payload.triggerOrdersFetchFailed, true);
 });
+
+test("buildLiveStatusPayload prefers the reconciled daily snapshot and display pnl values", async () => {
+    const helpers = createDashboardStatusHelpers({
+        getDb: () => ({
+            pair: "DOGE/USDT:USDT",
+            dailyPnL: 1.5,
+            dailyTrades: 2,
+            dailyPnlSource: "local",
+            dailyPnlSyncedAt: 0
+        }),
+        getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 }),
+        getIsShuttingDown: () => false,
+        getExchange: () => ({}),
+        getExchangeHealth: () => ({ isHealthy: true, needsRecoverySync: false }),
+        getExchangeRecoveryReason: () => "",
+        getAccountPositionMode: () => ({ label: "ONE_WAY" }),
+        getActivePositionsMap: () => ({
+            BOTH: {
+                side: "buy",
+                quantity: 10,
+                entryPrice: 0.2
+            }
+        }),
+        getActivePositionEntries: () => [[
+            "BOTH",
+            {
+                side: "buy",
+                quantity: 10,
+                entryPrice: 0.2,
+                targetPrice: 0.22,
+                stopLossPrice: 0.19
+            }
+        ]],
+        toFiniteNumber: (value, fallback = 0) => {
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? numeric : fallback;
+        },
+        defaultConfig: { pair: "DOGE/USDT:USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 },
+        dashboardEditableFields: [],
+        getExchangeClientOrderId: (order) => order.clientOrderId || order.info?.clientOrderId || null,
+        getPrice: async () => 0.21,
+        fetchOpenExchangePositions: async () => [],
+        fetchManagedOpenOrdersSnapshot: async () => ({ grid: [], tp: [], sl: [] }),
+        calculatePositionPnL: () => ({ netProfitUSDT: 1, displayProfitUSDT: 1.25, profitPercent: 5, displayProfitPercent: 6 }),
+        buildDailyPnlSnapshot: () => ({ dailyPnL: 1.5, dailyTrades: 2, dailyPnlSource: "local", dailyPnlSyncedAt: 0 }),
+        syncDailyPnlWithExchange: async () => ({ dailyPnL: 3.75, dailyTrades: 2, dailyPnlSource: "exchange", dailyPnlSyncedAt: 12345 })
+    });
+
+    const payload = await helpers.buildLiveStatusPayload();
+
+    assert.equal(payload.dailyPnL, 3.75);
+    assert.equal(payload.dailyPnlSource, "exchange");
+    assert.equal(payload.dailyPnlSyncedAt, 12345);
+    assert.equal(payload.activePositions[0].pnlUSDT, 1.25);
+    assert.equal(payload.activePositions[0].pnlPercent, 6);
+});

@@ -13,6 +13,7 @@ const createPositionLifecycleHelpers = ({
     cancelManagedOrdersForPosition,
     removeActivePositionByKey,
     saveDB,
+    applyDailyPnlDelta,
     logTrade,
     getTrackedPositionSideLabel,
     getPrice,
@@ -89,8 +90,15 @@ const createPositionLifecycleHelpers = ({
         const estimatedExitPrice = await getPrice(true);
         if (Number.isFinite(estimatedExitPrice) && estimatedExitPrice > 0) {
             const estimatedPnL = calculatePositionPnL(position, estimatedExitPrice);
-            db.dailyPnL += estimatedPnL.realizedProfitUSDT;
-            db.dailyTrades++;
+            if (typeof applyDailyPnlDelta === "function") await applyDailyPnlDelta({
+                pnlDelta: estimatedPnL.realizedProfitUSDT,
+                tradeDelta: 1,
+                source: "estimated"
+            });
+            else {
+                db.dailyPnL += estimatedPnL.realizedProfitUSDT;
+                db.dailyTrades++;
+            }
             metrics.trades.closed++;
             if (estimatedPnL.realizedProfitUSDT > 0) metrics.trades.wins++;
             else if (estimatedPnL.realizedProfitUSDT < 0) metrics.trades.losses++;
@@ -102,7 +110,6 @@ const createPositionLifecycleHelpers = ({
                 estimatedPnL.realizedProfitUSDT,
                 position.strategy || null
             );
-            await saveDB();
             console.warn(`[POSITION][WARN] Removed local position using estimated exit price because no confirmed exchange exit price was available (${reason}).`);
             return true;
         }
@@ -137,8 +144,15 @@ const createPositionLifecycleHelpers = ({
             console.log(`[POSITION][INFO] Finalize-close for ${trackedKey} became stale before bookkeeping. Skipping.`);
             return false;
         }
-        db.dailyPnL += netProfitUSDT;
-        db.dailyTrades++;
+        if (typeof applyDailyPnlDelta === "function") await applyDailyPnlDelta({
+            pnlDelta: netProfitUSDT,
+            tradeDelta: 1,
+            source: "local"
+        });
+        else {
+            db.dailyPnL += netProfitUSDT;
+            db.dailyTrades++;
+        }
 
         const resolvedExitPrice = Number.isFinite(exitPrice) && exitPrice > 0 ? exitPrice : await getPrice(true);
         logTrade(
@@ -167,7 +181,14 @@ const createPositionLifecycleHelpers = ({
         if (!Number.isFinite(exitPrice) || exitPrice <= 0) return;
         if (!Number.isFinite(closedQuantity) || closedQuantity <= 0) return;
         const partialPnl = calculatePositionPnL(position, exitPrice, closedQuantity);
-        db.dailyPnL += partialPnl.realizedProfitUSDT;
+        if (typeof applyDailyPnlDelta === "function") await applyDailyPnlDelta({
+            pnlDelta: partialPnl.realizedProfitUSDT,
+            tradeDelta: 0,
+            source: "local"
+        });
+        else {
+            db.dailyPnL += partialPnl.realizedProfitUSDT;
+        }
         logTrade(
             position.side === "buy" ? "LONG" : "SHORT",
             position.entryPrice,
@@ -177,7 +198,7 @@ const createPositionLifecycleHelpers = ({
             position.strategy || null
         );
         console.log(`[POSITION][INFO] Recorded partial close of ${closedQuantity} contracts: ${partialPnl.realizedProfitUSDT.toFixed(4)} USDT`);
-        await saveDB();
+        if (typeof applyDailyPnlDelta !== "function") await saveDB();
     };
 
     const closePosition = async (positionKey, reason) => {
