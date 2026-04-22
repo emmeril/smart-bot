@@ -86,24 +86,54 @@ const createPositionLifecycleHelpers = ({
             return false;
         }
         removeActivePositionByKey(trackedKey);
+        
+        const openExchangePositions = await fetchOpenExchangePositions();
+        const exchangePosition = openExchangePositions.length > 0 ? findOpenExchangePosition(openExchangePositions, db.pair, position) : null;
+        
+        if (exchangePosition) {
+            const contracts = Math.abs(getExchangePositionContracts(exchangePosition));
+            if (contracts > getPositionSyncQtyTolerance()) {
+                const currentPrice = await getPrice(true);
+                const pnlState = calculatePositionPnL(position, currentPrice);
+                const adjustedNetProfitUSDT = Number.isFinite(pnlState.netProfitUSDT) ? pnlState.netProfitUSDT : pnlState.realizedProfitUSDT;
+                db.dailyPnL += adjustedNetProfitUSDT;
+                db.dailyTrades++;
+                metrics.trades.closed++;
+                if (adjustedNetProfitUSDT > 0) metrics.trades.wins++;
+                else if (adjustedNetProfitUSDT < 0) metrics.trades.losses++;
+                logTrade(
+                    position.side === "buy" ? "LONG" : "SHORT",
+                    position.entryPrice,
+                    currentPrice,
+                    `CLOSE_UNCONFIRMED:${reason}`,
+                    adjustedNetProfitUSDT,
+                    position.strategy || null
+                );
+                await saveDB();
+                console.warn(`[POSITION][WARN] Removed local position using exchange position state (${contracts} contracts remaining), P&L estimated at ${adjustedNetProfitUSDT.toFixed(4)} USDT`);
+                return true;
+            }
+        }
+        
         const estimatedExitPrice = await getPrice(true);
         if (Number.isFinite(estimatedExitPrice) && estimatedExitPrice > 0) {
-            const estimatedPnL = calculatePositionPnL(position, estimatedExitPrice);
-            db.dailyPnL += estimatedPnL.realizedProfitUSDT;
+            const pnlState = calculatePositionPnL(position, estimatedExitPrice);
+            const adjustedNetProfitUSDT = Number.isFinite(pnlState.netProfitUSDT) ? pnlState.netProfitUSDT : pnlState.realizedProfitUSDT;
+            db.dailyPnL += adjustedNetProfitUSDT;
             db.dailyTrades++;
             metrics.trades.closed++;
-            if (estimatedPnL.realizedProfitUSDT > 0) metrics.trades.wins++;
-            else if (estimatedPnL.realizedProfitUSDT < 0) metrics.trades.losses++;
+            if (adjustedNetProfitUSDT > 0) metrics.trades.wins++;
+            else if (adjustedNetProfitUSDT < 0) metrics.trades.losses++;
             logTrade(
                 position.side === "buy" ? "LONG" : "SHORT",
                 position.entryPrice,
                 estimatedExitPrice,
                 `CLOSE_UNCONFIRMED:${reason}`,
-                estimatedPnL.realizedProfitUSDT,
+                adjustedNetProfitUSDT,
                 position.strategy || null
             );
             await saveDB();
-            console.warn(`[POSITION][WARN] Removed local position using estimated exit price because no confirmed exchange exit price was available (${reason}).`);
+            console.warn(`[POSITION][WARN] Removed local position using estimated exit price because no confirmed exchange exit price was available (${reason}). P&L: ${adjustedNetProfitUSDT.toFixed(4)} USDT`);
             return true;
         }
 
@@ -137,7 +167,13 @@ const createPositionLifecycleHelpers = ({
             console.log(`[POSITION][INFO] Finalize-close for ${trackedKey} became stale before bookkeeping. Skipping.`);
             return false;
         }
-        db.dailyPnL += netProfitUSDT;
+        
+        const pnlState = calculatePositionPnL(position, exitPrice || await getPrice(true));
+        const adjustedNetProfitUSDT = Number.isFinite(pnlState.netProfitUSDT) ? pnlState.netProfitUSDT : netProfitUSDT;
+        const fees = Number.isFinite(pnlState.fees) ? pnlState.fees : 0;
+        const funding = Number.isFinite(pnlState.funding) ? pnlState.funding : 0;
+        
+        db.dailyPnL += adjustedNetProfitUSDT;
         db.dailyTrades++;
 
         const resolvedExitPrice = Number.isFinite(exitPrice) && exitPrice > 0 ? exitPrice : await getPrice(true);
@@ -146,19 +182,22 @@ const createPositionLifecycleHelpers = ({
             position.entryPrice,
             resolvedExitPrice,
             `CLOSE:${reason}`,
-            netProfitUSDT,
+            adjustedNetProfitUSDT,
             position.strategy || null
         );
 
         console.log(`[POSITION][INFO] Closed position: ${reason}`);
-        console.log(`   Realized P&L: ${netProfitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
+        console.log(`   Realized P&L (gross): ${pnlState.grossProfitUSDT?.toFixed(4) || netProfitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
+        console.log(`   Fees deducted: ${fees.toFixed(4)} USDT`);
+        console.log(`   Funding deducted: ${funding.toFixed(4)} USDT`);
+        console.log(`   Net P&L: ${adjustedNetProfitUSDT.toFixed(4)} USDT`);
         console.log(`   Daily Total Realized P&L: ${db.dailyPnL.toFixed(4)} USDT / ${db.dailyTrades} trades`);
 
         removeActivePositionByKey(trackedKey);
         await saveDB();
         metrics.trades.closed++;
-        if (netProfitUSDT > 0) metrics.trades.wins++;
-        else if (netProfitUSDT < 0) metrics.trades.losses++;
+        if (adjustedNetProfitUSDT > 0) metrics.trades.wins++;
+        else if (adjustedNetProfitUSDT < 0) metrics.trades.losses++;
         return true;
     };
 
@@ -167,16 +206,19 @@ const createPositionLifecycleHelpers = ({
         if (!Number.isFinite(exitPrice) || exitPrice <= 0) return;
         if (!Number.isFinite(closedQuantity) || closedQuantity <= 0) return;
         const partialPnl = calculatePositionPnL(position, exitPrice, closedQuantity);
-        db.dailyPnL += partialPnl.realizedProfitUSDT;
+        const netProfitUSDT = Number.isFinite(partialPnl.netProfitUSDT) ? partialPnl.netProfitUSDT : partialPnl.realizedProfitUSDT;
+        const fees = Number.isFinite(partialPnl.fees) ? partialPnl.fees : 0;
+        
+        db.dailyPnL += netProfitUSDT;
         logTrade(
             position.side === "buy" ? "LONG" : "SHORT",
             position.entryPrice,
             exitPrice,
             `PARTIAL_CLOSE:${reason}`,
-            partialPnl.realizedProfitUSDT,
+            netProfitUSDT,
             position.strategy || null
         );
-        console.log(`[POSITION][INFO] Recorded partial close of ${closedQuantity} contracts: ${partialPnl.realizedProfitUSDT.toFixed(4)} USDT`);
+        console.log(`[POSITION][INFO] Recorded partial close of ${closedQuantity} contracts: ${partialPnl.grossProfitUSDT?.toFixed(4) || netProfitUSDT.toFixed(4)} USDT (gross), ${netProfitUSDT.toFixed(4)} USDT (net after ${fees.toFixed(4)} USDT fees)`);
         await saveDB();
     };
 
