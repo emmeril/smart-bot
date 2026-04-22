@@ -1,1277 +1,393 @@
 <!doctype html>
-<html lang="id">
+<html lang="en">
 <head>
   <meta charset="utf-8">
-	  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Smart Bot Trading Console</title>
-  <meta name="description" content="Dashboard konfigurasi untuk Smart Bot">
-    <style>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Smart Bot Grid Console</title>
+  <style>
     :root {
       color-scheme: dark;
-      --bg: #061018;
-      --bg-2: #0b1722;
-      --panel: rgba(11, 22, 30, 0.9);
-      --panel-2: rgba(7, 15, 21, 0.92);
-      --line: rgba(114, 152, 170, 0.18);
-      --line-strong: rgba(72, 226, 174, 0.24);
-      --text: #eef7fb;
-      --muted: #8ea5b3;
-      --accent: #48e2ae;
-      --accent-2: #f6c667;
-      --danger: #ff7c7c;
-      --info: #7fd7ff;
-      --shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
-      --radius-xl: 28px;
-      --radius-lg: 20px;
-      --radius-md: 14px;
+      --bg: #071119;
+      --panel: #0d1821;
+      --panel-soft: #111f2a;
+      --line: rgba(180, 220, 232, 0.12);
+      --text: #f4f8fb;
+      --muted: #91a7b5;
+      --accent: #57d4a3;
+      --danger: #ff8e8e;
+      --warn: #ffd37c;
+      --radius: 20px;
     }
     * { box-sizing: border-box; }
-    html, body { min-height: 100%; }
     body {
       margin: 0;
-      font-family: "Bahnschrift", "Aptos", "Segoe UI", sans-serif;
-      color: var(--text);
-      overflow-x: hidden;
+      min-height: 100vh;
       background:
-        linear-gradient(180deg, rgba(72, 226, 174, 0.05), transparent 24%),
-        radial-gradient(circle at top left, rgba(72, 226, 174, 0.14), transparent 32%),
-        radial-gradient(circle at top right, rgba(246, 198, 103, 0.12), transparent 28%),
-        linear-gradient(160deg, var(--bg), var(--bg-2));
+        radial-gradient(circle at top left, rgba(87, 212, 163, 0.12), transparent 30%),
+        linear-gradient(180deg, #071119, #09141d 45%, #0b1720);
+      color: var(--text);
+      font-family: "Aptos", "Segoe UI", sans-serif;
     }
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background-image:
-        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
-      background-size: 72px 72px;
-      mask-image: linear-gradient(180deg, rgba(0,0,0,0.48), transparent 92%);
-      z-index: 0;
-    }
-    .bg-orb {
-      position: fixed;
-      width: 38vw;
-      height: 38vw;
-      border-radius: 50%;
-      filter: blur(40px);
-      opacity: 0.23;
-      pointer-events: none;
-      z-index: 0;
-    }
-    .bg-orb-a { left: -12vw; top: -12vw; background: radial-gradient(circle, rgba(32, 201, 151, 0.85), rgba(32, 201, 151, 0)); }
-    .bg-orb-b { right: -10vw; top: 8vw; background: radial-gradient(circle, rgba(247, 185, 85, 0.8), rgba(247, 185, 85, 0)); }
     .shell {
-      position: relative;
-      z-index: 1;
-      width: min(1240px, calc(100% - 32px));
-      margin: 24px auto 40px;
+      width: min(980px, calc(100% - 24px));
+      margin: 24px auto;
       display: grid;
       gap: 16px;
-    }
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 14px 18px;
-      border-radius: 999px;
-      background: rgba(7, 16, 23, 0.72);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      backdrop-filter: blur(14px);
-      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.22);
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      min-width: 0;
-    }
-    .brand-mark {
-      width: 40px;
-      height: 40px;
-      border-radius: 14px;
-      display: grid;
-      place-items: center;
-      color: #04100c;
-      font-weight: 900;
-      letter-spacing: 0.08em;
-      background: linear-gradient(135deg, var(--accent), #7df1ca);
-      box-shadow: 0 12px 28px rgba(72, 226, 174, 0.22);
-    }
-    .brand-copy {
-      min-width: 0;
-    }
-	    .brand-copy strong,
-	    .topbar-meta strong {
-	      display: block;
-	      font-size: 0.96rem;
-	      letter-spacing: 0.01em;
-	    }
-	    .topbar-meta,
-	    .brand-copy {
-	      min-width: 0;
-	    }
-	    .brand-copy span,
-	    .topbar-meta span {
-	      display: block;
-	      color: var(--muted);
-	      font-size: 0.8rem;
-	      white-space: nowrap;
-	      overflow: hidden;
-	      text-overflow: ellipsis;
-	    }
-    .topbar-status {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-    .pulse-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 0 0 rgba(72, 226, 174, 0.45);
-      animation: pulse 1.8s infinite;
     }
     .panel {
-      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+      background: rgba(13, 24, 33, 0.92);
       border: 1px solid var(--line);
-      border-radius: var(--radius-xl);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(14px);
+      border-radius: var(--radius);
+      padding: 20px;
+      backdrop-filter: blur(12px);
     }
-    .hero {
-      display: grid;
-      grid-template-columns: 1.2fr 0.8fr;
-      gap: 18px;
-      padding: 28px;
-      overflow: hidden;
-    }
-    .hero::after {
-      content: "";
-      position: absolute;
-      inset: auto 24px 24px auto;
-      width: 220px;
-      height: 220px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(72, 226, 174, 0.12), transparent 68%);
-      pointer-events: none;
-    }
-    .hero-copy,
-    .hero-metrics,
-    .metric-card,
-    .status-item,
-    .live-card,
-    .live-list,
-    .live-item,
-    .section-card {
-      min-width: 0;
-    }
-    .hero-copy h1, .panel-head h2 { margin: 0; line-height: 1.02; letter-spacing: -0.03em; }
-    .hero-copy h1 { font-size: clamp(2.3rem, 5vw, 4.1rem); max-width: 12ch; }
-    .lede { margin: 14px 0 0; max-width: 62ch; color: var(--muted); font-size: 1rem; line-height: 1.7; }
-    .eyebrow { margin: 0 0 10px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.74rem; font-weight: 700; }
-    .hero-badges {
-      margin-top: 18px;
+    .header {
       display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: end;
     }
-	    .hero-actions { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; }
-	    .hero-actions form {
-	      margin: 0;
-	    }
-    .btn {
-      border: 0; border-radius: 999px; padding: 12px 18px; font: inherit; font-weight: 700;
-      cursor: pointer; transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
-    }
-    .btn:hover { transform: translateY(-1px); }
-    .btn:active { transform: translateY(1px); }
-    .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-    .btn-primary { background: linear-gradient(135deg, var(--accent), #83f2cd); color: #04110c; box-shadow: 0 16px 30px rgba(72, 226, 174, 0.24); }
-    .btn-secondary { background: rgba(255, 255, 255, 0.06); color: var(--text); border: 1px solid rgba(255, 255, 255, 0.12); }
-    .btn-danger { background: rgba(255, 107, 107, 0.14); color: #ffd2d2; border: 1px solid rgba(255, 107, 107, 0.22); }
-    .hero-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-content: start; }
-    .metric-card {
-      padding: 16px;
-      background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025)),
-        linear-gradient(135deg, rgba(72, 226, 174, 0.04), transparent 60%);
-      border: 1px solid rgba(255, 255, 255, 0.09);
-      border-radius: var(--radius-lg);
-    }
-    .metric-card .label, .status-label, .field-hint { display: block; color: var(--muted); font-size: 0.82rem; }
-    .metric-card strong { display: block; margin-top: 8px; font-size: 1.05rem; }
-    .metric-card span { display: block; margin-top: 4px; color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
-    .status-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 18px 20px; }
-    .live-panel { padding: 24px; }
-    .live-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-    .live-card { padding: 16px; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); }
-    .live-card .label { display: block; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.12em; }
-    .live-card strong { display: block; margin-top: 8px; font-size: 1.25rem; }
-    .live-card span { display: block; margin-top: 4px; color: var(--muted); line-height: 1.5; }
-    .live-lists { margin-top: 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-    .live-list { padding: 16px; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); }
-    .live-list h3 { margin: 0 0 12px; font-size: 0.96rem; }
-    .live-items { display: grid; gap: 10px; }
-    .live-item { padding: 12px 14px; border-radius: 12px; background: rgba(7, 14, 19, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); }
-    .live-item strong { display: block; margin-bottom: 4px; }
-    .live-item span { display: block; color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
-    .live-empty { color: var(--muted); font-size: 0.92rem; }
-    .live-sparkline { width: 100%; height: 64px; margin-top: 10px; display: block; }
-    .live-amount.positive { color: #9af2cc; }
-    .live-amount.negative { color: #ffb4b4; }
-    .live-amount.neutral { color: var(--text); }
-    .live-item.positive { border-color: rgba(32, 201, 151, 0.32); }
-    .live-item.negative { border-color: rgba(255, 107, 107, 0.32); }
-    .live-item.neutral { border-color: rgba(255, 255, 255, 0.08); }
-    .live-table { display: grid; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
-    .live-table-head,
-    .live-table-row { display: grid; grid-template-columns: 1.2fr 0.7fr 0.8fr 0.8fr; gap: 8px; align-items: center; min-width: 560px; }
-    .live-table-head { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; }
-    .live-table-row { padding: 10px 12px; border-radius: 12px; background: rgba(7, 14, 19, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); }
-    .side-badge { display: inline-flex; align-items: center; justify-content: center; padding: 5px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
-    .side-badge.buy { color: #9af2cc; background: rgba(32, 201, 151, 0.12); }
-    .side-badge.sell { color: #ffb4b4; background: rgba(255, 107, 107, 0.12); }
-    .side-badge.flat { color: #d3e6ef; background: rgba(255, 255, 255, 0.08); }
-    .status-item { padding: 12px 14px; border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.06); }
-    .status-item strong { display: block; margin-top: 8px; font-size: 1rem; }
-    .status-item strong.pill {
-      display: inline-flex;
-      margin-top: 8px;
-    }
-    .form-panel { padding: 24px; }
-    .panel-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 18px; }
-    .panel-head .muted, .footer-panel .muted { color: var(--muted); margin: 0; line-height: 1.6; }
-    .config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
-    .section-card { padding: 18px; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); }
-    .section-card h3 { margin: 0 0 14px; font-size: 1rem; letter-spacing: 0.02em; }
-    .field-list { display: grid; gap: 12px; }
-    .field { display: grid; gap: 8px; }
-    .config-legend {
-      margin: 0 0 16px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      color: var(--muted);
-      font-size: 0.84rem;
-      line-height: 1.5;
-    }
-    .field-label {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .field-label label {
-      font-weight: 700;
-    }
-    .field-badge {
-      display: inline-flex;
-      align-items: center;
-      padding: 4px 8px;
-      border-radius: 999px;
-      font-size: 0.72rem;
-      font-weight: 800;
-      letter-spacing: 0.04em;
-      color: #b8f7de;
-      background: rgba(72, 226, 174, 0.12);
-      border: 1px solid rgba(72, 226, 174, 0.2);
-    }
-    .field-badge.toggle {
-      color: #ffe0a8;
-      background: rgba(246, 198, 103, 0.12);
-      border-color: rgba(246, 198, 103, 0.2);
-    }
-    .field-row {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 12px 14px; border-radius: var(--radius-md); background: rgba(7, 14, 19, 0.75);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    .field-row span { min-width: 0; }
-    .field-row label { font-weight: 700; }
-    .field-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
-    .field-control {
-      width: 100%; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1);
-      background: rgba(255, 255, 255, 0.04); color: var(--text); padding: 12px 14px; font: inherit; outline: none;
-    }
-    .field-control:focus { border-color: rgba(32, 201, 151, 0.5); box-shadow: 0 0 0 4px rgba(32, 201, 151, 0.12); }
-    .field-control::placeholder { color: #6d8591; }
-    .field-note { color: var(--muted); font-size: 0.82rem; line-height: 1.5; }
-	    .config-actions {
-	      position: sticky;
-	      bottom: 14px;
-	      z-index: 2;
-      margin-top: 18px;
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-      padding: 12px;
-      border-radius: 18px;
-      background: rgba(7, 15, 21, 0.88);
-	      border: 1px solid rgba(255, 255, 255, 0.08);
-	      backdrop-filter: blur(12px);
-	    }
-	    .footer-panel { padding: 18px 20px; display: flex; justify-content: space-between; gap: 16px; align-items: center; }
-	    .toast { min-width: 220px; max-width: 50%; text-align: right; color: var(--muted); font-size: 0.92rem; }
-    .toast.success { color: #9af2cc; }
-    .toast.error { color: #ffb4b4; }
-    .toast.info { color: #d3e6ef; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); letter-spacing: -0.03em; }
+    .muted { color: var(--muted); line-height: 1.6; }
     .pill {
-      display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px;
-      font-size: 0.82rem; font-weight: 700; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    .pill.ok { color: #9af2cc; }
-    .pill.warn { color: #ffd27f; }
-    .pill.bad { color: #ffb4b4; }
-    .pill.info { color: #9edfff; }
-    .terminal-strip {
-      display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
-      gap: 14px;
-      padding: 18px 20px;
-    }
-    .terminal-card {
-      padding: 16px 18px;
-      border-radius: var(--radius-lg);
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    .terminal-card h3 {
-      margin: 0 0 10px;
-      font-size: 0.94rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--accent);
-    }
-    .terminal-log {
-      font-family: Consolas, "Cascadia Code", monospace;
-      font-size: 0.88rem;
-      line-height: 1.75;
-      color: #c9f8e7;
-      display: grid;
-      gap: 2px;
-    }
-    .terminal-log span {
-      color: var(--muted);
-    }
-    .terminal-badges {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: flex-start;
-    }
-    .signal-chip {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
+      padding: 8px 12px;
       border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      background: rgba(255, 255, 255, 0.04);
-      font-size: 0.84rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--line);
+      font-size: 0.82rem;
       font-weight: 700;
+    }
+    .grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .field {
+      display: grid;
+      gap: 8px;
+    }
+    label {
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    input {
+      width: 100%;
+      padding: 14px 15px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: var(--panel-soft);
       color: var(--text);
+      font: inherit;
+      outline: none;
     }
-    .signal-chip strong {
-      color: var(--accent-2);
+    input:focus {
+      border-color: rgba(87, 212, 163, 0.52);
+      box-shadow: 0 0 0 4px rgba(87, 212, 163, 0.12);
     }
-    @keyframes pulse {
-      0% { box-shadow: 0 0 0 0 rgba(72, 226, 174, 0.45); }
-      70% { box-shadow: 0 0 0 10px rgba(72, 226, 174, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(72, 226, 174, 0); }
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
     }
-    @media (max-width: 1100px) {
-      .terminal-strip { grid-template-columns: 1fr; }
-      .hero { grid-template-columns: 1fr; }
-      .hero-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 12px 16px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
     }
-	    @media (max-width: 840px) {
-	      .live-grid,
-	      .live-lists,
-	      .config-grid,
-	      .status-strip { grid-template-columns: 1fr; }
-      .topbar {
-        border-radius: 24px;
-        align-items: flex-start;
-        flex-direction: column;
-      }
-	      .topbar-status {
-	        justify-content: flex-start;
-	        width: 100%;
-	      }
-	      .hero-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-	      .panel-head,
-	      .footer-panel { flex-direction: column; align-items: start; }
-	      .config-actions {
-	        justify-content: stretch;
-	      }
-	      .toast {
-	        min-width: 0;
-	        max-width: 100%;
-	        width: 100%;
-	        text-align: left;
-	      }
-	    }
-	    @media (max-width: 640px) {
-	      body {
-	        padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
-	      }
-	      .shell { width: min(100% - 12px, 100%); margin: 6px auto 16px; gap: 12px; }
-	      .topbar {
-	        padding: 12px 14px;
-	        gap: 12px;
-	      }
-	      .brand {
-	        width: 100%;
-	      }
-	      .brand-mark {
-	        width: 36px;
-	        height: 36px;
-	        border-radius: 12px;
-	      }
-	      .brand-copy strong,
-	      .topbar-meta strong {
-	        font-size: 0.9rem;
-	      }
-	      .brand-copy span,
-	      .topbar-meta span {
-	        white-space: normal;
-	        overflow: visible;
-	        text-overflow: initial;
-	        line-height: 1.45;
-	      }
-	      .hero, .form-panel { padding: 16px; }
-	      .terminal-strip { padding: 16px; }
-	      .hero-copy h1 {
-	        font-size: clamp(1.8rem, 9vw, 2.5rem);
-	        max-width: none;
-	      }
-	      .hero-badges {
-	        gap: 8px;
-	      }
-	      .signal-chip {
-	        width: 100%;
-	        justify-content: space-between;
-	        border-radius: 14px;
-	      }
-	      .hero-metrics { grid-template-columns: 1fr; }
-	      .hero-actions { flex-direction: column; }
-	      .hero-actions > * {
-	        width: 100%;
-	      }
-	      .hero-actions form button,
-	      .btn { width: 100%; }
-	      .config-actions {
-	        bottom: max(8px, env(safe-area-inset-bottom, 0px));
-	        flex-direction: column;
-	        padding: 10px;
-	        border-radius: 16px;
-	      }
-	      .status-strip { padding: 16px; }
-	      .live-panel, .footer-panel { padding: 16px; }
-	      .metric-card,
-	      .live-card,
-	      .live-list,
-	      .section-card,
-	      .terminal-card,
-	      .status-item {
-	        padding: 14px;
-	      }
-	      .panel-head {
-	        gap: 10px;
-	        margin-bottom: 14px;
-	      }
-	      .config-legend {
-	        margin-bottom: 14px;
-	        align-items: flex-start;
-	      }
-	      .field-row { flex-direction: column; align-items: stretch; }
-	      .field-row input[type="checkbox"] { align-self: flex-start; }
-	      .live-table-head,
-	      .live-table-row {
-	        min-width: 0;
-	      }
-	      .live-table-head {
-	        display: none;
-	      }
-	      .live-table {
-	        overflow-x: visible;
-	      }
-	      .live-table-row {
-	        grid-template-columns: repeat(2, minmax(0, 1fr));
-	        padding: 10px;
-	        font-size: 0.82rem;
-	        word-break: break-word;
-	      }
-	      .live-table-row > div {
-	        min-width: 0;
-	      }
-	      .live-sparkline {
-	        height: 56px;
-	      }
-	    }
-	    @media (max-width: 420px) {
-	      .shell {
-	        width: min(100% - 10px, 100%);
-	      }
-	      .eyebrow {
-	        letter-spacing: 0.16em;
-	        font-size: 0.68rem;
-	      }
-	      .hero,
-	      .live-panel,
-	      .form-panel,
-	      .terminal-strip,
-	      .footer-panel,
-	      .status-strip {
-	        padding: 14px;
-	      }
-	      .live-table-row {
-	        grid-template-columns: 1fr;
-	      }
-	    }
-	  </style>
+    .primary {
+      background: linear-gradient(135deg, var(--accent), #8bf0cb);
+      color: #04130d;
+    }
+    .secondary {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+    .cards {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .card {
+      padding: 16px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid var(--line);
+    }
+    .card span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .card strong {
+      display: block;
+      margin-top: 10px;
+      font-size: 1.15rem;
+    }
+    .split {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1.2fr 0.8fr;
+    }
+    .list {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    }
+    .row:last-child { border-bottom: 0; padding-bottom: 0; }
+    .row span:first-child { color: var(--muted); }
+    .toast {
+      min-height: 20px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .toast.error { color: var(--danger); }
+    .toast.success { color: #98efcb; }
+    .mono { font-family: Consolas, "Cascadia Code", monospace; }
+    @media (max-width: 860px) {
+      .grid, .cards, .split { grid-template-columns: 1fr; }
+      .header { flex-direction: column; align-items: start; }
+    }
+  </style>
 </head>
 <body>
-  <div class="bg-orb bg-orb-a"></div>
-  <div class="bg-orb bg-orb-b"></div>
   <main class="shell">
-    <section class="topbar">
-      <div class="brand">
-        <div class="brand-mark">SB</div>
-        <div class="brand-copy">
-          <strong>Smart Bot Futures Grid</strong>
-          <span>Trading console untuk runtime, posisi, dan konfigurasi live</span>
-        </div>
-      </div>
-      <div class="topbar-status">
-        <div class="pulse-dot" aria-hidden="true"></div>
-        <div class="topbar-meta">
-          <strong id="topbarStatus">Connecting runtime...</strong>
-          <span id="topbarMeta">Memuat pair, mode, dan sinkronisasi bot</span>
-        </div>
-      </div>
-    </section>
-    <header class="hero panel">
-      <div class="hero-copy">
-        <p class="eyebrow">Smart Bot Control Center</p>
-        <div class="hero-badges">
-          <span class="signal-chip">Strategy <strong>futures_grid</strong></span>
-          <span class="signal-chip">Exchange <strong>Binance USDT-M</strong></span>
-          <span class="signal-chip">Mode <strong id="heroMode">Syncing...</strong></span>
-        </div>
-        <div class="hero-actions">
-          <button id="refreshBtn" class="btn btn-secondary" type="button">Muat ulang</button>
-          <button id="resetBtn" class="btn btn-danger" type="button">Reset default</button>
-          <form action="/logout" method="post" style="margin:0">
-            <button class="btn btn-secondary" type="submit">Logout</button>
-          </form>
-        </div>
-      </div>
-      <div class="hero-metrics" id="statusCards"></div>
-    </header>
-
-    <section class="panel status-strip">
-      <div class="status-item"><span class="status-label">Status bot</span><strong id="botStatus">Memuat...</strong></div>
-      <div class="status-item"><span class="status-label">Pair aktif</span><strong id="pairStatus">-</strong></div>
-      <div class="status-item"><span class="status-label">Mode margin</span><strong id="marginStatus">-</strong></div>
-      <div class="status-item"><span class="status-label">Terakhir update</span><strong id="updatedStatus">-</strong></div>
-    </section>
-
-    <section class="panel terminal-strip">
-      <article class="terminal-card">
-        <h3>Runtime Feed</h3>
-        <div class="terminal-log">
-          <div><span>&gt;</span> Pair aktif: <strong id="runtimePair">-</strong></div>
-          <div><span>&gt;</span> Engine status: <strong id="runtimeEngine">Memuat...</strong></div>
-          <div><span>&gt;</span> Posisi lokal: <strong id="runtimePositions">-</strong></div>
-          <div><span>&gt;</span> Daily trades: <strong id="runtimeTrades">-</strong></div>
-        </div>
-      </article>
-      <article class="terminal-card">
-        <h3>Bot Signals</h3>
-        <div class="terminal-badges">
-          <span class="signal-chip">Leverage <strong id="signalLeverage">-</strong></span>
-          <span class="signal-chip">Position mode <strong id="signalPositionMode">-</strong></span>
-          <span class="signal-chip">Grid state <strong id="signalGridState">-</strong></span>
-          <span class="signal-chip">Exchange <strong id="signalExchange">-</strong></span>
-        </div>
-      </article>
-    </section>
-
-    <section class="panel live-panel">
-      <div class="panel-head">
+    <section class="panel">
+      <div class="header">
         <div>
-          <p class="eyebrow">Live Status</p>
-          <h2>Posisi, PnL, dan Order</h2>
+          <h1>Binance-Style Grid Bot</h1>
+          <p class="muted">Only set pair, per-order margin, and leverage. Price range, grid count, take profit, stop loss, and ladder depth are derived automatically from live volatility.</p>
         </div>
-        <p class="muted">Diperbarui otomatis dari runtime bot.</p>
-      </div>
-      <div class="live-grid">
-        <article class="live-card">
-          <span class="label">Posisi aktif</span>
-          <strong id="livePositionsCount">-</strong>
-          <span id="livePositionsMeta">Memuat data posisi...</span>
-        </article>
-        <article class="live-card">
-          <span class="label">PnL harian</span>
-          <strong id="livePnlValue">-</strong>
-          <span id="livePnlMeta">-</span>
-          <canvas id="livePnlTrend" class="live-sparkline" width="320" height="72" aria-label="PnL trend mini chart"></canvas>
-        </article>
-        <article class="live-card">
-          <span class="label">Order terbuka</span>
-          <strong id="liveOrdersCount">-</strong>
-          <span id="liveOrdersMeta">Memuat data order...</span>
-        </article>
-      </div>
-      <div class="live-lists">
-        <section class="live-list">
-          <h3>Detail posisi</h3>
-          <div id="livePositionsList" class="live-items"></div>
-        </section>
-        <section class="live-list">
-          <h3>Ringkasan order</h3>
-          <div id="liveOrdersList" class="live-items"></div>
-        </section>
-      </div>
-    </section>
-	    <section class="panel form-panel">
-	      <div class="panel-head">
-	        <div>
-	          <p class="eyebrow">Konfigurasi</p>
-	          <h2>Parameter trading</h2>
-	        </div>
-	        <p class="muted">Semua field di bawah akan divalidasi kembali di sisi server sebelum disimpan.</p>
-	      </div>
-	      <div class="config-legend">
-	        <span class="field-badge">AUTO 0</span>
-	        <span>Isi `0` untuk mode otomatis.</span>
-	        <span class="field-badge toggle">AUTO TOGGLE</span>
-	        <span>Aktifkan switch untuk mode otomatis.</span>
-	      </div>
-	      <form id="configForm" class="config-grid"></form>
-	      <div class="config-actions">
-	        <button id="saveBtn" class="btn btn-primary" type="button">Simpan konfigurasi</button>
+        <div class="pill" id="runtimePill">Loading</div>
       </div>
     </section>
 
-    <section class="panel footer-panel">
-      <div>
-        <p class="eyebrow">Catatan</p>
-        <p class="muted">Dashboard ini fokus ke konfigurasi. Status posisi aktif dan nilai harian tetap dibaca dari runtime bot.</p>
+    <section class="panel">
+      <div class="grid" id="form"></div>
+      <div class="actions">
+        <button class="primary" id="saveBtn" type="button">Save Strategy</button>
+        <button class="secondary" id="refreshBtn" type="button">Refresh</button>
       </div>
-      <div id="toast" class="toast" aria-live="polite"></div>
+      <div class="toast" id="toast"></div>
+    </section>
+
+    <section class="cards" id="headlineCards"></section>
+
+    <section class="split">
+      <article class="panel">
+        <h2>Auto Parameters</h2>
+        <p class="muted">Live runtime preview of the derived grid model.</p>
+        <div class="list" id="autoGridList"></div>
+      </article>
+      <article class="panel">
+        <h2>Runtime</h2>
+        <p class="muted">Current bot and exchange state.</p>
+        <div class="list" id="runtimeList"></div>
+      </article>
     </section>
   </main>
 
   <script>
-    const SECTION_ORDER = ["General", "Risk", "Grid", "Session", "Trailing", "Direction"];
-    const state = { config: null, defaults: null, schema: [], status: null, serverTime: 0 };
-    let formDirty = false;
-    let autoRefreshTimer = null;
-    let liveRefreshTimer = null;
-    const pnlHistory = [];
-    const MAX_PNL_HISTORY = 24;
-    const form = document.getElementById("configForm");
+    const state = { config: {}, schema: [], status: {}, live: {} };
+    const form = document.getElementById("form");
     const toast = document.getElementById("toast");
+    const runtimePill = document.getElementById("runtimePill");
+    const headlineCards = document.getElementById("headlineCards");
+    const autoGridList = document.getElementById("autoGridList");
+    const runtimeList = document.getElementById("runtimeList");
     const saveBtn = document.getElementById("saveBtn");
     const refreshBtn = document.getElementById("refreshBtn");
-    const resetBtn = document.getElementById("resetBtn");
-    const statusCards = document.getElementById("statusCards");
-    const botStatus = document.getElementById("botStatus");
-    const pairStatus = document.getElementById("pairStatus");
-    const marginStatus = document.getElementById("marginStatus");
-    const updatedStatus = document.getElementById("updatedStatus");
-    const topbarStatus = document.getElementById("topbarStatus");
-    const topbarMeta = document.getElementById("topbarMeta");
-    const heroMode = document.getElementById("heroMode");
-    const runtimePair = document.getElementById("runtimePair");
-    const runtimeEngine = document.getElementById("runtimeEngine");
-    const runtimePositions = document.getElementById("runtimePositions");
-    const runtimeTrades = document.getElementById("runtimeTrades");
-    const signalLeverage = document.getElementById("signalLeverage");
-    const signalPositionMode = document.getElementById("signalPositionMode");
-    const signalGridState = document.getElementById("signalGridState");
-    const signalExchange = document.getElementById("signalExchange");
-    const livePositionsCount = document.getElementById("livePositionsCount");
-    const livePositionsMeta = document.getElementById("livePositionsMeta");
-    const livePnlValue = document.getElementById("livePnlValue");
-    const livePnlMeta = document.getElementById("livePnlMeta");
-    const liveOrdersCount = document.getElementById("liveOrdersCount");
-    const liveOrdersMeta = document.getElementById("liveOrdersMeta");
-    const livePositionsList = document.getElementById("livePositionsList");
-    const liveOrdersList = document.getElementById("liveOrdersList");
-    const livePnlTrend = document.getElementById("livePnlTrend");
 
-	    const SECTION_LABELS = {
-	      General: "General",
-	      Risk: "Risk Management",
-	      Grid: "Grid Engine",
-	      Session: "Session & Filters",
-	      Trailing: "Trailing Stop",
-	      Direction: "Direction Control"
-	    };
-	
-	    const AUTO_MODE_META = {
-	      gridOrderSizeUsdt: { label: "AUTO 0", hint: "0 = ukuran order dihitung otomatis oleh bot." },
-	      gridLevels: { label: "AUTO 0", hint: "0 = jumlah level dihitung otomatis." },
-	      gridRangePercent: { label: "AUTO 0", hint: "0 = range grid dihitung otomatis." },
-	      gridEntryBufferPercent: { label: "AUTO 0", hint: "0 = buffer entry dihitung otomatis." },
-	      gridTakeProfitLevels: { label: "AUTO 0", hint: "0 = TP otomatis mengikuti grid berikutnya." },
-	      gridOrdersPerSide: { label: "AUTO 0", hint: "0 = jumlah order per sisi dihitung otomatis." },
-	      gridStopLossLevels: { label: "AUTO 0", hint: "0 = SL grid dihitung otomatis." },
-	      autoTargetProfitEnabled: { label: "AUTO TOGGLE", hint: "Aktif = target profit memakai mode ATR otomatis.", className: "toggle" },
-	      autoStopLossEnabled: { label: "AUTO TOGGLE", hint: "Aktif = stop loss memakai mode ATR otomatis.", className: "toggle" }
-	    };
-	
-	    function getFieldHint(field) {
-	      const base = field.description || "";
-	      const autoHint = AUTO_MODE_META[field.key] ? AUTO_MODE_META[field.key].hint : "";
-	      if (base && autoHint) return `${base} ${autoHint}`;
-	      return autoHint || base;
-	    }
-
-	    function setBusy(busy) {
-	      saveBtn.disabled = busy;
-      refreshBtn.disabled = busy;
-      resetBtn.disabled = busy;
+    async function api(url, options = {}) {
+      const response = await fetch(url, {
+        headers: { "content-type": "application/json", ...(options.headers || {}) },
+        ...options
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || response.statusText || "Request failed");
+      }
+      return response.json();
     }
 
     function showToast(message, type = "info") {
-      toast.className = `toast ${type}`;
       toast.textContent = message;
-      if (showToast.timer) clearTimeout(showToast.timer);
-      showToast.timer = setTimeout(() => {
-        if (toast.textContent === message) {
-          toast.className = "toast";
-          toast.textContent = "";
-        }
-      }, 4200);
+      toast.className = `toast ${type}`;
     }
 
-    function formatNumber(value) {
-      if (value === null || value === undefined || value === "") return "-";
-      const num = Number(value);
-      if (!Number.isFinite(num)) return String(value);
-      if (Math.abs(num) >= 1000) return num.toLocaleString("en-US");
-      if (Number.isInteger(num)) return String(num);
-      return num.toFixed(2).replace(/\.00$/, "");
+    function formatNumber(value, digits = 4) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return "-";
+      return numeric.toFixed(digits).replace(/\.?0+$/, "");
     }
 
-    function formatDateTime(value) {
-      const ts = Number(value);
-      if (!Number.isFinite(ts) || ts <= 0) return "-";
-      return new Date(ts).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+    function setRuntimePill(status) {
+      const running = Boolean(status?.botRunning);
+      const exchange = Boolean(status?.exchangeConnected);
+      runtimePill.textContent = running ? (exchange ? "Runtime Active" : "Runtime Waiting") : "Runtime Idle";
     }
 
-    function formatPill(status) {
-      if (typeof status !== "string") return "pill";
-      const lower = status.toLowerCase();
-      if (lower.includes("running") || lower.includes("ready") || lower.includes("ok")) return "pill ok";
-      if (lower.includes("syncing") || lower.includes("recovery")) return "pill info";
-      if (lower.includes("warn") || lower.includes("pause")) return "pill warn";
-      if (lower.includes("error") || lower.includes("off")) return "pill bad";
-      return "pill";
-    }
-
-    function getRuntimeStatusSummary(status) {
-      const botRunning = Boolean(status.botRunning);
-      const exchangeConnected = Boolean(status.exchangeConnected);
-      const exchangeHealthy = Boolean(status.exchangeHealthy);
-      const needsRecoverySync = Boolean(status.needsRecoverySync);
-      if (!botRunning) {
-        return {
-          label: "Stopped",
-          description: exchangeConnected ? "Runtime berhenti, exchange masih terhubung." : "Runtime berhenti dan exchange tidak terhubung."
-        };
-      }
-      if (!exchangeConnected) {
-        return {
-          label: "Exchange Offline",
-          description: "Bot aktif tetapi koneksi exchange belum tersedia."
-        };
-      }
-      if (needsRecoverySync) {
-        return {
-          label: "Recovery Sync",
-          description: status.exchangeRecoveryReason || "Bot menunda entry baru sampai recovery sync berhasil."
-        };
-      }
-      if (!exchangeHealthy) {
-        return {
-          label: "Degraded",
-          description: status.exchangeRecoveryReason || "Exchange sedang bermasalah. Runtime tetap diawasi."
-        };
-      }
-      return {
-        label: "Running",
-        description: "Runtime aktif dan exchange siap menerima siklus berikutnya."
-      };
-    }
-
-    function api(path, options = {}) {
-      return fetch(path, {
-        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-        ...options
-      }).then(async (res) => {
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 401) { location.href = "/login"; throw new Error("Sesi login habis. Silakan masuk lagi."); }
-        if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
-        return data;
-      });
-    }
-
-    function renderMetrics(status) {
-      const botRunning = Boolean(status.botRunning);
-      const exchangeConnected = Boolean(status.exchangeConnected);
-      const exchangeHealthy = Boolean(status.exchangeHealthy);
-      const needsRecoverySync = Boolean(status.needsRecoverySync);
-      const gridState = status.activeGridState ? "Active" : "Idle";
-      const leverageValue = Number.isFinite(Number(status.leverage)) ? `${formatNumber(status.leverage)}x` : "-";
-      const positionModeValue = status.positionMode || "-";
-      const marginModeValue = String(status.marginMode || "-").toUpperCase();
-      const runtimeStatus = getRuntimeStatusSummary(status);
-      const exchangeLabel = !exchangeConnected
-        ? "Offline"
-        : (needsRecoverySync ? "Recovery sync" : (exchangeHealthy ? "Healthy" : "Degraded"));
-      const cards = [
-        { label: "Bot", value: runtimeStatus.label, note: runtimeStatus.description },
-        { label: "Positions", value: String(status.activePositions), note: status.activeGridState ? "Grid state active" : "No local grid state" },
-        { label: "Daily PnL", value: `${formatNumber(status.dailyPnL)} USDT`, note: `${status.dailyTrades} trades today | ${String(status.dailyPnlSource || "local").toLowerCase()}` },
-        { label: "Leverage", value: leverageValue, note: `${marginModeValue} | ${positionModeValue}` }
-      ];
-      statusCards.innerHTML = cards.map((card) => `
-        <article class="metric-card">
-          <span class="label">${card.label}</span>
-          <strong>${card.value}</strong>
-          <span>${card.note}</span>
-        </article>
-      `).join("");
-      botStatus.textContent = runtimeStatus.label;
-      botStatus.className = formatPill(runtimeStatus.label);
-      pairStatus.textContent = status.pair || "-";
-      marginStatus.textContent = `${marginModeValue} / ${positionModeValue}`;
-      updatedStatus.textContent = formatDateTime(status.lastUpdated);
-      topbarStatus.textContent = runtimeStatus.label === "Running" ? "Runtime bot aktif" : runtimeStatus.label;
-      topbarMeta.textContent = `${status.pair || "-"} | ${marginModeValue} | ${exchangeLabel}${status.exchangeRecoveryReason ? ` | ${status.exchangeRecoveryReason}` : ""}`;
-      heroMode.textContent = `${marginModeValue} / ${positionModeValue}`;
-      runtimePair.textContent = status.pair || "-";
-      runtimeEngine.textContent = runtimeStatus.label;
-      runtimeEngine.className = formatPill(runtimeStatus.label);
-      runtimePositions.textContent = String(status.activePositions ?? "-");
-      runtimeTrades.textContent = String(status.dailyTrades ?? "-");
-      signalLeverage.textContent = leverageValue;
-      signalPositionMode.textContent = positionModeValue;
-      signalGridState.textContent = gridState;
-      signalExchange.textContent = exchangeLabel;
-    }
-
-
-    function formatLiveCurrency(value) {
-      if (value === null || value === undefined || value === "") return "-";
-      const num = Number(value);
-      if (!Number.isFinite(num)) return String(value);
-      const prefix = num > 0 ? "+" : "";
-      return prefix + num.toFixed(4).replace(/\.0000$/, "");
-    }
-
-    function pushPnlHistory(value) {
-      const num = Number(value);
-      if (!Number.isFinite(num)) return;
-      pnlHistory.push(num);
-      if (pnlHistory.length > MAX_PNL_HISTORY) pnlHistory.shift();
-    }
-
-    function renderPnlSparkline() {
-      if (!livePnlTrend) return;
-      const ctx = livePnlTrend.getContext("2d");
-      if (!ctx) return;
-      const dpr = window.devicePixelRatio || 1;
-      const displayWidth = livePnlTrend.clientWidth || 320;
-      const displayHeight = 72;
-      livePnlTrend.width = Math.max(1, Math.floor(displayWidth * dpr));
-      livePnlTrend.height = Math.max(1, Math.floor(displayHeight * dpr));
-      ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, displayWidth, displayHeight);
-      ctx.fillStyle = "rgba(255,255,255,0.03)";
-      ctx.fillRect(0, 0, displayWidth, displayHeight);
-
-      if (pnlHistory.length < 2) {
-        ctx.strokeStyle = "rgba(154,242,204,0.5)";
-        ctx.beginPath();
-        ctx.moveTo(10, displayHeight / 2);
-        ctx.lineTo(displayWidth - 10, displayHeight / 2);
-        ctx.stroke();
-        return;
-      }
-
-      const min = Math.min(...pnlHistory);
-      const max = Math.max(...pnlHistory);
-      const span = Math.max(Math.abs(max - min), 0.0001);
-      const paddingX = 8;
-      const paddingY = 10;
-      const usableWidth = displayWidth - (paddingX * 2);
-      const usableHeight = displayHeight - (paddingY * 2);
-      const stepX = usableWidth / Math.max(1, pnlHistory.length - 1);
-      const baseY = displayHeight - paddingY;
-      const strokeColor = pnlHistory[pnlHistory.length - 1] >= 0 ? "rgba(32,201,151,0.95)" : "rgba(255,107,107,0.95)";
-      const fillColor = pnlHistory[pnlHistory.length - 1] >= 0 ? "rgba(32,201,151,0.12)" : "rgba(255,107,107,0.12)";
-
-      ctx.beginPath();
-      pnlHistory.forEach((value, index) => {
-        const x = paddingX + (index * stepX);
-        const normalized = (value - min) / span;
-        const y = baseY - (normalized * usableHeight);
-        if (index === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-
-      ctx.lineTo(displayWidth - paddingX, baseY);
-      ctx.lineTo(paddingX, baseY);
-      ctx.closePath();
-      ctx.fillStyle = fillColor;
-      ctx.fill();
-
-      ctx.beginPath();
-      pnlHistory.forEach((value, index) => {
-        const x = paddingX + (index * stepX);
-        const normalized = (value - min) / span;
-        const y = baseY - (normalized * usableHeight);
-        if (index === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      const zeroValueVisible = min <= 0 && max >= 0;
-      if (zeroValueVisible) {
-        const zeroY = baseY - ((0 - min) / span) * usableHeight;
-        ctx.strokeStyle = "rgba(255,255,255,0.12)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(paddingX, zeroY);
-        ctx.lineTo(displayWidth - paddingX, zeroY);
-        ctx.stroke();
-      }
-    }
-
-    function sideBadgeClass(value) {
-      const side = String(value || "").toLowerCase();
-      if (side === "buy" || side === "long") return "side-badge buy";
-      if (side === "sell" || side === "short") return "side-badge sell";
-      return "side-badge flat";
-    }
-
-    function renderLiveStatus(data) {
-      if (!data || data.ok === false) return;
-      const positions = Array.isArray(data.activePositions) ? data.activePositions : [];
-      const openOrders = data.openOrders || { grid: [], tp: [], sl: [] };
-      const orderCounts = data.orderCounts || { grid: 0, tp: 0, sl: 0, total: 0 };
-      const dailyPnl = Number(data.dailyPnL || 0);
-      const exchangeConnected = Boolean(data.exchangeConnected);
-      const exchangeHealthy = Boolean(data.exchangeHealthy);
-      const needsRecoverySync = Boolean(data.needsRecoverySync);
-      const exchangeLabel = !exchangeConnected
-        ? "exchange offline"
-        : (needsRecoverySync ? "recovery sync" : (exchangeHealthy ? "exchange healthy" : "exchange degraded"));
-      const recoverySuffix = data.exchangeRecoveryReason ? ` | ${data.exchangeRecoveryReason}` : "";
-
-      pushPnlHistory(dailyPnl);
-      renderPnlSparkline();
-
-      livePositionsCount.textContent = String(positions.length);
-      livePositionsMeta.textContent = data.exchangePositionsCount + " exchange position(s) | " + String(data.positionMode || "-").toUpperCase() + " | " + exchangeLabel + recoverySuffix;
-      livePnlValue.textContent = formatLiveCurrency(dailyPnl) + " USDT";
-      livePnlValue.className = "live-amount " + (dailyPnl > 0 ? "positive" : (dailyPnl < 0 ? "negative" : "neutral"));
-      const pnlSource = String(data.dailyPnlSource || "local").toLowerCase();
-      livePnlMeta.textContent = String(data.dailyTrades || 0) + " trade(s) today | source: " + pnlSource;
-      liveOrdersCount.textContent = String(orderCounts.total || 0);
-      liveOrdersMeta.textContent = (orderCounts.grid || 0) + " grid | " + (orderCounts.tp || 0) + " TP | " + (orderCounts.sl || 0) + " SL" + (data.triggerOrdersFetchFailed ? " | trigger snapshot fallback" : "");
-
-      livePositionsList.innerHTML = "";
-      if (positions.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "live-empty";
-        empty.textContent = "Belum ada posisi aktif.";
-        livePositionsList.appendChild(empty);
-      } else {
-        positions.slice(0, 4).forEach((position) => {
-          const item = document.createElement("div");
-          const pnlValue = Number(position.pnlUSDT || 0);
-          item.className = "live-item " + (pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral"));
-          const pnlSign = pnlValue >= 0 ? "+" : "";
-          item.innerHTML = '<strong>' + String(position.key || position.side || "POSITION") + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
-            '<span>Qty ' + formatNumber(position.quantity) + ' | Entry ' + formatNumber(position.entryPrice) + ' | Mark ' + formatNumber(position.currentPrice) + '</span>' +
-            '<span>PnL ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span>' +
-            '<span>TP ' + formatNumber(position.targetPrice) + ' | SL ' + formatNumber(position.stopLossPrice) + '</span>';
-          livePositionsList.appendChild(item);
-        });
-      }
-
-      liveOrdersList.innerHTML = "";
-      const groups = [
-        { label: 'Grid', list: openOrders.grid || [] },
-        { label: 'TP', list: openOrders.tp || [] },
-        { label: 'SL', list: openOrders.sl || [] }
-      ];
-      const hasOrders = groups.some((group) => group.list.length > 0);
-      if (!hasOrders) {
-        const empty = document.createElement("div");
-        empty.className = "live-empty";
-        empty.textContent = "Belum ada order terbuka.";
-        liveOrdersList.appendChild(empty);
-      } else {
-        groups.forEach((group) => {
-          const wrapper = document.createElement("div");
-          wrapper.className = "live-item neutral";
-          const rows = group.list.slice(0, 4).map((order) => {
-            const side = String(order.side || order.positionSide || '-').toUpperCase();
-            const badgeClass = sideBadgeClass(order.side || order.positionSide);
-            const price = order.price === null || order.price === undefined ? '-' : formatNumber(order.price);
-            const amount = order.amount === null || order.amount === undefined ? '-' : formatNumber(order.amount);
-            const refId = order.clientOrderId || order.id || 'order';
-            const trigger = order.triggerPrice === null || order.triggerPrice === undefined ? '-' : formatNumber(order.triggerPrice);
-            return '<div class="live-table-row"><div>' + refId + '</div><div><span class="' + badgeClass + '">' + side + '</span></div><div>' + price + '</div><div>' + amount + '</div></div>' +
-              '<div class="live-table-row" style="margin-top:6px; grid-template-columns: 1fr 1fr 1fr 1fr; font-size:0.8rem; color: var(--muted);">' +
-              '<div>Type: ' + String(order.type || '-') + '</div><div>Pos: ' + String(order.positionSide || '-') + '</div><div>Trig: ' + trigger + '</div><div>RO: ' + String(Boolean(order.reduceOnly)) + '</div></div>';
-          }).join('');
-          wrapper.innerHTML = '<strong>' + group.label + ' (' + group.list.length + ')</strong><div class="live-table"><div class="live-table-head"><div>Order</div><div>Side</div><div>Price</div><div>Qty</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
-          liveOrdersList.appendChild(wrapper);
-        });
-      }
-    }
-
-    function sectionList(schema) {
-      const map = new Map();
-      for (const field of schema) {
-        const section = field.section || "General";
-        if (!map.has(section)) map.set(section, []);
-        map.get(section).push(field);
-      }
-      const ordered = [];
-      for (const section of SECTION_ORDER) if (map.has(section)) ordered.push([section, map.get(section)]);
-      for (const entry of map.entries()) if (!SECTION_ORDER.includes(entry[0])) ordered.push(entry);
-      return ordered;
-    }
-
-	    function createField(field, value) {
-	      const wrapper = document.createElement("div");
-	      wrapper.className = "field";
-	      const labelRow = document.createElement("div");
-	      labelRow.className = "field-label";
-	      const label = document.createElement("label");
-	      label.textContent = field.label || field.key;
-	      label.htmlFor = field.key;
-	      labelRow.appendChild(label);
-	      if (AUTO_MODE_META[field.key]) {
-	        const badge = document.createElement("span");
-	        badge.className = `field-badge${AUTO_MODE_META[field.key].className ? ` ${AUTO_MODE_META[field.key].className}` : ""}`;
-	        badge.textContent = AUTO_MODE_META[field.key].label;
-	        labelRow.appendChild(badge);
-	      }
-	      wrapper.appendChild(labelRow);
-
-	      if (field.type === "boolean") {
-	        const row = document.createElement("div");
-	        row.className = "field-row";
-	        const hint = document.createElement("span");
-	        hint.className = "field-hint";
-	        hint.textContent = getFieldHint(field);
-	        const toggle = document.createElement("input");
-	        toggle.type = "checkbox";
-	        toggle.id = field.key;
-        toggle.name = field.key;
-        toggle.checked = Boolean(value);
-        row.appendChild(hint);
-        row.appendChild(toggle);
-        wrapper.appendChild(row);
-        return wrapper;
-      }
-
-      let input;
-      if (field.type === "select") {
-        input = document.createElement("select");
-        for (const optionValue of field.options || []) {
-          const option = document.createElement("option");
-          option.value = optionValue;
-          option.textContent = optionValue;
-          input.appendChild(option);
-        }
-      } else {
-        input = document.createElement("input");
-        input.type = field.type === "number" ? "number" : "text";
-        if (field.step !== undefined) input.step = field.step;
-        if (field.min !== undefined) input.min = field.min;
-        if (field.max !== undefined) input.max = field.max;
-        if (field.placeholder) input.placeholder = field.placeholder;
-      }
-
-      input.className = "field-control";
-      input.id = field.key;
-      input.name = field.key;
-      input.value = value === null || value === undefined ? "" : String(value);
-      if (field.type === "number") {
-        input.inputMode = Number(field.step) === 1 ? "numeric" : "decimal";
-	      }
-	      const note = document.createElement("div");
-	      note.className = "field-note";
-	      note.textContent = getFieldHint(field);
-	      wrapper.appendChild(input);
-	      wrapper.appendChild(note);
-	      return wrapper;
-	    }
-
-    function renderForm(config, schema) {
+    function renderForm() {
       form.innerHTML = "";
-      const sections = sectionList(schema);
-      for (const [sectionName, fields] of sections) {
-        const card = document.createElement("section");
-        card.className = "section-card";
-        const title = document.createElement("h3");
-        title.textContent = SECTION_LABELS[sectionName] || sectionName;
-        card.appendChild(title);
-        const list = document.createElement("div");
-        list.className = "field-list";
-        for (const field of fields) {
-          const value = Object.prototype.hasOwnProperty.call(config, field.key) ? config[field.key] : "";
-          list.appendChild(createField(field, value));
-        }
-        card.appendChild(list);
-        form.appendChild(card);
-      }
-      formDirty = false;
+      state.schema.forEach((field) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "field";
+        const label = document.createElement("label");
+        label.htmlFor = field.key;
+        label.textContent = field.label;
+        const input = document.createElement("input");
+        input.id = field.key;
+        input.name = field.key;
+        input.type = field.type === "number" ? "number" : "text";
+        input.placeholder = field.placeholder || "";
+        if (field.min !== undefined) input.min = field.min;
+        if (field.step !== undefined) input.step = field.step;
+        input.value = state.config[field.key] ?? "";
+        wrapper.appendChild(label);
+        wrapper.appendChild(input);
+        form.appendChild(wrapper);
+      });
     }
 
-    function collectConfig() {
+    function collectPayload() {
       const payload = {};
-      for (const field of state.schema) {
-        const el = form.elements[field.key];
-        if (!el) continue;
-        if (field.type === "boolean") {
-          payload[field.key] = el.checked;
-        } else if (field.type === "number") {
-          payload[field.key] = el.value === "" ? "" : Number(el.value);
-        } else {
-          payload[field.key] = el.value;
-        }
-      }
+      state.schema.forEach((field) => {
+        const element = form.querySelector(`#${field.key}`);
+        if (!element) return;
+        payload[field.key] = field.type === "number" ? Number(element.value) : element.value.trim();
+      });
       return payload;
     }
 
-    function applyPayload(payload) {
-      state.config = payload.config || payload;
-      state.defaults = payload.defaults || state.defaults;
-      state.schema = payload.schema || state.schema;
-      state.status = payload.status || state.status;
-      state.serverTime = payload.serverTime || Date.now();
-      renderMetrics(state.status || {});
-      renderForm(state.config, state.schema);
-      formDirty = false;
+    function renderHeadlineCards() {
+      const live = state.live || {};
+      const autoGrid = live.autoGrid || {};
+      const cards = [
+        { label: "Pair", value: state.config.pair || "-" },
+        { label: "Order", value: `${formatNumber(state.config.gridOrderSizeUsdt, 2)} USDT` },
+        { label: "Leverage", value: `${formatNumber(state.config.leverage, 0)}x` },
+        { label: "Volatility", value: autoGrid.volatilityScore !== undefined && autoGrid.volatilityScore !== null ? formatNumber(autoGrid.volatilityScore, 3) : "-" }
+      ];
+      headlineCards.innerHTML = cards.map((card) => `
+        <div class="card">
+          <span>${card.label}</span>
+          <strong>${card.value}</strong>
+        </div>
+      `).join("");
     }
 
-    async function loadDashboard(silent = false, preserveEdits = false) {
-      if (!silent) setBusy(true);
+    function renderAutoGrid() {
+      const autoGrid = state.live?.autoGrid || null;
+      if (!autoGrid) {
+        autoGridList.innerHTML = '<div class="row"><span>Preview</span><strong>-</strong></div>';
+        return;
+      }
+
+      const rows = [
+        ["Range", `${formatNumber(autoGrid.lowerBound)} to ${formatNumber(autoGrid.upperBound)}`],
+        ["Range Width", `${formatNumber(autoGrid.rangePercent, 2)}%`],
+        ["Grid Number", String(autoGrid.gridLevels ?? "-")],
+        ["Grid Step", Number.isFinite(Number(autoGrid.step)) ? formatNumber(autoGrid.step) : "-"],
+        ["Take Profit", `${formatNumber(autoGrid.takeProfitLevels, 0)} level`],
+        ["Stop Loss", `${formatNumber(autoGrid.stopLossLevels, 2)} levels | ${formatNumber(autoGrid.stopLossPercent, 2)}%`],
+        ["Orders Per Side", String(autoGrid.ordersPerSide ?? "-")],
+        ["ATR / Realized Vol", `${formatNumber(autoGrid.normalizedAtrPercent, 3)}% / ${formatNumber(autoGrid.realizedVolPercent, 3)}%`],
+        ["Swing / Efficiency", `${formatNumber(autoGrid.swingPercent, 2)}% / ${formatNumber(autoGrid.efficiencyRatio, 3)}`],
+        ["Capital Share", `${formatNumber((autoGrid.capitalShare || 0) * 100, 2)}% of free USDT`]
+      ];
+      autoGridList.innerHTML = rows.map(([label, value]) => `<div class="row"><span>${label}</span><strong class="${label === "Range" ? "mono" : ""}">${value}</strong></div>`).join("");
+    }
+
+    function renderRuntime() {
+      const live = state.live || {};
+      const rows = [
+        ["Bot", live.botRunning ? "Running" : "Stopped"],
+        ["Exchange", live.exchangeConnected ? (live.exchangeHealthy ? "Healthy" : "Degraded") : "Offline"],
+        ["Position Mode", live.positionMode || "-"],
+        ["Active Positions", String((live.activePositions || []).length)],
+        ["Grid Orders", String(live.orderCounts?.grid || 0)],
+        ["TP / SL Orders", `${String(live.orderCounts?.tp || 0)} / ${String(live.orderCounts?.sl || 0)}`],
+        ["Daily PnL", `${formatNumber(live.dailyPnL, 4)} USDT`],
+        ["Market Price", formatNumber(live.currentPrice)],
+        ["Available USDT", live.autoGrid ? formatNumber(live.autoGrid.availableUsdt, 2) : "-"]
+      ];
+      runtimeList.innerHTML = rows.map(([label, value]) => `<div class="row"><span>${label}</span><strong>${value}</strong></div>`).join("");
+    }
+
+    async function loadConfig(silent = false) {
       try {
-        const data = await api("/api/config");
-        if (preserveEdits && formDirty) {
-          state.status = data.status || state.status;
-          state.serverTime = data.serverTime || Date.now();
-          renderMetrics(state.status || {});
-        } else {
-          applyPayload(data);
-        }
-        await loadLiveStatus(true);
-        if (!silent) showToast("Konfigurasi berhasil dimuat", "success");
+        const payload = await api("/api/config");
+        state.config = payload.config || {};
+        state.schema = payload.schema || [];
+        state.status = payload.status || {};
+        renderForm();
+        setRuntimePill(state.status);
+        renderHeadlineCards();
+        if (!silent) showToast("Configuration loaded", "success");
       } catch (error) {
-        showToast(error.message || "Gagal memuat konfigurasi", "error");
-      } finally {
-        if (!silent) setBusy(false);
+        showToast(error.message || "Failed to load configuration", "error");
       }
     }
 
-    async function saveDashboard() {
-      setBusy(true);
+    async function loadStatus(silent = false) {
       try {
-        const data = await api("/api/config", { method: "PUT", body: JSON.stringify({ config: collectConfig() }) });
-        applyPayload(data);
-        await loadLiveStatus(true);
-        showToast(data.message || "Konfigurasi tersimpan", "success");
+        state.live = await api("/api/status");
+        setRuntimePill(state.live);
+        renderHeadlineCards();
+        renderAutoGrid();
+        renderRuntime();
+        if (!silent) showToast("Live status updated", "success");
       } catch (error) {
-        showToast(error.message || "Gagal menyimpan konfigurasi", "error");
-      } finally {
-        setBusy(false);
+        showToast(error.message || "Failed to load live status", "error");
       }
     }
 
-    async function resetDashboard() {
-      const ok = confirm("Reset konfigurasi ke default? Perubahan yang belum disimpan akan hilang.");
-      if (!ok) return;
-      setBusy(true);
+    async function saveConfig() {
       try {
-        const data = await api("/api/config/reset", { method: "POST" });
-        applyPayload(data);
-        await loadDashboard(true);
-        showToast(data.message || "Konfigurasi direset", "success");
+        const payload = collectPayload();
+        const result = await api("/api/config", {
+          method: "PUT",
+          body: JSON.stringify({ config: payload })
+        });
+        state.config = result.config || payload;
+        state.schema = result.schema || state.schema;
+        state.status = result.status || state.status;
+        renderForm();
+        await loadStatus(true);
+        showToast("Strategy updated", "success");
       } catch (error) {
-        showToast(error.message || "Gagal reset konfigurasi", "error");
-      } finally {
-        setBusy(false);
+        showToast(error.message || "Failed to save strategy", "error");
       }
     }
 
-    async function loadLiveStatus(silent = false) {
-      try {
-        const data = await api("/api/status");
-        renderLiveStatus(data);
-      } catch (error) {
-        if (!silent) showToast(error.message || "Gagal memuat status live", "error");
-      }
-    }
-
-    function startLiveRefresh() {
-      if (liveRefreshTimer) clearInterval(liveRefreshTimer);
-      liveRefreshTimer = setInterval(() => {
-        if (document.visibilityState !== "visible") return;
-        loadLiveStatus(true);
-      }, 5000);
-    }
-
-    window.addEventListener("resize", () => {
-      renderPnlSparkline();
+    saveBtn.addEventListener("click", saveConfig);
+    refreshBtn.addEventListener("click", async () => {
+      await loadConfig(true);
+      await loadStatus(true);
+      showToast("Dashboard refreshed", "success");
     });
 
-    function startAutoRefresh() {
-      if (autoRefreshTimer) clearInterval(autoRefreshTimer);
-      autoRefreshTimer = setInterval(() => {
-        if (document.visibilityState !== "visible") return;
-        loadDashboard(true, true);
-      }, 8000);
-    }
+    setInterval(() => {
+      if (document.visibilityState === "visible") loadStatus(true);
+    }, 5000);
 
-    form.addEventListener("input", () => {
-      formDirty = true;
-    });
-
-    form.addEventListener("change", () => {
-      formDirty = true;
-    });
-
-    saveBtn.addEventListener("click", saveDashboard);
-    refreshBtn.addEventListener("click", () => loadDashboard(false));
-    resetBtn.addEventListener("click", resetDashboard);
-
-    startAutoRefresh();
-    startLiveRefresh();
-    loadDashboard(false);
-    loadLiveStatus(true);
+    loadConfig(true).then(() => loadStatus(true));
   </script>
 </body>
 </html>

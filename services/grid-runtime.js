@@ -73,6 +73,214 @@ const createGridRuntimeHelpers = ({
         "4h": 1.18,
         "1d": 1.25
     };
+    const ADAPTIVE_RANGE_LIMITS = { min: 2.5, max: 12.5 };
+    const ADAPTIVE_LEVEL_LIMITS = { min: 6, max: 18 };
+
+    const computeLogReturnStdDev = (closes = []) => {
+        if (!Array.isArray(closes) || closes.length < 3) return NaN;
+        const returns = [];
+        for (let index = 1; index < closes.length; index += 1) {
+            const previous = toFiniteNumber(closes[index - 1], NaN);
+            const current = toFiniteNumber(closes[index], NaN);
+            if (!Number.isFinite(previous) || previous <= 0 || !Number.isFinite(current) || current <= 0) continue;
+            returns.push(Math.log(current / previous));
+        }
+        if (returns.length < 2) return NaN;
+        const mean = returns.reduce((sum, value) => sum + value, 0) / returns.length;
+        const variance = returns.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / returns.length;
+        return Math.sqrt(variance);
+    };
+
+    const computeEfficiencyRatio = (closes = [], lookback = 20) => {
+        const numericLookback = Math.max(2, Math.trunc(toFiniteNumber(lookback, 20)));
+        if (!Array.isArray(closes) || closes.length <= numericLookback) return NaN;
+        const window = closes.slice(-(numericLookback + 1)).map((value) => toFiniteNumber(value, NaN));
+        if (window.some((value) => !Number.isFinite(value) || value <= 0)) return NaN;
+        const directionalMove = Math.abs(window[window.length - 1] - window[0]);
+        let pathLength = 0;
+        for (let index = 1; index < window.length; index += 1) {
+            pathLength += Math.abs(window[index] - window[index - 1]);
+        }
+        if (!Number.isFinite(pathLength) || pathLength <= 0) return NaN;
+        return clamp(directionalMove / pathLength, 0, 1);
+    };
+
+    const buildAdaptiveVolatilityMetrics = (snapshot, lookbackCandles = defaultConfig.gridLookbackCandles) => {
+        const safeLookback = Math.max(24, Math.trunc(toFiniteNumber(lookbackCandles, defaultConfig.gridLookbackCandles)));
+        const closes = Array.isArray(snapshot?.close) ? snapshot.close.slice(-Math.max(safeLookback, 24)) : [];
+        const highs = Array.isArray(snapshot?.high) ? snapshot.high.slice(-Math.max(safeLookback, 24)) : [];
+        const lows = Array.isArray(snapshot?.low) ? snapshot.low.slice(-Math.max(safeLookback, 24)) : [];
+        const currentPrice = toFiniteNumber(snapshot?.currentPrice, NaN);
+        const currentATR = toFiniteNumber(snapshot?.currentATR, NaN);
+        if (!Number.isFinite(currentPrice) || currentPrice <= 0 || !Number.isFinite(currentATR) || currentATR <= 0 || closes.length < 12) {
+            return null;
+        }
+
+        const recentHigh = Math.max(...highs.filter((value) => Number.isFinite(value)));
+        const recentLow = Math.min(...lows.filter((value) => Number.isFinite(value)));
+        const normalizedAtrPercent = (currentATR / currentPrice) * 100;
+        const realizedVolPercent = computeLogReturnStdDev(closes) * Math.sqrt(Math.min(closes.length, 24)) * 100;
+        const swingPercent = Number.isFinite(recentHigh) && Number.isFinite(recentLow) && recentLow > 0
+            ? ((recentHigh - recentLow) / ((recentHigh + recentLow) / 2)) * 100
+            : normalizedAtrPercent * 4;
+        const efficiencyRatio = computeEfficiencyRatio(closes, Math.min(20, closes.length - 1));
+        const normalizedVolatilityScore = clamp(
+            (
+                clamp(normalizedAtrPercent / 2.2, 0, 1.8) * 0.45
+            ) + (
+                clamp(realizedVolPercent / 2.8, 0, 1.8) * 0.35
+            ) + (
+                clamp(swingPercent / 8.5, 0, 1.8) * 0.2
+            ),
+            0.2,
+            1.8
+        );
+
+        return {
+            normalizedAtrPercent,
+            realizedVolPercent,
+            swingPercent,
+            efficiencyRatio: Number.isFinite(efficiencyRatio) ? efficiencyRatio : 0.35,
+            normalizedVolatilityScore
+        };
+    };
+
+    const resolveAdaptiveGridParameters = ({
+        params = {},
+        snapshot = null,
+        availableUsdt = null
+    } = {}) => {
+        const db = getDb();
+        const exchange = getExchange();
+        const pair = db?.pair;
+        const presetName = resolveAutoPairPresetName(pair);
+        const currentPrice = toFiniteNumber(snapshot?.currentPrice, NaN);
+        const market = exchange?.markets?.[pair];
+        const lookbackCandles = Math.max(20, Math.trunc(toFiniteNumber(params.gridLookbackCandles, db?.gridLookbackCandles || defaultConfig.gridLookbackCandles)));
+        const fallbackRangePercent = resolveEffectiveGridRangePercent({
+            configuredGridRangePercent: params.configuredGridRangePercent ?? db?.gridRangePercent,
+            pair,
+            gridTimeframe: db?.gridTimeframe,
+            gridLookbackCandles: lookbackCandles
+        });
+        const fallbackLevels = resolveEffectiveGridLevels({
+            configuredGridLevels: params.configuredGridLevels ?? db?.gridLevels,
+            pair,
+            gridTimeframe: db?.gridTimeframe,
+            gridRangePercent: fallbackRangePercent,
+            gridLookbackCandles: lookbackCandles
+        });
+        const fallbackEntryBufferPercent = resolveEffectiveGridEntryBufferPercent({
+            configuredGridEntryBufferPercent: params.configuredGridEntryBufferPercent ?? db?.gridEntryBufferPercent,
+            pair,
+            gridTimeframe: db?.gridTimeframe,
+            gridRangePercent: fallbackRangePercent,
+            gridLevels: fallbackLevels
+        });
+        const configuredOrderSizeUsdt = Math.max(0.1, toFiniteNumber(params.gridOrderSizeUsdt ?? db?.gridOrderSizeUsdt, defaultConfig.gridOrderSizeUsdt));
+        const minimumOrderSizeUsdt = Number.isFinite(currentPrice) && currentPrice > 0
+            ? getMinimumValidatedGridOrderSizeUsdt(market, currentPrice)
+            : 0;
+        const effectiveOrderSizeUsdt = Math.max(configuredOrderSizeUsdt, minimumOrderSizeUsdt);
+        const volatility = buildAdaptiveVolatilityMetrics(snapshot, lookbackCandles);
+        if (!volatility) {
+            return {
+                ...params,
+                gridLevels: fallbackLevels,
+                gridRangePercent: fallbackRangePercent,
+                gridEntryBufferPercent: fallbackEntryBufferPercent,
+                gridTakeProfitLevels: resolveEffectiveGridTakeProfitLevels(params.gridTakeProfitLevels),
+                gridStopLossLevels: resolveEffectiveGridStopLossSteps(params.gridStopLossLevels, 1, null),
+                gridStopLossPercent: Math.max(2, toFiniteNumber(db?.gridStopLossPercent, defaultConfig.gridStopLossPercent)),
+                gridOrdersPerSide: resolveGridOrdersPerSideCap(params.gridOrdersPerSide, fallbackLevels),
+                gridOrderSizeUsdt: effectiveOrderSizeUsdt,
+                orderSizeUsdt: effectiveOrderSizeUsdt,
+                autoGrid: {
+                    mode: "FALLBACK",
+                    presetName,
+                    minimumOrderSizeUsdt,
+                    volatilityScore: null
+                }
+            };
+        }
+
+        const availableCapital = toFiniteNumber(availableUsdt, getBalanceCache()?.availableUSDT);
+        const capitalShare = Number.isFinite(availableCapital) && availableCapital > 0
+            ? clamp(effectiveOrderSizeUsdt / availableCapital, 0, 1)
+            : 0.12;
+        const sizeMultiple = effectiveOrderSizeUsdt / Math.max(minimumOrderSizeUsdt, 1);
+        const sizePressure = clamp(Math.log10(Math.max(1, sizeMultiple)), 0, 2.5);
+        const pairRangeFactor = presetName === "volatile" ? 1.18 : (presetName === "doge" ? 1.1 : 1);
+        const pairLevelBias = presetName === "volatile" ? 1 : (presetName === "doge" ? 0.5 : 0);
+
+        const rangePercentRaw = Math.max(
+            volatility.normalizedAtrPercent * 3.4,
+            volatility.realizedVolPercent * 2.2,
+            volatility.swingPercent * 0.72,
+            2.4 + (volatility.normalizedVolatilityScore * 3.9) + (capitalShare * 12)
+        ) * pairRangeFactor;
+        const gridRangePercent = Number(clamp(rangePercentRaw, ADAPTIVE_RANGE_LIMITS.min, ADAPTIVE_RANGE_LIMITS.max).toFixed(2));
+
+        const gridLevelsRaw = 7
+            + (volatility.normalizedVolatilityScore * 6.8)
+            + ((1 - volatility.efficiencyRatio) * 1.8)
+            + pairLevelBias
+            - (sizePressure * 1.1)
+            - (capitalShare * 10);
+        const gridLevels = clamp(Math.round(gridLevelsRaw), ADAPTIVE_LEVEL_LIMITS.min, ADAPTIVE_LEVEL_LIMITS.max);
+        const gridStepPercent = gridRangePercent / Math.max(gridLevels, 1);
+        const gridEntryBufferPercent = Number(clamp(
+            Math.max(gridStepPercent * 0.28, volatility.normalizedAtrPercent * 0.16),
+            0.05,
+            0.45
+        ).toFixed(3));
+        const gridTakeProfitLevels = 1;
+        const gridStopLossLevels = Number(clamp(
+            1.3 + (volatility.normalizedVolatilityScore * 1.45) + (capitalShare * 4.5) + ((1 - volatility.efficiencyRatio) * 0.6),
+            1.25,
+            4.5
+        ).toFixed(2));
+        const gridStopLossPercent = Number(clamp(
+            Math.max(
+                gridRangePercent * 0.92,
+                gridStepPercent * (gridStopLossLevels + 1),
+                volatility.normalizedAtrPercent * 5.1
+            ),
+            Math.max(2.5, gridRangePercent * 0.65),
+            gridRangePercent + 6
+        ).toFixed(2));
+        const maxOrdersPerSide = Math.max(1, gridLevels - 1);
+        const affordableOrdersPerSide = Number.isFinite(availableCapital) && availableCapital > 0
+            ? Math.floor((availableCapital * 0.9) / Math.max(effectiveOrderSizeUsdt * 2, 1e-8))
+            : maxOrdersPerSide;
+        const gridOrdersPerSide = clamp(affordableOrdersPerSide, 1, maxOrdersPerSide);
+
+        return {
+            ...params,
+            gridLevels,
+            gridRangePercent,
+            gridEntryBufferPercent,
+            gridTakeProfitLevels,
+            gridStopLossLevels,
+            gridStopLossPercent,
+            gridOrdersPerSide,
+            gridOrderSizeUsdt: effectiveOrderSizeUsdt,
+            orderSizeUsdt: effectiveOrderSizeUsdt,
+            autoGrid: {
+                mode: "ADAPTIVE_OFFICIAL",
+                presetName,
+                minimumOrderSizeUsdt,
+                volatilityScore: Number(volatility.normalizedVolatilityScore.toFixed(3)),
+                normalizedAtrPercent: Number(volatility.normalizedAtrPercent.toFixed(3)),
+                realizedVolPercent: Number(volatility.realizedVolPercent.toFixed(3)),
+                swingPercent: Number(volatility.swingPercent.toFixed(3)),
+                efficiencyRatio: Number(volatility.efficiencyRatio.toFixed(3)),
+                capitalShare: Number(capitalShare.toFixed(3)),
+                sizePressure: Number(sizePressure.toFixed(3)),
+                gridStepPercent: Number(gridStepPercent.toFixed(3))
+            }
+        };
+    };
 
     const resolveEffectiveGridRangePercent = ({
         configuredGridRangePercent,
@@ -719,14 +927,7 @@ const createGridRuntimeHelpers = ({
         const gridKeys = Object.keys(preset);
         let changed = false;
         const nextConfig = { ...config };
-        const shouldApplyPresetValue = (key, currentValue) => (
-            currentValue === undefined ||
-            currentValue === null ||
-            currentValue === "" ||
-            currentValue === defaultConfig[key]
-        );
         for (const key of gridKeys) {
-            if (!shouldApplyPresetValue(key, nextConfig[key])) continue;
             if (nextConfig[key] !== preset[key]) {
                 nextConfig[key] = preset[key];
                 changed = true;
@@ -749,6 +950,7 @@ const createGridRuntimeHelpers = ({
 
     return {
         getSignalParameters,
+        resolveAdaptiveGridParameters,
         resolveEffectiveGridTakeProfitLevels,
         resolveEffectiveGridStopLossSteps,
         findNearestGridLevelIndex,

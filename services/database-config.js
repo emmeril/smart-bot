@@ -64,7 +64,7 @@ const VALID_MARGIN_MODES = ["cross", "isolated"];
 const DEFAULT_CONFIG = {
     strategy: "futures_grid",
     pair: "DOGE/USDT:USDT",
-    gridOrderSizeUsdt: 0,
+    gridOrderSizeUsdt: 25,
     leverage: 10,
     gridTargetProfitUsdt: 0.5,
     dailyProfitTargetUsdt: 1.0,
@@ -109,44 +109,9 @@ const DEFAULT_CONFIG = {
 };
 
 const DASHBOARD_EDITABLE_FIELDS = [
-    { key: "strategy", label: "Strategy", section: "General", type: "select", options: ["futures_grid"], description: "Main strategy used by the bot." },
-    { key: "pair", label: "Pair", section: "General", type: "text", placeholder: "DOGE/USDT:USDT", description: "Futures symbol to trade." },
-    { key: "marginMode", label: "Margin Mode", section: "General", type: "select", options: ["isolated", "cross"], description: "Margin mode used on the exchange." },
-    { key: "leverage", label: "Leverage", section: "General", type: "number", min: 1, step: 1, description: "Futures leverage." },
-    { key: "monitoringInterval", label: "Monitoring Interval", section: "General", type: "number", min: 200, step: 100, description: "PnL monitoring interval in milliseconds." },
-    { key: "coolingPeriod", label: "Cooling Period", section: "General", type: "number", min: 0, step: 500, description: "Cooldown after a trade in milliseconds. Set 0 to disable cooldown." },
-    { key: "gridOrderSizeUsdt", label: "Grid Order Size (USDT)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Order size per grid entry in USDT. Set 0 for automatic sizing." },
-    { key: "gridTargetProfitUsdt", label: "Target Profit (USDT)", section: "Risk", type: "number", min: 0.1, step: 0.1, description: "Take-profit target in USDT." },
-    { key: "autoTargetProfitEnabled", label: "Auto Target Profit", section: "Risk", type: "boolean", description: "Use ATR-based TP with a capped range instead of a fixed profit." },
-    { key: "targetProfitAtrMultiplier", label: "TP ATR Multiplier", section: "Risk", type: "number", min: 0.1, step: 0.05, description: "ATR multiplier used to derive automatic target profit." },
-    { key: "targetProfitMinUsdt", label: "TP Min (USDT)", section: "Risk", type: "number", min: 0, step: 0.05, description: "Lower bound for automatic target profit." },
-    { key: "targetProfitMaxUsdt", label: "TP Max (USDT)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Upper bound for automatic target profit." },
-    { key: "gridStopLossPercent", label: "Stop Loss (%)", section: "Risk", type: "number", min: 0.1, step: 0.1, description: "Stop loss percentage used by the grid engine." },
-    { key: "autoStopLossEnabled", label: "Auto Stop Loss", section: "Risk", type: "boolean", description: "Use ATR-based stop loss with a capped range instead of a fixed percentage." },
-    { key: "stopLossAtrMultiplier", label: "SL ATR Multiplier", section: "Risk", type: "number", min: 0.05, step: 0.05, description: "ATR multiplier used to derive automatic stop loss." },
-    { key: "stopLossMinPercent", label: "SL Min (%)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Lower bound for automatic stop loss percent." },
-    { key: "stopLossMaxPercent", label: "SL Max (%)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Upper bound for automatic stop loss percent." },
-    { key: "dailyProfitTargetUsdt", label: "Daily Profit Target (USDT)", section: "Risk", type: "number", min: 0.1, step: 0.1, description: "Pause trading after this realized profit is reached." },
-    { key: "dailyMaxLossPercent", label: "Daily Max Loss (%)", section: "Risk", type: "number", min: 0.1, step: 0.1, description: "Pause trading after this loss percentage is reached." },
-    { key: "maxTradesPerDay", label: "Max Trades Per Day", section: "Risk", type: "number", min: 1, step: 1, description: "Daily trade cap." },
-    { key: "minVolumeRatio", label: "Min Volume Ratio", section: "Risk", type: "number", min: 1, step: 0.1, description: "Minimum volume filter." },
-    { key: "gridLevels", label: "Grid Levels", section: "Grid", type: "number", min: 0, step: 1, description: "Number of levels in the grid. Set 0 for automatic mode." },
-    { key: "gridLookbackCandles", label: "Lookback Candles", section: "Grid", type: "number", min: 20, step: 1, description: "Candles used to calculate the grid range." },
-    { key: "gridRangePercent", label: "Range (%)", section: "Grid", type: "number", min: 0, step: 0.1, description: "Grid range width in percent. Set 0 for automatic mode." },
-    { key: "gridEntryBufferPercent", label: "Entry Buffer (%)", section: "Grid", type: "number", min: 0, step: 0.01, description: "Buffer around grid levels for entries. Set 0 for automatic mode." },
-    { key: "gridTakeProfitLevels", label: "Take Profit Levels", section: "Grid", type: "number", min: 0, step: 1, description: "TP level offset from the entry level. Set 0 for automatic TP mode." },
-    { key: "gridOrdersPerSide", label: "Orders Per Side", section: "Grid", type: "number", min: 0, step: 1, description: "Number of ladder orders per side. Set 0 for automatic order count." },
-    { key: "gridStopLossLevels", label: "Stop Loss Levels", section: "Grid", type: "number", min: 0, step: 0.1, description: "Stop loss offset in grid steps. Set 0 for automatic SL mode." },
-    { key: "gridTimeframe", label: "Grid Timeframe", section: "Grid", type: "select", options: ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"], description: "Timeframe used to build the grid." },
-    { key: "sessionStartUTC", label: "Session Start UTC", section: "Session", type: "number", min: 0, max: 23, step: 1, description: "Trading session start hour in UTC." },
-    { key: "sessionEndUTC", label: "Session End UTC", section: "Session", type: "number", min: 0, max: 23, step: 1, description: "Trading session end hour in UTC." },
-    { key: "volumePeriod", label: "Volume Period", section: "Session", type: "number", min: 2, step: 1, description: "Volume lookback period." },
-    { key: "atrPeriod", label: "ATR Period", section: "Session", type: "number", min: 2, step: 1, description: "ATR calculation period." },
-    { key: "trailingEnabled", label: "Trailing Enabled", section: "Trailing", type: "boolean", description: "Enable trailing stop logic." },
-    { key: "trailingActivateATR", label: "Trail Activate ATR", section: "Trailing", type: "number", min: 0.2, step: 0.1, description: "ATR multiple needed before trailing starts." },
-    { key: "trailingOffsetATR", label: "Trail Offset ATR", section: "Trailing", type: "number", min: 0.1, step: 0.1, description: "ATR offset used by the trailing stop." },
-    { key: "allowLong", label: "Allow Long", section: "Direction", type: "boolean", description: "Allow long entries." },
-    { key: "allowShort", label: "Allow Short", section: "Direction", type: "boolean", description: "Allow short entries." }
+    { key: "pair", label: "Trading Pair", section: "Core", type: "text", placeholder: "BTC/USDT:USDT", description: "Perpetual futures pair traded by the bot." },
+    { key: "gridOrderSizeUsdt", label: "Order Amount (USDT)", section: "Core", type: "number", min: 0.1, step: 0.1, description: "Margin allocated to each grid order before leverage." },
+    { key: "leverage", label: "Leverage", section: "Core", type: "number", min: 1, step: 1, description: "Exchange leverage applied to the grid strategy." }
 ];
 
 const DASHBOARD_EDITABLE_KEYS = new Set(DASHBOARD_EDITABLE_FIELDS.map((field) => field.key));

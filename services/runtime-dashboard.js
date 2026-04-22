@@ -18,6 +18,29 @@ const createRuntimeDashboardHelpers = ({
     applyDashboardConfigUpdate,
     resetDashboardConfig
 }) => {
+    const loginAttemptState = new Map();
+    const getClientAddress = (req) => String(
+        req.headers["x-forwarded-for"] ||
+        req.ip ||
+        req.socket?.remoteAddress ||
+        "unknown"
+    );
+    const getLoginRateLimitConfig = () => ({
+        maxAttempts: Math.max(1, Math.trunc(toFiniteNumber(process.env.DASHBOARD_LOGIN_MAX_ATTEMPTS, 5))),
+        windowMs: Math.max(1000, Math.trunc(toFiniteNumber(process.env.DASHBOARD_LOGIN_WINDOW_MS, 5 * 60 * 1000)))
+    });
+    const getLoginAttemptBucket = (address) => {
+        const now = Date.now();
+        const { windowMs } = getLoginRateLimitConfig();
+        const existing = loginAttemptState.get(address);
+        if (!existing || (now - existing.startedAt) > windowMs) {
+            const next = { count: 0, startedAt: now };
+            loginAttemptState.set(address, next);
+            return next;
+        }
+        return existing;
+    };
+
     const requireDashboardAuth = (req, res, next) => {
         if (isDashboardAuthenticated(req)) return next();
         if (req.path.startsWith("/api")) {
@@ -44,11 +67,21 @@ const createRuntimeDashboardHelpers = ({
         app.post("/login", (req, res) => {
             const username = String(req.body?.username || "").trim();
             const password = String(req.body?.password || "");
+            const address = getClientAddress(req);
+            const bucket = getLoginAttemptBucket(address);
+            const { maxAttempts, windowMs } = getLoginRateLimitConfig();
+            if (bucket.count >= maxAttempts) {
+                res.setHeader("retry-after", String(Math.ceil(windowMs / 1000)));
+                res.status(429).send("Too many login attempts");
+                return;
+            }
             if (isDashboardLoginValid(username, password)) {
+                loginAttemptState.delete(address);
                 setDashboardSessionCookie(res, username);
                 res.redirect("/dashboard");
                 return;
             }
+            bucket.count += 1;
             res.redirect("/login?error=1");
         });
 
@@ -131,7 +164,7 @@ const createRuntimeDashboardHelpers = ({
 
     const resolveDashboardAddress = () => ({
         port: Math.max(1, Math.trunc(toFiniteNumber(process.env.DASHBOARD_PORT || process.env.PORT, 3000))),
-        host: process.env.DASHBOARD_HOST || "0.0.0.0"
+        host: process.env.DASHBOARD_HOST || "127.0.0.1"
     });
 
     const startWebDashboard = async (existingServer = null) => {

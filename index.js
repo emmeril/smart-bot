@@ -250,6 +250,7 @@ const {
     getSignalParameters,
     resolveEffectiveGridTakeProfitLevels,
     resolveEffectiveGridStopLossSteps,
+    resolveAdaptiveGridParameters,
     findNearestGridLevelIndex,
     buildGridExitPlan,
     buildGridLevels,
@@ -323,6 +324,58 @@ const isGridEntryOrder = (order) => getExchangeClientOrderId(order).startsWith(G
 const isTpReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWith(TP_CLIENT_ORDER_PREFIX);
 const isSlReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWith(SL_CLIENT_ORDER_PREFIX);
 const isTriggerManagedOrder = (order, label = "") => label === "SL" || isSlReduceOnlyOrder(order) || String(order?.type || "").toUpperCase().includes("STOP");
+
+const buildAutoGridPreview = async () => {
+    if (!db || !exchange) return null;
+    const params = getSignalParameters();
+    const ohlcv = await getOHLCV(params.neededCandles);
+    if (!Array.isArray(ohlcv) || ohlcv.length < params.neededCandles) return null;
+    const snapshot = buildSignalSnapshot(ohlcv, params);
+    if (!snapshot || snapshot.invalidAtr) return null;
+
+    const availableUsdt = await getAvailableUSDTBalance();
+    const adaptiveParams = resolveAdaptiveGridParameters({ params, snapshot, availableUsdt });
+    const projectedLowerBound = snapshot.currentPrice * (1 - (adaptiveParams.gridRangePercent / 100));
+    const projectedUpperBound = snapshot.currentPrice * (1 + (adaptiveParams.gridRangePercent / 100));
+    const persistedGridState = adaptiveParams.gridLevels > 1
+        ? sanitizeGridState(db?.activeGridState, adaptiveParams)
+        : null;
+    const lockedGridState = persistedGridState &&
+        snapshot.currentPrice >= persistedGridState.lowerBound &&
+        snapshot.currentPrice <= persistedGridState.upperBound
+        ? persistedGridState
+        : null;
+    const lowerBound = toFiniteNumber(lockedGridState?.lowerBound, projectedLowerBound);
+    const upperBound = toFiniteNumber(lockedGridState?.upperBound, projectedUpperBound);
+    const step = toFiniteNumber(lockedGridState?.step, (upperBound - lowerBound) / Math.max(adaptiveParams.gridLevels, 1));
+
+    return {
+        mode: adaptiveParams.autoGrid?.mode || "ADAPTIVE_OFFICIAL",
+        presetName: adaptiveParams.autoGrid?.presetName || resolveAutoPairPresetName(db.pair),
+        currentPrice: snapshot.currentPrice,
+        atr: snapshot.currentATR,
+        availableUsdt,
+        orderSizeUsdt: adaptiveParams.gridOrderSizeUsdt,
+        minimumOrderSizeUsdt: adaptiveParams.autoGrid?.minimumOrderSizeUsdt || 0,
+        volatilityScore: adaptiveParams.autoGrid?.volatilityScore ?? null,
+        normalizedAtrPercent: adaptiveParams.autoGrid?.normalizedAtrPercent ?? null,
+        realizedVolPercent: adaptiveParams.autoGrid?.realizedVolPercent ?? null,
+        swingPercent: adaptiveParams.autoGrid?.swingPercent ?? null,
+        efficiencyRatio: adaptiveParams.autoGrid?.efficiencyRatio ?? null,
+        capitalShare: adaptiveParams.autoGrid?.capitalShare ?? null,
+        rangePercent: adaptiveParams.gridRangePercent,
+        gridLevels: adaptiveParams.gridLevels,
+        takeProfitLevels: adaptiveParams.gridTakeProfitLevels,
+        stopLossLevels: adaptiveParams.gridStopLossLevels,
+        stopLossPercent: adaptiveParams.gridStopLossPercent,
+        entryBufferPercent: adaptiveParams.gridEntryBufferPercent,
+        ordersPerSide: adaptiveParams.gridOrdersPerSide,
+        lowerBound,
+        upperBound,
+        step,
+        source: lockedGridState ? "locked_grid_state" : "adaptive_projection"
+    };
+};
 
 const {
     fetchOpenGridOrders,
@@ -859,6 +912,7 @@ const {
     dashboardEditableFields: DASHBOARD_EDITABLE_FIELDS,
     getExchangeClientOrderId,
     getPrice: async (...args) => getPrice(...args),
+    buildAutoGridPreview: async () => await buildAutoGridPreview(),
     fetchOpenExchangePositions: async (...args) => fetchOpenExchangePositions(...args),
     fetchManagedOpenOrdersSnapshot: async (...args) => fetchManagedOpenOrdersSnapshot(...args),
     calculatePositionPnL,
@@ -922,101 +976,106 @@ const { startWebDashboard } = createRuntimeDashboardHelpers({
 const AUTO_PAIR_GRID_PRESETS = {
     binance: {
         strategy: "futures_grid",
-        leverage: 10,
-        gridTargetProfitUsdt: 0.4,
+        marginMode: "isolated",
+        gridTargetProfitUsdt: 0.5,
         autoTargetProfitEnabled: true,
-        targetProfitAtrMultiplier: 0.8,
-        targetProfitMinUsdt: 0.3,
-        targetProfitMaxUsdt: 4,
-        gridStopLossPercent: 5,
-        autoStopLossEnabled: true,
-        stopLossAtrMultiplier: 0.12,
-        stopLossMinPercent: 3,
-        stopLossMaxPercent: 7,
-        gridLevels: 10,
-        gridLookbackCandles: 144,
-        gridRangePercent: 4.0,
-        gridEntryBufferPercent: 0.12,
-        gridOrderSizeUsdt: 0,
-        gridTakeProfitLevels: 0,
-        gridOrdersPerSide: 0,
-        gridStopLossLevels: 0,
-        gridTimeframe: "5m",
-        minVolumeRatio: 1.1,
-        volumePeriod: 20,
-        atrPeriod: 14,
-        trailingEnabled: true,
-        trailingActivateATR: 1.2,
-        trailingOffsetATR: 0.6,
-        allowLong: true,
-        allowShort: true
-    },
-    volatile: {
-        strategy: "futures_grid",
-        leverage: 8,
-        gridTargetProfitUsdt: 0.35,
-        autoTargetProfitEnabled: true,
-        targetProfitAtrMultiplier: 0.7,
+        targetProfitAtrMultiplier: 0.85,
         targetProfitMinUsdt: 0.2,
-        targetProfitMaxUsdt: 2,
+        targetProfitMaxUsdt: 6,
         gridStopLossPercent: 6,
         autoStopLossEnabled: true,
-        stopLossAtrMultiplier: 0.15,
-        stopLossMinPercent: 4,
-        stopLossMaxPercent: 9,
-        gridLevels: 12,
-        gridLookbackCandles: 180,
-        gridRangePercent: 6.5,
-        gridEntryBufferPercent: 0.18,
-        gridOrderSizeUsdt: 0,
+        stopLossAtrMultiplier: 1.3,
+        stopLossMinPercent: 2.5,
+        stopLossMaxPercent: 12,
+        gridLevels: 0,
+        gridLookbackCandles: 144,
+        gridRangePercent: 0,
+        gridEntryBufferPercent: 0,
         gridTakeProfitLevels: 0,
         gridOrdersPerSide: 0,
         gridStopLossLevels: 0,
         gridTimeframe: "5m",
-        minVolumeRatio: 1.05,
+        minVolumeRatio: 1,
         volumePeriod: 20,
         atrPeriod: 14,
-        trailingEnabled: true,
+        trailingEnabled: false,
         trailingActivateATR: 1.4,
         trailingOffsetATR: 0.8,
         allowLong: true,
         allowShort: true
     },
-    doge: {
+    volatile: {
         strategy: "futures_grid",
-        leverage: 8,
-        gridTargetProfitUsdt: 0.25,
+        marginMode: "isolated",
+        gridTargetProfitUsdt: 0.45,
         autoTargetProfitEnabled: true,
-        targetProfitAtrMultiplier: 0.6,
-        targetProfitMinUsdt: 0.15,
-        targetProfitMaxUsdt: 1.25,
-        gridStopLossPercent: 4,
+        targetProfitAtrMultiplier: 0.95,
+        targetProfitMinUsdt: 0.2,
+        targetProfitMaxUsdt: 5,
+        gridStopLossPercent: 8,
         autoStopLossEnabled: true,
-        stopLossAtrMultiplier: 0.1,
-        stopLossMinPercent: 2.5,
-        stopLossMaxPercent: 6,
-        gridOrderSizeUsdt: 0,
-        gridLevels: 12,
+        stopLossAtrMultiplier: 1.45,
+        stopLossMinPercent: 3.5,
+        stopLossMaxPercent: 14,
+        gridLevels: 0,
         gridLookbackCandles: 180,
-        gridRangePercent: 5.5,
-        gridEntryBufferPercent: 0.16,
+        gridRangePercent: 0,
+        gridEntryBufferPercent: 0,
         gridTakeProfitLevels: 0,
         gridOrdersPerSide: 0,
         gridStopLossLevels: 0,
         gridTimeframe: "5m",
-        minVolumeRatio: 1.05,
+        minVolumeRatio: 1,
         volumePeriod: 20,
         atrPeriod: 14,
-        trailingEnabled: true,
-        trailingActivateATR: 1.3,
-        trailingOffsetATR: 0.7,
+        trailingEnabled: false,
+        trailingActivateATR: 1.6,
+        trailingOffsetATR: 0.95,
+        allowLong: true,
+        allowShort: true
+    },
+    doge: {
+        strategy: "futures_grid",
+        marginMode: "isolated",
+        gridTargetProfitUsdt: 0.35,
+        autoTargetProfitEnabled: true,
+        targetProfitAtrMultiplier: 0.9,
+        targetProfitMinUsdt: 0.15,
+        targetProfitMaxUsdt: 3,
+        gridStopLossPercent: 7,
+        autoStopLossEnabled: true,
+        stopLossAtrMultiplier: 1.35,
+        stopLossMinPercent: 2.5,
+        stopLossMaxPercent: 12,
+        gridLevels: 0,
+        gridLookbackCandles: 180,
+        gridRangePercent: 0,
+        gridEntryBufferPercent: 0,
+        gridTakeProfitLevels: 0,
+        gridOrdersPerSide: 0,
+        gridStopLossLevels: 0,
+        gridTimeframe: "5m",
+        minVolumeRatio: 1,
+        volumePeriod: 20,
+        atrPeriod: 14,
+        trailingEnabled: false,
+        trailingActivateATR: 1.5,
+        trailingOffsetATR: 0.9,
         allowLong: true,
         allowShort: true
     }
 };
 
 const applyAutoPresetToConfig = (config) => {
-    const autoPresetResult = applyAutoPairGridPreset(config, AUTO_PAIR_GRID_PRESETS);
+    const incoming = config && typeof config === "object" ? { ...config } : {};
+    const baseConfig = {
+        ...incoming,
+        strategy: "futures_grid",
+        pair: incoming.pair,
+        leverage: incoming.leverage,
+        gridOrderSizeUsdt: incoming.gridOrderSizeUsdt
+    };
+    const autoPresetResult = applyAutoPairGridPreset(baseConfig, AUTO_PAIR_GRID_PRESETS);
     return {
         config: normalizeConfig(autoPresetResult.config),
         autoPresetResult
@@ -1167,6 +1226,7 @@ const {
     clamp,
     resolveEffectiveGridTakeProfitLevels,
     resolveEffectiveGridStopLossSteps,
+    resolveAdaptiveGridParameters,
     sanitizeGridState,
     createLockedGridState,
     buildGridExitPlan,

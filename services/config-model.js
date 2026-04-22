@@ -41,7 +41,7 @@ const createConfigModelHelpers = ({
 
         const normalized = { ...config };
         const numericRules = {
-            gridOrderSizeUsdt: { min: 0, allowZero: true }, leverage: { min: 0, allowZero: false, integer: true },
+            gridOrderSizeUsdt: { min: 0.1, allowZero: false }, leverage: { min: 0, allowZero: false, integer: true },
             gridTargetProfitUsdt: { min: 0, allowZero: false }, dailyProfitTargetUsdt: { min: 0, allowZero: false },
             dailyMaxLossPercent: { min: 0, allowZero: false }, maxTradesPerDay: { min: 0, allowZero: false, integer: true },
             coolingPeriod: { min: 0, allowZero: true, integer: true }, monitoringInterval: { min: 200, allowZero: false, integer: true },

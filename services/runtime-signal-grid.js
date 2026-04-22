@@ -23,6 +23,7 @@ const createRuntimeSignalGridHelpers = ({
     clamp,
     resolveEffectiveGridTakeProfitLevels,
     resolveEffectiveGridStopLossSteps,
+    resolveAdaptiveGridParameters,
     sanitizeGridState,
     createLockedGridState,
     buildGridExitPlan,
@@ -277,15 +278,18 @@ const createRuntimeSignalGridHelpers = ({
                 return {};
             }
 
+            const effectiveParams = strategy === "futures_grid"
+                ? resolveAdaptiveGridParameters({ params, snapshot })
+                : params;
             const signalState = strategy === "futures_grid"
-                ? evaluateGridSignal(snapshot, params)
+                ? evaluateGridSignal(snapshot, effectiveParams)
                 : (typeof evaluateCrossoverSignal === "function"
                     ? evaluateCrossoverSignal(snapshot, params)
                     : {
                         canLong: false,
                         canShort: false,
                         setupDetected: false,
-                        detailTitle: "UNSUPPORTED STRATEGY",
+                detailTitle: "UNSUPPORTED STRATEGY",
                         strategyName: strategy.toUpperCase(),
                         extraDetailLines: [`   Strategy ${strategy} is not supported by the current build.`]
                     });
@@ -297,7 +301,7 @@ const createRuntimeSignalGridHelpers = ({
 
             const shouldDetailLog = finalState.setupDetected || (Date.now() - getLastSignalDetailLogAt() >= signalDetailLogTtl);
             if (shouldDetailLog) {
-                logSignalDetails(params, snapshot, finalState);
+                logSignalDetails(effectiveParams, snapshot, finalState);
                 setLastSignalDetailLogAt(Date.now());
             }
 
@@ -340,24 +344,25 @@ const createRuntimeSignalGridHelpers = ({
             }
 
             const availableUsdt = await getAvailableUSDTBalance();
+            const adaptiveParams = resolveAdaptiveGridParameters({ params, snapshot, availableUsdt });
             const effectiveSizeMeta = resolveEffectiveGridOrderSizeUsdt({
                 availableUsdt,
-                configuredOrderSizeUsdt: params.gridOrderSizeUsdt,
-                configuredOrdersPerSide: params.gridOrdersPerSide,
+                configuredOrderSizeUsdt: adaptiveParams.gridOrderSizeUsdt,
+                configuredOrdersPerSide: adaptiveParams.gridOrdersPerSide,
                 referencePrice: snapshot.currentPrice,
                 market: exchange?.markets?.[db?.pair],
-                gridLevels: params.gridLevels
+                gridLevels: adaptiveParams.gridLevels
             });
-            params.gridOrderSizeUsdt = effectiveSizeMeta.orderSizeUsdt;
+            adaptiveParams.gridOrderSizeUsdt = effectiveSizeMeta.orderSizeUsdt;
             const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
                 availableUsdt,
-                configuredOrdersPerSide: params.gridOrdersPerSide,
-                perOrderMargin: params.gridOrderSizeUsdt,
+                configuredOrdersPerSide: adaptiveParams.gridOrdersPerSide,
+                perOrderMargin: adaptiveParams.gridOrderSizeUsdt,
                 referencePrice: snapshot.currentPrice,
                 market: exchange?.markets?.[db?.pair],
-                gridLevels: params.gridLevels
+                gridLevels: adaptiveParams.gridLevels
             });
-            params.gridOrdersPerSide = effectiveOrdersMeta.count;
+            adaptiveParams.gridOrdersPerSide = effectiveOrdersMeta.count;
             let openGridOrders = await fetchOpenGridOrders();
             openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
 
@@ -407,13 +412,13 @@ const createRuntimeSignalGridHelpers = ({
             const trackedPositions = getActivePositionsList();
             const plannedExposureSignature = buildGridExposureSignature(openPositions, trackedPositions);
 
-            const lockedGridState = await resolveActiveGridState(snapshot, params);
+            const lockedGridState = await resolveActiveGridState(snapshot, adaptiveParams);
             if (!lockedGridState) {
                 console.log("[GRID][INFO] Unable to resolve locked grid state. Ladder sync skipped.");
                 return;
             }
 
-            const desiredOrdersRaw = buildGridEntryOrders(snapshot, params, lockedGridState);
+            const desiredOrdersRaw = buildGridEntryOrders(snapshot, adaptiveParams, lockedGridState);
             const desiredOrdersForRuntime = filterGridOrdersForActiveExposure(desiredOrdersRaw, openPositions, trackedPositions);
             if (desiredOrdersForRuntime.length !== desiredOrdersRaw.length) {
                 const accountPositionMode = getAccountPositionMode();

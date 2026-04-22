@@ -13,6 +13,7 @@ const createDashboardStatusHelpers = ({
     dashboardEditableFields,
     getExchangeClientOrderId,
     getPrice,
+    buildAutoGridPreview,
     fetchOpenExchangePositions,
     fetchManagedOpenOrdersSnapshot,
     calculatePositionPnL,
@@ -90,6 +91,7 @@ const createDashboardStatusHelpers = ({
         let currentPrice = NaN;
         let exchangePositions = [];
         let managedOrders = { grid: [], tp: [], sl: [] };
+        let autoGrid = null;
 
         try {
             currentPrice = await getPrice();
@@ -107,6 +109,14 @@ const createDashboardStatusHelpers = ({
             managedOrders = await fetchManagedOpenOrdersSnapshot();
         } catch (error) {
             console.warn(`[STATUS][WARN] Failed to fetch managed open orders: ${error.message}`);
+        }
+
+        if (typeof buildAutoGridPreview === "function") {
+            try {
+                autoGrid = await buildAutoGridPreview();
+            } catch (error) {
+                console.warn(`[STATUS][WARN] Failed to build adaptive grid preview: ${error.message}`);
+            }
         }
 
         const activePositions = getActivePositionEntries().map(([positionKey, position]) => {
@@ -148,6 +158,7 @@ const createDashboardStatusHelpers = ({
             dailyPnlSyncedAt: toFiniteNumber(dailyPnlSnapshot.dailyPnlSyncedAt, 0),
             activePositions,
             exchangePositionsCount: exchangePositions.length,
+            autoGrid,
             openOrders,
             orderCounts: {
                 grid: openOrders.grid.length,
