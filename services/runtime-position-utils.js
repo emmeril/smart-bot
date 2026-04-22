@@ -113,8 +113,6 @@ const createRuntimePositionUtils = ({
     const calculatePositionPnL = (position, currentPrice, quantityOverride = null) => {
         const db = getDb();
         const quantity = Number.isFinite(quantityOverride) ? quantityOverride : position.quantity;
-        const leverageAtEntry = Math.max(1, toFiniteNumber(position?.leverageAtEntry, db.leverage));
-        
         const exchangePnlSnapshot = !Number.isFinite(quantityOverride) ? position?.exchangePnlSnapshot : null;
         const hasFreshExchangePnl = exchangePnlSnapshot &&
             exchangePnlSnapshot.source === "exchange" &&
@@ -123,42 +121,21 @@ const createRuntimePositionUtils = ({
             Number.isFinite(exchangePnlSnapshot.grossProfitUSDT) &&
             Number.isFinite(exchangePnlSnapshot.netProfitUSDT) &&
             Number.isFinite(exchangePnlSnapshot.profitPercent);
-        
-        const TAKER_FEE_RATE = 0.0004;
-        const MAKER_FEE_RATE = 0.0002;
-        const estimatedEntryFee = position.entryPrice * quantity * TAKER_FEE_RATE;
-        const estimatedExitFee = currentPrice * quantity * TAKER_FEE_RATE;
-        const totalEstimatedFees = estimatedEntryFee + estimatedExitFee;
-        const fundingRateEstimate = 0.0001;
-        const fundingIntervalHours = 8;
-        const hoursSinceEntry = Math.max(1, (Date.now() - (position.entryTime || Date.now())) / 3600000);
-        const fundingIntervals = Math.floor(hoursSinceEntry / fundingIntervalHours);
-        const estimatedFunding = (position.entryPrice * quantity * fundingRateEstimate) * Math.max(0, fundingIntervals);
-
         if (hasFreshExchangePnl) {
-            const exchangeNetProfit = exchangePnlSnapshot.netProfitUSDT;
-            const exchangeFee = Number.isFinite(exchangePnlSnapshot.fee) ? exchangePnlSnapshot.fee : 0;
-            const entryValue = position.entryPrice * quantity;
-            const referenceInitialMargin = Math.max(entryValue / leverageAtEntry, 1e-8);
-            const profitPercent = (exchangePnlSnapshot.grossProfitUSDT / referenceInitialMargin) * 100;
-            const displayProfitPercent = (exchangeNetProfit / referenceInitialMargin) * 100;
-
             return {
                 grossProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
-                netProfitUSDT: exchangeNetProfit,
-                realizedProfitUSDT: exchangeNetProfit,
-                profitPercent: profitPercent,
-                displayProfitUSDT: exchangeNetProfit,
-                displayProfitPercent: displayProfitPercent,
-                fees: exchangeFee,
-                funding: exchangePnlSnapshot.funding || 0,
+                netProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
+                realizedProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
+                profitPercent: exchangePnlSnapshot.profitPercent,
+                displayProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
+                displayProfitPercent: exchangePnlSnapshot.profitPercent,
                 currentPrice: Number.isFinite(exchangePnlSnapshot.currentPrice) ? exchangePnlSnapshot.currentPrice : currentPrice,
-                source: "exchange",
-                syncedAt: exchangePnlSnapshot.timestamp
+                source: "exchange"
             };
         }
 
         const entryValue = position.entryPrice * quantity;
+        const leverageAtEntry = Math.max(1, toFiniteNumber(position?.leverageAtEntry, db.leverage));
         const snapshotMarkPrice = toFiniteNumber(exchangePnlSnapshot?.markPrice, NaN);
         const priceSource = Number.isFinite(snapshotMarkPrice) && snapshotMarkPrice > 0
             ? snapshotMarkPrice
@@ -167,23 +144,19 @@ const createRuntimePositionUtils = ({
         const grossProfitUSDT = position.side === "buy"
             ? (priceSource - position.entryPrice) * quantity
             : (position.entryPrice - priceSource) * quantity;
-        const netProfitUSDT = grossProfitUSDT - totalEstimatedFees - estimatedFunding;
         const referenceInitialMargin = Math.max(entryValue / leverageAtEntry, 1e-8);
         const profitPercent = (grossProfitUSDT / referenceInitialMargin) * 100;
-        const displayProfitPercent = (netProfitUSDT / referenceInitialMargin) * 100;
+        const displayProfitPercent = (grossProfitUSDT / referenceInitialMargin) * 100;
 
         return {
-            grossProfitUSDT: grossProfitUSDT,
-            netProfitUSDT: netProfitUSDT,
-            realizedProfitUSDT: netProfitUSDT,
-            profitPercent: profitPercent,
-            displayProfitUSDT: netProfitUSDT,
-            displayProfitPercent: displayProfitPercent,
-            fees: totalEstimatedFees,
-            funding: estimatedFunding,
+            grossProfitUSDT,
+            netProfitUSDT: grossProfitUSDT,
+            realizedProfitUSDT: grossProfitUSDT,
+            profitPercent,
+            displayProfitUSDT: grossProfitUSDT,
+            displayProfitPercent,
             currentPrice: priceSource,
-            source: "local",
-            syncedAt: null
+            source: "local"
         };
     };
 

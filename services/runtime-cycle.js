@@ -33,32 +33,15 @@ const createRuntimeCycleHelpers = ({
         const currentTime = toFiniteNumber(timestamp, NaN);
         if (!Number.isFinite(currentTime)) return false;
         const lastResetTime = toFiniteNumber(db.lastDailyReset, NaN);
-        
-        if (!Number.isFinite(lastResetTime)) return true;
-        
         const todayUTC = getUTCDateKey(currentTime);
         const lastResetUTC = getUTCDateKey(lastResetTime);
-        
-        if (todayUTC !== lastResetUTC) return true;
-        
-        const currentHour = new Date(currentTime).getUTCHours();
-        const lastResetHour = new Date(lastResetTime).getUTCHours();
-        if (currentHour < 8 && lastResetHour >= 20) return true;
-        if (currentHour >= 8 && lastResetHour < 8 && currentTime - lastResetTime > 86400000) return true;
-        
-        return false;
+        return todayUTC !== lastResetUTC;
     };
 
     const resetDailyStateIfNeeded = async (now) => {
         const db = getDb();
         if (!isNewTradingDay(now)) return false;
-        
-        console.log("[DAILY][INFO] Daily reset at UTC midnight");
-        const previousDailyPnL = db.dailyPnL || 0;
-        const previousDailyTrades = db.dailyTrades || 0;
-        
-        console.log(`[DAILY][INFO] Previous day summary: P&L ${previousDailyPnL.toFixed(4)} USDT, Trades ${previousDailyTrades}`);
-        
+        console.log("[DAILY][INFO] Daily reset");
         db.dailyPnL = 0;
         db.dailyTrades = 0;
         db.lastDailyReset = toFiniteNumber(now, Date.now());

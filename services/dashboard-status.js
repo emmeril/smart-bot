@@ -30,7 +30,7 @@ const createDashboardStatusHelpers = ({
             positionMode: getAccountPositionMode()?.label || "UNKNOWN",
             activePositions: Object.keys(activePositionsMap).length,
             activeGridState: Boolean(db?.activeGridState),
-            dailyPnL: Number(toFiniteNumber(db?.dailyPnL, 0).toFixed(4)),
+            dailyPnL: toFiniteNumber(db?.dailyPnL, 0),
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(db?.dailyTrades, 0))),
             lastUpdated: toFiniteNumber(db?.lastUpdated, 0),
             lastDailyReset: toFiniteNumber(db?.lastDailyReset, 0),
@@ -90,8 +90,6 @@ const createDashboardStatusHelpers = ({
 
         const activePositions = getActivePositionEntries().map(([positionKey, position]) => {
             const pnlState = Number.isFinite(currentPrice) ? calculatePositionPnL(position, currentPrice) : null;
-            const pnlSource = pnlState?.source || "local";
-            const syncedAt = pnlState?.syncedAt ? new Date(pnlState.syncedAt).toISOString() : null;
             return {
                 key: positionKey,
                 side: position.side || null,
@@ -99,12 +97,8 @@ const createDashboardStatusHelpers = ({
                 entryPrice: toFiniteNumber(position.entryPrice, 0),
                 targetPrice: Number.isFinite(position.targetPrice) ? position.targetPrice : null,
                 stopLossPrice: Number.isFinite(position.stopLossPrice) ? position.stopLossPrice : null,
-                pnlUSDT: pnlState ? Number(toFiniteNumber(pnlState.netProfitUSDT, 0).toFixed(4)) : null,
-                pnlPercent: pnlState ? Number(toFiniteNumber(pnlState.displayProfitPercent ?? pnlState.profitPercent, 0).toFixed(2)) : null,
-                pnlSource: pnlSource,
-                pnlSyncedAt: syncedAt,
-                fees: pnlState?.fees ? Number(pnlState.fees.toFixed(4)) : 0,
-                funding: pnlState?.funding ? Number(pnlState.funding.toFixed(4)) : 0,
+                pnlUSDT: pnlState ? toFiniteNumber(pnlState.netProfitUSDT, 0) : null,
+                pnlPercent: pnlState ? toFiniteNumber(pnlState.displayProfitPercent ?? pnlState.profitPercent, 0) : null,
                 currentPrice: Number.isFinite(currentPrice) ? currentPrice : null,
                 strategy: position.strategy || null
             };
@@ -127,7 +121,7 @@ const createDashboardStatusHelpers = ({
             needsRecoverySync: Boolean(getExchangeHealth()?.needsRecoverySync),
             exchangeRecoveryReason: getExchangeRecoveryReason() || null,
             positionMode: getAccountPositionMode()?.label || "UNKNOWN",
-            dailyPnL: Number(toFiniteNumber(db.dailyPnL, 0).toFixed(4)),
+            dailyPnL: toFiniteNumber(db.dailyPnL, 0),
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(db.dailyTrades, 0))),
             activePositions,
             exchangePositionsCount: exchangePositions.length,
