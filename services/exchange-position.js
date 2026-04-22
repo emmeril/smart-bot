@@ -142,19 +142,26 @@ const createExchangePositionHelpers = ({
         const exchangePercentage = toFiniteNumber(exchangePosition?.percentage, NaN);
         const initialMargin = Math.abs(toFiniteNumber(exchangePosition?.initialMargin, toFiniteNumber(exchangePosition?.collateral, NaN)));
         const leverageAtEntry = Math.max(1, Math.abs(toFiniteNumber(exchangePosition?.leverage, currentDb.leverage)));
+        const fee = toFiniteNumber(exchangePosition?.fee, toFiniteNumber(exchangePosition?.info?.fee, 0));
         const exitReferencePrice = Number.isFinite(normalizedMarkPrice) && normalizedMarkPrice > 0 ? normalizedMarkPrice : fallbackPrice;
         let profitPercent = exchangePercentage;
         if (!Number.isFinite(profitPercent) && Number.isFinite(initialMargin) && initialMargin > 0 && Number.isFinite(exchangeUnrealizedPnl)) {
             profitPercent = (exchangeUnrealizedPnl / initialMargin) * 100;
         }
+        const netProfitUSDT = exchangeUnrealizedPnl - fee;
         return {
             grossProfitUSDT: exchangeUnrealizedPnl,
-            netProfitUSDT: exchangeUnrealizedPnl,
+            netProfitUSDT: netProfitUSDT,
+            realizedProfitUSDT: netProfitUSDT,
             profitPercent,
+            displayProfitUSDT: netProfitUSDT,
+            displayProfitPercent: profitPercent,
             currentPrice: exitReferencePrice,
             markPrice: normalizedMarkPrice,
             initialMargin,
             leverageAtEntry,
+            fee: fee,
+            funding: 0,
             timestamp: Date.now(),
             source: "exchange"
         };

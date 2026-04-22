@@ -136,24 +136,25 @@ const createRuntimePositionUtils = ({
         const estimatedFunding = (position.entryPrice * quantity * fundingRateEstimate) * Math.max(0, fundingIntervals);
 
         if (hasFreshExchangePnl) {
-            const grossProfitUSDT = exchangePnlSnapshot.grossProfitUSDT;
-            const netProfitUSDT = grossProfitUSDT - totalEstimatedFees - estimatedFunding;
+            const exchangeNetProfit = exchangePnlSnapshot.netProfitUSDT;
+            const exchangeFee = Number.isFinite(exchangePnlSnapshot.fee) ? exchangePnlSnapshot.fee : 0;
             const entryValue = position.entryPrice * quantity;
             const referenceInitialMargin = Math.max(entryValue / leverageAtEntry, 1e-8);
-            const profitPercent = (grossProfitUSDT / referenceInitialMargin) * 100;
-            const displayProfitPercent = (netProfitUSDT / referenceInitialMargin) * 100;
+            const profitPercent = (exchangePnlSnapshot.grossProfitUSDT / referenceInitialMargin) * 100;
+            const displayProfitPercent = (exchangeNetProfit / referenceInitialMargin) * 100;
 
             return {
-                grossProfitUSDT: grossProfitUSDT,
-                netProfitUSDT: netProfitUSDT,
-                realizedProfitUSDT: netProfitUSDT,
+                grossProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
+                netProfitUSDT: exchangeNetProfit,
+                realizedProfitUSDT: exchangeNetProfit,
                 profitPercent: profitPercent,
-                displayProfitUSDT: netProfitUSDT,
+                displayProfitUSDT: exchangeNetProfit,
                 displayProfitPercent: displayProfitPercent,
-                fees: totalEstimatedFees,
-                funding: estimatedFunding,
+                fees: exchangeFee,
+                funding: exchangePnlSnapshot.funding || 0,
                 currentPrice: Number.isFinite(exchangePnlSnapshot.currentPrice) ? exchangePnlSnapshot.currentPrice : currentPrice,
-                source: "exchange"
+                source: "exchange",
+                syncedAt: exchangePnlSnapshot.timestamp
             };
         }
 
@@ -181,7 +182,8 @@ const createRuntimePositionUtils = ({
             fees: totalEstimatedFees,
             funding: estimatedFunding,
             currentPrice: priceSource,
-            source: "local"
+            source: "local",
+            syncedAt: null
         };
     };
 

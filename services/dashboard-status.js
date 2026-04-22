@@ -90,6 +90,8 @@ const createDashboardStatusHelpers = ({
 
         const activePositions = getActivePositionEntries().map(([positionKey, position]) => {
             const pnlState = Number.isFinite(currentPrice) ? calculatePositionPnL(position, currentPrice) : null;
+            const pnlSource = pnlState?.source || "local";
+            const syncedAt = pnlState?.syncedAt ? new Date(pnlState.syncedAt).toISOString() : null;
             return {
                 key: positionKey,
                 side: position.side || null,
@@ -99,6 +101,8 @@ const createDashboardStatusHelpers = ({
                 stopLossPrice: Number.isFinite(position.stopLossPrice) ? position.stopLossPrice : null,
                 pnlUSDT: pnlState ? Number(toFiniteNumber(pnlState.netProfitUSDT, 0).toFixed(4)) : null,
                 pnlPercent: pnlState ? Number(toFiniteNumber(pnlState.displayProfitPercent ?? pnlState.profitPercent, 0).toFixed(2)) : null,
+                pnlSource: pnlSource,
+                pnlSyncedAt: syncedAt,
                 fees: pnlState?.fees ? Number(pnlState.fees.toFixed(4)) : 0,
                 funding: pnlState?.funding ? Number(pnlState.funding.toFixed(4)) : 0,
                 currentPrice: Number.isFinite(currentPrice) ? currentPrice : null,
