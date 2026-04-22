@@ -207,6 +207,34 @@ const {
     getIsSyncingPosition: () => isSyncingPosition
 });
 
+// Initialize DB and config helpers early (must be before saveDB is used by other helpers)
+const {
+    initializeDB,
+    reloadConfig,
+    saveDB,
+    startConfigAutoReload
+} = createConfigRuntimeHelpers({
+    getDb: () => db,
+    setDb: (value) => { db = value; },
+    getIsShuttingDown: () => isShuttingDown,
+    getIsProcessing: () => isProcessing,
+    hasRuntimePositionMutationInFlight,
+    getConfigReloadTimer: () => configReloadTimer,
+    setConfigReloadTimer: (value) => { configReloadTimer = value; },
+    loadPersistedConfig,
+    ensureConfigRow,
+    persistConfig,
+    ensureConfigSchema,
+    applyAutoPresetToConfig,
+    hydrateConfig,
+    mergeRuntimeConfig,
+    applyRuntimeConfigChanges,
+    hasAnyActivePosition,
+    resolveProtectedRuntimeConfigEligibility: async (...args) => await resolveProtectedRuntimeConfigEligibility(...args),
+    dashboardEditableFields: DASHBOARD_EDITABLE_FIELDS,
+    configAutoReloadIntervalMs: CONFIG_AUTO_RELOAD_INTERVAL_MS
+});
+
 const formatAmountToMarketPrecision = (symbol, amount) => {
     const numericAmount = Number(amount);
     if (!exchange || !symbol || !Number.isFinite(numericAmount)) return NaN;
@@ -1119,33 +1147,6 @@ const { startWebDashboard } = createRuntimeDashboardHelpers({
 const applyAutoPresetToConfig = (config) => ({
     config: normalizeConfig(config),
     autoPresetResult: { changed: false, presetName: null }
-});
-
-const {
-    initializeDB,
-    reloadConfig,
-    saveDB,
-    startConfigAutoReload
-} = createConfigRuntimeHelpers({
-    getDb: () => db,
-    setDb: (value) => { db = value; },
-    getIsShuttingDown: () => isShuttingDown,
-    getIsProcessing: () => isProcessing,
-    hasRuntimePositionMutationInFlight,
-    getConfigReloadTimer: () => configReloadTimer,
-    setConfigReloadTimer: (value) => { configReloadTimer = value; },
-    loadPersistedConfig,
-    ensureConfigRow,
-    persistConfig,
-    ensureConfigSchema,
-    applyAutoPresetToConfig,
-    hydrateConfig,
-    mergeRuntimeConfig,
-    applyRuntimeConfigChanges,
-    hasAnyActivePosition,
-    resolveProtectedRuntimeConfigEligibility: async (...args) => await resolveProtectedRuntimeConfigEligibility(...args),
-    dashboardEditableFields: DASHBOARD_EDITABLE_FIELDS,
-    configAutoReloadIntervalMs: CONFIG_AUTO_RELOAD_INTERVAL_MS
 });
 
 const syncPositionWithExchange = async () => {
