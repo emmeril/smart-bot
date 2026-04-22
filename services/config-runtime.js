@@ -30,6 +30,7 @@ const createConfigRuntimeHelpers = ({
     let lastKnownDashboardConfigSignature = "";
     let configOperationChain = Promise.resolve();
     const configHotReloadRetryDelayMs = 100;
+    let lastDeferredReloadReason = "";
 
     const runConfigOperation = async (operation) => {
         const previousOperation = configOperationChain.catch(() => {});
@@ -150,6 +151,7 @@ const createConfigRuntimeHelpers = ({
             if (reloaded) {
                 syncDashboardConfigSignature();
                 await onHotReloadApplied();
+                console.log(`[CONFIG][INFO] Hot reload applied via ${reason}. Runtime state refreshed.`);
             }
             return reloaded;
         } catch (error) {
@@ -165,11 +167,16 @@ const createConfigRuntimeHelpers = ({
             setConfigReloadRetryTimer(null);
             if (!getDb() || getIsShuttingDown()) return;
 
-            if (getIsProcessing() || hasRuntimePositionMutationInFlight()) {
+            if (hasRuntimePositionMutationInFlight()) {
+                if (lastDeferredReloadReason !== reason) {
+                    console.log(`[CONFIG][INFO] Hot reload detected via ${reason}, waiting for active runtime mutation to finish...`);
+                    lastDeferredReloadReason = reason;
+                }
                 scheduleConfigReloadCheck(reason, configHotReloadRetryDelayMs);
                 return;
             }
 
+            lastDeferredReloadReason = "";
             await reloadConfigIfChanged(reason);
         }, Math.max(0, Math.trunc(Number(delayMs) || 0)));
 

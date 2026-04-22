@@ -262,13 +262,13 @@ test("startConfigAutoReload watches the config store and hot-reloads changes imm
     assert.equal(persistedWrites.length, 0);
 });
 
-test("scheduleConfigReloadCheck retries while runtime processing is busy", async () => {
+test("scheduleConfigReloadCheck retries while runtime position mutation is busy", async () => {
     const runtimeDb = {
         id: 1,
         pair: "DOGE/USDT:USDT",
         gridLevels: 8
     };
-    let isProcessing = true;
+    let mutationInFlight = true;
     let configReloadRetryTimer = null;
     let hotReloadApplied = 0;
 
@@ -276,8 +276,8 @@ test("scheduleConfigReloadCheck retries while runtime processing is busy", async
         getDb: () => runtimeDb,
         setDb: () => {},
         getIsShuttingDown: () => false,
-        getIsProcessing: () => isProcessing,
-        hasRuntimePositionMutationInFlight: () => false,
+        getIsProcessing: () => true,
+        hasRuntimePositionMutationInFlight: () => mutationInFlight,
         getConfigReloadTimer: () => null,
         setConfigReloadTimer: () => {},
         getConfigReloadRetryTimer: () => configReloadRetryTimer,
@@ -310,12 +310,65 @@ test("scheduleConfigReloadCheck retries while runtime processing is busy", async
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(runtimeDb.pair, "DOGE/USDT:USDT");
 
-    isProcessing = false;
+    mutationInFlight = false;
     await new Promise((resolve) => setTimeout(resolve, 140));
 
     if (configReloadRetryTimer) clearTimeout(configReloadRetryTimer);
 
     assert.equal(runtimeDb.pair, "ETH/USDT:USDT");
     assert.equal(runtimeDb.gridLevels, 10);
+    assert.equal(hotReloadApplied, 1);
+});
+
+test("scheduleConfigReloadCheck does not wait for generic processing when no mutation is active", async () => {
+    const runtimeDb = {
+        id: 1,
+        pair: "DOGE/USDT:USDT",
+        gridLevels: 8
+    };
+    let configReloadRetryTimer = null;
+    let hotReloadApplied = 0;
+
+    const helpers = createConfigRuntimeHelpers({
+        getDb: () => runtimeDb,
+        setDb: () => {},
+        getIsShuttingDown: () => false,
+        getIsProcessing: () => true,
+        hasRuntimePositionMutationInFlight: () => false,
+        getConfigReloadTimer: () => null,
+        setConfigReloadTimer: () => {},
+        getConfigReloadRetryTimer: () => configReloadRetryTimer,
+        setConfigReloadRetryTimer: (value) => { configReloadRetryTimer = value; },
+        getConfigReloadWatcher: () => null,
+        setConfigReloadWatcher: () => {},
+        loadPersistedConfig: async () => ({
+            id: 1,
+            pair: "SOL/USDT:USDT",
+            gridLevels: 16
+        }),
+        ensureConfigRow: async () => null,
+        persistConfig: async () => {},
+        ensureConfigSchema: async () => {},
+        applyAutoPresetToConfig: (config) => ({ config, autoPresetResult: { changed: false, presetName: null } }),
+        hydrateConfig: (config) => config,
+        mergeRuntimeConfig: (nextConfig) => { Object.assign(runtimeDb, nextConfig); },
+        applyRuntimeConfigChanges: async () => false,
+        hasAnyActivePosition: () => false,
+        dashboardEditableFields: [
+            { key: "pair" },
+            { key: "gridLevels" }
+        ],
+        configAutoReloadIntervalMs: 5000,
+        onHotReloadApplied: async () => { hotReloadApplied += 1; }
+    });
+
+    helpers.syncDashboardConfigSignature(runtimeDb);
+    helpers.scheduleConfigReloadCheck("test");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    if (configReloadRetryTimer) clearTimeout(configReloadRetryTimer);
+
+    assert.equal(runtimeDb.pair, "SOL/USDT:USDT");
+    assert.equal(runtimeDb.gridLevels, 16);
     assert.equal(hotReloadApplied, 1);
 });
