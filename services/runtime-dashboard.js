@@ -54,19 +54,56 @@ const createRuntimeDashboardHelpers = ({
         rateLimitState.delete(getRequestIp(req));
     };
 
-    const isSameOriginRequest = (req) => {
-        const originHeader = String(req.headers.origin || "").trim();
-        if (!originHeader) return true;
-        try {
-            const origin = new URL(originHeader);
-            const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
-            const protocol = forwardedProto || (req.secure ? "https" : "http");
-            const host = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
-            if (!host) return false;
-            return origin.protocol === `${protocol}:` && origin.host === host;
-        } catch {
-            return false;
+    const normalizeComparableHostname = (hostname) => {
+        const normalized = String(hostname || "").trim().toLowerCase();
+        if (normalized === "::1" || normalized === "[::1]" || normalized === "127.0.0.1" || normalized === "localhost") {
+            return "loopback";
         }
+        return normalized;
+    };
+
+    const parseComparableOrigin = (rawValue) => {
+        const value = String(rawValue || "").trim();
+        if (!value) return null;
+        try {
+            const parsed = new URL(value);
+            return {
+                protocol: parsed.protocol,
+                hostname: normalizeComparableHostname(parsed.hostname),
+                port: parsed.port || (parsed.protocol === "https:" ? "443" : "80")
+            };
+        } catch {
+            return null;
+        }
+    };
+
+    const getRequestComparableOrigin = (req) => {
+        const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+        const protocol = `${forwardedProto || (req.secure ? "https" : "http")}:`;
+        const hostHeader = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+        if (!hostHeader) return null;
+        try {
+            const parsed = new URL(`${protocol}//${hostHeader}`);
+            return {
+                protocol,
+                hostname: normalizeComparableHostname(parsed.hostname),
+                port: parsed.port || (protocol === "https:" ? "443" : "80")
+            };
+        } catch {
+            return null;
+        }
+    };
+
+    const isSameOriginRequest = (req) => {
+        const sourceOrigin = parseComparableOrigin(req.headers.origin) || parseComparableOrigin(req.headers.referer);
+        if (!sourceOrigin) return true;
+        const requestOrigin = getRequestComparableOrigin(req);
+        if (!requestOrigin) return false;
+        return (
+            sourceOrigin.protocol === requestOrigin.protocol &&
+            sourceOrigin.hostname === requestOrigin.hostname &&
+            sourceOrigin.port === requestOrigin.port
+        );
     };
 
     const requireSameOrigin = (req, res, next) => {
