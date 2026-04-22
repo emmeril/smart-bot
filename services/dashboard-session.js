@@ -27,7 +27,8 @@ const createDashboardSessionHelpers = ({ username, password, sessionSecret, sess
     };
 
     const createDashboardSessionToken = (sessionUsername) => {
-        const payload = Buffer.from(JSON.stringify({ u: sessionUsername, iat: Date.now() }), "utf8").toString("base64url");
+        const tokenId = crypto.randomBytes(16).toString("hex");
+        const payload = Buffer.from(JSON.stringify({ u: sessionUsername, iat: Date.now(), nonce: tokenId }), "utf8").toString("base64url");
         const signature = crypto.createHmac("sha256", sessionSecret).update(payload).digest("hex");
         return `${payload}.${signature}`;
     };
@@ -37,14 +38,16 @@ const createDashboardSessionHelpers = ({ username, password, sessionSecret, sess
         const [payload, signature] = token.split(".");
         if (!payload || !signature) return null;
         const expected = crypto.createHmac("sha256", sessionSecret).update(payload).digest("hex");
-        if (!safeBufferEqual(signature, expected)) return null;
+        if (!safeBufferEqual(signature, expected)) {
+            return null;
+        }
         try {
             const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
             if (!parsed || parsed.u !== username) return null;
             const issuedAt = Number(parsed.iat);
             if (!Number.isFinite(issuedAt)) return null;
             if (Date.now() - issuedAt > sessionTtlMs) return null;
-            return { username: parsed.u, issuedAt };
+            return { username: parsed.u, issuedAt, nonce: parsed.nonce };
         } catch {
             return null;
         }

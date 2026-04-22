@@ -30,8 +30,19 @@ const createRuntimeDashboardHelpers = ({
     const createDashboardApp = () => {
         const app = express();
         app.disable("x-powered-by");
-        app.use(express.json({ limit: "1mb" }));
-        app.use(express.urlencoded({ extended: false }));
+        app.set("trust proxy", 1);
+        app.use((req, res, next) => {
+            req.requestTime = Date.now();
+            next();
+        });
+        app.use(express.json({ limit: "1mb", verify: (req, res, buf) => {
+            try {
+                JSON.parse(buf.toString());
+            } catch (e) {
+                throw new Error("Invalid JSON");
+            }
+        } }));
+        app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
         app.get("/login", (req, res) => {
             if (isDashboardAuthenticated(req)) {
@@ -58,6 +69,14 @@ const createRuntimeDashboardHelpers = ({
         });
 
         app.use(requireDashboardAuth);
+
+        app.use((req, res, next) => {
+            res.setHeader("X-Content-Type-Options", "nosniff");
+            res.setHeader("X-Frame-Options", "DENY");
+            res.setHeader("X-XSS-Protection", "1; mode=block");
+            res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+            next();
+        });
 
         app.get("/", (req, res) => {
             res.sendFile(path.join(publicDir, "index.html"));
@@ -106,9 +125,17 @@ const createRuntimeDashboardHelpers = ({
 
         app.put("/api/config", async (req, res) => {
             try {
+                if (!req.body || typeof req.body !== "object" || Object.keys(req.body).length === 0) {
+                    res.status(400).json({ ok: false, error: "Invalid request body" });
+                    return;
+                }
                 const incoming = req.body && typeof req.body === "object" && req.body.config && typeof req.body.config === "object"
                     ? req.body.config
                     : req.body;
+                if (!incoming || typeof incoming !== "object" || Object.keys(incoming).length === 0) {
+                    res.status(400).json({ ok: false, error: "Invalid config object" });
+                    return;
+                }
                 const result = await applyDashboardConfigUpdate(incoming);
                 res.json({ ok: true, message: "Konfigurasi berhasil disimpan", ...result });
             } catch (error) {

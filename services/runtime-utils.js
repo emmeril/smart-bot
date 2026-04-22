@@ -105,14 +105,39 @@ const createRuntimeUtils = ({
                 lastError = error;
                 const message = String(error?.message || error);
                 const isBusy = message.includes("SQLITE_BUSY") || message.includes("database is locked");
-                if (!isBusy || attempt === attempts - 1) throw error;
+                if (!isBusy || attempt === attempts - 1) {
+                    console.error(`[DB][ERROR] SQLite operation failed after ${attempt + 1} attempts: ${message}`);
+                    throw error;
+                }
+                console.warn(`[DB][WARN] Database locked, retrying (${attempt + 1}/${attempts}) in ${delayMs}ms...`);
                 await sleep(delayMs);
             }
         }
         throw lastError;
     };
 
-    const ensureFileExists = (filePath, defaultContent = "{}") => {
+    const ensureFileExists = async (filePath, defaultContent = "{}") => {
+        try {
+            const dir = path.dirname(filePath);
+            try {
+                await fs.promises.access(dir);
+            } catch {
+                await fs.promises.mkdir(dir, { recursive: true });
+            }
+            try {
+                await fs.promises.access(filePath);
+            } catch {
+                await fs.promises.writeFile(filePath, defaultContent, "utf8");
+                console.log(`[FILE][INFO] Created ${path.basename(filePath)} file`);
+            }
+            return true;
+        } catch (error) {
+            console.error(`[FILE][ERROR] Failed to create ${path.basename(filePath)}:`, error.message);
+            return false;
+        }
+    };
+
+    const ensureFileExistsSync = (filePath, defaultContent = "{}") => {
         try {
             const dir = path.dirname(filePath);
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -141,7 +166,8 @@ const createRuntimeUtils = ({
         logExchangeRecoveryBlock,
         hasRuntimePositionMutationInFlight,
         withSqliteBusyRetry,
-        ensureFileExists
+        ensureFileExists,
+        ensureFileExistsSync
     };
 };
 
