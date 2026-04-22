@@ -8,7 +8,7 @@ test("applyDashboardConfigUpdate persists full config changes before reloading r
     const reloadCalls = [];
     const runtimeDb = {
         id: 1,
-        pair: "DOGE/USDT:USDT",
+        pair: "DOGE/USDT",
         gridLevels: 8,
         dailyPnL: 1.25,
         activePosition: null
@@ -19,7 +19,7 @@ test("applyDashboardConfigUpdate persists full config changes before reloading r
         hasAnyActivePosition: () => false,
         protectedKeys: new Set(["pair"]),
         editableKeys: new Set(["pair", "gridLevels"]),
-        getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", gridLevels: 8 }),
+        getDefaultConfig: () => ({ pair: "DOGE/USDT", gridLevels: 8 }),
         saveDB: async (options) => { saveCalls.push(options || null); },
         reloadConfig: async (previousConfig) => { reloadCalls.push(previousConfig); },
         refreshRuntimeSchedulers: () => {},
@@ -36,7 +36,7 @@ test("applyDashboardConfigUpdate persists full config changes before reloading r
 
     assert.deepEqual(saveCalls, [{ mode: "full" }]);
     assert.equal(reloadCalls.length, 1);
-    assert.equal(reloadCalls[0].pair, "DOGE/USDT:USDT");
+    assert.equal(reloadCalls[0].pair, "DOGE/USDT");
     assert.equal(runtimeDb.pair, "BTC/USDT:USDT");
     assert.equal(runtimeDb.gridLevels, 12);
     assert.equal(result.pair, "BTC/USDT:USDT");
@@ -47,13 +47,13 @@ test("applyDashboardConfigUpdate persists full config changes before reloading r
 test("applyDashboardConfigUpdate preserves activeGridState until runtime decides whether to rebuild it", async () => {
     const runtimeDb = {
         id: 1,
-        pair: "DOGE/USDT:USDT",
+        pair: "DOGE/USDT",
         gridLevels: 8,
         trailingEnabled: true,
         dailyPnL: 1.25,
         activePosition: null,
         activeGridState: {
-            fingerprint: "DOGE/USDT:USDT|5m|8|120|3.5|0|0",
+            fingerprint: "DOGE/USDT|5m|8|120|3.5|0|0",
             lowerBound: 0.1,
             upperBound: 0.2
         }
@@ -64,7 +64,7 @@ test("applyDashboardConfigUpdate preserves activeGridState until runtime decides
         hasAnyActivePosition: () => false,
         protectedKeys: new Set(["pair"]),
         editableKeys: new Set(["pair", "gridLevels", "trailingEnabled"]),
-        getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", gridLevels: 8, trailingEnabled: true }),
+        getDefaultConfig: () => ({ pair: "DOGE/USDT", gridLevels: 8, trailingEnabled: true }),
         saveDB: async () => {},
         reloadConfig: async () => {},
         refreshRuntimeSchedulers: () => {},
@@ -79,12 +79,12 @@ test("applyDashboardConfigUpdate preserves activeGridState until runtime decides
     });
 
     assert.deepEqual(runtimeDb.activeGridState, {
-        fingerprint: "DOGE/USDT:USDT|5m|8|120|3.5|0|0",
+        fingerprint: "DOGE/USDT|5m|8|120|3.5|0|0",
         lowerBound: 0.1,
         upperBound: 0.2
     });
     assert.deepEqual(result.activeGridState, {
-        fingerprint: "DOGE/USDT:USDT|5m|8|120|3.5|0|0",
+        fingerprint: "DOGE/USDT|5m|8|120|3.5|0|0",
         lowerBound: 0.1,
         upperBound: 0.2
     });
@@ -107,7 +107,7 @@ test("resetDashboardConfig persists full config changes before reloading runtime
         hasAnyActivePosition: () => false,
         protectedKeys: new Set(["pair"]),
         editableKeys: new Set(["pair", "gridLevels"]),
-        getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", gridLevels: 8 }),
+        getDefaultConfig: () => ({ pair: "DOGE/USDT", gridLevels: 8 }),
         saveDB: async (options) => { saveCalls.push(options || null); },
         reloadConfig: async (previousConfig) => { reloadCalls.push(previousConfig); },
         refreshRuntimeSchedulers: () => {},
@@ -122,15 +122,15 @@ test("resetDashboardConfig persists full config changes before reloading runtime
     assert.deepEqual(saveCalls, [{ mode: "full" }]);
     assert.equal(reloadCalls.length, 1);
     assert.equal(reloadCalls[0].pair, "BTC/USDT:USDT");
-    assert.equal(runtimeDb.pair, "DOGE/USDT:USDT");
+    assert.equal(runtimeDb.pair, "DOGE/USDT");
     assert.equal(runtimeDb.gridLevels, 8);
-    assert.deepEqual(result, { pair: "DOGE/USDT:USDT", gridLevels: 8 });
+    assert.deepEqual(result, { pair: "DOGE/USDT", gridLevels: 8 });
 });
 
 test("applyDashboardConfigUpdate serializes concurrent updates", async () => {
     const runtimeDb = {
         id: 1,
-        pair: "DOGE/USDT:USDT",
+        pair: "DOGE/USDT",
         gridLevels: 8,
         dailyPnL: 0,
         activePosition: null
@@ -144,7 +144,7 @@ test("applyDashboardConfigUpdate serializes concurrent updates", async () => {
         hasAnyActivePosition: () => false,
         protectedKeys: new Set(["pair"]),
         editableKeys: new Set(["pair", "gridLevels"]),
-        getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", gridLevels: 8 }),
+        getDefaultConfig: () => ({ pair: "DOGE/USDT", gridLevels: 8 }),
         saveDB: async (options) => {
             saveCalls.push({ options, snapshot: { ...runtimeDb } });
             if (!firstSavePending) return;
@@ -188,7 +188,7 @@ test("applyDashboardConfigUpdate serializes concurrent updates", async () => {
 test("applyDashboardConfigUpdate defers protected runtime keys while positions are active", async () => {
     const runtimeDb = {
         id: 1,
-        pair: "DOGE/USDT:USDT",
+        pair: "DOGE/USDT",
         leverage: 8,
         gridLevels: 8,
         pendingRuntimeConfig: null,
@@ -201,7 +201,7 @@ test("applyDashboardConfigUpdate defers protected runtime keys while positions a
         hasAnyActivePosition: () => true,
         protectedKeys: new Set(["pair", "leverage"]),
         editableKeys: new Set(["pair", "leverage", "gridLevels"]),
-        getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", leverage: 8, gridLevels: 8 }),
+        getDefaultConfig: () => ({ pair: "DOGE/USDT", leverage: 8, gridLevels: 8 }),
         saveDB: async () => {},
         reloadConfig: async () => {},
         refreshRuntimeSchedulers: () => {},
@@ -220,7 +220,7 @@ test("applyDashboardConfigUpdate defers protected runtime keys while positions a
         gridLevels: 10
     });
 
-    assert.equal(runtimeDb.pair, "DOGE/USDT:USDT");
+    assert.equal(runtimeDb.pair, "DOGE/USDT");
     assert.equal(runtimeDb.leverage, 8);
     assert.equal(runtimeDb.gridLevels, 10);
     assert.deepEqual(runtimeDb.pendingRuntimeConfig, { pair: "BTC/USDT:USDT", leverage: 12 });

@@ -9,7 +9,7 @@ const sequelize = new Sequelize({
 
 const Config = sequelize.define("Config", {
     strategy: { type: DataTypes.STRING, defaultValue: "futures_grid" },
-    pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
+    pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT" },
     binanceBotMode: { type: DataTypes.STRING, defaultValue: "auto" },
     binanceGridType: { type: DataTypes.STRING, defaultValue: "arithmetic" },
     binanceDirection: { type: DataTypes.STRING, defaultValue: "neutral" },
@@ -68,7 +68,7 @@ const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort", "auto
 const VALID_MARGIN_MODES = ["cross", "isolated"];
 const DEFAULT_CONFIG = {
     strategy: "futures_grid",
-    pair: "DOGE/USDT:USDT",
+    pair: "DOGE/USDT",
     binanceBotMode: "auto",
     binanceGridType: "arithmetic",
     binanceDirection: "neutral",
@@ -119,7 +119,7 @@ const DEFAULT_CONFIG = {
 };
 
 const DASHBOARD_EDITABLE_FIELDS = [
-    { key: "pair", label: "Trading Pair", section: "Market", type: "text", placeholder: "BTC/USDT:USDT", description: "Perpetual futures pair traded by the bot." },
+    { key: "pair", label: "Trading Pair", section: "Market", type: "text", placeholder: "DOGE/USDT", description: "Perpetual futures pair traded by the bot." },
     {
         key: "binanceBotMode",
         label: "Bot Mode",

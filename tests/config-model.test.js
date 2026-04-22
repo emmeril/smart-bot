@@ -31,7 +31,7 @@ const defaultConfig = {
     stopLossMaxPercent: 7,
     trailingActivateATR: 1.2,
     trailingOffsetATR: 0.6,
-    pair: "DOGE/USDT:USDT",
+    pair: "DOGE/USDT",
     strategy: "futures_grid",
     marginMode: "isolated",
     gridTimeframe: "5m",

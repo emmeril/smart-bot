@@ -274,7 +274,7 @@ Catatan penting:
 ### General
 
 - `strategy`: strategi aktif, saat ini `futures_grid`
-- `pair`: simbol futures, contoh `DOGE/USDT:USDT`
+- `pair`: simbol futures, contoh `DOGE/USDT`
 - `marginMode`: `isolated` atau `cross`
 - `leverage`: leverage futures
 - `monitoringInterval`: jeda monitor runtime dalam milidetik
@@ -430,7 +430,7 @@ Ini penting untuk menjaga runtime tetap konsisten setelah crash, restart server,
 ## Catatan Operasional
 
 - Bot ini ditujukan untuk Binance Futures USDT-M.
-- Pair futures harus sesuai format exchange yang didukung `ccxt`, misalnya `DOGE/USDT:USDT`.
+- Pair futures harus sesuai format exchange yang didukung `ccxt`, misalnya `DOGE/USDT`.
 - Timezone filter sesi memakai UTC, bukan WIB.
 - Perubahan config dari dashboard tidak mengharuskan restart jika proses auto reload aktif.
 - `gridOrderSizeUsdt` atau `gridOrdersPerSide` bernilai `0` dapat dipakai runtime untuk menghitung nilai efektif secara adaptif pada kondisi tertentu.
