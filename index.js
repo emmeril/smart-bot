@@ -1,4 +1,24 @@
 require("dotenv").config();
+
+// Validate required environment variables
+const requiredEnvVars = [
+  'API_KEY',
+  'API_SECRET',
+  'DASHBOARD_USERNAME',
+  'DASHBOARD_PASSWORD'
+];
+
+const missingEnvVars = requiredEnvVars.filter(key => !process.env[key]);
+if (missingEnvVars.length > 0) {
+  console.error("[CONFIG][ERROR] Missing required environment variables:", missingEnvVars.join(', '));
+  console.error("[CONFIG][INFO] Please check your .env file");
+  process.exit(1);
+}
+
+// Validate dashboard credentials are not default
+if (process.env.DASHBOARD_USERNAME === 'admin' || process.env.DASHBOARD_PASSWORD === 'admin') {
+  console.warn("[SECURITY][WARN] Using default dashboard credentials. Change immediately!");
+}
 const path = require("path");
 const { createConfigModelHelpers } = require("./services/config-model");
 const { createConfigPersistenceHelpers } = require("./services/config-persistence");
@@ -45,6 +65,9 @@ const { createTradeLogicHelpers } = require("./services/trade-logic");
 const { createPositionStateHelpers } = require("./services/position-state");
 const { createRuntimeSchedulerHelpers } = require("./services/runtime-scheduler");
 
+// ============================================================================
+// STATE VARIABLES (module-scoped)
+// ============================================================================
 let isProcessing = false;
 let isPlacingOrder = false;
 let isClosingPosition = false;
@@ -94,21 +117,64 @@ let exchangeHealth = {
 let lastRecoveryBlockLogAt = 0;
 const logPath = path.join(__dirname, 'trades.csv');
 let db = null;
-const BALANCE_CACHE_TTL = 15000;
-const TICKER_CACHE_TTL = 800;
-const OHLCV_CACHE_TTL = 1500;
-const SYNC_LOG_TTL = 15000;
-const SIGNAL_DETAIL_LOG_TTL = 10000;
-const GRID_SYNC_LOG_TTL = 15000;
-const GRID_SIZING_SKIP_LOG_TTL = 30000;
-const GRID_SIZING_STATE_LOG_TTL = 30000;
-const METRICS_LOG_INTERVAL = 60000;
-const POSITION_RUNTIME_PERSIST_TTL = 2000;
-const POSITION_SYNC_QTY_TOLERANCE = 0.001;
-const POSITION_SYNC_ENTRY_TOLERANCE_PCT = 0.05;
-const GRID_CLIENT_ORDER_PREFIX = "smartgrid";
-const TP_CLIENT_ORDER_PREFIX = "smarttp";
-const SL_CLIENT_ORDER_PREFIX = "smartsl";
+// ============================================================================
+// CONFIGURATION CONSTANTS
+// ============================================================================
+const CONFIG = {
+  // Cache TTLs (milliseconds)
+  CACHE: {
+    BALANCE: 15000,
+    TICKER: 800,
+    OHLCV: 1500,
+    SYNC_LOG: 15000,
+    SIGNAL_DETAIL_LOG: 10000,
+    GRID_SYNC_LOG: 15000,
+    GRID_SIZING_SKIP_LOG: 30000,
+    GRID_SIZING_STATE_LOG: 30000,
+    POSITION_RUNTIME_PERSIST: 2000
+  },
+  // Timing intervals (milliseconds)
+  INTERVALS: {
+    MAIN_LOOP: 2000,
+    METRICS_LOG: 60000,
+    CONFIG_AUTO_RELOAD: CONFIG_AUTO_RELOAD_INTERVAL_MS || 5000,
+    POSITION_SYNC: 30000,
+    PNL_MONITOR: 5000
+  },
+  // Tolerances
+  TOLERANCE: {
+    POSITION_SYNC_QTY: 0.001,
+    POSITION_SYNC_ENTRY_PCT: 0.05
+  },
+  // Order ID prefixes
+  ORDER_PREFIX: {
+    GRID: "smartgrid",
+    TP: "smarttp",
+    SL: "smartsl"
+  },
+  // Exchange
+  EXCHANGE: {
+    HEALTH_CHECK_INTERVAL: 10000,
+    MAX_CONSECUTIVE_FAILURES: 5
+  }
+};
+
+// Re-export constants for backward compatibility
+const BALANCE_CACHE_TTL = CONFIG.CACHE.BALANCE;
+const TICKER_CACHE_TTL = CONFIG.CACHE.TICKER;
+const OHLCV_CACHE_TTL = CONFIG.CACHE.OHLCV;
+const SYNC_LOG_TTL = CONFIG.CACHE.SYNC_LOG;
+const SIGNAL_DETAIL_LOG_TTL = CONFIG.CACHE.SIGNAL_DETAIL_LOG;
+const GRID_SYNC_LOG_TTL = CONFIG.CACHE.GRID_SYNC_LOG;
+const GRID_SIZING_SKIP_LOG_TTL = CONFIG.CACHE.GRID_SIZING_SKIP_LOG;
+const GRID_SIZING_STATE_LOG_TTL = CONFIG.CACHE.GRID_SIZING_STATE_LOG;
+const METRICS_LOG_INTERVAL = CONFIG.INTERVALS.METRICS_LOG;
+const POSITION_RUNTIME_PERSIST_TTL = CONFIG.CACHE.POSITION_RUNTIME_PERSIST;
+const POSITION_SYNC_QTY_TOLERANCE = CONFIG.TOLERANCE.POSITION_SYNC_QTY;
+const POSITION_SYNC_ENTRY_TOLERANCE_PCT = CONFIG.TOLERANCE.POSITION_SYNC_ENTRY_PCT;
+const GRID_CLIENT_ORDER_PREFIX = CONFIG.ORDER_PREFIX.GRID;
+const TP_CLIENT_ORDER_PREFIX = CONFIG.ORDER_PREFIX.TP;
+const SL_CLIENT_ORDER_PREFIX = CONFIG.ORDER_PREFIX.SL;
 
 let metrics = {
     windowStart: Date.now(),
@@ -190,6 +256,23 @@ const clearRuntimeTimers = () => {
         resetTimer();
     }
 };
+
+// ============================================================================
+// GLOBAL ERROR HANDLING
+// ============================================================================
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[CRITICAL] Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit automatically - let the bot try to recover
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[CRITICAL] Uncaught Exception:', error.message);
+  // Attempt graceful shutdown before exit
+  clearRuntimeTimers();
+  if (webServer) webServer.close();
+  if (db && db.sequelize) db.sequelize.close();
+  process.exit(1);
+});
 
 const { getDefaultConfig } = createRuntimeConfigHelpers({
     defaultConfig: DEFAULT_CONFIG
@@ -1066,7 +1149,7 @@ const {
 });
 
 const syncPositionWithExchange = async () => {
-    if (isSyncingPosition || isClosingPosition || isPlacingOrder) return;
+    if (isSyncingPosition || isClosingPosition || isPlacingOrder || isShuttingDown) return;
     isSyncingPosition = true;
     try {
         if (!db || !exchange) return;
@@ -1305,24 +1388,119 @@ const {
     exitProcess: (code) => process.exit(code)
 });
 
-(async () => {
+// ============================================================================
+// SIGNAL HANDLERS & GRACEFUL SHUTDOWN
+// ============================================================================
+const setupSignalHandlers = (monitoringHelpers) => {
+  const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+  
+  signals.forEach(signal => {
+    process.on(signal, async () => {
+      if (isShuttingDown) return;
+      console.log(`[SHUTDOWN] Received ${signal}. Initiating graceful shutdown...`);
+      isShuttingDown = true;
+      
+      try {
+        // Stop accepting new work
+        if (mainLoopTimer) clearInterval(mainLoopTimer);
+        if (metricsTimer) clearInterval(metricsTimer);
+        if (configReloadTimer) clearInterval(configReloadTimer);
+        
+        // Wait for in-flight operations to complete
+        let waitMs = 0;
+        const maxWait = 30000;
+        const pollMs = 500;
+        
+        while (hasRuntimePositionMutationInFlight() && waitMs < maxWait) {
+          await sleep(pollMs);
+          waitMs += pollMs;
+        }
+        
+        if (waitMs >= maxWait) {
+          console.warn("[SHUTDOWN] Forcing shutdown after waiting for in-flight operations");
+        }
+        
+        // Graceful shutdown via monitoring helpers
+        if (monitoringHelpers && typeof monitoringHelpers.shutdown === 'function') {
+          await monitoringHelpers.shutdown();
+        }
+        
+        console.log("[SHUTDOWN] Bot stopped cleanly");
+        process.exit(0);
+      } catch (error) {
+        console.error("[SHUTDOWN][ERROR]", error.message);
+        process.exit(1);
+      }
+    });
+  });
+};
+
+const startMainLoop = () => {
+  // Clear existing if any (shouldn't happen but safe)
+  if (mainLoopTimer) {
+    clearInterval(mainLoopTimer);
+    mainLoopTimer = null;
+  }
+  
+  let lastCycleCompleted = Date.now();
+  let cycleOverlapCount = 0;
+  
+  mainLoopTimer = setInterval(async () => {
+    // Check for stuck cycles
+    const now = Date.now();
+    const cycleTime = now - lastCycleCompleted;
+    if (cycleTime < CONFIG.INTERVALS.MAIN_LOOP && isProcessing) {
+      cycleOverlapCount++;
+      if (cycleOverlapCount <= 3) {
+        console.warn(`[WATCHDOG] Cycle overlap detected (${cycleTime}ms). Skipping.`);
+      } else if (cycleOverlapCount === 4) {
+        console.error("[WATCHDOG] Persistent cycle overlap - main loop may be stuck");
+      }
+      return;
+    }
+    
+    if (isProcessing || isShuttingDown) return;
+    
+    isProcessing = true;
+    lastCycleCompleted = now;
+    cycleOverlapCount = 0;
+    
     try {
-        if (!(await initializeDB())) process.exit(1);
+      await runTradingCycle();
+    } catch (error) {
+      console.error("[APP][ERROR] Main loop failed:", error.message);
+      // Prevent error accumulation
+      if (cycleOverlapCount++ > 10) {
+        console.error("[APP][CRITICAL] Too many consecutive errors. Consider restarting.");
+      }
+    } finally {
+      isProcessing = false;
+    }
+  }, CONFIG.INTERVALS.MAIN_LOOP);
+  
+  console.log(`[MAIN_LOOP] Started (interval=${CONFIG.INTERVALS.MAIN_LOOP}ms)`);
+};
+
+// ============================================================================
+// MAIN APPLICATION ENTRY POINT
+// ============================================================================
+(async () => {
+  try {
+    if (!(await initializeDB())) process.exit(1);
         webServer = await startWebDashboard(webServer);
         await bootstrapRuntime();
         const totalUSDT = await getTotalUSDTBalance(true);
         printStartupBanner(totalUSDT);
         lastTradeAt = getLastTradeTimestampFromLog();
 
-        mainLoopTimer = setInterval(async () => {
-            if (isProcessing) return;
-            isProcessing = true;
-            try { await runTradingCycle(); }
-            catch (error) { console.error("[APP][ERROR] Main loop failed:", error.message); }
-            finally { isProcessing = false; }
-        }, 2000);
-
+        startMainLoop();
         registerRuntimeCommands();
+        
+        // Setup signal handlers after initialization
+        setupSignalHandlers({
+          shutdown: (...args) => shutdown(...args),
+          clearRuntimeTimers
+        });
     } catch (error) {
         console.error("[APP][ERROR] Bot startup failed:", error.message);
         process.exit(1);
