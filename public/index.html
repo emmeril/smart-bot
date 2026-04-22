@@ -424,7 +424,7 @@
         state.status = result.status || state.status;
         renderForm();
         await loadStatus(true);
-        showToast("Strategy updated", "success");
+        showToast(result.message || "Strategy updated", "success");
       } catch (error) {
         showToast(error.message || "Failed to save strategy", "error");
       }
