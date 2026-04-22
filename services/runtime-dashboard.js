@@ -18,116 +18,6 @@ const createRuntimeDashboardHelpers = ({
     applyDashboardConfigUpdate,
     resetDashboardConfig
 }) => {
-    const loginAttemptWindowMs = Math.max(1000, Math.trunc(toFiniteNumber(process.env.DASHBOARD_LOGIN_WINDOW_MS, 5 * 60 * 1000)));
-    const loginAttemptLimit = Math.max(1, Math.trunc(toFiniteNumber(process.env.DASHBOARD_LOGIN_MAX_ATTEMPTS, 10)));
-    const rateLimitState = new Map();
-
-    const getRequestIp = (req) => String(req.ip || req.socket?.remoteAddress || "unknown");
-
-    const pruneRateLimitState = (now) => {
-        for (const [key, value] of rateLimitState.entries()) {
-            if (now - value.windowStart >= loginAttemptWindowMs) rateLimitState.delete(key);
-        }
-    };
-
-    const applyLoginRateLimit = (req, res) => {
-        const now = Date.now();
-        pruneRateLimitState(now);
-        const key = getRequestIp(req);
-        const current = rateLimitState.get(key);
-        if (!current || now - current.windowStart >= loginAttemptWindowMs) {
-            rateLimitState.set(key, { count: 1, windowStart: now });
-            return false;
-        }
-
-        current.count += 1;
-        if (current.count > loginAttemptLimit) {
-            const retryAfterSec = Math.max(1, Math.ceil((loginAttemptWindowMs - (now - current.windowStart)) / 1000));
-            res.setHeader("Retry-After", String(retryAfterSec));
-            res.status(429).json({ ok: false, error: "Too many login attempts. Please try again later." });
-            return true;
-        }
-        return false;
-    };
-
-    const clearLoginRateLimit = (req) => {
-        rateLimitState.delete(getRequestIp(req));
-    };
-
-    const normalizeComparableHostname = (hostname) => {
-        const normalized = String(hostname || "").trim().toLowerCase();
-        if (normalized === "::1" || normalized === "[::1]" || normalized === "127.0.0.1" || normalized === "localhost") {
-            return "loopback";
-        }
-        return normalized;
-    };
-
-    const parseComparableOrigin = (rawValue) => {
-        const value = String(rawValue || "").trim();
-        if (!value) return null;
-        try {
-            const parsed = new URL(value);
-            return {
-                protocol: parsed.protocol,
-                hostname: normalizeComparableHostname(parsed.hostname),
-                port: parsed.port || (parsed.protocol === "https:" ? "443" : "80")
-            };
-        } catch {
-            return null;
-        }
-    };
-
-    const getRequestComparableOrigin = (req) => {
-        const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
-        const protocol = `${forwardedProto || (req.secure ? "https" : "http")}:`;
-        const hostHeader = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
-        if (!hostHeader) return null;
-        try {
-            const parsed = new URL(`${protocol}//${hostHeader}`);
-            return {
-                protocol,
-                hostname: normalizeComparableHostname(parsed.hostname),
-                port: parsed.port || (protocol === "https:" ? "443" : "80")
-            };
-        } catch {
-            return null;
-        }
-    };
-
-    const isSameOriginRequest = (req) => {
-        const sourceOrigin = parseComparableOrigin(req.headers.origin) || parseComparableOrigin(req.headers.referer);
-        if (!sourceOrigin) return true;
-        const requestOrigin = getRequestComparableOrigin(req);
-        if (!requestOrigin) return false;
-        return (
-            sourceOrigin.protocol === requestOrigin.protocol &&
-            sourceOrigin.hostname === requestOrigin.hostname &&
-            sourceOrigin.port === requestOrigin.port
-        );
-    };
-
-    const requireSameOrigin = (req, res, next) => {
-        if (["GET", "HEAD", "OPTIONS"].includes(req.method)) {
-            next();
-            return;
-        }
-        if (isSameOriginRequest(req)) {
-            next();
-            return;
-        }
-        res.status(403).json({ ok: false, error: "Cross-origin request rejected" });
-    };
-
-    const attachSecurityHeaders = (req, res, next) => {
-        res.setHeader("X-Content-Type-Options", "nosniff");
-        res.setHeader("X-Frame-Options", "DENY");
-        res.setHeader("Referrer-Policy", "no-referrer");
-        if (req.secure) {
-            res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-        }
-        next();
-    };
-
     const requireDashboardAuth = (req, res, next) => {
         if (isDashboardAuthenticated(req)) return next();
         if (req.path.startsWith("/api")) {
@@ -140,38 +30,32 @@ const createRuntimeDashboardHelpers = ({
     const createDashboardApp = () => {
         const app = express();
         app.disable("x-powered-by");
-        app.set("trust proxy", String(process.env.DASHBOARD_TRUST_PROXY || "").toLowerCase() === "true");
+        app.set("trust proxy", 1);
         app.use((req, res, next) => {
             req.requestTime = Date.now();
             next();
         });
-        app.use(attachSecurityHeaders);
-        app.use(express.json({ limit: "1mb" }));
-        app.use(express.urlencoded({ extended: false, limit: "1mb" }));
-        app.use(requireSameOrigin);
-        app.use((error, req, res, next) => {
-            if (error && (error.type === "entity.parse.failed" || error instanceof SyntaxError)) {
-                res.status(400).json({ ok: false, error: "Invalid JSON body" });
-                return;
+        app.use(express.json({ limit: "1mb", verify: (req, res, buf) => {
+            try {
+                JSON.parse(buf.toString());
+            } catch (e) {
+                throw new Error("Invalid JSON");
             }
-            next(error);
-        });
+        } }));
+        app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
         app.get("/login", (req, res) => {
             if (isDashboardAuthenticated(req)) {
                 res.redirect("/dashboard");
                 return;
             }
-            res.setHeader("Cache-Control", "no-store");
             res.sendFile(path.join(publicDir, "login.html"));
         });
 
         app.post("/login", (req, res) => {
-            if (applyLoginRateLimit(req, res)) return;
             const username = String(req.body?.username || "").trim();
             const password = String(req.body?.password || "");
             if (isDashboardLoginValid(username, password)) {
-                clearLoginRateLimit(req);
                 setDashboardSessionCookie(res, username);
                 res.redirect("/dashboard");
                 return;
@@ -186,13 +70,19 @@ const createRuntimeDashboardHelpers = ({
 
         app.use(requireDashboardAuth);
 
+        app.use((req, res, next) => {
+            res.setHeader("X-Content-Type-Options", "nosniff");
+            res.setHeader("X-Frame-Options", "DENY");
+            res.setHeader("X-XSS-Protection", "1; mode=block");
+            res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+            next();
+        });
+
         app.get("/", (req, res) => {
-            res.setHeader("Cache-Control", "no-store");
             res.sendFile(path.join(publicDir, "index.html"));
         });
 
         app.get("/dashboard", (req, res) => {
-            res.setHeader("Cache-Control", "no-store");
             res.sendFile(path.join(publicDir, "index.html"));
         });
 
@@ -262,12 +152,13 @@ const createRuntimeDashboardHelpers = ({
             }
         });
 
+        app.use(express.static(publicDir));
         return app;
     };
 
     const resolveDashboardAddress = () => ({
         port: Math.max(1, Math.trunc(toFiniteNumber(process.env.DASHBOARD_PORT || process.env.PORT, 3000))),
-        host: process.env.DASHBOARD_HOST || "127.0.0.1"
+        host: process.env.DASHBOARD_HOST || "0.0.0.0"
     });
 
     const startWebDashboard = async (existingServer = null) => {

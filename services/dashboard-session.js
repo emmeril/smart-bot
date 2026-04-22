@@ -61,8 +61,8 @@ const createDashboardSessionHelpers = ({ username, password, sessionSecret, sess
     const isDashboardAuthenticated = (req) => Boolean(getDashboardSession(req));
 
     const isDashboardLoginValid = (candidateUsername, candidatePassword) => (
-        safeBufferEqual(String(candidateUsername || "").trim(), username) &&
-        safeBufferEqual(String(candidatePassword || ""), password)
+        String(candidateUsername || "").trim() === username &&
+        String(candidatePassword || "") === password
     );
 
     const buildDashboardSessionCookie = (value, maxAgeSeconds) => {
