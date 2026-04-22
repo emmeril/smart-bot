@@ -75,7 +75,7 @@ const createDashboardConfigHelpers = ({
         await saveDB({ mode: "full" });
         await reloadConfig(previousConfig);
         refreshRuntimeSchedulers();
-        await syncExchangeRuntimeSettings();
+        await syncExchangeRuntimeSettings(previousConfig);
     };
 
     const applyDashboardConfigUpdate = async (incoming) => await runDashboardConfigOperation(async () => {
@@ -117,7 +117,7 @@ const createDashboardConfigHelpers = ({
             deferredProtectedKeys: protectedKeysToDefer,
             protectedConfigEligibility: protectedEligibility || { canApply: true, reasons: [] },
             message: protectedKeysToDefer.length > 0
-                ? `Saved pending protected config (${protectedKeysToDefer.join(", ")}) and will apply it after Binance positions/orders are clear.`
+                ? `Configuration saved. Note: ${protectedKeysToDefer.join(", ")} will update automatically once positions/orders are cleared.`
                 : "Configuration updated successfully."
         };
     });

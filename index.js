@@ -1007,10 +1007,15 @@ const {
     saveDB: (...args) => saveDB(...args),
     reloadConfig: async (...args) => { await reloadConfig(...args); },
     refreshRuntimeSchedulers: () => { refreshRuntimeSchedulers(); },
-    syncExchangeRuntimeSettings: async () => {
+    syncExchangeRuntimeSettings: async (previousConfig = null) => {
         if (!exchange) return;
-        await setMarginMode();
-        await setLeverage();
+        
+        // Only call setters if relevant config changed or no previous config
+        const shouldCheckMargin = !previousConfig || previousConfig.marginMode !== db.marginMode;
+        const shouldCheckLeverage = !previousConfig || previousConfig.leverage !== db.leverage;
+        
+        if (shouldCheckMargin) await setMarginMode();
+        if (shouldCheckLeverage) await setLeverage();
     },
     resolveProtectedRuntimeConfigEligibility: async (...args) => await resolveProtectedRuntimeConfigEligibility(...args),
     buildDashboardPayload

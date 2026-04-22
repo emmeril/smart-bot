@@ -88,17 +88,17 @@ const createRuntimeExchangeBootstrapHelpers = ({
             const marginMode = (db.marginMode || "isolated").toLowerCase();
             const openPositions = await fetchOpenExchangePositions();
             if (openPositions.length > 0) {
-                console.log(`[MARGIN][INFO] Skipping margin mode update while ${openPositions.length} position(s) are open on ${db.pair}.`);
+                console.log(`[MARGIN][INFO] Margin mode update deferred: ${openPositions.length} position(s) open on ${db.pair}. Will apply when positions close.`);
                 return false;
             }
             const managedOrders = await fetchManagedOpenOrdersSnapshot();
             if (managedOrders.triggerOrdersFetchFailed) {
-                console.log(`[MARGIN][INFO] Skipping margin mode update because trigger open orders could not be verified on ${db.pair}.`);
+                console.log(`[MARGIN][INFO] Margin mode update deferred: trigger orders unavailable on ${db.pair}. Will retry.`);
                 return false;
             }
             const openOrderCount = managedOrders.grid.length + managedOrders.tp.length + managedOrders.sl.length;
             if (openOrderCount > 0) {
-                console.log(`[MARGIN][INFO] Skipping margin mode update while ${openOrderCount} open managed order(s) exist on ${db.pair}.`);
+                console.log(`[MARGIN][INFO] Margin mode update deferred: ${openOrderCount} open managed order(s) on ${db.pair}. Will apply when orders clear.`);
                 return false;
             }
             await exchange.setMarginMode(marginMode, db.pair);
@@ -128,18 +128,18 @@ const createRuntimeExchangeBootstrapHelpers = ({
 
             const openPositions = await fetchOpenExchangePositions();
             if (openPositions.length > 0) {
-                console.log(`[LEVERAGE][INFO] Skipping leverage update while ${openPositions.length} position(s) are open on ${symbol}.`);
+                console.log(`[LEVERAGE][INFO] Leverage update deferred: ${openPositions.length} position(s) open on ${symbol}. Will apply when positions close.`);
                 return false;
             }
 
             const managedOrders = await fetchManagedOpenOrdersSnapshot();
             if (managedOrders.triggerOrdersFetchFailed) {
-                console.log(`[LEVERAGE][INFO] Skipping leverage update because trigger open orders could not be verified on ${symbol}.`);
+                console.log(`[LEVERAGE][INFO] Leverage update deferred: trigger orders unavailable on ${symbol}. Will retry.`);
                 return false;
             }
             const openOrderCount = managedOrders.grid.length + managedOrders.tp.length + managedOrders.sl.length;
             if (openOrderCount > 0) {
-                console.log(`[LEVERAGE][INFO] Skipping leverage update while ${openOrderCount} open managed order(s) exist on ${symbol}.`);
+                console.log(`[LEVERAGE][INFO] Leverage update deferred: ${openOrderCount} open managed order(s) on ${symbol}. Will apply when orders clear.`);
                 return false;
             }
 
