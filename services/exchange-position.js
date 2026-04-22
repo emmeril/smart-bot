@@ -241,6 +241,10 @@ const createExchangePositionHelpers = ({
         const preservedTrailingEnabled = existingPosition?.trailingEnabled ?? Boolean(currentDb.trailingEnabled);
         const preservedTrailingActivateATR = existingPosition?.trailingActivateATR ?? toFiniteNumber(currentDb.trailingActivateATR, 1.2);
         const preservedTrailingOffsetATR = existingPosition?.trailingOffsetATR ?? toFiniteNumber(currentDb.trailingOffsetATR, 0.6);
+        const preservedTrailingRiskModel = existingPosition?.trailingRiskModel || "STATIC";
+        const preservedTrailingRiskSource = existingPosition?.trailingRiskSource || "config";
+        const preservedTrailingRiskReason = existingPosition?.trailingRiskReason || null;
+        const preservedTrailingRiskMeta = existingPosition?.trailingRiskMeta || null;
         const preservedEntryTime = Number.isFinite(existingPosition?.entryTime) ? existingPosition.entryTime : Date.now() - 300000;
         const preservedHighestSinceEntry = Number.isFinite(existingPosition?.highestSinceEntry) ? existingPosition.highestSinceEntry : entryPrice;
         const preservedLowestSinceEntry = Number.isFinite(existingPosition?.lowestSinceEntry) ? existingPosition.lowestSinceEntry : entryPrice;
@@ -300,6 +304,10 @@ const createExchangePositionHelpers = ({
             trailingEnabled: preserveExitPlan ? preservedTrailingEnabled : Boolean(currentDb.trailingEnabled),
             trailingActivateATR: preserveExitPlan ? preservedTrailingActivateATR : toFiniteNumber(currentDb.trailingActivateATR, 1.2),
             trailingOffsetATR: preserveExitPlan ? preservedTrailingOffsetATR : toFiniteNumber(currentDb.trailingOffsetATR, 0.6),
+            trailingRiskModel: preserveExitPlan ? preservedTrailingRiskModel : "STATIC",
+            trailingRiskSource: preserveExitPlan ? preservedTrailingRiskSource : "config",
+            trailingRiskReason: preserveExitPlan ? preservedTrailingRiskReason : null,
+            trailingRiskMeta: preserveExitPlan ? preservedTrailingRiskMeta : null,
             strategy: preservedStrategy,
             exchangePnlSnapshot,
             tpOrderId: null,
@@ -361,7 +369,6 @@ const createExchangePositionHelpers = ({
 };
 
 module.exports = { createExchangePositionHelpers };
-
 
 
 

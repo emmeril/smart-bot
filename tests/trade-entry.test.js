@@ -46,6 +46,7 @@ test("placeOrder exits early after emergency close when no valid TP/SL plan can 
         fetchManagedOpenOrdersSnapshot: async () => ({ triggerOrdersFetchFailed: false, grid: [], tp: [], sl: [] }),
         setLeverage: async () => true,
         getPrice: async () => 100,
+        getOHLCV: async () => [[1, 100, 101, 99, 100, 10], [2, 100, 101, 99, 100, 10], [3, 100, 101, 99, 100, 10]],
         parseSignalOrderData: () => ({
             signalPrice: 100,
             signalATR: null,
@@ -81,7 +82,8 @@ test("placeOrder exits early after emergency close when no valid TP/SL plan can 
         ensureReduceOnlyTakeProfitOrder: async () => { state.ensureTpCalls += 1; },
         ensureReduceOnlyStopLossOrder: async () => { state.ensureSlCalls += 1; },
         logTrade: () => {},
-        syncPositionWithExchange: async () => { state.syncCalls += 1; }
+        syncPositionWithExchange: async () => { state.syncCalls += 1; },
+        resolveAdaptiveRiskOverrides: async () => ({})
     });
 
     await helpers.placeOrder("buy", {});

@@ -16,6 +16,7 @@ const { createRuntimeMonitoringHelpers } = require("./services/runtime-monitorin
 const { createRuntimeMarketDataHelpers } = require("./services/runtime-market-data");
 const { createRuntimePositionUtils } = require("./services/runtime-position-utils");
 const { createRuntimeSignalGridHelpers } = require("./services/runtime-signal-grid");
+const { createVolatilityRiskHelpers } = require("./services/volatility-regime");
 const {
     sequelize,
     Config,
@@ -198,6 +199,14 @@ const clearRuntimeTimers = () => {
         configReloadWatcher = null;
     }
 };
+
+const {
+    resolveAdaptiveRiskOverrides
+} = createVolatilityRiskHelpers({
+    toFiniteNumber,
+    calcATR,
+    fetchImpl: globalThis.fetch
+});
 
 const { getDefaultConfig } = createRuntimeConfigHelpers({
     defaultConfig: DEFAULT_CONFIG
@@ -595,6 +604,9 @@ const {
     getIsSyncingGridOrders: () => isSyncingGridOrders,
     getExchangeHealth: () => exchangeHealth,
     getLastTradeAt: () => lastTradeAt,
+    formatPriceToMarketPrecision,
+    resolveAdaptiveRiskOverrides,
+    getOHLCV: (...args) => getOHLCV(...args),
     formatStatusTimestamp: (...args) => formatStatusTimestamp(...args),
     printStatusLine: (...args) => printStatusLine(...args),
     printOrderSample: (...args) => printOrderSample(...args),
@@ -1182,6 +1194,7 @@ const {
     getLastSignalDetailLogAt: () => lastSignalDetailLogAt,
     setLastSignalDetailLogAt: (value) => { lastSignalDetailLogAt = value; },
     buildRiskOverrides: () => buildRiskOverrides(),
+    resolveAdaptiveRiskOverrides,
     resolveEffectiveGridOrderSizeUsdt: (...args) => resolveEffectiveGridOrderSizeUsdt(...args),
     resolveEffectiveGridOrdersPerSide: (...args) => resolveEffectiveGridOrdersPerSide(...args),
     fetchOpenGridOrders: (...args) => fetchOpenGridOrders(...args),
@@ -1218,6 +1231,7 @@ const { placeOrder } = createTradeEntryHelpers({
     fetchManagedOpenOrdersSnapshot,
     setLeverage: (...args) => setLeverage(...args),
     getPrice: (...args) => getPrice(...args),
+    getOHLCV: (...args) => getOHLCV(...args),
     parseSignalOrderData,
     formatAmountToMarketPrecision,
     validateOrderSize,
@@ -1232,7 +1246,8 @@ const { placeOrder } = createTradeEntryHelpers({
     ensureReduceOnlyTakeProfitOrder,
     ensureReduceOnlyStopLossOrder,
     logTrade: (...args) => logTrade(...args),
-    syncPositionWithExchange: (...args) => syncPositionWithExchange(...args)
+    syncPositionWithExchange: (...args) => syncPositionWithExchange(...args),
+    resolveAdaptiveRiskOverrides
 });
 
 const {

@@ -130,6 +130,10 @@ const createTradeLogicHelpers = ({
             : Math.max(0, toFiniteNumber(db.gridOrderSizeUsdt, 0));
         const trailingActivateATR = toFiniteNumber(riskOverrides.trailingActivateATR, db.trailingActivateATR);
         const trailingOffsetATR = toFiniteNumber(riskOverrides.trailingOffsetATR, db.trailingOffsetATR);
+        const trailingRiskModel = riskOverrides.trailingRiskModel || "STATIC";
+        const trailingRiskSource = riskOverrides.trailingRiskSource || "config";
+        const trailingRiskReason = riskOverrides.trailingRiskReason || null;
+        const trailingRiskMeta = riskOverrides.trailingRiskMeta || null;
         const explicitTargetPrice = toFiniteNumber(explicitTargets.targetPrice, null);
         const explicitStopLossPrice = toFiniteNumber(explicitTargets.stopLossPrice, null);
 
@@ -177,6 +181,10 @@ const createTradeLogicHelpers = ({
         return {
             trailingActivateATR,
             trailingOffsetATR,
+            trailingRiskModel,
+            trailingRiskSource,
+            trailingRiskReason,
+            trailingRiskMeta,
             targetProfitUSDT,
             targetProfitMode,
             stopLossPercent,
@@ -225,6 +233,9 @@ const createTradeLogicHelpers = ({
         console.log(formatOrderPlanLine("Stop Loss", stopLossLabel));
         console.log(formatOrderPlanLine("Stop Loss Price", orderPlan.stopLossPrice));
         console.log(formatOrderPlanLine("Trailing ATR", formatTrailingPlanLabel(orderPlan)));
+        if (orderPlan.trailingRiskModel && orderPlan.trailingRiskModel !== "STATIC") {
+            console.log(formatOrderPlanLine("Trailing Model", `${orderPlan.trailingRiskModel} (${orderPlan.trailingRiskSource || "unknown"})`));
+        }
     };
 
     const shouldUseStoredStopLossPrice = (position) => Number.isFinite(position.stopLossPrice) && position.stopLossPrice > 0;

@@ -69,6 +69,7 @@ const createHelpers = ({
         getLastSignalDetailLogAt: () => Date.now(),
         setLastSignalDetailLogAt: () => {},
         buildRiskOverrides: () => ({}),
+        resolveAdaptiveRiskOverrides: async () => ({}),
         resolveEffectiveGridOrderSizeUsdt: () => ({ orderSizeUsdt: 5, mode: "MANUAL" }),
         resolveEffectiveGridOrdersPerSide: () => ({ count: 1, maxConfigured: 1, mode: "MANUAL", reason: "" }),
         fetchOpenGridOrders: async () => [],

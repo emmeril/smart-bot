@@ -14,6 +14,7 @@ const createTradeEntryHelpers = ({
     fetchManagedOpenOrdersSnapshot,
     setLeverage,
     getPrice,
+    getOHLCV,
     parseSignalOrderData,
     formatAmountToMarketPrecision,
     validateOrderSize,
@@ -28,7 +29,8 @@ const createTradeEntryHelpers = ({
     ensureReduceOnlyTakeProfitOrder,
     ensureReduceOnlyStopLossOrder,
     logTrade,
-    syncPositionWithExchange
+    syncPositionWithExchange,
+    resolveAdaptiveRiskOverrides
 }) => {
     const placeOrder = async (side, signalData = {}) => {
         const db = getDb();
@@ -73,6 +75,18 @@ const createTradeEntryHelpers = ({
             const { signalPrice, signalATR, strategyName, riskOverrides, signalTargetPrice, signalStopLossPrice } = parseSignalOrderData(signalData);
             const hasSignalPrice = Number(signalPrice) > 0;
             const entryPrice = hasSignalPrice ? Number(signalPrice) : tickerPrice;
+            const localOhlcv = await getOHLCV(Math.max(80, Math.trunc((db.atrPeriod || 14) * 4)));
+            const adaptiveRiskOverrides = await resolveAdaptiveRiskOverrides({
+                pair: db.pair,
+                timeframe: db.gridTimeframe,
+                atrPeriod: db.atrPeriod,
+                currentPrice: entryPrice,
+                currentATR: signalATR,
+                localOhlcv,
+                baseActivateATR: riskOverrides.trailingActivateATR ?? db.trailingActivateATR,
+                baseOffsetATR: riskOverrides.trailingOffsetATR ?? db.trailingOffsetATR
+            });
+            const mergedRiskOverrides = { ...riskOverrides, ...adaptiveRiskOverrides };
             const qty = (db.gridOrderSizeUsdt * db.leverage) / entryPrice;
             const market = exchange.markets[db.pair];
             const adjustedQty = formatAmountToMarketPrecision(db.pair, qty);
@@ -87,7 +101,7 @@ const createTradeEntryHelpers = ({
                 entryPrice,
                 adjustedQty,
                 signalATR,
-                riskOverrides,
+                mergedRiskOverrides,
                 { targetPrice: signalTargetPrice, stopLossPrice: signalStopLossPrice }
             );
             logOrderPlan(strategyName, entryPrice, adjustedQty, orderPlan);
@@ -114,7 +128,7 @@ const createTradeEntryHelpers = ({
                 actualEntryPrice,
                 actualQuantity,
                 signalATR,
-                riskOverrides,
+                mergedRiskOverrides,
                 { targetPrice: signalTargetPrice, stopLossPrice: signalStopLossPrice }
             );
             const actualPlanValid = isDirectionalOrderPlanValid(side, actualEntryPrice, actualOrderPlan);
@@ -167,6 +181,10 @@ const createTradeEntryHelpers = ({
                 strategy: strategyName,
                 trailingActivateATR: resolvedOrderPlan.trailingActivateATR,
                 trailingOffsetATR: resolvedOrderPlan.trailingOffsetATR,
+                trailingRiskModel: resolvedOrderPlan.trailingRiskModel,
+                trailingRiskSource: resolvedOrderPlan.trailingRiskSource,
+                trailingRiskReason: resolvedOrderPlan.trailingRiskReason,
+                trailingRiskMeta: resolvedOrderPlan.trailingRiskMeta,
                 tpOrderId: null,
                 tpClientOrderId: null,
                 slOrderId: null,

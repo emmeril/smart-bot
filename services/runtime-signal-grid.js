@@ -39,6 +39,7 @@ const createRuntimeSignalGridHelpers = ({
     getLastSignalDetailLogAt,
     setLastSignalDetailLogAt,
     buildRiskOverrides,
+    resolveAdaptiveRiskOverrides,
     resolveEffectiveGridOrderSizeUsdt,
     resolveEffectiveGridOrdersPerSide,
     fetchOpenGridOrders,
@@ -293,6 +294,17 @@ const levels = resolvedGridState?.levels || [];
                 setLastSignalDetailLogAt(Date.now());
             }
 
+            const adaptiveRiskOverrides = await resolveAdaptiveRiskOverrides({
+                pair: db.pair,
+                timeframe: db.gridTimeframe,
+                atrPeriod: params.atrPeriod,
+                currentPrice: snapshot.currentPrice,
+                currentATR: snapshot.currentATR,
+                localOhlcv: ohlcv,
+                baseActivateATR: db.trailingActivateATR,
+                baseOffsetATR: db.trailingOffsetATR
+            });
+
             return {
                 canLong: finalState.canLong,
                 canShort: finalState.canShort,
@@ -300,7 +312,7 @@ const levels = resolvedGridState?.levels || [];
                 atr: snapshot.currentATR,
                 hasSignal: finalState.setupDetected,
                 strategy: signalState.strategyName || strategy.toUpperCase(),
-                riskOverrides: buildRiskOverrides(),
+                riskOverrides: { ...buildRiskOverrides(), ...adaptiveRiskOverrides },
                 targetPrice: finalState.canLong ? signalState.longPlan?.targetPrice : (finalState.canShort ? signalState.shortPlan?.targetPrice : null),
                 stopLossPrice: finalState.canLong ? signalState.longPlan?.stopLossPrice : (finalState.canShort ? signalState.shortPlan?.stopLossPrice : null)
             };
