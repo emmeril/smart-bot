@@ -316,6 +316,9 @@
 
     function renderRuntime() {
       const live = state.live || {};
+      const pending = live.pendingRuntimeConfig
+        ? Object.entries(live.pendingRuntimeConfig).map(([key, value]) => `${key}=${value}`).join(" | ")
+        : "-";
       const rows = [
         ["Bot", live.botRunning ? "Running" : "Stopped"],
         ["Exchange", live.exchangeConnected ? (live.exchangeHealthy ? "Healthy" : "Degraded") : "Offline"],
@@ -325,7 +328,8 @@
         ["TP / SL Orders", `${String(live.orderCounts?.tp || 0)} / ${String(live.orderCounts?.sl || 0)}`],
         ["Daily PnL", `${formatNumber(live.dailyPnL, 4)} USDT`],
         ["Market Price", formatNumber(live.currentPrice)],
-        ["Available USDT", live.autoGrid ? formatNumber(live.autoGrid.availableUsdt, 2) : "-"]
+        ["Available USDT", live.autoGrid ? formatNumber(live.autoGrid.availableUsdt, 2) : "-"],
+        ["Pending Apply", pending]
       ];
       runtimeList.innerHTML = rows.map(([label, value]) => `<div class="row"><span>${label}</span><strong>${value}</strong></div>`).join("");
     }

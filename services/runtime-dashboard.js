@@ -143,7 +143,7 @@ const createRuntimeDashboardHelpers = ({
                     ? req.body.config
                     : req.body;
                 const result = await applyDashboardConfigUpdate(incoming);
-                res.json({ ok: true, message: "Konfigurasi berhasil disimpan", ...result });
+                res.json({ ok: true, message: result?.message || "Konfigurasi berhasil disimpan", ...result });
             } catch (error) {
                 res.status(400).json({ ok: false, error: error.message });
             }

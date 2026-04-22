@@ -24,6 +24,9 @@ const createDashboardStatusHelpers = ({
         const db = getDb();
         const exchangeHealth = getExchangeHealth();
         const activePositionsMap = getActivePositionsMap(db?.activePosition);
+        const pendingRuntimeConfig = db?.pendingRuntimeConfig && typeof db.pendingRuntimeConfig === "object"
+            ? { ...db.pendingRuntimeConfig }
+            : null;
         return {
             botRunning: !getIsShuttingDown(),
             exchangeConnected: Boolean(getExchange()),
@@ -42,7 +45,9 @@ const createDashboardStatusHelpers = ({
             pair: db?.pair || defaultConfig.pair,
             strategy: db?.strategy || defaultConfig.strategy,
             marginMode: db?.marginMode || defaultConfig.marginMode,
-            leverage: Math.max(1, Math.trunc(toFiniteNumber(db?.leverage, defaultConfig.leverage)))
+            leverage: Math.max(1, Math.trunc(toFiniteNumber(db?.leverage, defaultConfig.leverage))),
+            pendingRuntimeConfig,
+            hasPendingRuntimeConfig: Boolean(pendingRuntimeConfig)
         };
     };
 
@@ -156,6 +161,7 @@ const createDashboardStatusHelpers = ({
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(dailyPnlSnapshot.dailyTrades, 0))),
             dailyPnlSource: String(dailyPnlSnapshot.dailyPnlSource || "local").toLowerCase(),
             dailyPnlSyncedAt: toFiniteNumber(dailyPnlSnapshot.dailyPnlSyncedAt, 0),
+            pendingRuntimeConfig: db.pendingRuntimeConfig && typeof db.pendingRuntimeConfig === "object" ? { ...db.pendingRuntimeConfig } : null,
             activePositions,
             exchangePositionsCount: exchangePositions.length,
             autoGrid,
@@ -170,13 +176,20 @@ const createDashboardStatusHelpers = ({
         };
     };
 
-    const buildDashboardPayload = () => ({
-        config: getDb() ? { ...getDb() } : getDefaultConfig(),
-        defaults: getDefaultConfig(),
-        schema: dashboardEditableFields,
-        status: buildDashboardStatus(),
-        serverTime: Date.now()
-    });
+    const buildDashboardPayload = () => {
+        const db = getDb();
+        const currentConfig = db ? { ...db } : getDefaultConfig();
+        const displayConfig = currentConfig.pendingRuntimeConfig && typeof currentConfig.pendingRuntimeConfig === "object"
+            ? { ...currentConfig, ...currentConfig.pendingRuntimeConfig }
+            : currentConfig;
+        return {
+            config: displayConfig,
+            defaults: getDefaultConfig(),
+            schema: dashboardEditableFields,
+            status: buildDashboardStatus(),
+            serverTime: Date.now()
+        };
+    };
 
     return {
         buildDashboardStatus,

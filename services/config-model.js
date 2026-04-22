@@ -103,6 +103,11 @@ const createConfigModelHelpers = ({
         } else if (!normalized.activeGridState || typeof normalized.activeGridState !== "object") {
             normalized.activeGridState = null;
         }
+        if (typeof normalized.pendingRuntimeConfig === "string") {
+            normalized.pendingRuntimeConfig = safeParseJSON(normalized.pendingRuntimeConfig, null);
+        } else if (!normalized.pendingRuntimeConfig || typeof normalized.pendingRuntimeConfig !== "object") {
+            normalized.pendingRuntimeConfig = null;
+        }
 
         const normalizeBoolean = (key) => {
             if (typeof normalized[key] === "boolean") return;
@@ -159,6 +164,7 @@ const createConfigModelHelpers = ({
         delete hydrated.maxDailyLossPercent;
         hydrated.activePosition = normalizeActivePositionState(hydrated.activePosition);
         hydrated.activeGridState = safeParseJSON(hydrated.activeGridState, null);
+        hydrated.pendingRuntimeConfig = safeParseJSON(hydrated.pendingRuntimeConfig, null);
         return normalizeConfig(hydrated);
     };
 
@@ -166,6 +172,7 @@ const createConfigModelHelpers = ({
         ...config,
         activePosition: config.activePosition ? JSON.stringify(config.activePosition) : null,
         activeGridState: config.activeGridState ? JSON.stringify(config.activeGridState) : null,
+        pendingRuntimeConfig: config.pendingRuntimeConfig ? JSON.stringify(config.pendingRuntimeConfig) : null,
         lastUpdated: Date.now()
     });
 
@@ -233,6 +240,7 @@ const createConfigModelHelpers = ({
                 : null
         });
         await addColumnIfMissing({ column: "activeGridState", sql: "ALTER TABLE Configs ADD COLUMN activeGridState TEXT DEFAULT NULL;" });
+        await addColumnIfMissing({ column: "pendingRuntimeConfig", sql: "ALTER TABLE Configs ADD COLUMN pendingRuntimeConfig TEXT DEFAULT NULL;" });
         await addColumnIfMissing({ column: "dailyPnlSource", sql: "ALTER TABLE Configs ADD COLUMN dailyPnlSource VARCHAR(255) DEFAULT 'local';" });
         await addColumnIfMissing({ column: "dailyPnlSyncedAt", sql: "ALTER TABLE Configs ADD COLUMN dailyPnlSyncedAt BIGINT DEFAULT 0;" });
         await addColumnIfMissing({

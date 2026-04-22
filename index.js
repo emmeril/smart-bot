@@ -377,6 +377,56 @@ const buildAutoGridPreview = async () => {
     };
 };
 
+const resolveProtectedRuntimeConfigEligibility = async ({ waitMs = 0, payloadKeys = [] } = {}) => {
+    const startedAt = Date.now();
+    const pollMs = 250;
+    const requestedKeys = Array.isArray(payloadKeys) ? payloadKeys.filter(Boolean) : [];
+
+    while (true) {
+        const reasons = [];
+        if (hasRuntimePositionMutationInFlight()) reasons.push("RUNTIME_POSITION_MUTATION_IN_FLIGHT");
+        if (hasAnyActivePosition()) reasons.push("LOCAL_ACTIVE_POSITION");
+
+        if (exchange && db) {
+            try {
+                const openPositions = await fetchOpenExchangePositions();
+                if (openPositions.length > 0) reasons.push("EXCHANGE_ACTIVE_POSITION");
+            } catch (error) {
+                reasons.push(`EXCHANGE_POSITION_CHECK_FAILED:${error.message}`);
+            }
+
+            try {
+                const managedOrders = await fetchManagedOpenOrdersSnapshot();
+                if (managedOrders.triggerOrdersFetchFailed) reasons.push("EXCHANGE_TRIGGER_ORDER_SNAPSHOT_UNAVAILABLE");
+                const openManagedOrderCount = (managedOrders.grid?.length || 0) + (managedOrders.tp?.length || 0) + (managedOrders.sl?.length || 0);
+                if (openManagedOrderCount > 0) reasons.push("EXCHANGE_OPEN_MANAGED_ORDERS");
+            } catch (error) {
+                reasons.push(`EXCHANGE_ORDER_CHECK_FAILED:${error.message}`);
+            }
+        }
+
+        if (reasons.length === 0) {
+            return {
+                canApply: true,
+                waitedMs: Date.now() - startedAt,
+                payloadKeys: requestedKeys,
+                reasons: []
+            };
+        }
+
+        if ((Date.now() - startedAt) >= Math.max(0, waitMs)) {
+            return {
+                canApply: false,
+                waitedMs: Date.now() - startedAt,
+                payloadKeys: requestedKeys,
+                reasons
+            };
+        }
+
+        await sleep(pollMs);
+    }
+};
+
 const {
     fetchOpenGridOrders,
     findOpenGridOrderByClientOrderId,
@@ -952,6 +1002,7 @@ const {
         await setMarginMode();
         await setLeverage();
     },
+    resolveProtectedRuntimeConfigEligibility: async (...args) => await resolveProtectedRuntimeConfigEligibility(...args),
     buildDashboardPayload
 });
 
@@ -1104,6 +1155,7 @@ const {
     mergeRuntimeConfig,
     applyRuntimeConfigChanges,
     hasAnyActivePosition,
+    resolveProtectedRuntimeConfigEligibility: async (...args) => await resolveProtectedRuntimeConfigEligibility(...args),
     dashboardEditableFields: DASHBOARD_EDITABLE_FIELDS,
     configAutoReloadIntervalMs: CONFIG_AUTO_RELOAD_INTERVAL_MS
 });
