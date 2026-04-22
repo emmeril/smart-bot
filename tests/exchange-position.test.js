@@ -14,7 +14,7 @@ test("buildSyncedActivePosition preserves existing exit plan when quantity and e
         formatPriceToMarketPrecision: (_pair, price) => Number(Number(price).toFixed(4)),
         getExchangeClientOrderId: (order) => String(order?.clientOrderId || ""),
         getDb: () => ({
-            pair: "DOGE/USDT:USDT",
+            pair: "DOGE/USDT",
             leverage: 10,
             marginMode: "isolated",
             trailingEnabled: true,
@@ -56,7 +56,7 @@ test("buildSyncedActivePosition preserves existing exit plan when quantity and e
 
     const synced = helpers.buildSyncedActivePosition(
         {
-            symbol: "DOGE/USDT:USDT",
+            symbol: "DOGE/USDT",
             side: "long",
             contracts: 2,
             entryPrice: 100,
@@ -90,7 +90,7 @@ test("shouldRefreshSyncedPosition returns true when quantity changes beyond sync
         formatPriceToMarketPrecision: (_pair, price) => Number(Number(price).toFixed(4)),
         getExchangeClientOrderId: (order) => String(order?.clientOrderId || ""),
         getDb: () => ({
-            pair: "DOGE/USDT:USDT",
+            pair: "DOGE/USDT",
             leverage: 10,
             marginMode: "isolated"
         }),

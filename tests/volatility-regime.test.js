@@ -68,7 +68,7 @@ test("resolveAdaptiveRiskOverrides widens trailing distance in elevated volatili
     });
 
     const risk = await helper.resolveAdaptiveRiskOverrides({
-        pair: "DOGE/USDT:USDT",
+        pair: "DOGE/USDT",
         timeframe: "5m",
         atrPeriod: 14,
         currentPrice: 150,
@@ -94,7 +94,7 @@ test("resolveAdaptiveRiskOverrides falls back cleanly when there is not enough l
     });
 
     const risk = await helper.resolveAdaptiveRiskOverrides({
-        pair: "DOGE/USDT:USDT",
+        pair: "DOGE/USDT",
         timeframe: "5m",
         atrPeriod: 14,
         currentPrice: NaN,

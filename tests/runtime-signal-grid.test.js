@@ -16,9 +16,9 @@ const createHelpers = ({
     };
 
     const helpers = createRuntimeSignalGridHelpers({
-        getDb: () => ({ strategy: "futures_grid", pair: "DOGE/USDT:USDT" }),
+        getDb: () => ({ strategy: "futures_grid", pair: "DOGE/USDT" }),
         getAccountPositionMode: () => ({ label: "ONE_WAY" }),
-        getExchange: () => ({ markets: { "DOGE/USDT:USDT": {} } }),
+        getExchange: () => ({ markets: { "DOGE/USDT": {} } }),
         getIsSyncingGridOrders: () => syncing,
         setIsSyncingGridOrders: (value) => { syncing = value; },
         getLastGridSyncLogAt: () => 0,

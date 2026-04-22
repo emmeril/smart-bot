@@ -7,7 +7,7 @@ test("saveDB preserves externally updated editable config during runtime state p
     const persistedWrites = [];
     const runtimeDb = {
         id: 1,
-        pair: "DOGE/USDT:USDT",
+        pair: "DOGE/USDT",
         gridLevels: 8,
         dailyPnL: 2.5,
         activePosition: { BOTH: { side: "buy", quantity: 10 } }
@@ -52,7 +52,7 @@ test("saveDB preserves externally updated editable config during runtime state p
     assert.equal(persistedWrites[0].gridLevels, 12);
     assert.equal(persistedWrites[0].dailyPnL, 2.5);
     assert.deepEqual(persistedWrites[0].activePosition, runtimeDb.activePosition);
-    assert.equal(runtimeDb.pair, "DOGE/USDT:USDT");
+    assert.equal(runtimeDb.pair, "DOGE/USDT");
 });
 
 test("saveDB full mode persists in-memory editable config changes", async () => {
@@ -74,7 +74,7 @@ test("saveDB full mode persists in-memory editable config changes", async () => 
         setConfigReloadTimer: () => {},
         loadPersistedConfig: async () => ({
             id: 1,
-            pair: "DOGE/USDT:USDT",
+            pair: "DOGE/USDT",
             gridLevels: 12,
             dailyPnL: 0.1
         }),
@@ -118,7 +118,7 @@ test("initializeDB persists auto preset changes with full save mode", async () =
         ensureConfigRow: async () => ({
             toJSON: () => ({
                 id: 1,
-                pair: "DOGE/USDT:USDT",
+                pair: "DOGE/USDT",
                 gridLevels: 8
             })
         }),
@@ -152,7 +152,7 @@ test("reloadConfig persists auto preset changes with full save mode when runtime
     const persistedWrites = [];
     const runtimeDb = {
         id: 1,
-        pair: "DOGE/USDT:USDT",
+        pair: "DOGE/USDT",
         gridLevels: 8,
         dailyPnL: 0.5
     };
@@ -167,7 +167,7 @@ test("reloadConfig persists auto preset changes with full save mode when runtime
         setConfigReloadTimer: () => {},
         loadPersistedConfig: async () => ({
             id: 1,
-            pair: "DOGE/USDT:USDT",
+            pair: "DOGE/USDT",
             gridLevels: 8,
             dailyPnL: 0.1
         }),
@@ -202,7 +202,7 @@ test("reloadConfig applies deferred protected runtime config once exchange restr
     const persistedWrites = [];
     const runtimeDb = {
         id: 1,
-        pair: "DOGE/USDT:USDT",
+        pair: "DOGE/USDT",
         leverage: 8,
         pendingRuntimeConfig: { pair: "BTC/USDT:USDT", leverage: 12 }
     };
@@ -217,7 +217,7 @@ test("reloadConfig applies deferred protected runtime config once exchange restr
         setConfigReloadTimer: () => {},
         loadPersistedConfig: async () => ({
             id: 1,
-            pair: "DOGE/USDT:USDT",
+            pair: "DOGE/USDT",
             leverage: 8,
             pendingRuntimeConfig: { pair: "BTC/USDT:USDT", leverage: 12 }
         }),
