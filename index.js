@@ -1004,7 +1004,6 @@ const {
     editableKeys: DASHBOARD_EDITABLE_KEYS,
     applyAutoPresetToConfig: (config) => applyAutoPresetToConfig(config),
     getDefaultConfig: () => getDefaultConfig(),
-    saveDB: async (...args) => { await saveDB(...args); },
     reloadConfig: async (...args) => { await reloadConfig(...args); },
     refreshRuntimeSchedulers: () => { refreshRuntimeSchedulers(); },
     syncExchangeRuntimeSettings: async () => {
@@ -1034,120 +1033,10 @@ const { startWebDashboard } = createRuntimeDashboardHelpers({
     resetDashboardConfig
 });
 
-const AUTO_PAIR_GRID_PRESETS = {
-    binance: {
-        strategy: "futures_grid",
-        marginMode: "isolated",
-        gridTargetProfitUsdt: 0.5,
-        autoTargetProfitEnabled: true,
-        targetProfitAtrMultiplier: 0.85,
-        targetProfitMinUsdt: 0.2,
-        targetProfitMaxUsdt: 6,
-        gridStopLossPercent: 6,
-        autoStopLossEnabled: true,
-        stopLossAtrMultiplier: 1.3,
-        stopLossMinPercent: 2.5,
-        stopLossMaxPercent: 12,
-        gridLevels: 0,
-        gridLookbackCandles: 144,
-        gridRangePercent: 0,
-        gridEntryBufferPercent: 0,
-        gridTakeProfitLevels: 0,
-        gridOrdersPerSide: 0,
-        gridStopLossLevels: 0,
-        gridTimeframe: "5m",
-        minVolumeRatio: 1,
-        volumePeriod: 20,
-        atrPeriod: 14,
-        trailingEnabled: false,
-        trailingActivateATR: 1.4,
-        trailingOffsetATR: 0.8,
-        allowLong: true,
-        allowShort: true
-    },
-    volatile: {
-        strategy: "futures_grid",
-        marginMode: "isolated",
-        gridTargetProfitUsdt: 0.45,
-        autoTargetProfitEnabled: true,
-        targetProfitAtrMultiplier: 0.95,
-        targetProfitMinUsdt: 0.2,
-        targetProfitMaxUsdt: 5,
-        gridStopLossPercent: 8,
-        autoStopLossEnabled: true,
-        stopLossAtrMultiplier: 1.45,
-        stopLossMinPercent: 3.5,
-        stopLossMaxPercent: 14,
-        gridLevels: 0,
-        gridLookbackCandles: 180,
-        gridRangePercent: 0,
-        gridEntryBufferPercent: 0,
-        gridTakeProfitLevels: 0,
-        gridOrdersPerSide: 0,
-        gridStopLossLevels: 0,
-        gridTimeframe: "5m",
-        minVolumeRatio: 1,
-        volumePeriod: 20,
-        atrPeriod: 14,
-        trailingEnabled: false,
-        trailingActivateATR: 1.6,
-        trailingOffsetATR: 0.95,
-        allowLong: true,
-        allowShort: true
-    },
-    doge: {
-        strategy: "futures_grid",
-        marginMode: "isolated",
-        gridTargetProfitUsdt: 0.35,
-        autoTargetProfitEnabled: true,
-        targetProfitAtrMultiplier: 0.9,
-        targetProfitMinUsdt: 0.15,
-        targetProfitMaxUsdt: 3,
-        gridStopLossPercent: 7,
-        autoStopLossEnabled: true,
-        stopLossAtrMultiplier: 1.35,
-        stopLossMinPercent: 2.5,
-        stopLossMaxPercent: 12,
-        gridLevels: 0,
-        gridLookbackCandles: 180,
-        gridRangePercent: 0,
-        gridEntryBufferPercent: 0,
-        gridTakeProfitLevels: 0,
-        gridOrdersPerSide: 0,
-        gridStopLossLevels: 0,
-        gridTimeframe: "5m",
-        minVolumeRatio: 1,
-        volumePeriod: 20,
-        atrPeriod: 14,
-        trailingEnabled: false,
-        trailingActivateATR: 1.5,
-        trailingOffsetATR: 0.9,
-        allowLong: true,
-        allowShort: true
-    }
-};
-
-const applyAutoPresetToConfig = (config) => {
-    const incoming = config && typeof config === "object" ? { ...config } : {};
-    const baseConfig = {
-        ...incoming,
-        strategy: "futures_grid",
-        pair: incoming.pair,
-        leverage: incoming.leverage,
-        gridOrderSizeUsdt: incoming.gridOrderSizeUsdt,
-        binanceBotMode: incoming.binanceBotMode,
-        binanceGridType: incoming.binanceGridType,
-        binanceDirection: incoming.binanceDirection,
-        binanceLowerPrice: incoming.binanceLowerPrice,
-        binanceUpperPrice: incoming.binanceUpperPrice,
-        binanceInvestmentUsdt: incoming.binanceInvestmentUsdt
-    };
-    const autoPresetResult = applyAutoPairGridPreset(baseConfig, AUTO_PAIR_GRID_PRESETS);
-    return {
-        config: normalizeConfig(autoPresetResult.config),
-        autoPresetResult
-    };
-};
+const applyAutoPresetToConfig = (config) => ({
+    config: normalizeConfig(config),
+    autoPresetResult: { changed: false, presetName: null }
+});
 
 const {
     initializeDB,
