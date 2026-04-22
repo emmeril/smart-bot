@@ -37,7 +37,6 @@ test("saveDB preserves externally updated editable config during runtime state p
         mergeRuntimeConfig: () => {},
         applyRuntimeConfigChanges: async () => false,
         hasAnyActivePosition: () => false,
-        resolveProtectedRuntimeConfigEligibility: async () => ({ canApply: true, reasons: [] }),
         dashboardEditableFields: [
             { key: "pair" },
             { key: "gridLevels" }
@@ -86,7 +85,6 @@ test("saveDB full mode persists in-memory editable config changes", async () => 
         mergeRuntimeConfig: () => {},
         applyRuntimeConfigChanges: async () => false,
         hasAnyActivePosition: () => false,
-        resolveProtectedRuntimeConfigEligibility: async () => ({ canApply: true, reasons: [] }),
         dashboardEditableFields: [
             { key: "pair" },
             { key: "gridLevels" }
@@ -132,7 +130,6 @@ test("initializeDB persists auto preset changes with full save mode", async () =
         mergeRuntimeConfig: () => {},
         applyRuntimeConfigChanges: async () => false,
         hasAnyActivePosition: () => false,
-        resolveProtectedRuntimeConfigEligibility: async () => ({ canApply: true, reasons: [] }),
         dashboardEditableFields: [
             { key: "pair" },
             { key: "gridLevels" }
@@ -182,7 +179,6 @@ test("reloadConfig persists auto preset changes with full save mode when runtime
         mergeRuntimeConfig: (nextConfig) => { Object.assign(runtimeDb, nextConfig); },
         applyRuntimeConfigChanges: async () => false,
         hasAnyActivePosition: () => false,
-        resolveProtectedRuntimeConfigEligibility: async () => ({ canApply: true, reasons: [] }),
         dashboardEditableFields: [
             { key: "pair" },
             { key: "gridLevels" }
@@ -196,54 +192,4 @@ test("reloadConfig persists auto preset changes with full save mode when runtime
     assert.equal(persistedWrites.length, 1);
     assert.equal(persistedWrites[0].pair, "BTC/USDT:USDT");
     assert.equal(persistedWrites[0].gridLevels, 14);
-});
-
-test("reloadConfig applies deferred protected runtime config once exchange restrictions are clear", async () => {
-    const persistedWrites = [];
-    const runtimeDb = {
-        id: 1,
-        pair: "DOGE/USDT:USDT",
-        leverage: 8,
-        pendingRuntimeConfig: { pair: "BTC/USDT:USDT", leverage: 12 }
-    };
-
-    const helpers = createConfigRuntimeHelpers({
-        getDb: () => runtimeDb,
-        setDb: () => {},
-        getIsShuttingDown: () => false,
-        getIsProcessing: () => false,
-        hasRuntimePositionMutationInFlight: () => false,
-        getConfigReloadTimer: () => null,
-        setConfigReloadTimer: () => {},
-        loadPersistedConfig: async () => ({
-            id: 1,
-            pair: "DOGE/USDT:USDT",
-            leverage: 8,
-            pendingRuntimeConfig: { pair: "BTC/USDT:USDT", leverage: 12 }
-        }),
-        ensureConfigRow: async () => null,
-        persistConfig: async (config) => { persistedWrites.push({ ...config }); },
-        ensureConfigSchema: async () => {},
-        applyAutoPresetToConfig: (config) => ({ config, autoPresetResult: { changed: false, presetName: null } }),
-        hydrateConfig: (config) => config,
-        mergeRuntimeConfig: (nextConfig) => { Object.assign(runtimeDb, nextConfig); },
-        applyRuntimeConfigChanges: async () => false,
-        hasAnyActivePosition: () => false,
-        resolveProtectedRuntimeConfigEligibility: async () => ({ canApply: true, reasons: [] }),
-        dashboardEditableFields: [
-            { key: "pair" },
-            { key: "leverage" }
-        ],
-        configAutoReloadIntervalMs: 5000
-    });
-
-    const reloaded = await helpers.reloadConfig({ ...runtimeDb });
-
-    assert.equal(reloaded, true);
-    assert.equal(runtimeDb.pair, "BTC/USDT:USDT");
-    assert.equal(runtimeDb.leverage, 12);
-    assert.equal(runtimeDb.pendingRuntimeConfig, null);
-    assert.equal(persistedWrites.length, 1);
-    assert.equal(persistedWrites[0].pair, "BTC/USDT:USDT");
-    assert.equal(persistedWrites[0].pendingRuntimeConfig, null);
 });

@@ -15,7 +15,6 @@ const createConfigRuntimeHelpers = ({
     mergeRuntimeConfig,
     applyRuntimeConfigChanges,
     hasAnyActivePosition,
-    resolveProtectedRuntimeConfigEligibility,
     dashboardEditableFields,
     configAutoReloadIntervalMs
 }) => {
@@ -43,12 +42,6 @@ const createConfigRuntimeHelpers = ({
     const syncDashboardConfigSignature = (config = getDb()) => {
         lastKnownDashboardConfigSignature = buildDashboardConfigSignature(config || {});
         return lastKnownDashboardConfigSignature;
-    };
-
-    const sanitizePendingRuntimeConfig = (value) => {
-        if (!value || typeof value !== "object") return null;
-        const entries = Object.entries(value);
-        return entries.length > 0 ? Object.fromEntries(entries) : null;
     };
 
     const buildPersistableConfig = async (options = {}) => {
@@ -118,32 +111,13 @@ const createConfigRuntimeHelpers = ({
                 : { ...db };
             const persistedConfig = await loadPersistedConfig();
             if (!persistedConfig) return false;
-            let { config: normalizedConfig, autoPresetResult } = applyAutoPresetToConfig(persistedConfig);
-            const pendingRuntimeConfig = sanitizePendingRuntimeConfig(normalizedConfig.pendingRuntimeConfig);
-            let appliedPendingRuntimeConfig = false;
-            if (pendingRuntimeConfig) {
-                const protectedEligibility = typeof resolveProtectedRuntimeConfigEligibility === "function"
-                    ? await resolveProtectedRuntimeConfigEligibility({ waitMs: 0, payloadKeys: Object.keys(pendingRuntimeConfig) })
-                    : { canApply: !hasAnyActivePosition(), reasons: [] };
-                if (protectedEligibility?.canApply) {
-                    ({ config: normalizedConfig, autoPresetResult } = applyAutoPresetToConfig({
-                        ...normalizedConfig,
-                        ...pendingRuntimeConfig,
-                        pendingRuntimeConfig: null
-                    }));
-                    appliedPendingRuntimeConfig = true;
-                }
-            }
+            const { config: normalizedConfig, autoPresetResult } = applyAutoPresetToConfig(persistedConfig);
             mergeRuntimeConfig(normalizedConfig);
             await applyRuntimeConfigChanges(runtimeSnapshot);
             syncDashboardConfigSignature();
-            if ((autoPresetResult.changed && !hasAnyActivePosition()) || appliedPendingRuntimeConfig) {
+            if (autoPresetResult.changed && !hasAnyActivePosition()) {
                 await saveDBInternal({ mode: "full" });
-                if (appliedPendingRuntimeConfig) {
-                    console.log(`[CONFIG][INFO] Applied deferred protected config for ${getDb().pair}`);
-                } else {
-                    console.log(`[PRESET][INFO] Auto-refreshed ${autoPresetResult.presetName} profile for ${getDb().pair}`);
-                }
+                console.log(`[PRESET][INFO] Auto-refreshed ${autoPresetResult.presetName} profile for ${getDb().pair}`);
             }
             return true;
         } catch (error) {
@@ -160,8 +134,7 @@ const createConfigRuntimeHelpers = ({
             const persistedConfig = await loadPersistedConfig();
             if (!persistedConfig) return false;
             const persistedSignature = buildDashboardConfigSignature(persistedConfig);
-            const hasPendingRuntimeConfig = Boolean(sanitizePendingRuntimeConfig(getDb()?.pendingRuntimeConfig));
-            if (persistedSignature === lastKnownDashboardConfigSignature && !hasPendingRuntimeConfig) return false;
+            if (persistedSignature === lastKnownDashboardConfigSignature) return false;
             console.log("[CONFIG][INFO] Detected dashboard config change. Reloading...");
             const reloaded = await reloadConfigInternal();
             if (reloaded) syncDashboardConfigSignature();

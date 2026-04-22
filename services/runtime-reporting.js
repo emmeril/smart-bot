@@ -43,7 +43,7 @@ const createRuntimeReportingHelpers = ({
         console.log(`Balance: $${totalUSDT.toFixed(2)}`);
         console.log(`Pair: ${db.pair}`);
         console.log(`Strategy: ${String(db.strategy || "futures_grid").toUpperCase()} on ${db.gridTimeframe}`);
-        console.log(`Preset Profile: ${gridSummary.presetName.toUpperCase()} | Mode ${gridSummary.botMode}/${gridSummary.gridType}`);
+        console.log(`Preset Profile: ${gridSummary.presetName.toUpperCase()}`);
         console.log(`Position Mode: ${accountPositionMode.label}`);
         const gridLevelsLabel = gridSummary.gridLevelsMode === "AUTO"
             ? `AUTO ${gridSummary.effectiveGridLevels} levels`
@@ -70,7 +70,7 @@ const createRuntimeReportingHelpers = ({
         console.log(`Trailing ATR: ${formatTrailingLabel()}`);
         console.log(`Leverage: ${db.leverage}x`);
         console.log(`Margin Mode: ${String(db.marginMode || "isolated").toUpperCase()}`);
-        console.log(`Max trades per day: ${db.maxTradesPerDay}`);
+        console.log(`Daily target: $${db.dailyProfitTargetUsdt} (max ${db.maxTradesPerDay} trades)`);
         console.log("=".repeat(70) + "\n");
     };
 

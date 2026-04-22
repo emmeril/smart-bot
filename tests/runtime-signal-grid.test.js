@@ -43,17 +43,6 @@ const createHelpers = ({
         clamp: (value, min, max) => Math.min(Math.max(value, min), max),
         resolveEffectiveGridTakeProfitLevels: () => 1,
         resolveEffectiveGridStopLossSteps: () => 1,
-        resolveAdaptiveGridParameters: ({ params }) => ({
-            ...params,
-            gridOrderSizeUsdt: 5,
-            gridOrdersPerSide: 1,
-            gridLevels: 4,
-            gridRangePercent: 5,
-            gridEntryBufferPercent: 0.2,
-            gridTakeProfitLevels: 1,
-            gridStopLossLevels: 2,
-            gridStopLossPercent: 5
-        }),
         sanitizeGridState: (state) => state,
         createLockedGridState: (snapshot) => snapshot,
         buildGridExitPlan: () => ({ targetPrice: 101, stopLossPrice: 99, stopLossSteps: 1 }),

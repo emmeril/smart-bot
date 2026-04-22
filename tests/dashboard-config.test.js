@@ -24,7 +24,6 @@ test("applyDashboardConfigUpdate persists full config changes before reloading r
         reloadConfig: async (previousConfig) => { reloadCalls.push(previousConfig); },
         refreshRuntimeSchedulers: () => {},
         syncExchangeRuntimeSettings: async () => {},
-        resolveProtectedRuntimeConfigEligibility: async () => ({ canApply: true, reasons: [] }),
         buildDashboardPayload: () => ({ pair: runtimeDb.pair, gridLevels: runtimeDb.gridLevels }),
         applyAutoPresetToConfig: (config) => ({ config })
     });
@@ -39,9 +38,7 @@ test("applyDashboardConfigUpdate persists full config changes before reloading r
     assert.equal(reloadCalls[0].pair, "DOGE/USDT:USDT");
     assert.equal(runtimeDb.pair, "BTC/USDT:USDT");
     assert.equal(runtimeDb.gridLevels, 12);
-    assert.equal(result.pair, "BTC/USDT:USDT");
-    assert.equal(result.gridLevels, 12);
-    assert.deepEqual(result.deferredProtectedKeys, []);
+    assert.deepEqual(result, { pair: "BTC/USDT:USDT", gridLevels: 12 });
 });
 
 test("applyDashboardConfigUpdate preserves activeGridState until runtime decides whether to rebuild it", async () => {
@@ -69,7 +66,6 @@ test("applyDashboardConfigUpdate preserves activeGridState until runtime decides
         reloadConfig: async () => {},
         refreshRuntimeSchedulers: () => {},
         syncExchangeRuntimeSettings: async () => {},
-        resolveProtectedRuntimeConfigEligibility: async () => ({ canApply: true, reasons: [] }),
         buildDashboardPayload: () => ({ activeGridState: runtimeDb.activeGridState }),
         applyAutoPresetToConfig: (config) => ({ config })
     });
@@ -83,12 +79,13 @@ test("applyDashboardConfigUpdate preserves activeGridState until runtime decides
         lowerBound: 0.1,
         upperBound: 0.2
     });
-    assert.deepEqual(result.activeGridState, {
-        fingerprint: "DOGE/USDT:USDT|5m|8|120|3.5|0|0",
-        lowerBound: 0.1,
-        upperBound: 0.2
+    assert.deepEqual(result, {
+        activeGridState: {
+            fingerprint: "DOGE/USDT:USDT|5m|8|120|3.5|0|0",
+            lowerBound: 0.1,
+            upperBound: 0.2
+        }
     });
-    assert.deepEqual(result.deferredProtectedKeys, []);
 });
 
 test("resetDashboardConfig persists full config changes before reloading runtime", async () => {
@@ -112,7 +109,6 @@ test("resetDashboardConfig persists full config changes before reloading runtime
         reloadConfig: async (previousConfig) => { reloadCalls.push(previousConfig); },
         refreshRuntimeSchedulers: () => {},
         syncExchangeRuntimeSettings: async () => {},
-        resolveProtectedRuntimeConfigEligibility: async () => ({ canApply: true, reasons: [] }),
         buildDashboardPayload: () => ({ pair: runtimeDb.pair, gridLevels: runtimeDb.gridLevels }),
         applyAutoPresetToConfig: (config) => ({ config })
     });
@@ -154,7 +150,6 @@ test("applyDashboardConfigUpdate serializes concurrent updates", async () => {
         reloadConfig: async () => {},
         refreshRuntimeSchedulers: () => {},
         syncExchangeRuntimeSettings: async () => {},
-        resolveProtectedRuntimeConfigEligibility: async () => ({ canApply: true, reasons: [] }),
         buildDashboardPayload: () => ({ pair: runtimeDb.pair, gridLevels: runtimeDb.gridLevels }),
         applyAutoPresetToConfig: (config) => ({ config })
     });
@@ -175,55 +170,8 @@ test("applyDashboardConfigUpdate serializes concurrent updates", async () => {
     assert.equal(saveCalls.length, 2);
     assert.equal(saveCalls[1].snapshot.pair, "BTC/USDT:USDT");
     assert.equal(saveCalls[1].snapshot.gridLevels, 12);
-    assert.equal(firstResult.pair, "BTC/USDT:USDT");
-    assert.equal(firstResult.gridLevels, 8);
-    assert.deepEqual(firstResult.deferredProtectedKeys, []);
-    assert.equal(secondResult.pair, "BTC/USDT:USDT");
-    assert.equal(secondResult.gridLevels, 12);
-    assert.deepEqual(secondResult.deferredProtectedKeys, []);
+    assert.deepEqual(firstResult, { pair: "BTC/USDT:USDT", gridLevels: 8 });
+    assert.deepEqual(secondResult, { pair: "BTC/USDT:USDT", gridLevels: 12 });
     assert.equal(runtimeDb.pair, "BTC/USDT:USDT");
     assert.equal(runtimeDb.gridLevels, 12);
-});
-
-test("applyDashboardConfigUpdate defers protected runtime keys while positions are active", async () => {
-    const runtimeDb = {
-        id: 1,
-        pair: "DOGE/USDT:USDT",
-        leverage: 8,
-        gridLevels: 8,
-        pendingRuntimeConfig: null,
-        dailyPnL: 0,
-        activePosition: { BOTH: { side: "buy", quantity: 10 } }
-    };
-
-    const helpers = createDashboardConfigHelpers({
-        getDb: () => runtimeDb,
-        hasAnyActivePosition: () => true,
-        protectedKeys: new Set(["pair", "leverage"]),
-        editableKeys: new Set(["pair", "leverage", "gridLevels"]),
-        getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", leverage: 8, gridLevels: 8 }),
-        saveDB: async () => {},
-        reloadConfig: async () => {},
-        refreshRuntimeSchedulers: () => {},
-        syncExchangeRuntimeSettings: async () => {},
-        resolveProtectedRuntimeConfigEligibility: async () => ({ canApply: false, reasons: ["EXCHANGE_ACTIVE_POSITION"] }),
-        buildDashboardPayload: () => ({
-            config: runtimeDb.pendingRuntimeConfig ? { ...runtimeDb, ...runtimeDb.pendingRuntimeConfig } : { ...runtimeDb },
-            status: { pendingRuntimeConfig: runtimeDb.pendingRuntimeConfig }
-        }),
-        applyAutoPresetToConfig: (config) => ({ config })
-    });
-
-    const result = await helpers.applyDashboardConfigUpdate({
-        pair: "BTC/USDT:USDT",
-        leverage: 12,
-        gridLevels: 10
-    });
-
-    assert.equal(runtimeDb.pair, "DOGE/USDT:USDT");
-    assert.equal(runtimeDb.leverage, 8);
-    assert.equal(runtimeDb.gridLevels, 10);
-    assert.deepEqual(runtimeDb.pendingRuntimeConfig, { pair: "BTC/USDT:USDT", leverage: 12 });
-    assert.deepEqual(result.deferredProtectedKeys, ["pair", "leverage"]);
-    assert.deepEqual(result.status.pendingRuntimeConfig, { pair: "BTC/USDT:USDT", leverage: 12 });
 });

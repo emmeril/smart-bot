@@ -73,255 +73,6 @@ const createGridRuntimeHelpers = ({
         "4h": 1.18,
         "1d": 1.25
     };
-    const ADAPTIVE_RANGE_LIMITS = { min: 2.5, max: 12.5 };
-    const ADAPTIVE_LEVEL_LIMITS = { min: 6, max: 18 };
-    const resolveManualGridBounds = (config = getDb()) => {
-        const lowerBound = Math.max(0, toFiniteNumber(config?.binanceLowerPrice, 0));
-        const upperBound = Math.max(0, toFiniteNumber(config?.binanceUpperPrice, 0));
-        return { lowerBound, upperBound, valid: lowerBound > 0 && upperBound > lowerBound };
-    };
-    const resolveGridType = (config = getDb()) => String(config?.binanceGridType || "arithmetic").trim().toLowerCase() === "geometric"
-        ? "geometric"
-        : "arithmetic";
-    const isManualBinanceGrid = (config = getDb()) => String(config?.binanceBotMode || "auto").trim().toLowerCase() === "manual";
-
-    const computeLogReturnStdDev = (closes = []) => {
-        if (!Array.isArray(closes) || closes.length < 3) return NaN;
-        const returns = [];
-        for (let index = 1; index < closes.length; index += 1) {
-            const previous = toFiniteNumber(closes[index - 1], NaN);
-            const current = toFiniteNumber(closes[index], NaN);
-            if (!Number.isFinite(previous) || previous <= 0 || !Number.isFinite(current) || current <= 0) continue;
-            returns.push(Math.log(current / previous));
-        }
-        if (returns.length < 2) return NaN;
-        const mean = returns.reduce((sum, value) => sum + value, 0) / returns.length;
-        const variance = returns.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / returns.length;
-        return Math.sqrt(variance);
-    };
-
-    const computeEfficiencyRatio = (closes = [], lookback = 20) => {
-        const numericLookback = Math.max(2, Math.trunc(toFiniteNumber(lookback, 20)));
-        if (!Array.isArray(closes) || closes.length <= numericLookback) return NaN;
-        const window = closes.slice(-(numericLookback + 1)).map((value) => toFiniteNumber(value, NaN));
-        if (window.some((value) => !Number.isFinite(value) || value <= 0)) return NaN;
-        const directionalMove = Math.abs(window[window.length - 1] - window[0]);
-        let pathLength = 0;
-        for (let index = 1; index < window.length; index += 1) {
-            pathLength += Math.abs(window[index] - window[index - 1]);
-        }
-        if (!Number.isFinite(pathLength) || pathLength <= 0) return NaN;
-        return clamp(directionalMove / pathLength, 0, 1);
-    };
-
-    const buildAdaptiveVolatilityMetrics = (snapshot, lookbackCandles = defaultConfig.gridLookbackCandles) => {
-        const safeLookback = Math.max(24, Math.trunc(toFiniteNumber(lookbackCandles, defaultConfig.gridLookbackCandles)));
-        const closes = Array.isArray(snapshot?.close) ? snapshot.close.slice(-Math.max(safeLookback, 24)) : [];
-        const highs = Array.isArray(snapshot?.high) ? snapshot.high.slice(-Math.max(safeLookback, 24)) : [];
-        const lows = Array.isArray(snapshot?.low) ? snapshot.low.slice(-Math.max(safeLookback, 24)) : [];
-        const currentPrice = toFiniteNumber(snapshot?.currentPrice, NaN);
-        const currentATR = toFiniteNumber(snapshot?.currentATR, NaN);
-        if (!Number.isFinite(currentPrice) || currentPrice <= 0 || !Number.isFinite(currentATR) || currentATR <= 0 || closes.length < 12) {
-            return null;
-        }
-
-        const recentHigh = Math.max(...highs.filter((value) => Number.isFinite(value)));
-        const recentLow = Math.min(...lows.filter((value) => Number.isFinite(value)));
-        const normalizedAtrPercent = (currentATR / currentPrice) * 100;
-        const realizedVolPercent = computeLogReturnStdDev(closes) * Math.sqrt(Math.min(closes.length, 24)) * 100;
-        const swingPercent = Number.isFinite(recentHigh) && Number.isFinite(recentLow) && recentLow > 0
-            ? ((recentHigh - recentLow) / ((recentHigh + recentLow) / 2)) * 100
-            : normalizedAtrPercent * 4;
-        const efficiencyRatio = computeEfficiencyRatio(closes, Math.min(20, closes.length - 1));
-        const normalizedVolatilityScore = clamp(
-            (
-                clamp(normalizedAtrPercent / 2.2, 0, 1.8) * 0.45
-            ) + (
-                clamp(realizedVolPercent / 2.8, 0, 1.8) * 0.35
-            ) + (
-                clamp(swingPercent / 8.5, 0, 1.8) * 0.2
-            ),
-            0.2,
-            1.8
-        );
-
-        return {
-            normalizedAtrPercent,
-            realizedVolPercent,
-            swingPercent,
-            efficiencyRatio: Number.isFinite(efficiencyRatio) ? efficiencyRatio : 0.35,
-            normalizedVolatilityScore
-        };
-    };
-
-    const resolveAdaptiveGridParameters = ({
-        params = {},
-        snapshot = null,
-        availableUsdt = null
-    } = {}) => {
-        const db = getDb();
-        const exchange = getExchange();
-        const pair = db?.pair;
-        const manualGrid = isManualBinanceGrid(db);
-        const presetName = resolveAutoPairPresetName(pair);
-        const currentPrice = toFiniteNumber(snapshot?.currentPrice, NaN);
-        const market = exchange?.markets?.[pair];
-        const lookbackCandles = Math.max(20, Math.trunc(toFiniteNumber(params.gridLookbackCandles, db?.gridLookbackCandles || defaultConfig.gridLookbackCandles)));
-        const fallbackRangePercent = resolveEffectiveGridRangePercent({
-            configuredGridRangePercent: params.configuredGridRangePercent ?? db?.gridRangePercent,
-            pair,
-            gridTimeframe: db?.gridTimeframe,
-            gridLookbackCandles: lookbackCandles
-        });
-        const fallbackLevels = resolveEffectiveGridLevels({
-            configuredGridLevels: params.configuredGridLevels ?? db?.gridLevels,
-            pair,
-            gridTimeframe: db?.gridTimeframe,
-            gridRangePercent: fallbackRangePercent,
-            gridLookbackCandles: lookbackCandles
-        });
-        const fallbackEntryBufferPercent = resolveEffectiveGridEntryBufferPercent({
-            configuredGridEntryBufferPercent: params.configuredGridEntryBufferPercent ?? db?.gridEntryBufferPercent,
-            pair,
-            gridTimeframe: db?.gridTimeframe,
-            gridRangePercent: fallbackRangePercent,
-            gridLevels: fallbackLevels
-        });
-        const configuredOrderSizeUsdt = Math.max(0, toFiniteNumber(params.gridOrderSizeUsdt ?? db?.gridOrderSizeUsdt, defaultConfig.gridOrderSizeUsdt));
-        const minimumOrderSizeUsdt = Number.isFinite(currentPrice) && currentPrice > 0
-            ? getMinimumValidatedGridOrderSizeUsdt(market, currentPrice)
-            : 0;
-        const effectiveOrderSizeUsdt = Math.max(configuredOrderSizeUsdt, minimumOrderSizeUsdt);
-        const manualBounds = resolveManualGridBounds(db);
-        const configuredInvestmentUsdt = Math.max(0, toFiniteNumber(db?.binanceInvestmentUsdt, defaultConfig.binanceInvestmentUsdt));
-        if (manualGrid) {
-            const configuredGridLevels = Math.max(2, Math.trunc(toFiniteNumber(params.gridLevels, db?.gridLevels || defaultConfig.gridLevels)));
-            const configuredOrdersPerSide = Math.max(1, configuredGridLevels - 1);
-            const investmentOrderSizeUsdt = configuredInvestmentUsdt > 0
-                ? Math.max(minimumOrderSizeUsdt, configuredInvestmentUsdt / Math.max(configuredOrdersPerSide * 2, 1))
-                : effectiveOrderSizeUsdt;
-            const referencePrice = manualBounds.valid ? (manualBounds.lowerBound + manualBounds.upperBound) / 2 : currentPrice;
-            const rangePercent = manualBounds.valid && Number.isFinite(referencePrice) && referencePrice > 0
-                ? ((manualBounds.upperBound - manualBounds.lowerBound) / referencePrice) * 100
-                : fallbackRangePercent;
-            return {
-                ...params,
-                gridLevels: configuredGridLevels,
-                gridRangePercent: Number(Math.max(0.5, rangePercent).toFixed(2)),
-                gridEntryBufferPercent: fallbackEntryBufferPercent,
-                gridTakeProfitLevels: resolveEffectiveGridTakeProfitLevels(params.gridTakeProfitLevels),
-                gridStopLossLevels: resolveEffectiveGridStopLossSteps(params.gridStopLossLevels, 1, null),
-                gridStopLossPercent: Math.max(2, toFiniteNumber(db?.gridStopLossPercent, defaultConfig.gridStopLossPercent)),
-                gridOrdersPerSide: configuredOrdersPerSide,
-                gridOrderSizeUsdt: investmentOrderSizeUsdt,
-                orderSizeUsdt: investmentOrderSizeUsdt,
-                autoGrid: {
-                    mode: "MANUAL_BINANCE",
-                    presetName,
-                    minimumOrderSizeUsdt,
-                    volatilityScore: null
-                }
-            };
-        }
-        const volatility = buildAdaptiveVolatilityMetrics(snapshot, lookbackCandles);
-        if (!volatility) {
-            return {
-                ...params,
-                gridLevels: fallbackLevels,
-                gridRangePercent: fallbackRangePercent,
-                gridEntryBufferPercent: fallbackEntryBufferPercent,
-                gridTakeProfitLevels: resolveEffectiveGridTakeProfitLevels(params.gridTakeProfitLevels),
-                gridStopLossLevels: resolveEffectiveGridStopLossSteps(params.gridStopLossLevels, 1, null),
-                gridStopLossPercent: Math.max(2, toFiniteNumber(db?.gridStopLossPercent, defaultConfig.gridStopLossPercent)),
-                gridOrdersPerSide: resolveGridOrdersPerSideCap(params.gridOrdersPerSide, fallbackLevels),
-                gridOrderSizeUsdt: effectiveOrderSizeUsdt,
-                orderSizeUsdt: effectiveOrderSizeUsdt,
-                autoGrid: {
-                    mode: "FALLBACK",
-                    presetName,
-                    minimumOrderSizeUsdt,
-                    volatilityScore: null
-                }
-            };
-        }
-
-        const availableCapital = toFiniteNumber(availableUsdt, getBalanceCache()?.availableUSDT);
-        const capitalShare = Number.isFinite(availableCapital) && availableCapital > 0
-            ? clamp(effectiveOrderSizeUsdt / availableCapital, 0, 1)
-            : 0.12;
-        const sizeMultiple = effectiveOrderSizeUsdt / Math.max(minimumOrderSizeUsdt, 1);
-        const sizePressure = clamp(Math.log10(Math.max(1, sizeMultiple)), 0, 2.5);
-        const pairRangeFactor = presetName === "volatile" ? 1.18 : (presetName === "doge" ? 1.1 : 1);
-        const pairLevelBias = presetName === "volatile" ? 1 : (presetName === "doge" ? 0.5 : 0);
-
-        const rangePercentRaw = Math.max(
-            volatility.normalizedAtrPercent * 3.4,
-            volatility.realizedVolPercent * 2.2,
-            volatility.swingPercent * 0.72,
-            2.4 + (volatility.normalizedVolatilityScore * 3.9) + (capitalShare * 12)
-        ) * pairRangeFactor;
-        const gridRangePercent = Number(clamp(rangePercentRaw, ADAPTIVE_RANGE_LIMITS.min, ADAPTIVE_RANGE_LIMITS.max).toFixed(2));
-
-        const gridLevelsRaw = 7
-            + (volatility.normalizedVolatilityScore * 6.8)
-            + ((1 - volatility.efficiencyRatio) * 1.8)
-            + pairLevelBias
-            - (sizePressure * 1.1)
-            - (capitalShare * 10);
-        const gridLevels = clamp(Math.round(gridLevelsRaw), ADAPTIVE_LEVEL_LIMITS.min, ADAPTIVE_LEVEL_LIMITS.max);
-        const gridStepPercent = gridRangePercent / Math.max(gridLevels, 1);
-        const gridEntryBufferPercent = Number(clamp(
-            Math.max(gridStepPercent * 0.28, volatility.normalizedAtrPercent * 0.16),
-            0.05,
-            0.45
-        ).toFixed(3));
-        const gridTakeProfitLevels = 1;
-        const gridStopLossLevels = Number(clamp(
-            1.3 + (volatility.normalizedVolatilityScore * 1.45) + (capitalShare * 4.5) + ((1 - volatility.efficiencyRatio) * 0.6),
-            1.25,
-            4.5
-        ).toFixed(2));
-        const gridStopLossPercent = Number(clamp(
-            Math.max(
-                gridRangePercent * 0.92,
-                gridStepPercent * (gridStopLossLevels + 1),
-                volatility.normalizedAtrPercent * 5.1
-            ),
-            Math.max(2.5, gridRangePercent * 0.65),
-            gridRangePercent + 6
-        ).toFixed(2));
-        const maxOrdersPerSide = Math.max(1, gridLevels - 1);
-        const affordableOrdersPerSide = Number.isFinite(availableCapital) && availableCapital > 0
-            ? Math.floor((availableCapital * 0.9) / Math.max(effectiveOrderSizeUsdt * 2, 1e-8))
-            : maxOrdersPerSide;
-        const gridOrdersPerSide = clamp(affordableOrdersPerSide, 1, maxOrdersPerSide);
-
-        return {
-            ...params,
-            gridLevels,
-            gridRangePercent,
-            gridEntryBufferPercent,
-            gridTakeProfitLevels,
-            gridStopLossLevels,
-            gridStopLossPercent,
-            gridOrdersPerSide,
-            gridOrderSizeUsdt: effectiveOrderSizeUsdt,
-            orderSizeUsdt: effectiveOrderSizeUsdt,
-            autoGrid: {
-                mode: "ADAPTIVE_OFFICIAL",
-                presetName,
-                minimumOrderSizeUsdt,
-                volatilityScore: Number(volatility.normalizedVolatilityScore.toFixed(3)),
-                normalizedAtrPercent: Number(volatility.normalizedAtrPercent.toFixed(3)),
-                realizedVolPercent: Number(volatility.realizedVolPercent.toFixed(3)),
-                swingPercent: Number(volatility.swingPercent.toFixed(3)),
-                efficiencyRatio: Number(volatility.efficiencyRatio.toFixed(3)),
-                capitalShare: Number(capitalShare.toFixed(3)),
-                sizePressure: Number(sizePressure.toFixed(3)),
-                gridStepPercent: Number(gridStepPercent.toFixed(3))
-            }
-        };
-    };
 
     const resolveEffectiveGridRangePercent = ({
         configuredGridRangePercent,
@@ -416,12 +167,6 @@ const createGridRuntimeHelpers = ({
         const neededCandles = Math.max(gridLookbackCandles + 5, volumePeriod + 10, atrPeriod + 10, 150);
         return {
             strategy: "futures_grid",
-            binanceBotMode: String(db.binanceBotMode || defaultConfig.binanceBotMode || "auto").toLowerCase(),
-            binanceGridType: resolveGridType(db),
-            binanceDirection: String(db.binanceDirection || defaultConfig.binanceDirection || "neutral").toLowerCase(),
-            binanceLowerPrice: Math.max(0, toFiniteNumber(db.binanceLowerPrice, defaultConfig.binanceLowerPrice)),
-            binanceUpperPrice: Math.max(0, toFiniteNumber(db.binanceUpperPrice, defaultConfig.binanceUpperPrice)),
-            binanceInvestmentUsdt: Math.max(0, toFiniteNumber(db.binanceInvestmentUsdt, defaultConfig.binanceInvestmentUsdt)),
             volumePeriod,
             atrPeriod,
             neededCandles,
@@ -465,31 +210,6 @@ const createGridRuntimeHelpers = ({
         return bestIndex;
     };
 
-    const getGridIntervalIndex = (levels, price) => {
-        if (!Array.isArray(levels) || levels.length < 2 || !Number.isFinite(price)) return { lowerIndex: 0, upperIndex: 1 };
-        for (let index = 0; index < levels.length - 1; index += 1) {
-            const lower = toFiniteNumber(levels[index], NaN);
-            const upper = toFiniteNumber(levels[index + 1], NaN);
-            if (Number.isFinite(lower) && Number.isFinite(upper) && price >= lower && price <= upper) {
-                return { lowerIndex: index, upperIndex: index + 1 };
-            }
-        }
-        if (price < toFiniteNumber(levels[0], NaN)) return { lowerIndex: 0, upperIndex: 1 };
-        return { lowerIndex: Math.max(0, levels.length - 2), upperIndex: Math.max(1, levels.length - 1) };
-    };
-
-    const getLocalGridStep = (levels, entryIndex, fallbackStep) => {
-        const safeLevels = Array.isArray(levels) ? levels : [];
-        const safeEntryIndex = clamp(Math.trunc(toFiniteNumber(entryIndex, 0)), 0, Math.max(0, safeLevels.length - 1));
-        const nextLevel = toFiniteNumber(safeLevels[Math.min(safeEntryIndex + 1, safeLevels.length - 1)], NaN);
-        const currentLevel = toFiniteNumber(safeLevels[safeEntryIndex], NaN);
-        const previousLevel = toFiniteNumber(safeLevels[Math.max(0, safeEntryIndex - 1)], NaN);
-        const nextStep = Number.isFinite(nextLevel) && Number.isFinite(currentLevel) ? Math.abs(nextLevel - currentLevel) : NaN;
-        const prevStep = Number.isFinite(currentLevel) && Number.isFinite(previousLevel) ? Math.abs(currentLevel - previousLevel) : NaN;
-        const resolvedStep = Number.isFinite(nextStep) && nextStep > 0 ? nextStep : prevStep;
-        return Number.isFinite(resolvedStep) && resolvedStep > 0 ? resolvedStep : fallbackStep;
-    };
-
     const buildGridExitPlan = ({
         side,
         entryIndex,
@@ -507,9 +227,8 @@ const createGridRuntimeHelpers = ({
             return { targetPrice: NaN, stopLossPrice: NaN, takeProfitLevels: 0, stopLossSteps: 0, mode: "INVALID" };
         }
 
-        const localStep = getLocalGridStep(safeLevels, entryIndex, safeStep);
         const takeProfitLevels = resolveEffectiveGridTakeProfitLevels(params?.gridTakeProfitLevels);
-        const stopLossSteps = resolveEffectiveGridStopLossSteps(params?.gridStopLossLevels, localStep, atr);
+        const stopLossSteps = resolveEffectiveGridStopLossSteps(params?.gridStopLossLevels, safeStep, atr);
         const safeEntryIndex = clamp(Math.trunc(toFiniteNumber(entryIndex, 0)), 0, safeLevels.length - 1);
         const lowerBound = toFiniteNumber(gridState?.lowerBound, safeLevels[0]);
         const upperBound = toFiniteNumber(gridState?.upperBound, safeLevels[safeLevels.length - 1]);
@@ -518,8 +237,8 @@ const createGridRuntimeHelpers = ({
         if (normalizedSide === "buy") {
             const targetIndex = clamp(safeEntryIndex + takeProfitLevels, 1, safeLevels.length - 1);
             const rawStop = autoStopMode
-                ? lowerBound - (localStep * stopLossSteps)
-                : toFiniteNumber(safeLevels[safeEntryIndex], lowerBound) - (localStep * stopLossSteps);
+                ? lowerBound - (safeStep * stopLossSteps)
+                : toFiniteNumber(safeLevels[safeEntryIndex], lowerBound) - (safeStep * stopLossSteps);
             return {
                 targetPrice: formatPriceToMarketPrecision(db.pair, safeLevels[targetIndex]),
                 stopLossPrice: formatPriceToMarketPrecision(db.pair, rawStop),
@@ -531,8 +250,8 @@ const createGridRuntimeHelpers = ({
 
         const targetIndex = clamp(safeEntryIndex - takeProfitLevels, 0, Math.max(0, safeLevels.length - 2));
         const rawStop = autoStopMode
-            ? upperBound + (localStep * stopLossSteps)
-            : toFiniteNumber(safeLevels[safeEntryIndex], upperBound) + (localStep * stopLossSteps);
+            ? upperBound + (safeStep * stopLossSteps)
+            : toFiniteNumber(safeLevels[safeEntryIndex], upperBound) + (safeStep * stopLossSteps);
         return {
             targetPrice: formatPriceToMarketPrecision(db.pair, safeLevels[targetIndex]),
             stopLossPrice: formatPriceToMarketPrecision(db.pair, rawStop),
@@ -542,20 +261,12 @@ const createGridRuntimeHelpers = ({
         };
     };
 
-    const buildGridLevels = (lowerBound, upperBound, gridLevels, gridType = resolveGridType()) => {
+    const buildGridLevels = (lowerBound, upperBound, gridLevels) => {
         const safeLevels = Math.max(2, Math.trunc(gridLevels));
-        const normalizedType = String(gridType || "arithmetic").toLowerCase();
-        if (normalizedType === "geometric" && lowerBound > 0 && upperBound > lowerBound) {
-            const ratio = (upperBound / lowerBound) ** (1 / safeLevels);
-            const levels = [];
-            for (let i = 0; i <= safeLevels; i++) levels.push(lowerBound * (ratio ** i));
-            const step = levels.length > 1 ? levels[1] - levels[0] : NaN;
-            return { levels, step, ratio };
-        }
         const step = (upperBound - lowerBound) / safeLevels;
         const levels = [];
         for (let i = 0; i <= safeLevels; i++) levels.push(lowerBound + (step * i));
-        return { levels, step, ratio: null };
+        return { levels, step };
     };
 
     const resolveGridOrdersPerSideCap = (configuredOrdersPerSide, gridLevels = getDb()?.gridLevels) => {
@@ -667,8 +378,6 @@ const createGridRuntimeHelpers = ({
         const db = getDb();
         return [
             normalizeSymbol(db?.pair),
-            params?.binanceBotMode || db?.binanceBotMode || "auto",
-            params?.binanceGridType || db?.binanceGridType || "arithmetic",
             params?.gridTimeframe || db?.gridTimeframe || "",
             params?.configuredGridLevels,
             params?.gridLevels,
@@ -677,9 +386,7 @@ const createGridRuntimeHelpers = ({
             params?.gridRangePercent,
             params?.configuredGridEntryBufferPercent,
             params?.gridTakeProfitLevels,
-            params?.gridStopLossLevels,
-            params?.binanceLowerPrice || db?.binanceLowerPrice || 0,
-            params?.binanceUpperPrice || db?.binanceUpperPrice || 0
+            params?.gridStopLossLevels
         ].join("|");
     };
 
@@ -699,7 +406,6 @@ const createGridRuntimeHelpers = ({
             upperBound,
             step,
             levels,
-            gridType: resolveGridType(state),
             referencePrice: toFiniteNumber(state.referencePrice, (lowerBound + upperBound) / 2),
             createdAt: toFiniteNumber(state.createdAt, Date.now()),
             fingerprint: state.fingerprint
@@ -707,18 +413,12 @@ const createGridRuntimeHelpers = ({
     };
 
     const createLockedGridState = (snapshot, params) => {
-        const manualBounds = resolveManualGridBounds(params);
-        const usingManualBounds = String(params?.binanceBotMode || "auto").toLowerCase() === "manual" && manualBounds.valid;
         const recentHigh = Math.max(...snapshot.high.slice(-(params.gridLookbackCandles)));
         const recentLow = Math.min(...snapshot.low.slice(-(params.gridLookbackCandles)));
-        const referencePrice = usingManualBounds ? (manualBounds.lowerBound + manualBounds.upperBound) / 2 : (recentHigh + recentLow) / 2;
-        const lowerBound = usingManualBounds
-            ? manualBounds.lowerBound
-            : Math.min(referencePrice * (1 - (params.gridRangePercent / 100)), recentLow);
-        const upperBound = usingManualBounds
-            ? manualBounds.upperBound
-            : Math.max(referencePrice * (1 + (params.gridRangePercent / 100)), recentHigh);
-        const { levels, step } = buildGridLevels(lowerBound, upperBound, params.gridLevels, params?.binanceGridType);
+        const referencePrice = (recentHigh + recentLow) / 2;
+        const lowerBound = Math.min(referencePrice * (1 - (params.gridRangePercent / 100)), recentLow);
+        const upperBound = Math.max(referencePrice * (1 + (params.gridRangePercent / 100)), recentHigh);
+        const { levels, step } = buildGridLevels(lowerBound, upperBound, params.gridLevels);
         if (!Number.isFinite(step) || step <= 0) return null;
         return {
             fingerprint: getGridStateFingerprint(params),
@@ -727,7 +427,6 @@ const createGridRuntimeHelpers = ({
             upperBound,
             step,
             levels,
-            gridType: resolveGridType(params),
             createdAt: Date.now()
         };
     };
@@ -886,30 +585,24 @@ const createGridRuntimeHelpers = ({
         const tickerCache = getTickerCache();
         const presetName = getActiveAutoPairPresetName();
         const gridState = db?.activeGridState;
-        const manualGrid = isManualBinanceGrid(db);
-        const manualBounds = resolveManualGridBounds(db);
-        const effectiveGridLevels = manualGrid
-            ? Math.max(2, Math.trunc(toFiniteNumber(db?.gridLevels, defaultConfig.gridLevels)))
-            : resolveEffectiveGridLevels({
-                configuredGridLevels: db?.gridLevels,
-                pair: db?.pair,
-                gridTimeframe: db?.gridTimeframe,
-                gridRangePercent: resolveEffectiveGridRangePercent({
-                    configuredGridRangePercent: db?.gridRangePercent,
-                    pair: db?.pair,
-                    gridTimeframe: db?.gridTimeframe,
-                    gridLookbackCandles: db?.gridLookbackCandles
-                }),
-                gridLookbackCandles: db?.gridLookbackCandles
-            });
-        const effectiveGridRangePercent = manualGrid && manualBounds.valid
-            ? Number((((manualBounds.upperBound - manualBounds.lowerBound) / ((manualBounds.lowerBound + manualBounds.upperBound) / 2)) * 100).toFixed(2))
-            : resolveEffectiveGridRangePercent({
+        const effectiveGridLevels = resolveEffectiveGridLevels({
+            configuredGridLevels: db?.gridLevels,
+            pair: db?.pair,
+            gridTimeframe: db?.gridTimeframe,
+            gridRangePercent: resolveEffectiveGridRangePercent({
                 configuredGridRangePercent: db?.gridRangePercent,
                 pair: db?.pair,
                 gridTimeframe: db?.gridTimeframe,
                 gridLookbackCandles: db?.gridLookbackCandles
-            });
+            }),
+            gridLookbackCandles: db?.gridLookbackCandles
+        });
+        const effectiveGridRangePercent = resolveEffectiveGridRangePercent({
+            configuredGridRangePercent: db?.gridRangePercent,
+            pair: db?.pair,
+            gridTimeframe: db?.gridTimeframe,
+            gridLookbackCandles: db?.gridLookbackCandles
+        });
         const effectiveGridEntryBufferPercent = resolveEffectiveGridEntryBufferPercent({
             configuredGridEntryBufferPercent: db?.gridEntryBufferPercent,
             pair: db?.pair,
@@ -926,15 +619,9 @@ const createGridRuntimeHelpers = ({
 
         let slotLabel = "N/A";
         if (hasLockedGrid && Number.isFinite(currentPrice)) {
-            let lowerIndex = 0;
-            for (let index = 0; index < levels.length - 1; index += 1) {
-                if (currentPrice >= levels[index] && currentPrice <= levels[index + 1]) {
-                    lowerIndex = index;
-                    break;
-                }
-                if (currentPrice > levels[index + 1]) lowerIndex = Math.min(index + 1, Math.max(0, levels.length - 2));
-            }
-            lowerIndex = clamp(lowerIndex, 0, Math.max(0, levels.length - 2));
+            const rawIndex = (currentPrice - lowerBound) / step;
+            const clampedIndex = clamp(rawIndex, 0, Math.max(0, levels.length - 1));
+            const lowerIndex = clamp(Math.floor(clampedIndex), 0, Math.max(0, levels.length - 2));
             const upperIndex = clamp(lowerIndex + 1, 1, Math.max(1, levels.length - 1));
             slotLabel = `${lowerIndex}/${Math.max(1, effectiveGridLevels)}${insideRange ? "" : " OUT"}`;
             if (Number.isFinite(levels[lowerIndex]) && Number.isFinite(levels[upperIndex])) {
@@ -947,23 +634,17 @@ const createGridRuntimeHelpers = ({
         const sellOrders = gridOrders.filter((order) => String(order?.side || "").toLowerCase() === "sell").length;
         const availableUsdt = Number.isFinite(balanceCache.availableUSDT) ? balanceCache.availableUSDT : balanceCache.totalUSDT;
         const referencePrice = Number.isFinite(currentPrice) && currentPrice > 0 ? currentPrice : (hasLockedGrid ? (lowerBound + upperBound) / 2 : tickerCache.price);
-        const configuredOrdersPerSide = manualGrid
-            ? Math.max(1, effectiveGridLevels - 1)
-            : db.gridOrdersPerSide;
-        const configuredOrderSizeUsdt = manualGrid && toFiniteNumber(db?.binanceInvestmentUsdt, 0) > 0
-            ? toFiniteNumber(db.binanceInvestmentUsdt, 0) / Math.max(configuredOrdersPerSide * 2, 1)
-            : db.gridOrderSizeUsdt;
         const effectiveSizeMeta = resolveEffectiveGridOrderSizeUsdt({
             availableUsdt,
-            configuredOrderSizeUsdt,
-            configuredOrdersPerSide,
+            configuredOrderSizeUsdt: db.gridOrderSizeUsdt,
+            configuredOrdersPerSide: db.gridOrdersPerSide,
             referencePrice,
             market: exchange?.markets?.[db?.pair],
             gridLevels: effectiveGridLevels
         });
         const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
             availableUsdt,
-            configuredOrdersPerSide,
+            configuredOrdersPerSide: db.gridOrdersPerSide,
             perOrderMargin: effectiveSizeMeta.orderSizeUsdt,
             referencePrice,
             market: exchange?.markets?.[db?.pair],
@@ -972,14 +653,12 @@ const createGridRuntimeHelpers = ({
 
         return {
             presetName,
-            botMode: manualGrid ? "MANUAL" : "AUTO",
-            gridType: resolveGridType(db).toUpperCase(),
             configuredGridLevels: Math.max(0, Math.trunc(toFiniteNumber(db?.gridLevels, defaultConfig.gridLevels))),
             effectiveGridLevels,
-            gridLevelsMode: manualGrid ? "MANUAL" : (Math.trunc(toFiniteNumber(db?.gridLevels, defaultConfig.gridLevels)) <= 0 ? "AUTO" : "MANUAL"),
+            gridLevelsMode: Math.trunc(toFiniteNumber(db?.gridLevels, defaultConfig.gridLevels)) <= 0 ? "AUTO" : "MANUAL",
             configuredGridRangePercent: Math.max(0, toFiniteNumber(db?.gridRangePercent, defaultConfig.gridRangePercent)),
             effectiveGridRangePercent,
-            gridRangeMode: manualGrid ? "MANUAL" : (toFiniteNumber(db?.gridRangePercent, defaultConfig.gridRangePercent) <= 0 ? "AUTO" : "MANUAL"),
+            gridRangeMode: toFiniteNumber(db?.gridRangePercent, defaultConfig.gridRangePercent) <= 0 ? "AUTO" : "MANUAL",
             configuredGridEntryBufferPercent: Math.max(0, toFiniteNumber(db?.gridEntryBufferPercent, defaultConfig.gridEntryBufferPercent)),
             effectiveGridEntryBufferPercent,
             gridEntryBufferMode: toFiniteNumber(db?.gridEntryBufferPercent, defaultConfig.gridEntryBufferPercent) <= 0 ? "AUTO" : "MANUAL",
@@ -1000,8 +679,6 @@ const createGridRuntimeHelpers = ({
 
     const buildGridStateFingerprintForConfig = (config) => [
         normalizeSymbol(config?.pair),
-        String(config?.binanceBotMode || "auto").toLowerCase(),
-        resolveGridType(config),
         config?.gridTimeframe || "",
         Math.max(0, Math.trunc(toFiniteNumber(config?.gridLevels, defaultConfig.gridLevels))),
         resolveEffectiveGridLevels({
@@ -1026,16 +703,13 @@ const createGridRuntimeHelpers = ({
         }),
         Math.max(0, toFiniteNumber(config?.gridEntryBufferPercent, defaultConfig.gridEntryBufferPercent)),
         Math.max(0, Math.trunc(toFiniteNumber(config?.gridTakeProfitLevels, defaultConfig.gridTakeProfitLevels))),
-        Math.max(0, toFiniteNumber(config?.gridStopLossLevels, defaultConfig.gridStopLossLevels)),
-        Math.max(0, toFiniteNumber(config?.binanceLowerPrice, 0)),
-        Math.max(0, toFiniteNumber(config?.binanceUpperPrice, 0))
+        Math.max(0, toFiniteNumber(config?.gridStopLossLevels, defaultConfig.gridStopLossLevels))
     ].join("|");
 
     const applyAutoPairGridPreset = (config, autoPairGridPresets) => {
         if (!config || typeof config !== "object") return { config, changed: false, presetName: null };
         const strategy = String(config.strategy || "").toLowerCase();
         if (strategy && strategy !== "futures_grid") return { config, changed: false, presetName: null };
-        if (isManualBinanceGrid(config)) return { config, changed: false, presetName: null };
         const presets = autoPairGridPresets && typeof autoPairGridPresets === "object" ? autoPairGridPresets : {};
 
         const presetName = resolveAutoPairPresetName(config.pair);
@@ -1045,7 +719,14 @@ const createGridRuntimeHelpers = ({
         const gridKeys = Object.keys(preset);
         let changed = false;
         const nextConfig = { ...config };
+        const shouldApplyPresetValue = (key, currentValue) => (
+            currentValue === undefined ||
+            currentValue === null ||
+            currentValue === "" ||
+            currentValue === defaultConfig[key]
+        );
         for (const key of gridKeys) {
+            if (!shouldApplyPresetValue(key, nextConfig[key])) continue;
             if (nextConfig[key] !== preset[key]) {
                 nextConfig[key] = preset[key];
                 changed = true;
@@ -1068,7 +749,6 @@ const createGridRuntimeHelpers = ({
 
     return {
         getSignalParameters,
-        resolveAdaptiveGridParameters,
         resolveEffectiveGridTakeProfitLevels,
         resolveEffectiveGridStopLossSteps,
         findNearestGridLevelIndex,

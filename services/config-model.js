@@ -42,7 +42,8 @@ const createConfigModelHelpers = ({
         const normalized = { ...config };
         const numericRules = {
             gridOrderSizeUsdt: { min: 0, allowZero: true }, leverage: { min: 0, allowZero: false, integer: true },
-            gridTargetProfitUsdt: { min: 0, allowZero: false }, maxTradesPerDay: { min: 0, allowZero: false, integer: true },
+            gridTargetProfitUsdt: { min: 0, allowZero: false }, dailyProfitTargetUsdt: { min: 0, allowZero: false },
+            dailyMaxLossPercent: { min: 0, allowZero: false }, maxTradesPerDay: { min: 0, allowZero: false, integer: true },
             coolingPeriod: { min: 0, allowZero: true, integer: true }, monitoringInterval: { min: 200, allowZero: false, integer: true },
             gridStopLossPercent: { min: 0, allowZero: false }, gridLevels: { min: 0, allowZero: true, integer: true },
             gridLookbackCandles: { min: 20, allowZero: false, integer: true }, gridRangePercent: { min: 0, allowZero: true },
@@ -59,10 +60,7 @@ const createConfigModelHelpers = ({
             stopLossMinPercent: { min: 0, allowZero: true },
             stopLossMaxPercent: { min: 0, allowZero: true },
             trailingActivateATR: { min: 0.2, allowZero: false },
-            trailingOffsetATR: { min: 0.1, allowZero: false },
-            binanceLowerPrice: { min: 0, allowZero: true },
-            binanceUpperPrice: { min: 0, allowZero: true },
-            binanceInvestmentUsdt: { min: 0, allowZero: true }
+            trailingOffsetATR: { min: 0.1, allowZero: false }
         };
 
         Object.entries(numericRules).forEach(([key, rule]) => {
@@ -92,12 +90,6 @@ const createConfigModelHelpers = ({
         normalized.pair = rawPair || defaults.pair;
         const rawStrategy = typeof normalized.strategy === "string" ? normalized.strategy.trim().toLowerCase() : "";
         normalized.strategy = rawStrategy || defaults.strategy;
-        const rawBotMode = typeof normalized.binanceBotMode === "string" ? normalized.binanceBotMode.trim().toLowerCase() : "";
-        normalized.binanceBotMode = rawBotMode === "manual" ? "manual" : "auto";
-        const rawGridType = typeof normalized.binanceGridType === "string" ? normalized.binanceGridType.trim().toLowerCase() : "";
-        normalized.binanceGridType = rawGridType === "geometric" ? "geometric" : "arithmetic";
-        const rawDirection = typeof normalized.binanceDirection === "string" ? normalized.binanceDirection.trim().toLowerCase() : "";
-        normalized.binanceDirection = ["neutral", "long", "short"].includes(rawDirection) ? rawDirection : defaults.binanceDirection;
         const rawMarginMode = typeof normalized.marginMode === "string" ? normalized.marginMode.trim().toLowerCase() : "";
         normalized.marginMode = validMarginModes.includes(rawMarginMode) ? rawMarginMode : defaults.marginMode;
         const rawGridTimeframe = typeof normalized.gridTimeframe === "string"
@@ -110,11 +102,6 @@ const createConfigModelHelpers = ({
             normalized.activeGridState = safeParseJSON(normalized.activeGridState, null);
         } else if (!normalized.activeGridState || typeof normalized.activeGridState !== "object") {
             normalized.activeGridState = null;
-        }
-        if (typeof normalized.pendingRuntimeConfig === "string") {
-            normalized.pendingRuntimeConfig = safeParseJSON(normalized.pendingRuntimeConfig, null);
-        } else if (!normalized.pendingRuntimeConfig || typeof normalized.pendingRuntimeConfig !== "object") {
-            normalized.pendingRuntimeConfig = null;
         }
 
         const normalizeBoolean = (key) => {
@@ -132,16 +119,6 @@ const createConfigModelHelpers = ({
         };
 
         booleanConfigKeys.forEach(normalizeBoolean);
-        if (normalized.binanceDirection === "long") {
-            normalized.allowLong = true;
-            normalized.allowShort = false;
-        } else if (normalized.binanceDirection === "short") {
-            normalized.allowLong = false;
-            normalized.allowShort = true;
-        } else {
-            normalized.allowLong = true;
-            normalized.allowShort = true;
-        }
         normalized.dailyPnL = toFiniteNumber(normalized.dailyPnL, defaults.dailyPnL);
         normalized.dailyTrades = Math.max(0, Math.trunc(toFiniteNumber(normalized.dailyTrades, defaults.dailyTrades)));
         normalized.dailyPnlSource = typeof normalized.dailyPnlSource === "string" && normalized.dailyPnlSource.trim()
@@ -158,10 +135,6 @@ const createConfigModelHelpers = ({
         const gridLevelsCap = normalized.gridLevels > 0 ? normalized.gridLevels : Math.max(defaults.gridLevels, 18);
         normalized.gridTakeProfitLevels = clamp(normalized.gridTakeProfitLevels, 0, Math.max(1, gridLevelsCap - 1));
         normalized.gridOrdersPerSide = clamp(normalized.gridOrdersPerSide, 0, Math.max(1, gridLevelsCap - 1));
-        if (normalized.binanceLowerPrice > 0 && normalized.binanceUpperPrice > 0 && normalized.binanceUpperPrice <= normalized.binanceLowerPrice) {
-            normalized.binanceLowerPrice = defaults.binanceLowerPrice;
-            normalized.binanceUpperPrice = defaults.binanceUpperPrice;
-        }
 
         return normalized;
     };
@@ -180,14 +153,12 @@ const createConfigModelHelpers = ({
         delete hydrated.stopLossPercent;
         if (hydrated.gridTimeframe === undefined && typeof hydrated.breakoutTimeframe === "string") hydrated.gridTimeframe = hydrated.breakoutTimeframe;
         delete hydrated.breakoutTimeframe;
-        if (hydrated.binanceDirection === undefined) {
-            if (hydrated.allowLong && !hydrated.allowShort) hydrated.binanceDirection = "long";
-            else if (!hydrated.allowLong && hydrated.allowShort) hydrated.binanceDirection = "short";
-            else hydrated.binanceDirection = "neutral";
-        }
+        if (hydrated.dailyProfitTargetUsdt === undefined && hydrated.targetDailyProfit !== undefined) hydrated.dailyProfitTargetUsdt = hydrated.targetDailyProfit;
+        delete hydrated.targetDailyProfit;
+        if (hydrated.dailyMaxLossPercent === undefined && hydrated.maxDailyLossPercent !== undefined) hydrated.dailyMaxLossPercent = hydrated.maxDailyLossPercent;
+        delete hydrated.maxDailyLossPercent;
         hydrated.activePosition = normalizeActivePositionState(hydrated.activePosition);
         hydrated.activeGridState = safeParseJSON(hydrated.activeGridState, null);
-        hydrated.pendingRuntimeConfig = safeParseJSON(hydrated.pendingRuntimeConfig, null);
         return normalizeConfig(hydrated);
     };
 
@@ -195,7 +166,6 @@ const createConfigModelHelpers = ({
         ...config,
         activePosition: config.activePosition ? JSON.stringify(config.activePosition) : null,
         activeGridState: config.activeGridState ? JSON.stringify(config.activeGridState) : null,
-        pendingRuntimeConfig: config.pendingRuntimeConfig ? JSON.stringify(config.pendingRuntimeConfig) : null,
         lastUpdated: Date.now()
     });
 
@@ -263,16 +233,23 @@ const createConfigModelHelpers = ({
                 : null
         });
         await addColumnIfMissing({ column: "activeGridState", sql: "ALTER TABLE Configs ADD COLUMN activeGridState TEXT DEFAULT NULL;" });
-        await addColumnIfMissing({ column: "pendingRuntimeConfig", sql: "ALTER TABLE Configs ADD COLUMN pendingRuntimeConfig TEXT DEFAULT NULL;" });
         await addColumnIfMissing({ column: "dailyPnlSource", sql: "ALTER TABLE Configs ADD COLUMN dailyPnlSource VARCHAR(255) DEFAULT 'local';" });
         await addColumnIfMissing({ column: "dailyPnlSyncedAt", sql: "ALTER TABLE Configs ADD COLUMN dailyPnlSyncedAt BIGINT DEFAULT 0;" });
+        await addColumnIfMissing({
+            column: "dailyProfitTargetUsdt",
+            sql: "ALTER TABLE Configs ADD COLUMN dailyProfitTargetUsdt FLOAT DEFAULT 1;",
+            legacyCopySql: columnNames.has("targetDailyProfit")
+                ? "UPDATE Configs SET dailyProfitTargetUsdt = COALESCE(targetDailyProfit, 1) WHERE dailyProfitTargetUsdt IS NULL OR dailyProfitTargetUsdt = '';"
+                : null
+        });
+        await addColumnIfMissing({
+            column: "dailyMaxLossPercent",
+            sql: "ALTER TABLE Configs ADD COLUMN dailyMaxLossPercent FLOAT DEFAULT 10;",
+            legacyCopySql: columnNames.has("maxDailyLossPercent")
+                ? "UPDATE Configs SET dailyMaxLossPercent = COALESCE(maxDailyLossPercent, 10) WHERE dailyMaxLossPercent IS NULL OR dailyMaxLossPercent = '';"
+                : null
+        });
         await addColumnIfMissing({ column: "strategy", sql: "ALTER TABLE Configs ADD COLUMN strategy VARCHAR(255) DEFAULT 'futures_grid';" });
-        await addColumnIfMissing({ column: "binanceBotMode", sql: "ALTER TABLE Configs ADD COLUMN binanceBotMode VARCHAR(255) DEFAULT 'auto';" });
-        await addColumnIfMissing({ column: "binanceGridType", sql: "ALTER TABLE Configs ADD COLUMN binanceGridType VARCHAR(255) DEFAULT 'arithmetic';" });
-        await addColumnIfMissing({ column: "binanceDirection", sql: "ALTER TABLE Configs ADD COLUMN binanceDirection VARCHAR(255) DEFAULT 'neutral';" });
-        await addColumnIfMissing({ column: "binanceLowerPrice", sql: "ALTER TABLE Configs ADD COLUMN binanceLowerPrice FLOAT DEFAULT 0;" });
-        await addColumnIfMissing({ column: "binanceUpperPrice", sql: "ALTER TABLE Configs ADD COLUMN binanceUpperPrice FLOAT DEFAULT 0;" });
-        await addColumnIfMissing({ column: "binanceInvestmentUsdt", sql: "ALTER TABLE Configs ADD COLUMN binanceInvestmentUsdt FLOAT DEFAULT 0;" });
         await addColumnIfMissing({ column: "sessionStartUTC", sql: "ALTER TABLE Configs ADD COLUMN sessionStartUTC INTEGER DEFAULT 0;" });
         await addColumnIfMissing({ column: "sessionEndUTC", sql: "ALTER TABLE Configs ADD COLUMN sessionEndUTC INTEGER DEFAULT 23;" });
         await addColumnIfMissing({ column: "volumePeriod", sql: "ALTER TABLE Configs ADD COLUMN volumePeriod INTEGER DEFAULT 20;" });

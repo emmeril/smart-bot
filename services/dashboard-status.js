@@ -13,7 +13,6 @@ const createDashboardStatusHelpers = ({
     dashboardEditableFields,
     getExchangeClientOrderId,
     getPrice,
-    buildAutoGridPreview,
     fetchOpenExchangePositions,
     fetchManagedOpenOrdersSnapshot,
     calculatePositionPnL,
@@ -24,9 +23,6 @@ const createDashboardStatusHelpers = ({
         const db = getDb();
         const exchangeHealth = getExchangeHealth();
         const activePositionsMap = getActivePositionsMap(db?.activePosition);
-        const pendingRuntimeConfig = db?.pendingRuntimeConfig && typeof db.pendingRuntimeConfig === "object"
-            ? { ...db.pendingRuntimeConfig }
-            : null;
         return {
             botRunning: !getIsShuttingDown(),
             exchangeConnected: Boolean(getExchange()),
@@ -45,9 +41,7 @@ const createDashboardStatusHelpers = ({
             pair: db?.pair || defaultConfig.pair,
             strategy: db?.strategy || defaultConfig.strategy,
             marginMode: db?.marginMode || defaultConfig.marginMode,
-            leverage: Math.max(1, Math.trunc(toFiniteNumber(db?.leverage, defaultConfig.leverage))),
-            pendingRuntimeConfig,
-            hasPendingRuntimeConfig: Boolean(pendingRuntimeConfig)
+            leverage: Math.max(1, Math.trunc(toFiniteNumber(db?.leverage, defaultConfig.leverage)))
         };
     };
 
@@ -96,7 +90,6 @@ const createDashboardStatusHelpers = ({
         let currentPrice = NaN;
         let exchangePositions = [];
         let managedOrders = { grid: [], tp: [], sl: [] };
-        let autoGrid = null;
 
         try {
             currentPrice = await getPrice();
@@ -114,14 +107,6 @@ const createDashboardStatusHelpers = ({
             managedOrders = await fetchManagedOpenOrdersSnapshot();
         } catch (error) {
             console.warn(`[STATUS][WARN] Failed to fetch managed open orders: ${error.message}`);
-        }
-
-        if (typeof buildAutoGridPreview === "function") {
-            try {
-                autoGrid = await buildAutoGridPreview();
-            } catch (error) {
-                console.warn(`[STATUS][WARN] Failed to build adaptive grid preview: ${error.message}`);
-            }
         }
 
         const activePositions = getActivePositionEntries().map(([positionKey, position]) => {
@@ -161,10 +146,8 @@ const createDashboardStatusHelpers = ({
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(dailyPnlSnapshot.dailyTrades, 0))),
             dailyPnlSource: String(dailyPnlSnapshot.dailyPnlSource || "local").toLowerCase(),
             dailyPnlSyncedAt: toFiniteNumber(dailyPnlSnapshot.dailyPnlSyncedAt, 0),
-            pendingRuntimeConfig: db.pendingRuntimeConfig && typeof db.pendingRuntimeConfig === "object" ? { ...db.pendingRuntimeConfig } : null,
             activePositions,
             exchangePositionsCount: exchangePositions.length,
-            autoGrid,
             openOrders,
             orderCounts: {
                 grid: openOrders.grid.length,
@@ -176,20 +159,13 @@ const createDashboardStatusHelpers = ({
         };
     };
 
-    const buildDashboardPayload = () => {
-        const db = getDb();
-        const currentConfig = db ? { ...db } : getDefaultConfig();
-        const displayConfig = currentConfig.pendingRuntimeConfig && typeof currentConfig.pendingRuntimeConfig === "object"
-            ? { ...currentConfig, ...currentConfig.pendingRuntimeConfig }
-            : currentConfig;
-        return {
-            config: displayConfig,
-            defaults: getDefaultConfig(),
-            schema: dashboardEditableFields,
-            status: buildDashboardStatus(),
-            serverTime: Date.now()
-        };
-    };
+    const buildDashboardPayload = () => ({
+        config: getDb() ? { ...getDb() } : getDefaultConfig(),
+        defaults: getDefaultConfig(),
+        schema: dashboardEditableFields,
+        status: buildDashboardStatus(),
+        serverTime: Date.now()
+    });
 
     return {
         buildDashboardStatus,

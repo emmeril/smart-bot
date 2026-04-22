@@ -23,7 +23,6 @@ const createRuntimeSignalGridHelpers = ({
     clamp,
     resolveEffectiveGridTakeProfitLevels,
     resolveEffectiveGridStopLossSteps,
-    resolveAdaptiveGridParameters,
     sanitizeGridState,
     createLockedGridState,
     buildGridExitPlan,
@@ -96,20 +95,14 @@ const createRuntimeSignalGridHelpers = ({
                 extraDetailLines: ["   Grid step is too small to evaluate safely."]
             };
         }
-        let lowerIndex = 0;
-        for (let index = 0; index < levels.length - 1; index += 1) {
-            if (snapshot.currentPrice >= levels[index] && snapshot.currentPrice <= levels[index + 1]) {
-                lowerIndex = index;
-                break;
-            }
-            if (snapshot.currentPrice > levels[index + 1]) lowerIndex = Math.min(index + 1, Math.max(0, levels.length - 2));
-        }
-        lowerIndex = clamp(lowerIndex, 0, levels.length - 2);
+        const rawIndex = (snapshot.currentPrice - lowerBound) / step;
+        const clampedIndex = clamp(rawIndex, 0, levels.length - 1);
+        const lowerIndex = clamp(Math.floor(clampedIndex), 0, levels.length - 2);
         const upperIndex = clamp(lowerIndex + 1, 1, levels.length - 1);
         const currentLevelLow = levels[lowerIndex];
         const currentLevelHigh = levels[upperIndex];
         const buffer = snapshot.currentPrice * (params.gridEntryBufferPercent / 100);
-        const distanceFromMidSteps = step > 0 ? (snapshot.currentPrice - referencePrice) / step : 0;
+        const distanceFromMidSteps = (snapshot.currentPrice - referencePrice) / step;
         const volumeOk = snapshot.volumeRatio >= db.minVolumeRatio;
         const sessionOk = db.sessionStartUTC <= db.sessionEndUTC
             ? snapshot.hourUTC >= db.sessionStartUTC && snapshot.hourUTC <= db.sessionEndUTC
@@ -163,7 +156,6 @@ const createRuntimeSignalGridHelpers = ({
             longPlan: safeCanLong ? { targetPrice: longTargetPrice, stopLossPrice: longStopPrice, gridIndex: lowerIndex } : null,
             shortPlan: safeCanShort ? { targetPrice: shortTargetPrice, stopLossPrice: shortStopPrice, gridIndex: upperIndex } : null,
             extraDetailLines: [
-                `   Bot Mode: ${String(params.binanceBotMode || "auto").toUpperCase()} | Grid Type: ${String(params.binanceGridType || "arithmetic").toUpperCase()} | Direction: ${String(params.binanceDirection || "neutral").toUpperCase()}`,
                 `   Reference Price: ${referencePrice.toFixed(6)}`,
                 `   Grid Range: ${lowerBound.toFixed(6)} - ${upperBound.toFixed(6)} | Width ${params.configuredGridRangePercent <= 0 ? `AUTO ${params.gridRangePercent}%` : `${params.gridRangePercent}%`}`,
                 `   Grid Levels: ${params.configuredGridLevels <= 0 ? `AUTO ${params.gridLevels}` : params.gridLevels} | Step: ${step.toFixed(6)}`,
@@ -285,18 +277,15 @@ const createRuntimeSignalGridHelpers = ({
                 return {};
             }
 
-            const effectiveParams = strategy === "futures_grid"
-                ? resolveAdaptiveGridParameters({ params, snapshot })
-                : params;
             const signalState = strategy === "futures_grid"
-                ? evaluateGridSignal(snapshot, effectiveParams)
+                ? evaluateGridSignal(snapshot, params)
                 : (typeof evaluateCrossoverSignal === "function"
                     ? evaluateCrossoverSignal(snapshot, params)
                     : {
                         canLong: false,
                         canShort: false,
                         setupDetected: false,
-                detailTitle: "UNSUPPORTED STRATEGY",
+                        detailTitle: "UNSUPPORTED STRATEGY",
                         strategyName: strategy.toUpperCase(),
                         extraDetailLines: [`   Strategy ${strategy} is not supported by the current build.`]
                     });
@@ -308,7 +297,7 @@ const createRuntimeSignalGridHelpers = ({
 
             const shouldDetailLog = finalState.setupDetected || (Date.now() - getLastSignalDetailLogAt() >= signalDetailLogTtl);
             if (shouldDetailLog) {
-                logSignalDetails(effectiveParams, snapshot, finalState);
+                logSignalDetails(params, snapshot, finalState);
                 setLastSignalDetailLogAt(Date.now());
             }
 
@@ -351,25 +340,24 @@ const createRuntimeSignalGridHelpers = ({
             }
 
             const availableUsdt = await getAvailableUSDTBalance();
-            const adaptiveParams = resolveAdaptiveGridParameters({ params, snapshot, availableUsdt });
             const effectiveSizeMeta = resolveEffectiveGridOrderSizeUsdt({
                 availableUsdt,
-                configuredOrderSizeUsdt: adaptiveParams.gridOrderSizeUsdt,
-                configuredOrdersPerSide: adaptiveParams.gridOrdersPerSide,
+                configuredOrderSizeUsdt: params.gridOrderSizeUsdt,
+                configuredOrdersPerSide: params.gridOrdersPerSide,
                 referencePrice: snapshot.currentPrice,
                 market: exchange?.markets?.[db?.pair],
-                gridLevels: adaptiveParams.gridLevels
+                gridLevels: params.gridLevels
             });
-            adaptiveParams.gridOrderSizeUsdt = effectiveSizeMeta.orderSizeUsdt;
+            params.gridOrderSizeUsdt = effectiveSizeMeta.orderSizeUsdt;
             const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
                 availableUsdt,
-                configuredOrdersPerSide: adaptiveParams.gridOrdersPerSide,
-                perOrderMargin: adaptiveParams.gridOrderSizeUsdt,
+                configuredOrdersPerSide: params.gridOrdersPerSide,
+                perOrderMargin: params.gridOrderSizeUsdt,
                 referencePrice: snapshot.currentPrice,
                 market: exchange?.markets?.[db?.pair],
-                gridLevels: adaptiveParams.gridLevels
+                gridLevels: params.gridLevels
             });
-            adaptiveParams.gridOrdersPerSide = effectiveOrdersMeta.count;
+            params.gridOrdersPerSide = effectiveOrdersMeta.count;
             let openGridOrders = await fetchOpenGridOrders();
             openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
 
@@ -419,13 +407,13 @@ const createRuntimeSignalGridHelpers = ({
             const trackedPositions = getActivePositionsList();
             const plannedExposureSignature = buildGridExposureSignature(openPositions, trackedPositions);
 
-            const lockedGridState = await resolveActiveGridState(snapshot, adaptiveParams);
+            const lockedGridState = await resolveActiveGridState(snapshot, params);
             if (!lockedGridState) {
                 console.log("[GRID][INFO] Unable to resolve locked grid state. Ladder sync skipped.");
                 return;
             }
 
-            const desiredOrdersRaw = buildGridEntryOrders(snapshot, adaptiveParams, lockedGridState);
+            const desiredOrdersRaw = buildGridEntryOrders(snapshot, params, lockedGridState);
             const desiredOrdersForRuntime = filterGridOrdersForActiveExposure(desiredOrdersRaw, openPositions, trackedPositions);
             if (desiredOrdersForRuntime.length !== desiredOrdersRaw.length) {
                 const accountPositionMode = getAccountPositionMode();
