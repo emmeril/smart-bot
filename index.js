@@ -1280,18 +1280,14 @@ const {
         mainLoopTimer = setInterval(async () => {
             if (isProcessing) return;
             isProcessing = true;
-            try {
-                await runTradingCycle();
-            } catch (error) {
-                console.error("[APP][ERROR] Main loop failed:", error.message);
-                if (error.stack) console.error("[APP][ERROR] Stack:", error.stack);
-            } finally { isProcessing = false; }
+            try { await runTradingCycle(); }
+            catch (error) { console.error("[APP][ERROR] Main loop failed:", error.message); }
+            finally { isProcessing = false; }
         }, 2000);
 
         registerRuntimeCommands();
     } catch (error) {
         console.error("[APP][ERROR] Bot startup failed:", error.message);
-        if (error.stack) console.error("[APP][ERROR] Stack:", error.stack);
         process.exit(1);
     }
 })();

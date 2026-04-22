@@ -86,8 +86,16 @@ const createRuntimeSignalGridHelpers = ({
         const referencePrice = toFiniteNumber(resolvedGridState?.referencePrice, NaN);
         const lowerBound = toFiniteNumber(resolvedGridState?.lowerBound, NaN);
         const upperBound = toFiniteNumber(resolvedGridState?.upperBound, NaN);
-const levels = resolvedGridState?.levels || [];
+        const levels = resolvedGridState?.levels || [];
         const step = toFiniteNumber(resolvedGridState?.step, NaN);
+        if (!Number.isFinite(step) || step <= 0) {
+            return {
+                canLong: false, canShort: false, setupDetected: false,
+                detailTitle: "BINANCE GRID ANALYSIS",
+                extraDetailLines: ["   Grid step is too small to evaluate safely."]
+            };
+        }
+        const rawIndex = (snapshot.currentPrice - lowerBound) / step;
         const clampedIndex = clamp(rawIndex, 0, levels.length - 1);
         const lowerIndex = clamp(Math.floor(clampedIndex), 0, levels.length - 2);
         const upperIndex = clamp(lowerIndex + 1, 1, levels.length - 1);
