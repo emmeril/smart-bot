@@ -12,7 +12,6 @@ const createRuntimePositionUtils = ({
     setLastPositionRuntimePersistAt,
     positionRuntimePersistTtl,
     getPrice,
-    getOHLCV,
     getActivePositionEntries,
     fetchManagedOpenOrdersSnapshot,
     getGridRuntimeSummary,
@@ -24,8 +23,6 @@ const createRuntimePositionUtils = ({
     getIsSyncingGridOrders,
     getExchangeHealth,
     getLastTradeAt,
-    formatPriceToMarketPrecision,
-    resolveAdaptiveRiskOverrides,
     formatStatusTimestamp,
     printStatusLine,
     printOrderSample,
@@ -62,11 +59,7 @@ const createRuntimePositionUtils = ({
         highestSinceEntry: toFiniteNumber(position?.highestSinceEntry, null),
         lowestSinceEntry: toFiniteNumber(position?.lowestSinceEntry, null),
         stopLossPrice: toFiniteNumber(position?.stopLossPrice, null),
-        stopLossUSDT: toFiniteNumber(position?.stopLossUSDT, null),
-        trailingActivateATR: toFiniteNumber(position?.trailingActivateATR, null),
-        trailingOffsetATR: toFiniteNumber(position?.trailingOffsetATR, null),
-        trailingRiskModel: position?.trailingRiskModel || null,
-        trailingRiskSource: position?.trailingRiskSource || null
+        stopLossUSDT: toFiniteNumber(position?.stopLossUSDT, null)
     });
 
     const didPositionRuntimeStateChange = (beforeState, position) => {
@@ -88,35 +81,19 @@ const createRuntimePositionUtils = ({
         position.lowestSinceEntry = Math.min(position.lowestSinceEntry ?? position.entryPrice, currentPrice);
     };
 
-    const applyTrailingStopUpdate = async (position, currentPrice = NaN) => {
+    const applyTrailingStopUpdate = (position) => {
         const db = getDb();
         const trailingEnabled = position?.trailingEnabled ?? db.trailingEnabled;
         if (!trailingEnabled || !Number.isFinite(position.atrAtEntry) || position.atrAtEntry <= 0) return;
-        const ohlcv = await getOHLCV(Math.max(80, Math.trunc(toFiniteNumber(db?.atrPeriod, 14) * 4)));
-        const adaptiveRiskOverrides = await resolveAdaptiveRiskOverrides({
-            pair: db?.pair,
-            timeframe: db?.gridTimeframe,
-            atrPeriod: db?.atrPeriod,
-            currentPrice,
-            localOhlcv: ohlcv,
-            baseActivateATR: position.trailingActivateATR ?? db.trailingActivateATR,
-            baseOffsetATR: position.trailingOffsetATR ?? db.trailingOffsetATR
-        });
-        const effectiveTrailingActivateATR = toFiniteNumber(adaptiveRiskOverrides.trailingActivateATR, toFiniteNumber(position.trailingActivateATR, db.trailingActivateATR));
-        const effectiveTrailingOffsetATR = toFiniteNumber(adaptiveRiskOverrides.trailingOffsetATR, toFiniteNumber(position.trailingOffsetATR, db.trailingOffsetATR));
-        position.trailingActivateATR = effectiveTrailingActivateATR;
-        position.trailingOffsetATR = effectiveTrailingOffsetATR;
-        position.trailingRiskModel = adaptiveRiskOverrides.trailingRiskModel || position.trailingRiskModel || "STATIC";
-        position.trailingRiskSource = adaptiveRiskOverrides.trailingRiskSource || position.trailingRiskSource || "config";
-        position.trailingRiskReason = adaptiveRiskOverrides.trailingRiskReason || null;
-        position.trailingRiskMeta = adaptiveRiskOverrides.trailingRiskMeta || null;
+        const effectiveTrailingActivateATR = toFiniteNumber(position.trailingActivateATR, db.trailingActivateATR);
+        const effectiveTrailingOffsetATR = toFiniteNumber(position.trailingOffsetATR, db.trailingOffsetATR);
         const trailActivationMove = effectiveTrailingActivateATR * position.atrAtEntry;
         const trailOffsetMove = effectiveTrailingOffsetATR * position.atrAtEntry;
 
         if (position.side === "buy") {
             const activated = position.highestSinceEntry >= position.entryPrice + trailActivationMove;
             if (!activated) return;
-            const trailedStop = formatPriceToMarketPrecision(db.pair, position.highestSinceEntry - trailOffsetMove);
+            const trailedStop = position.highestSinceEntry - trailOffsetMove;
             if (!Number.isFinite(position.stopLossPrice) || trailedStop > position.stopLossPrice) {
                 position.stopLossPrice = trailedStop;
                 position.stopLossUSDT = -Math.abs(position.stopLossPrice - position.entryPrice) * position.quantity;
@@ -126,7 +103,7 @@ const createRuntimePositionUtils = ({
 
         const activated = position.lowestSinceEntry <= position.entryPrice - trailActivationMove;
         if (!activated) return;
-        const trailedStop = formatPriceToMarketPrecision(db.pair, position.lowestSinceEntry + trailOffsetMove);
+        const trailedStop = position.lowestSinceEntry + trailOffsetMove;
         if (!Number.isFinite(position.stopLossPrice) || trailedStop < position.stopLossPrice) {
             position.stopLossPrice = trailedStop;
             position.stopLossUSDT = -Math.abs(position.stopLossPrice - position.entryPrice) * position.quantity;
