@@ -5,7 +5,7 @@ const { createPositionLifecycleHelpers } = require("../services/position-lifecyc
 
 test("closePosition keeps remaining position active after a partial close and reapplies exits", async () => {
     const db = {
-        pair: "DOGE/USDT",
+        pair: "DOGE/USDT:USDT",
         dailyPnL: 0,
         dailyTrades: 0
     };
@@ -127,7 +127,7 @@ test("closePosition keeps remaining position active after a partial close and re
 
 test("clearMissingPositionState skips stale cleanup when tracked position has changed", async () => {
     const db = {
-        pair: "DOGE/USDT",
+        pair: "DOGE/USDT:USDT",
         dailyPnL: 0,
         dailyTrades: 0
     };
@@ -215,7 +215,7 @@ test("clearMissingPositionState skips stale cleanup when tracked position has ch
 
 test("finalizeClosedPosition skips stale finalize when tracked position has changed", async () => {
     const db = {
-        pair: "DOGE/USDT",
+        pair: "DOGE/USDT:USDT",
         dailyPnL: 0,
         dailyTrades: 0
     };

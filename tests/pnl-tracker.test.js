@@ -5,7 +5,7 @@ const { createPnlTrackerHelpers } = require("../services/pnl-tracker");
 
 test("syncDailyPnlWithExchange reconciles realized pnl and fees into the shared daily snapshot", async () => {
     const db = {
-        pair: "DOGE/USDT",
+        pair: "DOGE/USDT:USDT",
         dailyPnL: 12,
         dailyTrades: 2,
         dailyPnlSource: "local",

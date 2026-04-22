@@ -7,14 +7,14 @@ test("fetchManagedOpenOrdersSnapshot preserves trigger-order fetch failures", as
     const regularOrders = [
         {
             id: "grid-1",
-            symbol: "DOGE/USDT",
+            symbol: "DOGE/USDT:USDT",
             type: "limit",
             side: "buy",
             clientOrderId: "smartgrid_buy_1_100"
         },
         {
             id: "tp-1",
-            symbol: "DOGE/USDT",
+            symbol: "DOGE/USDT:USDT",
             type: "limit",
             side: "sell",
             clientOrderId: "smarttp_BOTH_sell_101"
@@ -33,7 +33,7 @@ test("fetchManagedOpenOrdersSnapshot preserves trigger-order fetch failures", as
     const helpers = createManagedOrdersHelpers({
         getExchange: () => exchange,
         getMetrics: () => ({ api: { orders: 0 } }),
-        getDb: () => ({ pair: "DOGE/USDT" }),
+        getDb: () => ({ pair: "DOGE/USDT:USDT" }),
         normalizeSymbol: (symbol) => String(symbol || "").toUpperCase(),
         getExchangeClientOrderId: (order) => String(order?.clientOrderId || ""),
         getOrderTriggerPrice: () => NaN,

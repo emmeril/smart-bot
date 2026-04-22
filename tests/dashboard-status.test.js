@@ -6,11 +6,11 @@ const { createDashboardStatusHelpers } = require("../services/dashboard-status")
 test("buildLiveStatusPayload maps managed order fallbacks from order.info", async () => {
     const helpers = createDashboardStatusHelpers({
         getDb: () => ({
-            pair: "DOGE/USDT",
+            pair: "DOGE/USDT:USDT",
             dailyPnL: 0,
             dailyTrades: 0
         }),
-        getDefaultConfig: () => ({ pair: "DOGE/USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 }),
+        getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 }),
         getIsShuttingDown: () => false,
         getExchange: () => ({}),
         getExchangeHealth: () => ({ isHealthy: true, needsRecoverySync: false }),
@@ -22,7 +22,7 @@ test("buildLiveStatusPayload maps managed order fallbacks from order.info", asyn
             const numeric = Number(value);
             return Number.isFinite(numeric) ? numeric : fallback;
         },
-        defaultConfig: { pair: "DOGE/USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 },
+        defaultConfig: { pair: "DOGE/USDT:USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 },
         dashboardEditableFields: [],
         getExchangeClientOrderId: (order) => order.clientOrderId || order.info?.clientOrderId || null,
         getPrice: async () => 0.2,
@@ -59,11 +59,11 @@ test("buildLiveStatusPayload maps managed order fallbacks from order.info", asyn
 test("buildLiveStatusPayload exposes exchange health fields for the dashboard UI", async () => {
     const helpers = createDashboardStatusHelpers({
         getDb: () => ({
-            pair: "DOGE/USDT",
+            pair: "DOGE/USDT:USDT",
             dailyPnL: 1.5,
             dailyTrades: 2
         }),
-        getDefaultConfig: () => ({ pair: "DOGE/USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 }),
+        getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 }),
         getIsShuttingDown: () => false,
         getExchange: () => ({}),
         getExchangeHealth: () => ({ isHealthy: false, needsRecoverySync: true }),
@@ -75,7 +75,7 @@ test("buildLiveStatusPayload exposes exchange health fields for the dashboard UI
             const numeric = Number(value);
             return Number.isFinite(numeric) ? numeric : fallback;
         },
-        defaultConfig: { pair: "DOGE/USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 },
+        defaultConfig: { pair: "DOGE/USDT:USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 },
         dashboardEditableFields: [],
         getExchangeClientOrderId: (order) => order.clientOrderId || order.info?.clientOrderId || null,
         getPrice: async () => 0.2,
@@ -101,13 +101,13 @@ test("buildLiveStatusPayload exposes exchange health fields for the dashboard UI
 test("buildLiveStatusPayload prefers the reconciled daily snapshot and display pnl values", async () => {
     const helpers = createDashboardStatusHelpers({
         getDb: () => ({
-            pair: "DOGE/USDT",
+            pair: "DOGE/USDT:USDT",
             dailyPnL: 1.5,
             dailyTrades: 2,
             dailyPnlSource: "local",
             dailyPnlSyncedAt: 0
         }),
-        getDefaultConfig: () => ({ pair: "DOGE/USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 }),
+        getDefaultConfig: () => ({ pair: "DOGE/USDT:USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 }),
         getIsShuttingDown: () => false,
         getExchange: () => ({}),
         getExchangeHealth: () => ({ isHealthy: true, needsRecoverySync: false }),
@@ -134,7 +134,7 @@ test("buildLiveStatusPayload prefers the reconciled daily snapshot and display p
             const numeric = Number(value);
             return Number.isFinite(numeric) ? numeric : fallback;
         },
-        defaultConfig: { pair: "DOGE/USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 },
+        defaultConfig: { pair: "DOGE/USDT:USDT", strategy: "futures_grid", marginMode: "isolated", leverage: 10 },
         dashboardEditableFields: [],
         getExchangeClientOrderId: (order) => order.clientOrderId || order.info?.clientOrderId || null,
         getPrice: async () => 0.21,

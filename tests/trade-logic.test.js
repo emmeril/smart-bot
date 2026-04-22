@@ -5,7 +5,7 @@ const { createTradeLogicHelpers } = require("../services/trade-logic");
 
 test("buildOrderPlan derives stop loss from actual position margin when auto size is enabled", () => {
     const db = {
-        pair: "DOGE/USDT",
+        pair: "DOGE/USDT:USDT",
         leverage: 10,
         gridOrderSizeUsdt: 0,
         gridTargetProfitUsdt: 0.5,

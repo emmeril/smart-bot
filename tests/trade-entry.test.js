@@ -17,7 +17,7 @@ test("placeOrder exits early after emergency close when no valid TP/SL plan can 
     let planValidationCalls = 0;
     const exchange = {
         markets: {
-            "DOGE/USDT": {}
+            "DOGE/USDT:USDT": {}
         },
         createOrder: async () => {
             createOrderCalls += 1;
@@ -27,7 +27,7 @@ test("placeOrder exits early after emergency close when no valid TP/SL plan can 
 
     const helpers = createTradeEntryHelpers({
         getDb: () => ({
-            pair: "DOGE/USDT",
+            pair: "DOGE/USDT:USDT",
             gridOrderSizeUsdt: 5,
             leverage: 10,
             marginMode: "isolated"

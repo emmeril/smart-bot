@@ -6,7 +6,7 @@ const { createGridRuntimeHelpers } = require("../services/grid-runtime");
 test("filterGridOrdersForActiveExposure keeps only the active side in one-way mode", () => {
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({
-            pair: "DOGE/USDT",
+            pair: "DOGE/USDT:USDT",
             leverage: 10,
             gridLevels: 8,
             gridOrdersPerSide: 2,
@@ -63,7 +63,7 @@ test("filterGridOrdersForActiveExposure keeps only the active side in one-way mo
 test("filterGridOrdersForActiveExposure keeps both sides in hedge mode", () => {
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({
-            pair: "DOGE/USDT",
+            pair: "DOGE/USDT:USDT",
             leverage: 10,
             gridLevels: 8,
             gridOrdersPerSide: 2,
@@ -120,7 +120,7 @@ test("filterGridOrdersForActiveExposure keeps both sides in hedge mode", () => {
 test("resolveEffectiveGridLevels keeps manual values and derives sane automatic levels", () => {
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({
-            pair: "DOGE/USDT",
+            pair: "DOGE/USDT:USDT",
             leverage: 10,
             gridLevels: 0,
             gridOrdersPerSide: 2,
@@ -184,7 +184,7 @@ test("resolveEffectiveGridLevels keeps manual values and derives sane automatic 
 
     assert.equal(helpers.resolveEffectiveGridLevels({
         configuredGridLevels: 0,
-        pair: "DOGE/USDT",
+        pair: "DOGE/USDT:USDT",
         gridTimeframe: "5m",
         gridRangePercent: 6.5,
         gridLookbackCandles: 180
@@ -192,7 +192,7 @@ test("resolveEffectiveGridLevels keeps manual values and derives sane automatic 
 
     assert.equal(helpers.resolveEffectiveGridLevels({
         configuredGridLevels: 0,
-        pair: "DOGE/USDT",
+        pair: "DOGE/USDT:USDT",
         gridTimeframe: "1h",
         gridRangePercent: 2.0,
         gridLookbackCandles: 60
@@ -210,7 +210,7 @@ test("resolveEffectiveGridLevels keeps manual values and derives sane automatic 
 test("resolveEffectiveGridRangePercent and entry buffer adapt for DOGE", () => {
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({
-            pair: "DOGE/USDT",
+            pair: "DOGE/USDT:USDT",
             leverage: 10,
             gridLevels: 0,
             gridOrdersPerSide: 2,
@@ -261,7 +261,7 @@ test("resolveEffectiveGridRangePercent and entry buffer adapt for DOGE", () => {
 
     assert.equal(helpers.resolveEffectiveGridRangePercent({
         configuredGridRangePercent: 0,
-        pair: "DOGE/USDT",
+        pair: "DOGE/USDT:USDT",
         gridTimeframe: "5m",
         gridLookbackCandles: 180
     }), 5.51);
@@ -275,7 +275,7 @@ test("resolveEffectiveGridRangePercent and entry buffer adapt for DOGE", () => {
 
     assert.equal(helpers.resolveEffectiveGridEntryBufferPercent({
         configuredGridEntryBufferPercent: 0,
-        pair: "DOGE/USDT",
+        pair: "DOGE/USDT:USDT",
         gridTimeframe: "5m",
         gridRangePercent: 5.51,
         gridLevels: 12
@@ -285,7 +285,7 @@ test("resolveEffectiveGridRangePercent and entry buffer adapt for DOGE", () => {
 test("applyAutoPairGridPreset clears stale activeGridState when fingerprint only matches by substring", () => {
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({
-            pair: "DOGE/USDT",
+            pair: "DOGE/USDT:USDT",
             leverage: 10,
             gridLevels: 2,
             gridOrdersPerSide: 2,
@@ -338,7 +338,7 @@ test("applyAutoPairGridPreset clears stale activeGridState when fingerprint only
 
     const result = helpers.applyAutoPairGridPreset({
         strategy: "futures_grid",
-        pair: "DOGE/USDT",
+        pair: "DOGE/USDT:USDT",
         marginMode: "isolated",
         gridLevels: 2,
         gridLookbackCandles: 180,
@@ -348,7 +348,7 @@ test("applyAutoPairGridPreset clears stale activeGridState when fingerprint only
         gridStopLossLevels: 0,
         gridTimeframe: "5m",
         activeGridState: {
-            fingerprint: "DOGE/USDT|5m|1|12|0|180|5.51|0|0|0",
+            fingerprint: "DOGE/USDT:USDT|5m|1|12|0|180|5.51|0|0|0",
             lowerBound: 0.1,
             upperBound: 0.2
         }
