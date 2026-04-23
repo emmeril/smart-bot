@@ -124,7 +124,7 @@ test("initializeDB persists auto preset changes with full save mode", async () =
         ensureConfigSchema: async () => {},
         applyAutoPresetToConfig: (config) => ({
             config: { ...config, pair: "BTC/USDT:USDT", gridLevels: 12 },
-            autoPresetResult: { changed: true, presetName: "binance" }
+            autoPresetResult: { changed: true, presetName: "universal" }
         }),
         hydrateConfig: (config) => config,
         mergeRuntimeConfig: () => {},
@@ -173,7 +173,7 @@ test("reloadConfig persists auto preset changes with full save mode when runtime
         ensureConfigSchema: async () => {},
         applyAutoPresetToConfig: (config) => ({
             config: { ...config, pair: "BTC/USDT:USDT", gridLevels: 14, dailyPnL: 0.1 },
-            autoPresetResult: { changed: true, presetName: "binance" }
+            autoPresetResult: { changed: true, presetName: "universal" }
         }),
         hydrateConfig: (config) => config,
         mergeRuntimeConfig: (nextConfig) => { Object.assign(runtimeDb, nextConfig); },

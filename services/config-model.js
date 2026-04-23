@@ -53,6 +53,7 @@ const createConfigModelHelpers = ({
             sessionEndUTC: { min: 0, allowZero: true, integer: true }, volumePeriod: { min: 2, allowZero: false, integer: true },
             minVolumeRatio: { min: 1, allowZero: false },
             atrPeriod: { min: 2, allowZero: false, integer: true },
+            riskRewardRatio: { min: 0.5, allowZero: false },
             targetProfitAtrMultiplier: { min: 0.1, allowZero: false },
             targetProfitMinUsdt: { min: 0, allowZero: true },
             targetProfitMaxUsdt: { min: 0, allowZero: true },
@@ -60,7 +61,16 @@ const createConfigModelHelpers = ({
             stopLossMinPercent: { min: 0, allowZero: true },
             stopLossMaxPercent: { min: 0, allowZero: true },
             trailingActivateATR: { min: 0.2, allowZero: false },
-            trailingOffsetATR: { min: 0.1, allowZero: false }
+            trailingOffsetATR: { min: 0.1, allowZero: false },
+            entryRsiPeriod: { min: 2, allowZero: false, integer: true },
+            entryRsiLongThreshold: { min: 1, allowZero: false },
+            entryRsiShortThreshold: { min: 50, allowZero: false },
+            entryAdxPeriod: { min: 2, allowZero: false, integer: true },
+            entryAdxMax: { min: 5, allowZero: false },
+            entryBbPeriod: { min: 5, allowZero: false, integer: true },
+            entryBbStdDev: { min: 1, allowZero: false },
+            entryBbLongThreshold: { min: 0, allowZero: true },
+            entryBbShortThreshold: { min: 0.5, allowZero: false }
         };
 
         Object.entries(numericRules).forEach(([key, rule]) => {
@@ -135,6 +145,11 @@ const createConfigModelHelpers = ({
         const gridLevelsCap = normalized.gridLevels > 0 ? normalized.gridLevels : Math.max(defaults.gridLevels, 18);
         normalized.gridTakeProfitLevels = clamp(normalized.gridTakeProfitLevels, 0, Math.max(1, gridLevelsCap - 1));
         normalized.gridOrdersPerSide = clamp(normalized.gridOrdersPerSide, 0, Math.max(1, gridLevelsCap - 1));
+        normalized.entryRsiLongThreshold = clamp(normalized.entryRsiLongThreshold, 1, 49);
+        normalized.entryRsiShortThreshold = clamp(normalized.entryRsiShortThreshold, 51, 99);
+        normalized.entryAdxMax = clamp(normalized.entryAdxMax, 5, 80);
+        normalized.entryBbLongThreshold = clamp(normalized.entryBbLongThreshold, 0, 0.49);
+        normalized.entryBbShortThreshold = clamp(normalized.entryBbShortThreshold, 0.51, 1);
 
         return normalized;
     };
@@ -212,9 +227,9 @@ const createConfigModelHelpers = ({
                 ? "UPDATE Configs SET autoStopLossEnabled = COALESCE(autoSlEnabled, 1) WHERE autoStopLossEnabled IS NULL OR autoStopLossEnabled = '';"
                 : null
         });
-        await addColumnIfMissing({ column: "stopLossAtrMultiplier", sql: "ALTER TABLE Configs ADD COLUMN stopLossAtrMultiplier FLOAT DEFAULT 0.12;" });
-        await addColumnIfMissing({ column: "stopLossMinPercent", sql: "ALTER TABLE Configs ADD COLUMN stopLossMinPercent FLOAT DEFAULT 3;" });
-        await addColumnIfMissing({ column: "stopLossMaxPercent", sql: "ALTER TABLE Configs ADD COLUMN stopLossMaxPercent FLOAT DEFAULT 7;" });
+        await addColumnIfMissing({ column: "stopLossAtrMultiplier", sql: "ALTER TABLE Configs ADD COLUMN stopLossAtrMultiplier FLOAT DEFAULT 1.6;" });
+        await addColumnIfMissing({ column: "stopLossMinPercent", sql: "ALTER TABLE Configs ADD COLUMN stopLossMinPercent FLOAT DEFAULT 2.5;" });
+        await addColumnIfMissing({ column: "stopLossMaxPercent", sql: "ALTER TABLE Configs ADD COLUMN stopLossMaxPercent FLOAT DEFAULT 10;" });
         await addColumnIfMissing({
             column: "autoTargetProfitEnabled",
             sql: "ALTER TABLE Configs ADD COLUMN autoTargetProfitEnabled BOOLEAN DEFAULT 1;",
@@ -222,9 +237,9 @@ const createConfigModelHelpers = ({
                 ? "UPDATE Configs SET autoTargetProfitEnabled = COALESCE(autoTpEnabled, 1) WHERE autoTargetProfitEnabled IS NULL OR autoTargetProfitEnabled = '';"
                 : null
         });
-        await addColumnIfMissing({ column: "targetProfitAtrMultiplier", sql: "ALTER TABLE Configs ADD COLUMN targetProfitAtrMultiplier FLOAT DEFAULT 0.75;" });
+        await addColumnIfMissing({ column: "targetProfitAtrMultiplier", sql: "ALTER TABLE Configs ADD COLUMN targetProfitAtrMultiplier FLOAT DEFAULT 2.4;" });
         await addColumnIfMissing({ column: "targetProfitMinUsdt", sql: "ALTER TABLE Configs ADD COLUMN targetProfitMinUsdt FLOAT DEFAULT 0.25;" });
-        await addColumnIfMissing({ column: "targetProfitMaxUsdt", sql: "ALTER TABLE Configs ADD COLUMN targetProfitMaxUsdt FLOAT DEFAULT 3;" });
+        await addColumnIfMissing({ column: "targetProfitMaxUsdt", sql: "ALTER TABLE Configs ADD COLUMN targetProfitMaxUsdt FLOAT DEFAULT 5;" });
         await addColumnIfMissing({
             column: "gridTimeframe",
             sql: "ALTER TABLE Configs ADD COLUMN gridTimeframe VARCHAR(255) DEFAULT '5m';",
@@ -255,9 +270,19 @@ const createConfigModelHelpers = ({
         await addColumnIfMissing({ column: "volumePeriod", sql: "ALTER TABLE Configs ADD COLUMN volumePeriod INTEGER DEFAULT 20;" });
         await addColumnIfMissing({ column: "minVolumeRatio", sql: "ALTER TABLE Configs ADD COLUMN minVolumeRatio FLOAT DEFAULT 1.3;" });
         await addColumnIfMissing({ column: "atrPeriod", sql: "ALTER TABLE Configs ADD COLUMN atrPeriod INTEGER DEFAULT 14;" });
+        await addColumnIfMissing({ column: "riskRewardRatio", sql: "ALTER TABLE Configs ADD COLUMN riskRewardRatio FLOAT DEFAULT 1.6;" });
         await addColumnIfMissing({ column: "trailingEnabled", sql: "ALTER TABLE Configs ADD COLUMN trailingEnabled BOOLEAN DEFAULT 1;" });
-        await addColumnIfMissing({ column: "trailingActivateATR", sql: "ALTER TABLE Configs ADD COLUMN trailingActivateATR FLOAT DEFAULT 1.2;" });
-        await addColumnIfMissing({ column: "trailingOffsetATR", sql: "ALTER TABLE Configs ADD COLUMN trailingOffsetATR FLOAT DEFAULT 0.6;" });
+        await addColumnIfMissing({ column: "trailingActivateATR", sql: "ALTER TABLE Configs ADD COLUMN trailingActivateATR FLOAT DEFAULT 1.5;" });
+        await addColumnIfMissing({ column: "trailingOffsetATR", sql: "ALTER TABLE Configs ADD COLUMN trailingOffsetATR FLOAT DEFAULT 0.75;" });
+        await addColumnIfMissing({ column: "entryRsiPeriod", sql: "ALTER TABLE Configs ADD COLUMN entryRsiPeriod INTEGER DEFAULT 14;" });
+        await addColumnIfMissing({ column: "entryRsiLongThreshold", sql: "ALTER TABLE Configs ADD COLUMN entryRsiLongThreshold FLOAT DEFAULT 40;" });
+        await addColumnIfMissing({ column: "entryRsiShortThreshold", sql: "ALTER TABLE Configs ADD COLUMN entryRsiShortThreshold FLOAT DEFAULT 60;" });
+        await addColumnIfMissing({ column: "entryAdxPeriod", sql: "ALTER TABLE Configs ADD COLUMN entryAdxPeriod INTEGER DEFAULT 14;" });
+        await addColumnIfMissing({ column: "entryAdxMax", sql: "ALTER TABLE Configs ADD COLUMN entryAdxMax FLOAT DEFAULT 32;" });
+        await addColumnIfMissing({ column: "entryBbPeriod", sql: "ALTER TABLE Configs ADD COLUMN entryBbPeriod INTEGER DEFAULT 20;" });
+        await addColumnIfMissing({ column: "entryBbStdDev", sql: "ALTER TABLE Configs ADD COLUMN entryBbStdDev FLOAT DEFAULT 2;" });
+        await addColumnIfMissing({ column: "entryBbLongThreshold", sql: "ALTER TABLE Configs ADD COLUMN entryBbLongThreshold FLOAT DEFAULT 0.2;" });
+        await addColumnIfMissing({ column: "entryBbShortThreshold", sql: "ALTER TABLE Configs ADD COLUMN entryBbShortThreshold FLOAT DEFAULT 0.8;" });
         await addColumnIfMissing({ column: "allowLong", sql: "ALTER TABLE Configs ADD COLUMN allowLong BOOLEAN DEFAULT 1;" });
         await addColumnIfMissing({ column: "allowShort", sql: "ALTER TABLE Configs ADD COLUMN allowShort BOOLEAN DEFAULT 1;" });
 

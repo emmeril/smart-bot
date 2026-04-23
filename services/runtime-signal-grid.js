@@ -104,14 +104,21 @@ const createRuntimeSignalGridHelpers = ({
         const buffer = snapshot.currentPrice * (params.gridEntryBufferPercent / 100);
         const distanceFromMidSteps = (snapshot.currentPrice - referencePrice) / step;
         const volumeOk = snapshot.volumeRatio >= db.minVolumeRatio;
+        const adxOk = !Number.isFinite(snapshot.currentAdx) || snapshot.currentAdx <= params.entryAdxMax;
+        const rsiLongOk = !Number.isFinite(snapshot.currentRsi) || snapshot.currentRsi <= params.entryRsiLongThreshold;
+        const rsiShortOk = !Number.isFinite(snapshot.currentRsi) || snapshot.currentRsi >= params.entryRsiShortThreshold;
+        const bbLongOk = !Number.isFinite(snapshot.bbPercentB) || snapshot.bbPercentB <= params.entryBbLongThreshold;
+        const bbShortOk = !Number.isFinite(snapshot.bbPercentB) || snapshot.bbPercentB >= params.entryBbShortThreshold;
         const sessionOk = db.sessionStartUTC <= db.sessionEndUTC
             ? snapshot.hourUTC >= db.sessionStartUTC && snapshot.hourUTC <= db.sessionEndUTC
             : snapshot.hourUTC >= db.sessionStartUTC || snapshot.hourUTC <= db.sessionEndUTC;
         const insideRange = snapshot.currentPrice >= lowerBound && snapshot.currentPrice <= upperBound;
         const meanReversionLong = db.allowLong && insideRange && distanceFromMidSteps <= -1 && snapshot.currentPrice <= currentLevelLow + buffer;
         const meanReversionShort = db.allowShort && insideRange && distanceFromMidSteps >= 1 && snapshot.currentPrice >= currentLevelHigh - buffer;
-        const canLong = meanReversionLong && volumeOk && sessionOk;
-        const canShort = meanReversionShort && volumeOk && sessionOk;
+        const momentumLongOk = !Number.isFinite(snapshot.macdHistogram) || snapshot.macdHistogram >= 0;
+        const momentumShortOk = !Number.isFinite(snapshot.macdHistogram) || snapshot.macdHistogram <= 0;
+        const canLong = meanReversionLong && volumeOk && sessionOk && adxOk && rsiLongOk && bbLongOk && momentumLongOk;
+        const canShort = meanReversionShort && volumeOk && sessionOk && adxOk && rsiShortOk && bbShortOk && momentumShortOk;
         const longExitPlan = buildGridExitPlan({
             side: "buy",
             entryIndex: lowerIndex,
@@ -163,6 +170,10 @@ const createRuntimeSignalGridHelpers = ({
                 `   TP/SL Mode: TP ${params.gridTakeProfitLevels <= 0 ? "AUTO_NEXT_GRID" : `${resolveEffectiveGridTakeProfitLevels(params.gridTakeProfitLevels)} GRID`} | SL ${params.gridStopLossLevels <= 0 ? `AUTO_RANGE ${longExitPlan.stopLossSteps.toFixed(2)} step` : `${resolveEffectiveGridStopLossSteps(params.gridStopLossLevels, step, snapshot.currentATR).toFixed(2)} step`}`,
                 `   Current Slot: ${lowerIndex}/${params.gridLevels} (${currentLevelLow.toFixed(6)} - ${currentLevelHigh.toFixed(6)})`,
                 `   Distance From Mid: ${distanceFromMidSteps.toFixed(2)} steps`,
+                `   NATR: ${Number.isFinite(snapshot.currentNatrPercent) ? `${snapshot.currentNatrPercent.toFixed(3)}%` : "N/A"} | ADX ${params.entryAdxPeriod}: ${Number.isFinite(snapshot.currentAdx) ? snapshot.currentAdx.toFixed(2) : "N/A"} (max ${params.entryAdxMax}) -> ${adxOk ? "[OK]" : "[NO]"}`,
+                `   RSI ${params.entryRsiPeriod}: ${Number.isFinite(snapshot.currentRsi) ? snapshot.currentRsi.toFixed(2) : "N/A"} | Long <= ${params.entryRsiLongThreshold} -> ${rsiLongOk ? "[OK]" : "[NO]"} | Short >= ${params.entryRsiShortThreshold} -> ${rsiShortOk ? "[OK]" : "[NO]"}`,
+                `   Bollinger %B ${params.entryBbPeriod},${params.entryBbStdDev}: ${Number.isFinite(snapshot.bbPercentB) ? snapshot.bbPercentB.toFixed(3) : "N/A"} | Long <= ${params.entryBbLongThreshold} -> ${bbLongOk ? "[OK]" : "[NO]"} | Short >= ${params.entryBbShortThreshold} -> ${bbShortOk ? "[OK]" : "[NO]"}`,
+                `   MACD Histogram: ${Number.isFinite(snapshot.macdHistogram) ? snapshot.macdHistogram.toFixed(6) : "N/A"} | Long ${momentumLongOk ? "[OK]" : "[NO]"} | Short ${momentumShortOk ? "[OK]" : "[NO]"}`,
                 `   Volume Ratio: ${snapshot.volumeRatio.toFixed(2)}x (min ${db.minVolumeRatio}x) -> ${volumeOk ? "[OK]" : "[NO]"}`,
                 `   Session Filter: ${sessionOk ? "[OK]" : "[NO]"}`,
                 `   Long Grid Re-entry: ${meanReversionLong ? "[OK]" : "[NO]"}`,

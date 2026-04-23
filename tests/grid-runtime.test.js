@@ -188,7 +188,7 @@ test("resolveEffectiveGridLevels keeps manual values and derives sane automatic 
         gridTimeframe: "5m",
         gridRangePercent: 6.5,
         gridLookbackCandles: 180
-    }), 14);
+    }), 13);
 
     assert.equal(helpers.resolveEffectiveGridLevels({
         configuredGridLevels: 0,
@@ -196,7 +196,7 @@ test("resolveEffectiveGridLevels keeps manual values and derives sane automatic 
         gridTimeframe: "1h",
         gridRangePercent: 2.0,
         gridLookbackCandles: 60
-    }), 8);
+    }), 6);
 
     assert.equal(helpers.resolveEffectiveGridLevels({
         configuredGridLevels: 0,
@@ -207,7 +207,7 @@ test("resolveEffectiveGridLevels keeps manual values and derives sane automatic 
     }), 10);
 });
 
-test("resolveEffectiveGridRangePercent and entry buffer adapt for DOGE", () => {
+test("resolveEffectiveGridRangePercent and entry buffer use universal normalized scaling", () => {
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({
             pair: "DOGE/USDT:USDT",
@@ -264,22 +264,22 @@ test("resolveEffectiveGridRangePercent and entry buffer adapt for DOGE", () => {
         pair: "DOGE/USDT:USDT",
         gridTimeframe: "5m",
         gridLookbackCandles: 180
-    }), 5.51);
+    }), 4.49);
 
     assert.equal(helpers.resolveEffectiveGridRangePercent({
         configuredGridRangePercent: 0,
         pair: "BTC/USDT:USDT",
         gridTimeframe: "5m",
         gridLookbackCandles: 120
-    }), 3.68);
+    }), 4.05);
 
     assert.equal(helpers.resolveEffectiveGridEntryBufferPercent({
         configuredGridEntryBufferPercent: 0,
         pair: "DOGE/USDT:USDT",
         gridTimeframe: "5m",
-        gridRangePercent: 5.51,
+        gridRangePercent: 4.49,
         gridLevels: 12
-    }), 0.163);
+    }), 0.116);
 });
 
 test("applyAutoPairGridPreset clears stale activeGridState when fingerprint only matches by substring", () => {
@@ -352,7 +352,7 @@ test("applyAutoPairGridPreset clears stale activeGridState when fingerprint only
             lowerBound: 0.1,
             upperBound: 0.2
         }
-    }, { doge: {} });
+    }, { universal: {} });
 
     assert.equal(result.config.activeGridState, null);
     assert.equal(result.changed, true);

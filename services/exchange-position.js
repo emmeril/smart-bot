@@ -182,6 +182,11 @@ const createExchangePositionHelpers = ({
         return openPositions[0];
     };
 
+    const resolvePriceDistanceFromMarginRiskPercent = (entryPrice, leverage, marginRiskPercent) => {
+        if (!Number.isFinite(entryPrice) || entryPrice <= 0) return NaN;
+        return entryPrice * (Math.abs(marginRiskPercent) / 100) / Math.max(1, leverage);
+    };
+
     const resolveAutoTargetProfitUSDT = (entryPrice, quantity, atrAtEntry = NaN) => {
         const currentDb = getDb();
         const baseTargetProfitUSDT = Math.max(0, toFiniteNumber(currentDb.gridTargetProfitUsdt, 0.5));
@@ -191,14 +196,29 @@ const createExchangePositionHelpers = ({
             return baseTargetProfitUSDT;
         }
 
-        const atrMultiplier = Math.max(0.1, toFiniteNumber(currentDb.targetProfitAtrMultiplier, 0.75));
+        const atrMultiplier = Math.max(0.1, toFiniteNumber(currentDb.targetProfitAtrMultiplier, 2.4));
+        const leverage = Math.max(1, toFiniteNumber(currentDb.leverage, 1));
+        const baseStopLossPercent = Math.max(0, toFiniteNumber(currentDb.gridStopLossPercent, 5));
+        const riskRewardRatio = Math.max(0.5, toFiniteNumber(currentDb.riskRewardRatio, 1.6));
+        const stopLossAtrMultiplier = Math.max(0.05, toFiniteNumber(currentDb.stopLossAtrMultiplier, 1.6));
+        const minStopLossPercent = Math.max(0.1, toFiniteNumber(currentDb.stopLossMinPercent, Math.min(baseStopLossPercent, 2.5)));
+        const maxStopLossPercent = Math.max(
+            minStopLossPercent,
+            toFiniteNumber(currentDb.stopLossMaxPercent, Math.max(baseStopLossPercent * 1.5, minStopLossPercent))
+        );
         const minTargetProfitUSDT = Math.max(0.01, toFiniteNumber(currentDb.targetProfitMinUsdt, Math.min(baseTargetProfitUSDT, 0.25)));
         const maxTargetProfitUSDT = Math.max(
             minTargetProfitUSDT,
             toFiniteNumber(currentDb.targetProfitMaxUsdt, Math.max(baseTargetProfitUSDT * 3, minTargetProfitUSDT))
         );
+        const staticStopDistance = resolvePriceDistanceFromMarginRiskPercent(entryPrice, leverage, baseStopLossPercent);
+        const atrStopDistance = atrValue * stopLossAtrMultiplier;
+        const minStopDistance = resolvePriceDistanceFromMarginRiskPercent(entryPrice, leverage, minStopLossPercent);
+        const maxStopDistance = resolvePriceDistanceFromMarginRiskPercent(entryPrice, leverage, maxStopLossPercent);
+        const normalizedStopDistance = Math.min(maxStopDistance, Math.max(minStopDistance, Math.max(staticStopDistance, atrStopDistance)));
+        const rewardRiskTargetUSDT = Math.abs(normalizedStopDistance * riskRewardRatio * quantity);
         const atrTargetProfitUSDT = atrValue * quantity * atrMultiplier;
-        const suggestedTargetProfitUSDT = Math.max(baseTargetProfitUSDT, atrTargetProfitUSDT);
+        const suggestedTargetProfitUSDT = Math.max(baseTargetProfitUSDT, atrTargetProfitUSDT, rewardRiskTargetUSDT);
         return Math.min(maxTargetProfitUSDT, Math.max(minTargetProfitUSDT, suggestedTargetProfitUSDT));
     };
 
@@ -212,13 +232,14 @@ const createExchangePositionHelpers = ({
         }
 
         const leverage = Math.max(1, toFiniteNumber(currentDb.leverage, 1));
-        const atrMultiplier = Math.max(0.05, toFiniteNumber(currentDb.stopLossAtrMultiplier, 0.12));
-        const minStopLossPercent = Math.max(0.1, toFiniteNumber(currentDb.stopLossMinPercent, Math.min(baseStopLossPercent, 3)));
+        const atrMultiplier = Math.max(0.05, toFiniteNumber(currentDb.stopLossAtrMultiplier, 1.6));
+        const minStopLossPercent = Math.max(0.1, toFiniteNumber(currentDb.stopLossMinPercent, Math.min(baseStopLossPercent, 2.5)));
         const maxStopLossPercent = Math.max(
             minStopLossPercent,
             toFiniteNumber(currentDb.stopLossMaxPercent, Math.max(baseStopLossPercent * 1.5, minStopLossPercent))
         );
-        const atrBasedPercent = (atrValue / entryPrice) * leverage * atrMultiplier * 100;
+        const atrDistance = atrValue * atrMultiplier;
+        const atrBasedPercent = (atrDistance / entryPrice) * leverage * 100;
         const suggestedStopLossPercent = Math.max(baseStopLossPercent, atrBasedPercent);
         return Math.min(maxStopLossPercent, Math.max(minStopLossPercent, suggestedStopLossPercent));
     };
@@ -354,8 +375,6 @@ const createExchangePositionHelpers = ({
 };
 
 module.exports = { createExchangePositionHelpers };
-
-
 
 
 

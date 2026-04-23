@@ -60,52 +60,93 @@ const createTradeLogicHelpers = ({
         return Number.isFinite(roundedPrice) ? roundedPrice : price;
     };
 
-    const resolveTargetProfitUSDT = (signalATR, adjustedQty) => {
+    const resolvePriceDistanceFromMarginRiskPercent = (entryPrice, leverage, marginRiskPercent) => {
+        if (!Number.isFinite(entryPrice) || entryPrice <= 0) return NaN;
+        return entryPrice * (Math.abs(marginRiskPercent) / 100) / Math.max(1, leverage);
+    };
+
+    const resolveMarginRiskPercentFromPriceDistance = (entryPrice, leverage, priceDistance) => {
+        if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(priceDistance) || priceDistance <= 0) return NaN;
+        return (priceDistance / entryPrice) * Math.max(1, leverage) * 100;
+    };
+
+    const resolveStopLossPlan = (signalATR, entryPrice, adjustedQty) => {
         const db = getDb();
-        const baseTargetProfitUSDT = Math.max(0, toFiniteNumber(db.gridTargetProfitUsdt, 0.5));
+        const leverage = Math.max(1, toFiniteNumber(db.leverage, 1));
+        const baseStopLossPercent = Math.max(0, toFiniteNumber(db.gridStopLossPercent, 5));
         const atrValue = Math.abs(toFiniteNumber(signalATR, NaN));
-        const autoTargetProfitEnabled = db.autoTargetProfitEnabled !== false;
-        if (!autoTargetProfitEnabled || !Number.isFinite(atrValue) || atrValue <= 0 || !Number.isFinite(adjustedQty) || adjustedQty <= 0) {
-            return { targetProfitUSDT: baseTargetProfitUSDT, targetProfitMode: "STATIC" };
+        const staticStopLossDistance = resolvePriceDistanceFromMarginRiskPercent(entryPrice, leverage, baseStopLossPercent);
+        const autoStopLossEnabled = db.autoStopLossEnabled !== false;
+
+        if (!autoStopLossEnabled || !Number.isFinite(atrValue) || atrValue <= 0 || !Number.isFinite(entryPrice) || entryPrice <= 0) {
+            return {
+                stopLossDistance: staticStopLossDistance,
+                stopLossPercent: baseStopLossPercent,
+                stopLossUSDT: -Math.abs(staticStopLossDistance * Math.abs(toFiniteNumber(adjustedQty, 0))),
+                stopLossMode: "STATIC"
+            };
         }
 
-        const atrMultiplier = Math.max(0.1, toFiniteNumber(db.targetProfitAtrMultiplier, 0.75));
+        const atrMultiplier = Math.max(0.05, toFiniteNumber(db.stopLossAtrMultiplier, 1.6));
+        const minStopLossPercent = Math.max(0.1, toFiniteNumber(db.stopLossMinPercent, Math.min(baseStopLossPercent, 2.5)));
+        const maxStopLossPercent = Math.max(
+            minStopLossPercent,
+            toFiniteNumber(db.stopLossMaxPercent, Math.max(baseStopLossPercent * 1.5, minStopLossPercent))
+        );
+        const atrStopDistance = atrValue * atrMultiplier;
+        const minStopDistance = resolvePriceDistanceFromMarginRiskPercent(entryPrice, leverage, minStopLossPercent);
+        const maxStopDistance = resolvePriceDistanceFromMarginRiskPercent(entryPrice, leverage, maxStopLossPercent);
+        const suggestedStopDistance = Math.max(staticStopLossDistance, atrStopDistance);
+        const stopLossDistance = clampNumber(suggestedStopDistance, minStopDistance, maxStopDistance);
+        const stopLossPercent = resolveMarginRiskPercentFromPriceDistance(entryPrice, leverage, stopLossDistance);
+
+        return {
+            stopLossDistance,
+            stopLossPercent,
+            stopLossUSDT: -Math.abs(stopLossDistance * Math.abs(toFiniteNumber(adjustedQty, 0))),
+            stopLossMode: "AUTO_ATR"
+        };
+    };
+
+    const resolveTargetProfitPlan = (signalATR, entryPrice, adjustedQty, stopLossDistance) => {
+        const db = getDb();
+        const numericQty = Math.abs(toFiniteNumber(adjustedQty, 0));
+        const leverage = Math.max(1, toFiniteNumber(db.leverage, 1));
+        const baseTargetProfitUSDT = Math.max(0, toFiniteNumber(db.gridTargetProfitUsdt, 0.5));
+        const atrValue = Math.abs(toFiniteNumber(signalATR, NaN));
+        const staticTargetDistance = numericQty > 0 ? baseTargetProfitUSDT / numericQty : NaN;
+        const autoTargetProfitEnabled = db.autoTargetProfitEnabled !== false;
+        if (!autoTargetProfitEnabled || !Number.isFinite(atrValue) || atrValue <= 0 || !Number.isFinite(numericQty) || numericQty <= 0) {
+            return {
+                targetProfitUSDT: baseTargetProfitUSDT,
+                targetProfitDistance: staticTargetDistance,
+                targetProfitMode: "STATIC"
+            };
+        }
+
+        const atrMultiplier = Math.max(0.1, toFiniteNumber(db.targetProfitAtrMultiplier, 2.4));
+        const riskRewardRatio = Math.max(0.5, toFiniteNumber(db.riskRewardRatio, 1.6));
         const minTargetProfitUSDT = Math.max(0.01, toFiniteNumber(db.targetProfitMinUsdt, Math.min(baseTargetProfitUSDT, 0.25)));
         const maxTargetProfitUSDT = Math.max(
             minTargetProfitUSDT,
             toFiniteNumber(db.targetProfitMaxUsdt, Math.max(baseTargetProfitUSDT * 3, minTargetProfitUSDT))
         );
-        const atrTargetProfitUSDT = atrValue * adjustedQty * atrMultiplier;
-        const suggestedTargetProfitUSDT = Math.max(baseTargetProfitUSDT, atrTargetProfitUSDT);
-
-        return {
-            targetProfitUSDT: clampNumber(suggestedTargetProfitUSDT, minTargetProfitUSDT, maxTargetProfitUSDT),
-            targetProfitMode: "AUTO"
-        };
-    };
-
-    const resolveStopLossPercent = (signalATR, entryPrice) => {
-        const db = getDb();
-        const baseStopLossPercent = Math.max(0, toFiniteNumber(db.gridStopLossPercent, 5));
-        const atrValue = Math.abs(toFiniteNumber(signalATR, NaN));
-        const autoStopLossEnabled = db.autoStopLossEnabled !== false;
-        if (!autoStopLossEnabled || !Number.isFinite(atrValue) || atrValue <= 0 || !Number.isFinite(entryPrice) || entryPrice <= 0) {
-            return { stopLossPercent: baseStopLossPercent, stopLossMode: "STATIC" };
-        }
-
-        const leverage = Math.max(1, toFiniteNumber(db.leverage, 1));
-        const atrMultiplier = Math.max(0.05, toFiniteNumber(db.stopLossAtrMultiplier, 0.12));
-        const minStopLossPercent = Math.max(0.1, toFiniteNumber(db.stopLossMinPercent, Math.min(baseStopLossPercent, 3)));
-        const maxStopLossPercent = Math.max(
-            minStopLossPercent,
-            toFiniteNumber(db.stopLossMaxPercent, Math.max(baseStopLossPercent * 1.5, minStopLossPercent))
+        const atrTargetDistance = atrValue * atrMultiplier;
+        const rewardRiskDistance = Number.isFinite(stopLossDistance) && stopLossDistance > 0
+            ? stopLossDistance * riskRewardRatio
+            : NaN;
+        const suggestedTargetDistance = Math.max(
+            staticTargetDistance,
+            Number.isFinite(atrTargetDistance) ? atrTargetDistance : 0,
+            Number.isFinite(rewardRiskDistance) ? rewardRiskDistance : 0
         );
-        const atrBasedPercent = (atrValue / entryPrice) * leverage * atrMultiplier * 100;
-        const suggestedStopLossPercent = Math.max(baseStopLossPercent, atrBasedPercent);
+        const targetProfitUSDT = clampNumber(suggestedTargetDistance * numericQty, minTargetProfitUSDT, maxTargetProfitUSDT);
+        const targetProfitDistance = targetProfitUSDT / numericQty;
 
         return {
-            stopLossPercent: clampNumber(suggestedStopLossPercent, minStopLossPercent, maxStopLossPercent),
-            stopLossMode: "AUTO"
+            targetProfitUSDT,
+            targetProfitDistance,
+            targetProfitMode: Number.isFinite(rewardRiskDistance) && rewardRiskDistance > 0 ? "AUTO_RR_ATR" : "AUTO_ATR"
         };
     };
 
@@ -124,10 +165,6 @@ const createTradeLogicHelpers = ({
     const buildOrderPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides, explicitTargets = {}) => {
         const db = getDb();
         const numericQty = Math.abs(toFiniteNumber(adjustedQty, 0));
-        const leverage = Math.max(1, toFiniteNumber(db.leverage, 1));
-        const positionMarginUsdt = Number.isFinite(entryPrice) && entryPrice > 0 && numericQty > 0
-            ? (numericQty * entryPrice) / leverage
-            : Math.max(0, toFiniteNumber(db.gridOrderSizeUsdt, 0));
         const trailingActivateATR = toFiniteNumber(riskOverrides.trailingActivateATR, db.trailingActivateATR);
         const trailingOffsetATR = toFiniteNumber(riskOverrides.trailingOffsetATR, db.trailingOffsetATR);
         const explicitTargetPrice = toFiniteNumber(explicitTargets.targetPrice, null);
@@ -137,34 +174,44 @@ const createTradeLogicHelpers = ({
         let targetProfitMode = "STATIC";
         let stopLossPercent = db.gridStopLossPercent;
         let stopLossMode = "STATIC";
-        let stopLossUSDT = -positionMarginUsdt * (stopLossPercent / 100);
+        let stopLossUSDT = NaN;
         let targetPrice;
         let stopLossPrice;
+        let stopLossDistance = NaN;
 
         if (Number.isFinite(explicitTargetPrice)) {
             targetPrice = resolveRoundedPlanPrice(db.pair, explicitTargetPrice);
             targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
             targetProfitMode = "EXPLICIT";
-        } else {
-            const resolvedTargetProfit = resolveTargetProfitUSDT(signalATR, adjustedQty);
-            targetProfitUSDT = resolvedTargetProfit.targetProfitUSDT;
-            targetProfitMode = resolvedTargetProfit.targetProfitMode;
-            const rawTargetPrice = buildDirectionalTargetPrice(side, entryPrice, targetProfitUSDT, adjustedQty);
-            targetPrice = resolveRoundedPlanPrice(db.pair, rawTargetPrice);
-            targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
         }
 
         if (Number.isFinite(explicitStopLossPrice)) {
             stopLossPrice = resolveRoundedPlanPrice(db.pair, explicitStopLossPrice);
             stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
+            stopLossDistance = Math.abs(stopLossPrice - entryPrice);
+            stopLossPercent = resolveMarginRiskPercentFromPriceDistance(entryPrice, Math.max(1, toFiniteNumber(db.leverage, 1)), stopLossDistance);
+            stopLossMode = "EXPLICIT";
         } else {
-            const resolvedStopLoss = resolveStopLossPercent(signalATR, entryPrice);
+            const resolvedStopLoss = resolveStopLossPlan(signalATR, entryPrice, adjustedQty);
             stopLossPercent = resolvedStopLoss.stopLossPercent;
             stopLossMode = resolvedStopLoss.stopLossMode;
-            stopLossUSDT = -positionMarginUsdt * (stopLossPercent / 100);
+            stopLossUSDT = resolvedStopLoss.stopLossUSDT;
+            stopLossDistance = resolvedStopLoss.stopLossDistance;
             const rawStopLossPrice = buildDirectionalStopLossPrice(side, entryPrice, stopLossUSDT, adjustedQty);
             stopLossPrice = resolveRoundedPlanPrice(db.pair, rawStopLossPrice);
             stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
+            stopLossDistance = Math.abs(stopLossPrice - entryPrice);
+        }
+
+        if (Number.isFinite(explicitTargetPrice)) {
+            targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
+        } else {
+            const resolvedTargetProfit = resolveTargetProfitPlan(signalATR, entryPrice, adjustedQty, stopLossDistance);
+            targetProfitUSDT = resolvedTargetProfit.targetProfitUSDT;
+            targetProfitMode = resolvedTargetProfit.targetProfitMode;
+            const rawTargetPrice = buildDirectionalTargetPrice(side, entryPrice, targetProfitUSDT, adjustedQty);
+            targetPrice = resolveRoundedPlanPrice(db.pair, rawTargetPrice);
+            targetProfitUSDT = Math.abs(targetPrice - entryPrice) * adjustedQty;
         }
 
         if (Number.isFinite(entryPrice) && Number.isFinite(targetPrice) && targetPrice === entryPrice) {
@@ -258,20 +305,15 @@ const createTradeLogicHelpers = ({
         if (Number.isFinite(position.targetProfitUSDT) && position.targetProfitUSDT > 0) {
             return position.targetProfitUSDT;
         }
-        const fallbackResolved = resolveTargetProfitUSDT(position.atrAtEntry, position.quantity);
-        return fallbackResolved.targetProfitMode === "AUTO"
+        const fallbackStopLossDistance = resolveStopLossPlan(position.atrAtEntry, position.entryPrice, position.quantity).stopLossDistance;
+        const fallbackResolved = resolveTargetProfitPlan(position.atrAtEntry, position.entryPrice, position.quantity, fallbackStopLossDistance);
+        return fallbackResolved.targetProfitMode !== "STATIC"
             ? fallbackResolved.targetProfitUSDT
             : db.gridTargetProfitUsdt;
     };
 
     const resolveEffectiveStopLossUSDT = (position) => {
-        const db = getDb();
-        const fallbackStopLossPercent = resolveStopLossPercent(position.atrAtEntry, position.entryPrice).stopLossPercent;
-        const fallbackOrderSizeUsdt = Number.isFinite(position.quantity) && position.quantity > 0 && Number.isFinite(position.entryPrice) && position.entryPrice > 0
-            && Number.isFinite(position.leverageAtEntry) && position.leverageAtEntry > 0
-            ? (position.quantity * position.entryPrice) / position.leverageAtEntry
-            : db.gridOrderSizeUsdt;
-        const fallbackStopLossUSDT = -Math.abs(fallbackOrderSizeUsdt * (fallbackStopLossPercent / 100));
+        const fallbackStopLossUSDT = resolveStopLossPlan(position.atrAtEntry, position.entryPrice, position.quantity).stopLossUSDT;
         const rawStopLossUSDT = Number.isFinite(position.stopLossUSDT) && position.stopLossUSDT !== 0 ? position.stopLossUSDT : fallbackStopLossUSDT;
         return -Math.abs(rawStopLossUSDT);
     };
@@ -406,6 +448,169 @@ const createTradeLogicHelpers = ({
         displayProfitPercent: getDisplayProfitPercent(pnlState)
     });
 
+    const calcSMA = (values, period) => {
+        const numericPeriod = Math.max(1, Math.trunc(toFiniteNumber(period, 1)));
+        const output = Array(values.length).fill(null);
+        let rollingSum = 0;
+        for (let index = 0; index < values.length; index += 1) {
+            const value = toFiniteNumber(values[index], NaN);
+            rollingSum += Number.isFinite(value) ? value : 0;
+            if (index >= numericPeriod) {
+                const trailingValue = toFiniteNumber(values[index - numericPeriod], NaN);
+                rollingSum -= Number.isFinite(trailingValue) ? trailingValue : 0;
+            }
+            if (index >= numericPeriod - 1) output[index] = rollingSum / numericPeriod;
+        }
+        return output;
+    };
+
+    const calcEMA = (values, period) => {
+        const numericPeriod = Math.max(1, Math.trunc(toFiniteNumber(period, 1)));
+        const multiplier = 2 / (numericPeriod + 1);
+        const output = Array(values.length).fill(null);
+        const seed = calcSMA(values, numericPeriod);
+        let previous = seed[numericPeriod - 1];
+        if (!Number.isFinite(previous)) return output;
+        output[numericPeriod - 1] = previous;
+        for (let index = numericPeriod; index < values.length; index += 1) {
+            const value = toFiniteNumber(values[index], NaN);
+            if (!Number.isFinite(value)) continue;
+            previous = ((value - previous) * multiplier) + previous;
+            output[index] = previous;
+        }
+        return output;
+    };
+
+    const calcRSI = (values, period) => {
+        const numericPeriod = Math.max(2, Math.trunc(toFiniteNumber(period, 14)));
+        const output = Array(values.length).fill(null);
+        if (values.length <= numericPeriod) return output;
+
+        let gains = 0;
+        let losses = 0;
+        for (let index = 1; index <= numericPeriod; index += 1) {
+            const change = toFiniteNumber(values[index], NaN) - toFiniteNumber(values[index - 1], NaN);
+            if (!Number.isFinite(change)) return output;
+            if (change >= 0) gains += change;
+            else losses += Math.abs(change);
+        }
+
+        let averageGain = gains / numericPeriod;
+        let averageLoss = losses / numericPeriod;
+        output[numericPeriod] = averageLoss === 0 ? 100 : 100 - (100 / (1 + (averageGain / averageLoss)));
+        for (let index = numericPeriod + 1; index < values.length; index += 1) {
+            const change = toFiniteNumber(values[index], NaN) - toFiniteNumber(values[index - 1], NaN);
+            if (!Number.isFinite(change)) continue;
+            const gain = change > 0 ? change : 0;
+            const loss = change < 0 ? Math.abs(change) : 0;
+            averageGain = ((averageGain * (numericPeriod - 1)) + gain) / numericPeriod;
+            averageLoss = ((averageLoss * (numericPeriod - 1)) + loss) / numericPeriod;
+            output[index] = averageLoss === 0 ? 100 : 100 - (100 / (1 + (averageGain / averageLoss)));
+        }
+        return output;
+    };
+
+    const calcStdDev = (values, period) => {
+        const numericPeriod = Math.max(2, Math.trunc(toFiniteNumber(period, 20)));
+        const output = Array(values.length).fill(null);
+        for (let index = numericPeriod - 1; index < values.length; index += 1) {
+            const window = values.slice(index - numericPeriod + 1, index + 1).map((value) => toFiniteNumber(value, NaN));
+            if (window.some((value) => !Number.isFinite(value))) continue;
+            const mean = window.reduce((sum, value) => sum + value, 0) / window.length;
+            const variance = window.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / window.length;
+            output[index] = Math.sqrt(variance);
+        }
+        return output;
+    };
+
+    const calcBollingerBands = (values, period, stdDevMultiplier) => {
+        const basis = calcSMA(values, period);
+        const stdDev = calcStdDev(values, period);
+        const upper = Array(values.length).fill(null);
+        const lower = Array(values.length).fill(null);
+        for (let index = 0; index < values.length; index += 1) {
+            if (!Number.isFinite(basis[index]) || !Number.isFinite(stdDev[index])) continue;
+            upper[index] = basis[index] + (stdDev[index] * stdDevMultiplier);
+            lower[index] = basis[index] - (stdDev[index] * stdDevMultiplier);
+        }
+        return { basis, upper, lower };
+    };
+
+    const calcMACD = (values, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) => {
+        const fast = calcEMA(values, fastPeriod);
+        const slow = calcEMA(values, slowPeriod);
+        const macd = values.map((_, index) => (
+            Number.isFinite(fast[index]) && Number.isFinite(slow[index]) ? fast[index] - slow[index] : null
+        ));
+        const signal = calcEMA(macd.map((value) => toFiniteNumber(value, NaN)), signalPeriod);
+        const histogram = macd.map((value, index) => (
+            Number.isFinite(value) && Number.isFinite(signal[index]) ? value - signal[index] : null
+        ));
+        return { macd, signal, histogram };
+    };
+
+    const calcADX = (high, low, close, period) => {
+        const numericPeriod = Math.max(2, Math.trunc(toFiniteNumber(period, 14)));
+        const output = Array(close.length).fill(null);
+        if (close.length <= numericPeriod * 2) return output;
+
+        const tr = Array(close.length).fill(0);
+        const plusDm = Array(close.length).fill(0);
+        const minusDm = Array(close.length).fill(0);
+
+        for (let index = 1; index < close.length; index += 1) {
+            const upMove = high[index] - high[index - 1];
+            const downMove = low[index - 1] - low[index];
+            tr[index] = Math.max(
+                high[index] - low[index],
+                Math.abs(high[index] - close[index - 1]),
+                Math.abs(low[index] - close[index - 1])
+            );
+            plusDm[index] = upMove > downMove && upMove > 0 ? upMove : 0;
+            minusDm[index] = downMove > upMove && downMove > 0 ? downMove : 0;
+        }
+
+        let smoothedTr = 0;
+        let smoothedPlusDm = 0;
+        let smoothedMinusDm = 0;
+        for (let index = 1; index <= numericPeriod; index += 1) {
+            smoothedTr += tr[index];
+            smoothedPlusDm += plusDm[index];
+            smoothedMinusDm += minusDm[index];
+        }
+
+        const dxValues = Array(close.length).fill(null);
+        for (let index = numericPeriod; index < close.length; index += 1) {
+            if (index > numericPeriod) {
+                smoothedTr = smoothedTr - (smoothedTr / numericPeriod) + tr[index];
+                smoothedPlusDm = smoothedPlusDm - (smoothedPlusDm / numericPeriod) + plusDm[index];
+                smoothedMinusDm = smoothedMinusDm - (smoothedMinusDm / numericPeriod) + minusDm[index];
+            }
+            if (smoothedTr <= 0) continue;
+            const plusDi = (smoothedPlusDm / smoothedTr) * 100;
+            const minusDi = (smoothedMinusDm / smoothedTr) * 100;
+            const diSum = plusDi + minusDi;
+            dxValues[index] = diSum === 0 ? 0 : (Math.abs(plusDi - minusDi) / diSum) * 100;
+        }
+
+        let adxSeed = 0;
+        let seedCount = 0;
+        for (let index = numericPeriod; index < (numericPeriod * 2); index += 1) {
+            if (Number.isFinite(dxValues[index])) {
+                adxSeed += dxValues[index];
+                seedCount += 1;
+            }
+        }
+        if (seedCount !== numericPeriod) return output;
+
+        output[(numericPeriod * 2) - 1] = adxSeed / numericPeriod;
+        for (let index = numericPeriod * 2; index < close.length; index += 1) {
+            if (!Number.isFinite(dxValues[index]) || !Number.isFinite(output[index - 1])) continue;
+            output[index] = ((output[index - 1] * (numericPeriod - 1)) + dxValues[index]) / numericPeriod;
+        }
+        return output;
+    };
+
     const extractOhlcvSeries = (ohlcv) => ({
         open: ohlcv.map((c) => c[1]),
         high: ohlcv.map((c) => c[2]),
@@ -435,6 +640,25 @@ const createTradeLogicHelpers = ({
         const volumeRatio = currentVolume / (avgVolume || 1);
         const hourUTC = new Date(ohlcv[lastIndex][0]).getUTCHours();
         const currentATR = getCurrentAtr(high, low, close, params.atrPeriod, lastIndex);
+        const currentNatrPercent = Number.isFinite(currentATR) && Number.isFinite(currentPrice) && currentPrice > 0
+            ? (currentATR / currentPrice) * 100
+            : NaN;
+        const rsiSeries = calcRSI(close, params.entryRsiPeriod || 14);
+        const currentRsi = rsiSeries[lastIndex];
+        const adxSeries = calcADX(high, low, close, params.entryAdxPeriod || 14);
+        const currentAdx = adxSeries[lastIndex];
+        const bollinger = calcBollingerBands(close, params.entryBbPeriod || 20, params.entryBbStdDev || 2);
+        const bbBasis = bollinger.basis[lastIndex];
+        const bbUpper = bollinger.upper[lastIndex];
+        const bbLower = bollinger.lower[lastIndex];
+        const bbWidth = Number.isFinite(bbUpper) && Number.isFinite(bbLower) && Number.isFinite(bbBasis) && bbBasis !== 0
+            ? (bbUpper - bbLower) / bbBasis
+            : NaN;
+        const bbPercentB = Number.isFinite(bbUpper) && Number.isFinite(bbLower) && bbUpper !== bbLower
+            ? (currentPrice - bbLower) / (bbUpper - bbLower)
+            : NaN;
+        const macd = calcMACD(close);
+        const macdHistogram = macd.histogram[lastIndex];
 
         return {
             open,
@@ -449,7 +673,16 @@ const createTradeLogicHelpers = ({
             avgVolume,
             volumeRatio,
             hourUTC,
-            currentATR
+            currentATR,
+            currentNatrPercent,
+            currentRsi,
+            currentAdx,
+            bbBasis,
+            bbUpper,
+            bbLower,
+            bbWidth,
+            bbPercentB,
+            macdHistogram
         };
     };
 
@@ -466,10 +699,58 @@ const createTradeLogicHelpers = ({
     const buildSignalSnapshot = (ohlcv, params) => {
         if (!Array.isArray(ohlcv) || ohlcv.length < 3) return null;
 
-        const { open, high, low, close, volume, lastIndex, currentOpen, currentPrice, currentVolume, avgVolume, volumeRatio, hourUTC, currentATR } = getSignalSnapshotContext(ohlcv, params);
+        const snapshotContext = getSignalSnapshotContext(ohlcv, params);
+        const {
+            open,
+            high,
+            low,
+            close,
+            volume,
+            lastIndex,
+            currentOpen,
+            currentPrice,
+            currentVolume,
+            avgVolume,
+            volumeRatio,
+            hourUTC,
+            currentATR,
+            currentNatrPercent,
+            currentRsi,
+            currentAdx,
+            bbBasis,
+            bbUpper,
+            bbLower,
+            bbWidth,
+            bbPercentB,
+            macdHistogram
+        } = snapshotContext;
         if (!Number.isFinite(currentATR) || currentATR <= 0) return { invalidAtr: true };
 
-        return { ohlcv, open, high, low, close, volume, lastIndex, currentOpen, currentPrice, currentVolume, avgVolume, volumeRatio, hourUTC, currentATR };
+        return {
+            ohlcv,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            lastIndex,
+            currentOpen,
+            currentPrice,
+            currentVolume,
+            avgVolume,
+            volumeRatio,
+            hourUTC,
+            currentATR,
+            currentNatrPercent,
+            currentRsi,
+            currentAdx,
+            bbBasis,
+            bbUpper,
+            bbLower,
+            bbWidth,
+            bbPercentB,
+            macdHistogram
+        };
     };
 
 
@@ -486,11 +767,6 @@ const createTradeLogicHelpers = ({
 };
 
 module.exports = { createTradeLogicHelpers };
-
-
-
-
-
 
 
 

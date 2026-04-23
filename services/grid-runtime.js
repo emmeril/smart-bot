@@ -23,16 +23,7 @@ const createGridRuntimeHelpers = ({
 }) => {
     const AUTO_GRID_LEVELS_MIN = 6;
     const AUTO_GRID_LEVELS_MAX = 18;
-    const GRID_LEVELS_PROFILE_FACTORS = {
-        binance: 1.0,
-        doge: 1.1,
-        volatile: 1.15
-    };
-    const GRID_LEVELS_PROFILE_LIMITS = {
-        binance: { min: 6, max: 18 },
-        doge: { min: 8, max: 16 },
-        volatile: { min: 8, max: 18 }
-    };
+    const UNIVERSAL_PROFILE_NAME = "universal";
     const GRID_LEVELS_TIMEFRAME_FACTORS = {
         "1m": 1.2,
         "3m": 1.1,
@@ -43,11 +34,7 @@ const createGridRuntimeHelpers = ({
         "4h": 0.68,
         "1d": 0.55
     };
-    const GRID_RANGE_PROFILE_BASELINES = {
-        binance: 4.0,
-        doge: 5.4,
-        volatile: 6.5
-    };
+    const GRID_LEVELS_BASE_FACTOR = 1.02;
     const GRID_RANGE_TIMEFRAME_FACTORS = {
         "1m": 0.85,
         "3m": 0.92,
@@ -58,11 +45,7 @@ const createGridRuntimeHelpers = ({
         "4h": 1.42,
         "1d": 1.65
     };
-    const GRID_BUFFER_PROFILE_BASELINES = {
-        binance: 0.12,
-        doge: 0.16,
-        volatile: 0.18
-    };
+    const GRID_RANGE_BASELINE = 4.4;
     const GRID_BUFFER_TIMEFRAME_FACTORS = {
         "1m": 0.9,
         "3m": 0.95,
@@ -72,6 +55,25 @@ const createGridRuntimeHelpers = ({
         "1h": 1.12,
         "4h": 1.18,
         "1d": 1.25
+    };
+    const GRID_BUFFER_BASELINE = 0.14;
+    const LEGACY_AUTO_PRESET_VALUES = {
+        leverage: [10, 8],
+        gridTargetProfitUsdt: [0.5, 0.4, 0.35, 0.25],
+        targetProfitAtrMultiplier: [0.75, 0.8, 0.7, 0.6],
+        targetProfitMinUsdt: [0.25, 0.3, 0.2, 0.15],
+        targetProfitMaxUsdt: [3, 4, 2, 1.25],
+        gridStopLossPercent: [5, 6, 4],
+        stopLossAtrMultiplier: [0.12, 0.15, 0.1],
+        stopLossMinPercent: [3, 4, 2.5],
+        stopLossMaxPercent: [7, 9, 6],
+        gridLevels: [8, 10, 12],
+        gridLookbackCandles: [120, 144, 180],
+        gridRangePercent: [3.5, 4, 5.5, 6.5],
+        gridEntryBufferPercent: [0.15, 0.12, 0.16, 0.18],
+        minVolumeRatio: [1.3, 1.1, 1.05],
+        trailingActivateATR: [1.2, 1.3, 1.4],
+        trailingOffsetATR: [0.6, 0.7, 0.8]
     };
 
     const resolveEffectiveGridRangePercent = ({
@@ -83,13 +85,11 @@ const createGridRuntimeHelpers = ({
         const configured = toFiniteNumber(configuredGridRangePercent, defaultConfig.gridRangePercent);
         if (configured > 0) return Math.max(0.5, configured);
 
-        const presetName = resolveAutoPairPresetName(pair || getDb()?.pair);
         const normalizedTimeframe = String(gridTimeframe || getDb()?.gridTimeframe || defaultConfig.gridTimeframe).trim();
         const safeLookbackCandles = Math.max(20, Math.trunc(toFiniteNumber(gridLookbackCandles, defaultConfig.gridLookbackCandles)));
-        const baseline = GRID_RANGE_PROFILE_BASELINES[presetName] || defaultConfig.gridRangePercent;
         const timeframeFactor = GRID_RANGE_TIMEFRAME_FACTORS[normalizedTimeframe] || 1.0;
         const lookbackFactor = clamp(0.92 + ((safeLookbackCandles - 120) / 600), 0.85, 1.2);
-        const derivedRange = baseline * timeframeFactor * lookbackFactor;
+        const derivedRange = GRID_RANGE_BASELINE * timeframeFactor * lookbackFactor;
         return Number(clamp(derivedRange, 2.5, 9.5).toFixed(2));
     };
 
@@ -103,15 +103,13 @@ const createGridRuntimeHelpers = ({
         const configured = toFiniteNumber(configuredGridEntryBufferPercent, defaultConfig.gridEntryBufferPercent);
         if (configured > 0) return Math.max(0.02, configured);
 
-        const presetName = resolveAutoPairPresetName(pair || getDb()?.pair);
         const normalizedTimeframe = String(gridTimeframe || getDb()?.gridTimeframe || defaultConfig.gridTimeframe).trim();
         const safeRangePercent = Math.max(0.5, toFiniteNumber(gridRangePercent, defaultConfig.gridRangePercent));
         const safeGridLevels = Math.max(4, Math.trunc(toFiniteNumber(gridLevels, defaultConfig.gridLevels)));
-        const baseline = GRID_BUFFER_PROFILE_BASELINES[presetName] || defaultConfig.gridEntryBufferPercent;
         const timeframeFactor = GRID_BUFFER_TIMEFRAME_FACTORS[normalizedTimeframe] || 1.0;
         const rangeFactor = clamp(safeRangePercent / 4.5, 0.85, 1.25);
         const levelsFactor = clamp(10 / safeGridLevels, 0.8, 1.15);
-        const derivedBuffer = baseline * timeframeFactor * rangeFactor * levelsFactor;
+        const derivedBuffer = GRID_BUFFER_BASELINE * timeframeFactor * rangeFactor * levelsFactor;
         return Number(clamp(derivedBuffer, 0.08, 0.3).toFixed(3));
     };
 
@@ -125,23 +123,24 @@ const createGridRuntimeHelpers = ({
         const configured = Math.trunc(toFiniteNumber(configuredGridLevels, defaultConfig.gridLevels));
         if (configured > 0) return Math.max(4, configured);
 
-        const presetName = resolveAutoPairPresetName(pair || getDb()?.pair);
         const safeRangePercent = Math.max(0.5, toFiniteNumber(gridRangePercent, defaultConfig.gridRangePercent));
         const safeLookbackCandles = Math.max(20, Math.trunc(toFiniteNumber(gridLookbackCandles, defaultConfig.gridLookbackCandles)));
         const normalizedTimeframe = String(gridTimeframe || getDb()?.gridTimeframe || defaultConfig.gridTimeframe).trim();
-        const profileFactor = GRID_LEVELS_PROFILE_FACTORS[presetName] || 1.0;
-        const profileLimits = GRID_LEVELS_PROFILE_LIMITS[presetName] || { min: AUTO_GRID_LEVELS_MIN, max: AUTO_GRID_LEVELS_MAX };
         const timeframeFactor = GRID_LEVELS_TIMEFRAME_FACTORS[normalizedTimeframe] || 1.0;
         const lookbackComponent = Math.sqrt(safeLookbackCandles / 30) * 1.4;
         const rangeComponent = safeRangePercent / 0.72;
-        const derivedLevels = Math.round((lookbackComponent + rangeComponent) * profileFactor * timeframeFactor);
-        return clamp(derivedLevels, profileLimits.min, profileLimits.max);
+        const derivedLevels = Math.round((lookbackComponent + rangeComponent) * GRID_LEVELS_BASE_FACTOR * timeframeFactor);
+        return clamp(derivedLevels, AUTO_GRID_LEVELS_MIN, AUTO_GRID_LEVELS_MAX);
     };
 
     const getSignalParameters = () => {
         const db = getDb();
         const volumePeriod = Math.max(2, Math.trunc(toFiniteNumber(db.volumePeriod, defaultConfig.volumePeriod)));
         const atrPeriod = Math.max(2, Math.trunc(toFiniteNumber(db.atrPeriod, defaultConfig.atrPeriod)));
+        const entryRsiPeriod = Math.max(2, Math.trunc(toFiniteNumber(db.entryRsiPeriod, defaultConfig.entryRsiPeriod || 14)));
+        const entryAdxPeriod = Math.max(2, Math.trunc(toFiniteNumber(db.entryAdxPeriod, defaultConfig.entryAdxPeriod || 14)));
+        const entryBbPeriod = Math.max(5, Math.trunc(toFiniteNumber(db.entryBbPeriod, defaultConfig.entryBbPeriod || 20)));
+        const entryBbStdDev = Math.max(1, toFiniteNumber(db.entryBbStdDev, defaultConfig.entryBbStdDev || 2));
         const gridLookbackCandles = Math.max(20, Math.trunc(toFiniteNumber(db.gridLookbackCandles, defaultConfig.gridLookbackCandles)));
         const gridRangePercent = resolveEffectiveGridRangePercent({
             configuredGridRangePercent: db.gridRangePercent,
@@ -164,11 +163,20 @@ const createGridRuntimeHelpers = ({
             gridLevels
         });
         const gridTakeProfitLevels = Math.max(0, Math.trunc(toFiniteNumber(db.gridTakeProfitLevels, defaultConfig.gridTakeProfitLevels)));
-        const neededCandles = Math.max(gridLookbackCandles + 5, volumePeriod + 10, atrPeriod + 10, 150);
+        const neededCandles = Math.max(gridLookbackCandles + 5, volumePeriod + 10, atrPeriod + 30, entryBbPeriod + 30, entryAdxPeriod + 40, 180);
         return {
             strategy: "futures_grid",
             volumePeriod,
             atrPeriod,
+            entryRsiPeriod,
+            entryRsiLongThreshold: clamp(toFiniteNumber(db.entryRsiLongThreshold, defaultConfig.entryRsiLongThreshold || 40), 1, 49),
+            entryRsiShortThreshold: clamp(toFiniteNumber(db.entryRsiShortThreshold, defaultConfig.entryRsiShortThreshold || 60), 51, 99),
+            entryAdxPeriod,
+            entryAdxMax: clamp(toFiniteNumber(db.entryAdxMax, defaultConfig.entryAdxMax || 32), 5, 80),
+            entryBbPeriod,
+            entryBbStdDev,
+            entryBbLongThreshold: clamp(toFiniteNumber(db.entryBbLongThreshold, defaultConfig.entryBbLongThreshold || 0.2), 0, 0.49),
+            entryBbShortThreshold: clamp(toFiniteNumber(db.entryBbShortThreshold, defaultConfig.entryBbShortThreshold || 0.8), 0.51, 1),
             neededCandles,
             gridLookbackCandles,
             configuredGridLevels: Math.max(0, Math.trunc(toFiniteNumber(db.gridLevels, defaultConfig.gridLevels))),
@@ -568,13 +576,7 @@ const createGridRuntimeHelpers = ({
         return orders.filter((order) => exposureSides.has(String(order?.side || "").toLowerCase()));
     };
 
-    const resolveAutoPairPresetName = (pair) => {
-        const normalizedPair = String(pair || "").trim().toUpperCase();
-        if (!normalizedPair) return "binance";
-        if (normalizedPair.includes("DOGE")) return "doge";
-        if (/(PEPE|BONK|FLOKI|SHIB|MEME|1000)/i.test(normalizedPair)) return "volatile";
-        return "binance";
-    };
+    const resolveAutoPairPresetName = () => UNIVERSAL_PROFILE_NAME;
 
     const getActiveAutoPairPresetName = () => resolveAutoPairPresetName(getDb()?.pair);
 
@@ -723,7 +725,8 @@ const createGridRuntimeHelpers = ({
             currentValue === undefined ||
             currentValue === null ||
             currentValue === "" ||
-            currentValue === defaultConfig[key]
+            currentValue === defaultConfig[key] ||
+            (Array.isArray(LEGACY_AUTO_PRESET_VALUES[key]) && LEGACY_AUTO_PRESET_VALUES[key].includes(currentValue))
         );
         for (const key of gridKeys) {
             if (!shouldApplyPresetValue(key, nextConfig[key])) continue;
