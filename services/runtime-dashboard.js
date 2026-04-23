@@ -18,6 +18,56 @@ const createRuntimeDashboardHelpers = ({
     applyDashboardConfigUpdate,
     resetDashboardConfig
 }) => {
+    const loginAttempts = new Map();
+
+    const normalizeClientAddress = (value) => {
+        const address = String(value || "").trim();
+        if (!address) return "unknown";
+        return address.startsWith("::ffff:") ? address.slice(7) : address;
+    };
+
+    const getLoginRateLimitConfig = () => ({
+        maxAttempts: Math.max(1, Math.trunc(toFiniteNumber(process.env.DASHBOARD_LOGIN_MAX_ATTEMPTS, 5))),
+        windowMs: Math.max(1000, Math.trunc(toFiniteNumber(process.env.DASHBOARD_LOGIN_WINDOW_MS, 15 * 60 * 1000)))
+    });
+
+    const getLoginAttemptKey = (req) => normalizeClientAddress(req?.socket?.remoteAddress || req?.ip || req?.headers?.["x-forwarded-for"]);
+
+    const sweepExpiredLoginAttempts = (now = Date.now()) => {
+        const { windowMs } = getLoginRateLimitConfig();
+        for (const [key, record] of loginAttempts.entries()) {
+            if (!record || now - record.windowStart >= windowMs) {
+                loginAttempts.delete(key);
+            }
+        }
+    };
+
+    const getLoginAttemptRecord = (req, now = Date.now()) => {
+        sweepExpiredLoginAttempts(now);
+        const { windowMs } = getLoginRateLimitConfig();
+        const key = getLoginAttemptKey(req);
+        const current = loginAttempts.get(key);
+
+        if (!current || now - current.windowStart >= windowMs) {
+            const fresh = { windowStart: now, failedAttempts: 0 };
+            loginAttempts.set(key, fresh);
+            return fresh;
+        }
+
+        return current;
+    };
+
+    const resetLoginAttempts = (req) => {
+        loginAttempts.delete(getLoginAttemptKey(req));
+    };
+
+    const rejectLoginAttempt = (res, retryAfterSeconds) => {
+        if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+            res.setHeader("Retry-After", String(Math.ceil(retryAfterSeconds)));
+        }
+        res.status(429).send("Too many login attempts. Please try again later.");
+    };
+
     const requireDashboardAuth = (req, res, next) => {
         if (isDashboardAuthenticated(req)) return next();
         if (req.path.startsWith("/api")) {
@@ -44,11 +94,24 @@ const createRuntimeDashboardHelpers = ({
         app.post("/login", (req, res) => {
             const username = String(req.body?.username || "").trim();
             const password = String(req.body?.password || "");
+            const now = Date.now();
+            const { maxAttempts, windowMs } = getLoginRateLimitConfig();
+            const loginRecord = getLoginAttemptRecord(req, now);
+
+            if (loginRecord.failedAttempts >= maxAttempts) {
+                const retryAfterSeconds = Math.max(1, Math.ceil((loginRecord.windowStart + windowMs - now) / 1000));
+                rejectLoginAttempt(res, retryAfterSeconds);
+                return;
+            }
+
             if (isDashboardLoginValid(username, password)) {
+                resetLoginAttempts(req);
                 setDashboardSessionCookie(res, username);
                 res.redirect("/dashboard");
                 return;
             }
+
+            loginRecord.failedAttempts += 1;
             res.redirect("/login?error=1");
         });
 
@@ -125,13 +188,12 @@ const createRuntimeDashboardHelpers = ({
             }
         });
 
-        app.use(express.static(publicDir));
         return app;
     };
 
     const resolveDashboardAddress = () => ({
         port: Math.max(1, Math.trunc(toFiniteNumber(process.env.DASHBOARD_PORT || process.env.PORT, 3000))),
-        host: process.env.DASHBOARD_HOST || "0.0.0.0"
+        host: process.env.DASHBOARD_HOST || "127.0.0.1"
     });
 
     const startWebDashboard = async (existingServer = null) => {
