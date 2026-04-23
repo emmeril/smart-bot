@@ -15,6 +15,7 @@ const { createRuntimeMonitoringHelpers } = require("./services/runtime-monitorin
 const { createRuntimeMarketDataHelpers } = require("./services/runtime-market-data");
 const { createRuntimePositionUtils } = require("./services/runtime-position-utils");
 const { createRuntimeSignalGridHelpers } = require("./services/runtime-signal-grid");
+const { createFonnteNotifierHelpers } = require("./services/fonnte-notifier");
 const {
     sequelize,
     Config,
@@ -323,6 +324,16 @@ const isGridEntryOrder = (order) => getExchangeClientOrderId(order).startsWith(G
 const isTpReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWith(TP_CLIENT_ORDER_PREFIX);
 const isSlReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWith(SL_CLIENT_ORDER_PREFIX);
 const isTriggerManagedOrder = (order, label = "") => label === "SL" || isSlReduceOnlyOrder(order) || String(order?.type || "").toUpperCase().includes("STOP");
+
+const {
+    notifyPositionClosed
+} = createFonnteNotifierHelpers({
+    token: process.env.FONNTE_TOKEN,
+    target: process.env.FONNTE_TARGET || process.env.ADMIN_PHONE,
+    endpoint: process.env.FONNTE_ENDPOINT,
+    countryCode: process.env.FONNTE_COUNTRY_CODE,
+    enabled: process.env.FONNTE_NOTIFICATIONS_ENABLED
+});
 
 const {
     fetchOpenGridOrders,
@@ -649,7 +660,8 @@ const {
     ensureReduceOnlyTakeProfitOrder,
     ensureReduceOnlyStopLossOrder,
     getPositionSyncQtyTolerance: () => POSITION_SYNC_QTY_TOLERANCE,
-    getOrderFillSnapshot
+    getOrderFillSnapshot,
+    notifyPositionClosed: (...args) => notifyPositionClosed(...args)
 });
 
 const mergeRuntimeConfig = (nextConfig) => {

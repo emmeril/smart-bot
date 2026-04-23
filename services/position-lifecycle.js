@@ -37,7 +37,8 @@ const createPositionLifecycleHelpers = ({
     ensureReduceOnlyTakeProfitOrder,
     ensureReduceOnlyStopLossOrder,
     getPositionSyncQtyTolerance,
-    getOrderFillSnapshot
+    getOrderFillSnapshot,
+    notifyPositionClosed
 }) => {
     const getLifecyclePositionKey = (positionKey = null, position = null) => (
         toPositionMapKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position))
@@ -110,6 +111,21 @@ const createPositionLifecycleHelpers = ({
                 estimatedPnL.realizedProfitUSDT,
                 position.strategy || null
             );
+            if (typeof notifyPositionClosed === "function") {
+                await notifyPositionClosed({
+                    position: {
+                        ...position,
+                        symbol: db.pair
+                    },
+                    reason,
+                    exitPrice: estimatedExitPrice,
+                    netProfitUSDT: estimatedPnL.realizedProfitUSDT,
+                    profitPercent: estimatedPnL.profitPercent,
+                    closedAt: Date.now(),
+                    estimatedExitPrice: true,
+                    positionKey: trackedKey
+                });
+            }
             console.warn(`[POSITION][WARN] Removed local position using estimated exit price because no confirmed exchange exit price was available (${reason}).`);
             return true;
         }
@@ -123,11 +139,26 @@ const createPositionLifecycleHelpers = ({
             0,
             position.strategy || null
         );
+        if (typeof notifyPositionClosed === "function") {
+            await notifyPositionClosed({
+                position: {
+                    ...position,
+                    symbol: db.pair
+                },
+                reason,
+                exitPrice: null,
+                netProfitUSDT: 0,
+                profitPercent: 0,
+                closedAt: Date.now(),
+                estimatedExitPrice: true,
+                positionKey: trackedKey
+            });
+        }
         console.warn(`[POSITION][WARN] Removed local position without realizing P&L because no confirmed exchange exit price was available (${reason}).`);
         return true;
     };
 
-    const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, reason, exitPrice = null, positionKey = null) => {
+    const finalizeClosedPosition = async (position, netProfitUSDT, profitPercent, reason, exitPrice = null, positionKey = null, exitMeta = {}) => {
         const db = getDb();
         const metrics = getMetrics();
         const trackedKey = getLifecyclePositionKey(positionKey, position);
@@ -173,6 +204,23 @@ const createPositionLifecycleHelpers = ({
         metrics.trades.closed++;
         if (netProfitUSDT > 0) metrics.trades.wins++;
         else if (netProfitUSDT < 0) metrics.trades.losses++;
+
+        if (typeof notifyPositionClosed === "function") {
+            await notifyPositionClosed({
+                position: {
+                    ...position,
+                    symbol: db.pair
+                },
+                reason,
+                exitPrice: Number.isFinite(exitPrice) ? exitPrice : null,
+                netProfitUSDT,
+                profitPercent,
+                closedAt: Number.isFinite(exitMeta.closedAt) ? exitMeta.closedAt : Date.now(),
+                order: exitMeta.order || null,
+                closeFillSnapshot: exitMeta.closeFillSnapshot || null,
+                positionKey: trackedKey
+            });
+        }
         return true;
     };
 
@@ -312,6 +360,11 @@ const createPositionLifecycleHelpers = ({
             }
 
             const closeFillSnapshot = getOrderFillSnapshot(closeOrder, await getPrice(true), position.quantity);
+            const closedAt = Number.isFinite(Number(closeOrder?.timestamp))
+                ? Number(closeOrder.timestamp)
+                : Number.isFinite(Number(closeOrder?.lastTradeTimestamp))
+                    ? Number(closeOrder.lastTradeTimestamp)
+                    : Date.now();
             const remainingPosition = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
             if (remainingPosition) {
                 const remainingContracts = Math.abs(getExchangePositionContracts(remainingPosition));
@@ -345,7 +398,19 @@ const createPositionLifecycleHelpers = ({
                 }
             }
             const realizedPnL = calculatePositionPnL(position, closeFillSnapshot.price);
-            await finalizeClosedPosition(position, realizedPnL.netProfitUSDT, realizedPnL.profitPercent, reason, closeFillSnapshot.price, positionKey);
+            await finalizeClosedPosition(
+                position,
+                realizedPnL.netProfitUSDT,
+                realizedPnL.profitPercent,
+                reason,
+                closeFillSnapshot.price,
+                positionKey,
+                {
+                    closedAt,
+                    order: closeOrder,
+                    closeFillSnapshot
+                }
+            );
         } catch (error) {
             console.error("[POSITION][ERROR] Close position failed:", String(error?.message || error));
         } finally {
