@@ -125,6 +125,11 @@ const createDashboardStatusHelpers = ({
             };
         });
 
+        // Calculate total unrealized PnL from all active positions
+        const unrealizedPnL = activePositions.reduce((sum, pos) => {
+            return sum + (Number.isFinite(pos.pnlUSDT) ? pos.pnlUSDT : 0);
+        }, 0);
+
         const openOrders = {
             grid: managedOrders.grid.map(mapManagedOrder),
             tp: managedOrders.tp.map(mapManagedOrder),
@@ -146,6 +151,8 @@ const createDashboardStatusHelpers = ({
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(dailyPnlSnapshot.dailyTrades, 0))),
             dailyPnlSource: String(dailyPnlSnapshot.dailyPnlSource || "local").toLowerCase(),
             dailyPnlSyncedAt: toFiniteNumber(dailyPnlSnapshot.dailyPnlSyncedAt, 0),
+            unrealizedPnL,
+            totalPnL: toFiniteNumber(dailyPnlSnapshot.dailyPnL, 0) + unrealizedPnL,
             activePositions,
             exchangePositionsCount: exchangePositions.length,
             openOrders,

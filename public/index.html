@@ -207,7 +207,79 @@
     .metric-card .label, .status-label, .field-hint { display: block; color: var(--muted); font-size: 0.82rem; }
     .metric-card strong { display: block; margin-top: 8px; font-size: 1.05rem; }
     .metric-card span { display: block; margin-top: 4px; color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
+    .pnl-card { position: relative; overflow: hidden; }
+    .pnl-card.realized { border-left: 3px solid #48e2ae; }
+    .pnl-card.unrealized { border-left: 3px solid #7fd7ff; }
+    .pnl-card.total { border-left: 3px solid #f6c667; }
+    .pnl-card .label { display: block; color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+    .pnl-card .pnl-value { font-size: 1.4rem; font-weight: 700; line-height: 1.2; }
+    .pnl-card .pnl-positive { color: #9af2cc; }
+    .pnl-card .pnl-negative { color: #ffb4b4; }
+    .pnl-card .pnl-neutral { color: var(--text); }
+    .pnl-card .pnl-meta { display: block; margin-top: 6px; font-size: 0.8rem; color: var(--muted); }
+    .pnl-breakdown { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); }
+    .pnl-breakdown-item { display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 4px; }
+    .pnl-breakdown-item .breakdown-label { color: var(--muted); }
+    .pnl-breakdown-item .breakdown-value { font-weight: 600; }
     .status-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 18px 20px; }
+    .pnl-section { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .pnl-summary-card { padding: 20px; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); }
+    .pnl-summary-card h3 { margin: 0 0 6px; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .pnl-summary-card .pnl-display { font-size: 1.6rem; font-weight: 800; line-height: 1.1; margin-bottom: 4px; }
+    .pnl-summary-card .pnl-sub { font-size: 0.82rem; color: var(--muted); }
+    .pnl-detail-list { display: grid; gap: 10px; margin-top: 14px; }
+    .pnl-detail-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-radius: 12px; background: rgba(7, 14, 19, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); }
+    .pnl-detail-item .detail-label { font-weight: 600; font-size: 0.92rem; }
+    .pnl-detail-item .detail-meta { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+    .pnl-detail-item .detail-amount { font-size: 1.1rem; font-weight: 700; }
+    @media (max-width: 1100px) {
+    .pnl-section { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .pnl-summary-card { padding: 20px; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); }
+    .pnl-summary-card h3 { margin: 0 0 6px; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .pnl-summary-card .pnl-display { font-size: 1.6rem; font-weight: 800; line-height: 1.1; margin-bottom: 4px; }
+    .pnl-summary-card .pnl-sub { font-size: 0.82rem; color: var(--muted); }
+    .pnl-detail-list { display: grid; gap: 10px; margin-top: 14px; }
+    .pnl-detail-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-radius: 12px; background: rgba(7, 14, 19, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); }
+    .pnl-detail-item .detail-label { font-weight: 600; font-size: 0.92rem; }
+    .pnl-detail-item .detail-meta { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+    .pnl-detail-item .detail-amount { font-size: 1.1rem; font-weight: 700; }
+    @media (max-width: 1100px) {
+      .terminal-strip { grid-template-columns: 1fr; }
+      .hero { grid-template-columns: 1fr; }
+      .hero-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+    @media (max-width: 840px) {
+      .live-grid,
+      .live-lists,
+      .config-grid,
+      .status-strip { grid-template-columns: 1fr; }
+      .pnl-section { grid-template-columns: 1fr; }
+      .topbar {
+        border-radius: 24px;
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .topbar-status {
+        justify-content: flex-start;
+        width: 100%;
+      }
+      .hero-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .panel-head,
+      .footer-panel { flex-direction: column; align-items: start; }
+      .config-actions {
+        justify-content: stretch;
+      }
+      .toast {
+        min-width: 0;
+        max-width: 100%;
+        width: 100%;
+        text-align: left;
+      }
+    }
+    @media (max-width: 640px) {
+      .hero-metrics { grid-template-columns: 1fr; }
+      .pnl-section { grid-template-columns: 1fr; }
+    }
     .live-panel { padding: 24px; }
     .live-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
     .live-card { padding: 16px; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); }
@@ -584,6 +656,24 @@
       <div class="status-item"><span class="status-label">Terakhir update</span><strong id="updatedStatus">-</strong></div>
     </section>
 
+    <section class="panel pnl-section" id="pnlBreakdown">
+      <article class="pnl-summary-card realized">
+        <h3>Realized PnL</h3>
+        <div class="pnl-display" id="realizedPnlValue">-</div>
+        <div class="pnl-sub" id="realizedPnlMeta">Dari posisi yang sudah ditutup</div>
+      </article>
+      <article class="pnl-summary-card unrealized">
+        <h3>Unrealized PnL</h3>
+        <div class="pnl-display" id="unrealizedPnlValue">-</div>
+        <div class="pnl-sub" id="unrealizedPnlMeta">Dari posisi yang masih terbuka</div>
+      </article>
+      <article class="pnl-summary-card total">
+        <h3>Total PnL</h3>
+        <div class="pnl-display" id="totalPnlValue">-</div>
+        <div class="pnl-sub" id="totalPnlMeta">Gabungan realized + unrealized</div>
+      </article>
+    </section>
+
     <section class="panel terminal-strip">
       <article class="terminal-card">
         <h3>Runtime Feed</h3>
@@ -620,10 +710,10 @@
           <span id="livePositionsMeta">Memuat data posisi...</span>
         </article>
         <article class="live-card">
-          <span class="label">PnL harian</span>
+          <span class="label">Realized PnL</span>
           <strong id="livePnlValue">-</strong>
           <span id="livePnlMeta">-</span>
-          <canvas id="livePnlTrend" class="live-sparkline" width="320" height="72" aria-label="PnL trend mini chart"></canvas>
+          <canvas id="livePnlTrend" class="live-sparkline" width="320" height="72" aria-label="Realized PnL trend mini chart"></canvas>
         </article>
         <article class="live-card">
           <span class="label">Order terbuka</span>
@@ -709,6 +799,12 @@
     const livePositionsList = document.getElementById("livePositionsList");
     const liveOrdersList = document.getElementById("liveOrdersList");
     const livePnlTrend = document.getElementById("livePnlTrend");
+    const realizedPnlValue = document.getElementById("realizedPnlValue");
+    const realizedPnlMeta = document.getElementById("realizedPnlMeta");
+    const unrealizedPnlValue = document.getElementById("unrealizedPnlValue");
+    const unrealizedPnlMeta = document.getElementById("unrealizedPnlMeta");
+    const totalPnlValue = document.getElementById("totalPnlValue");
+    const totalPnlMeta = document.getElementById("totalPnlMeta");
 
 	    const SECTION_LABELS = {
 	      General: "General",
@@ -844,7 +940,7 @@
       const cards = [
         { label: "Bot", value: runtimeStatus.label, note: runtimeStatus.description },
         { label: "Positions", value: String(status.activePositions), note: status.activeGridState ? "Grid state active" : "No local grid state" },
-        { label: "Daily PnL", value: `${formatNumber(status.dailyPnL)} USDT`, note: `${status.dailyTrades} trades today | ${String(status.dailyPnlSource || "local").toLowerCase()}` },
+        { label: "Realized PnL", value: `${formatNumber(status.dailyPnL)} USDT`, note: `${status.dailyTrades} trades today | ${String(status.dailyPnlSource || "local").toLowerCase()}` },
         { label: "Leverage", value: leverageValue, note: `${marginModeValue} | ${positionModeValue}` }
       ];
       statusCards.innerHTML = cards.map((card) => `
@@ -963,6 +1059,37 @@
       }
     }
 
+    function renderPnLBreakdown(data) {
+      if (!data || data.ok === false) return;
+      
+      const realizedPnL = Number(data.dailyPnL || 0);
+      const unrealizedPnL = Number(data.unrealizedPnL || 0);
+      const totalPnL = Number(data.totalPnL || realizedPnL + unrealizedPnL);
+      
+      const formatPnl = (value) => {
+        const prefix = value >= 0 ? "+" : "";
+        return prefix + formatNumber(value) + " USDT";
+      };
+      
+      const getPnlClass = (value) => value > 0 ? "pnl-positive" : (value < 0 ? "pnl-negative" : "pnl-neutral");
+      
+      // Realized PnL
+      realizedPnlValue.textContent = formatPnl(realizedPnL);
+      realizedPnlValue.className = "pnl-display " + getPnlClass(realizedPnL);
+      realizedPnlMeta.textContent = `${data.dailyTrades || 0} trade(s) | source: ${String(data.dailyPnlSource || "local").toLowerCase()}`;
+      
+      // Unrealized PnL
+      const activePosCount = Array.isArray(data.activePositions) ? data.activePositions.length : 0;
+      unrealizedPnlValue.textContent = formatPnl(unrealizedPnL);
+      unrealizedPnlValue.className = "pnl-display " + getPnlClass(unrealizedPnL);
+      unrealizedPnlMeta.textContent = `${activePosCount} posisi terbuka`;
+      
+      // Total PnL
+      totalPnlValue.textContent = formatPnl(totalPnL);
+      totalPnlValue.className = "pnl-display " + getPnlClass(totalPnL);
+      totalPnlMeta.textContent = `Gabungan realized + unrealized`;
+    }
+
     function sideBadgeClass(value) {
       const side = String(value || "").toLowerCase();
       if (side === "buy" || side === "long") return "side-badge buy";
@@ -986,6 +1113,9 @@
 
       pushPnlHistory(dailyPnl);
       renderPnlSparkline();
+
+      // Render PnL breakdown (Realized, Unrealized, Total)
+      renderPnLBreakdown(data);
 
       livePositionsCount.textContent = String(positions.length);
       livePositionsMeta.textContent = data.exchangePositionsCount + " exchange position(s) | " + String(data.positionMode || "-").toUpperCase() + " | " + exchangeLabel + recoverySuffix;
