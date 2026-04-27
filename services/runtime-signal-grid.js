@@ -39,6 +39,8 @@ const createRuntimeSignalGridHelpers = ({
     getLastSignalDetailLogAt,
     setLastSignalDetailLogAt,
     buildRiskOverrides,
+    getOrderBook,
+    getRecentTrades,
     resolveEffectiveGridOrderSizeUsdt,
     resolveEffectiveGridOrdersPerSide,
     fetchOpenGridOrders,
@@ -288,6 +290,11 @@ const createRuntimeSignalGridHelpers = ({
                 return {};
             }
 
+            const [orderBook, recentTrades] = await Promise.all([
+                typeof getOrderBook === "function" ? getOrderBook(10) : Promise.resolve(null),
+                typeof getRecentTrades === "function" ? getRecentTrades(25) : Promise.resolve([])
+            ]);
+
             const signalState = strategy === "futures_grid"
                 ? evaluateGridSignal(snapshot, params)
                 : (typeof evaluateCrossoverSignal === "function"
@@ -320,6 +327,49 @@ const createRuntimeSignalGridHelpers = ({
                 hasSignal: finalState.setupDetected,
                 strategy: signalState.strategyName || strategy.toUpperCase(),
                 riskOverrides: buildRiskOverrides(),
+                exitOptimization: {
+                    enabled: true,
+                    currentPrice: snapshot.currentPrice,
+                    candidate: {
+                        tpAtr: Math.max(0.1, toFiniteNumber(db.targetProfitAtrMultiplier, 2.4)),
+                        slAtr: Math.max(0.05, toFiniteNumber(db.stopLossAtrMultiplier, 1.6)),
+                        trailingActivateATR: Math.max(0.2, toFiniteNumber(db.trailingActivateATR, 1.5)),
+                        trailingOffsetATR: Math.max(0.1, toFiniteNumber(db.trailingOffsetATR, 0.75))
+                    },
+                    regime: {
+                        zScore: !Number.isFinite(snapshot.bbBasis) || !Number.isFinite(snapshot.currentPrice) || !Number.isFinite(snapshot.currentStdDev) || snapshot.currentStdDev <= 0
+                            ? 0
+                            : (snapshot.currentPrice - snapshot.bbBasis) / snapshot.currentStdDev,
+                        volatilityPercentile: clamp(
+                            Number.isFinite(snapshot.currentNatrPercent)
+                                ? snapshot.currentNatrPercent / Math.max(params.gridRangePercent || snapshot.currentNatrPercent || 1, 0.0001)
+                                : 0.5,
+                            0,
+                            1
+                        )
+                    },
+                    liquiditySnapshot: {
+                        orderBook,
+                        trades: recentTrades
+                    },
+                    orderFlow: {
+                        orderFlowImbalance: (() => {
+                            const buyVolume = recentTrades.reduce((sum, trade) => sum + (String(trade?.side || "").toLowerCase() === "buy" ? Math.abs(toFiniteNumber(trade?.amount ?? trade?.size, 0)) : 0), 0);
+                            const sellVolume = recentTrades.reduce((sum, trade) => sum + (String(trade?.side || "").toLowerCase() === "sell" ? Math.abs(toFiniteNumber(trade?.amount ?? trade?.size, 0)) : 0), 0);
+                            const totalVolume = buyVolume + sellVolume;
+                            return totalVolume > 0 ? (buyVolume - sellVolume) / totalVolume : 0;
+                        })(),
+                        absorptionScore: (() => {
+                            const bestBidSize = Math.abs(toFiniteNumber(orderBook?.bids?.[0]?.[1], 0));
+                            const bestAskSize = Math.abs(toFiniteNumber(orderBook?.asks?.[0]?.[1], 0));
+                            const spread = Math.abs(toFiniteNumber(orderBook?.asks?.[0]?.[0], snapshot.currentPrice) - toFiniteNumber(orderBook?.bids?.[0]?.[0], snapshot.currentPrice));
+                            if (bestBidSize <= 0 && bestAskSize <= 0) return 0;
+                            return clamp((Math.max(bestBidSize, bestAskSize) / Math.max(bestBidSize + bestAskSize, 1)) - (spread / Math.max(snapshot.currentPrice, 1)), 0, 1);
+                        })(),
+                        shortHorizonATR: snapshot.currentATR,
+                        mediumHorizonATR: Math.max(snapshot.currentATR / Math.max(snapshot.volumeRatio || 1, 0.5), 0.0000001)
+                    }
+                },
                 targetPrice: finalState.canLong ? signalState.longPlan?.targetPrice : (finalState.canShort ? signalState.shortPlan?.targetPrice : null),
                 stopLossPrice: finalState.canLong ? signalState.longPlan?.stopLossPrice : (finalState.canShort ? signalState.shortPlan?.stopLossPrice : null)
             };

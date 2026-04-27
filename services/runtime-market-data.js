@@ -74,6 +74,36 @@ const createRuntimeMarketDataHelpers = ({
         }
     };
 
+    const getOrderBook = async (limit = 10) => {
+        const exchange = getExchange();
+        const db = getDb();
+        const metrics = getMetrics();
+        if (!exchange || typeof exchange.fetchOrderBook !== "function") return null;
+        try {
+            const orderBook = await retry(() => exchange.fetchOrderBook(db.pair, limit));
+            metrics.api.orderBook = (metrics.api.orderBook || 0) + 1;
+            return orderBook;
+        } catch (error) {
+            console.error("[MARKET][WARN] Failed to fetch order book:", error.message);
+            return null;
+        }
+    };
+
+    const getRecentTrades = async (limit = 25) => {
+        const exchange = getExchange();
+        const db = getDb();
+        const metrics = getMetrics();
+        if (!exchange || typeof exchange.fetchTrades !== "function") return [];
+        try {
+            const trades = await retry(() => exchange.fetchTrades(db.pair, undefined, limit));
+            metrics.api.trades = (metrics.api.trades || 0) + 1;
+            return Array.isArray(trades) ? trades : [];
+        } catch (error) {
+            console.error("[MARKET][WARN] Failed to fetch recent trades:", error.message);
+            return [];
+        }
+    };
+
     const escapeCsvField = (value) => {
         const text = String(value ?? "");
         if (!/[",\r\n]/.test(text)) return text;
@@ -191,6 +221,8 @@ const createRuntimeMarketDataHelpers = ({
         formatOrderSummary,
         getPrice,
         getOHLCV,
+        getOrderBook,
+        getRecentTrades,
         escapeCsvField,
         logTrade,
         extractUsdtBalanceSnapshot,

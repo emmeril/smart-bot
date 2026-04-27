@@ -1,3 +1,5 @@
+const { resolveOptimalExit, buildLiquiditySnapshot } = require("./exit-optimizer");
+
 const createTradeLogicHelpers = ({
     getDb,
     toFiniteNumber,
@@ -15,7 +17,8 @@ const createTradeLogicHelpers = ({
         strategyName: "FUTURES_GRID",
         riskOverrides: {},
         signalTargetPrice: null,
-        signalStopLossPrice: null
+        signalStopLossPrice: null,
+        exitOptimization: null
     });
 
     const parseSignalOrderData = (signalData) => {
@@ -28,7 +31,8 @@ const createTradeLogicHelpers = ({
             strategyName: signalData.strategy ? String(signalData.strategy) : "FUTURES_GRID",
             riskOverrides: signalData.riskOverrides || {},
             signalTargetPrice: toFiniteNumber(signalData.targetPrice, null),
-            signalStopLossPrice: toFiniteNumber(signalData.stopLossPrice, null)
+            signalStopLossPrice: toFiniteNumber(signalData.stopLossPrice, null),
+            exitOptimization: signalData.exitOptimization || null
         };
     };
 
@@ -150,6 +154,75 @@ const createTradeLogicHelpers = ({
         };
     };
 
+    const buildOptimizationCandidateFromConfig = () => {
+        const db = getDb();
+        return {
+            tpAtr: Math.max(0.1, toFiniteNumber(db.targetProfitAtrMultiplier, 2.4)),
+            slAtr: Math.max(0.05, toFiniteNumber(db.stopLossAtrMultiplier, 1.6)),
+            trailingActivateATR: Math.max(0.2, toFiniteNumber(db.trailingActivateATR, 1.5)),
+            trailingOffsetATR: Math.max(0.1, toFiniteNumber(db.trailingOffsetATR, 0.75))
+        };
+    };
+
+    const resolveOptimizedOrderPlan = (side, entryPrice, adjustedQty, signalATR, exitOptimization = null) => {
+        const db = getDb();
+        const numericQty = Math.abs(toFiniteNumber(adjustedQty, 0));
+        const currentATR = Math.abs(toFiniteNumber(signalATR, NaN));
+        if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(currentATR) || currentATR <= 0 || !Number.isFinite(numericQty) || numericQty <= 0) {
+            return null;
+        }
+
+        const optimizationPayload = typeof exitOptimization === "object" && exitOptimization !== null ? exitOptimization : {};
+        const rawLiquiditySnapshot = optimizationPayload.liquiditySnapshot || {};
+        const liquiditySnapshot = (
+            Number.isFinite(rawLiquiditySnapshot?.spreadBps) ||
+            Number.isFinite(rawLiquiditySnapshot?.marketImpactBps) ||
+            Number.isFinite(rawLiquiditySnapshot?.depthImbalance)
+        )
+            ? rawLiquiditySnapshot
+            : buildLiquiditySnapshot({
+                orderBook: rawLiquiditySnapshot.orderBook,
+                trades: rawLiquiditySnapshot.trades,
+                currentPrice: toFiniteNumber(optimizationPayload.currentPrice, entryPrice)
+            });
+        const optimizedExit = resolveOptimalExit({
+            side,
+            entryPrice,
+            currentPrice: toFiniteNumber(optimizationPayload.currentPrice, entryPrice),
+            currentATR,
+            optimizationResult: optimizationPayload.optimizationResult || { candidate: optimizationPayload.candidate || buildOptimizationCandidateFromConfig() },
+            regime: optimizationPayload.regime || {},
+            liquiditySnapshot,
+            orderFlow: optimizationPayload.orderFlow || {}
+        });
+
+        const targetPrice = resolveRoundedPlanPrice(db.pair, optimizedExit.targetPrice);
+        const stopLossPrice = resolveRoundedPlanPrice(db.pair, optimizedExit.stopPrice);
+        if (!Number.isFinite(targetPrice) || !Number.isFinite(stopLossPrice)) return null;
+
+        const targetProfitUSDT = Math.abs(targetPrice - entryPrice) * numericQty;
+        const stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * numericQty;
+        const stopLossPercent = resolveMarginRiskPercentFromPriceDistance(
+            entryPrice,
+            Math.max(1, toFiniteNumber(db.leverage, 1)),
+            Math.abs(stopLossPrice - entryPrice)
+        );
+
+        return {
+            trailingActivateATR: toFiniteNumber(optimizedExit?.candidate?.trailingActivateATR, db.trailingActivateATR),
+            trailingOffsetATR: toFiniteNumber(optimizedExit?.candidate?.trailingOffsetATR, db.trailingOffsetATR),
+            targetProfitUSDT,
+            targetProfitMode: "OPTIMIZED_EXIT",
+            stopLossPercent,
+            stopLossMode: "OPTIMIZED_EXIT",
+            stopLossUSDT,
+            targetPrice,
+            stopLossPrice,
+            trailingEnabled: Boolean(db.trailingEnabled),
+            optimizationMeta: optimizedExit
+        };
+    };
+
     const buildDirectionalTargetPrice = (side, entryPrice, targetProfitUSDT, adjustedQty) => (
         side === "buy"
             ? entryPrice + (targetProfitUSDT / adjustedQty)
@@ -169,6 +242,7 @@ const createTradeLogicHelpers = ({
         const trailingOffsetATR = toFiniteNumber(riskOverrides.trailingOffsetATR, db.trailingOffsetATR);
         const explicitTargetPrice = toFiniteNumber(explicitTargets.targetPrice, null);
         const explicitStopLossPrice = toFiniteNumber(explicitTargets.stopLossPrice, null);
+        const optimizationPayload = explicitTargets.exitOptimization || riskOverrides.exitOptimization || null;
 
         let targetProfitUSDT = db.gridTargetProfitUsdt;
         let targetProfitMode = "STATIC";
@@ -191,6 +265,18 @@ const createTradeLogicHelpers = ({
             stopLossDistance = Math.abs(stopLossPrice - entryPrice);
             stopLossPercent = resolveMarginRiskPercentFromPriceDistance(entryPrice, Math.max(1, toFiniteNumber(db.leverage, 1)), stopLossDistance);
             stopLossMode = "EXPLICIT";
+        } else if (optimizationPayload && optimizationPayload.enabled !== false) {
+            const optimizedPlan = resolveOptimizedOrderPlan(side, entryPrice, numericQty, signalATR, optimizationPayload);
+            if (optimizedPlan) return optimizedPlan;
+            const resolvedStopLoss = resolveStopLossPlan(signalATR, entryPrice, adjustedQty);
+            stopLossPercent = resolvedStopLoss.stopLossPercent;
+            stopLossMode = resolvedStopLoss.stopLossMode;
+            stopLossUSDT = resolvedStopLoss.stopLossUSDT;
+            stopLossDistance = resolvedStopLoss.stopLossDistance;
+            const rawStopLossPrice = buildDirectionalStopLossPrice(side, entryPrice, stopLossUSDT, adjustedQty);
+            stopLossPrice = resolveRoundedPlanPrice(db.pair, rawStopLossPrice);
+            stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
+            stopLossDistance = Math.abs(stopLossPrice - entryPrice);
         } else {
             const resolvedStopLoss = resolveStopLossPlan(signalATR, entryPrice, adjustedQty);
             stopLossPercent = resolvedStopLoss.stopLossPercent;
@@ -651,6 +737,8 @@ const createTradeLogicHelpers = ({
         const bbBasis = bollinger.basis[lastIndex];
         const bbUpper = bollinger.upper[lastIndex];
         const bbLower = bollinger.lower[lastIndex];
+        const stdDevSeries = calcStdDev(close, params.entryBbPeriod || 20);
+        const currentStdDev = stdDevSeries[lastIndex];
         const bbWidth = Number.isFinite(bbUpper) && Number.isFinite(bbLower) && Number.isFinite(bbBasis) && bbBasis !== 0
             ? (bbUpper - bbLower) / bbBasis
             : NaN;
@@ -674,6 +762,7 @@ const createTradeLogicHelpers = ({
             volumeRatio,
             hourUTC,
             currentATR,
+            currentStdDev,
             currentNatrPercent,
             currentRsi,
             currentAdx,
@@ -714,6 +803,7 @@ const createTradeLogicHelpers = ({
             volumeRatio,
             hourUTC,
             currentATR,
+            currentStdDev,
             currentNatrPercent,
             currentRsi,
             currentAdx,
@@ -741,6 +831,7 @@ const createTradeLogicHelpers = ({
             volumeRatio,
             hourUTC,
             currentATR,
+            currentStdDev,
             currentNatrPercent,
             currentRsi,
             currentAdx,
@@ -767,6 +858,3 @@ const createTradeLogicHelpers = ({
 };
 
 module.exports = { createTradeLogicHelpers };
-
-
-

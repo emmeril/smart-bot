@@ -70,7 +70,7 @@ const createTradeEntryHelpers = ({
                 return;
             }
 
-            const { signalPrice, signalATR, strategyName, riskOverrides, signalTargetPrice, signalStopLossPrice } = parseSignalOrderData(signalData);
+            const { signalPrice, signalATR, strategyName, riskOverrides, signalTargetPrice, signalStopLossPrice, exitOptimization } = parseSignalOrderData(signalData);
             const hasSignalPrice = Number(signalPrice) > 0;
             const entryPrice = hasSignalPrice ? Number(signalPrice) : tickerPrice;
             const qty = (db.gridOrderSizeUsdt * db.leverage) / entryPrice;
@@ -88,7 +88,7 @@ const createTradeEntryHelpers = ({
                 adjustedQty,
                 signalATR,
                 riskOverrides,
-                { targetPrice: signalTargetPrice, stopLossPrice: signalStopLossPrice }
+                { targetPrice: signalTargetPrice, stopLossPrice: signalStopLossPrice, exitOptimization }
             );
             logOrderPlan(strategyName, entryPrice, adjustedQty, orderPlan);
             if (!isDirectionalOrderPlanValid(side, entryPrice, orderPlan)) {
@@ -115,7 +115,7 @@ const createTradeEntryHelpers = ({
                 actualQuantity,
                 signalATR,
                 riskOverrides,
-                { targetPrice: signalTargetPrice, stopLossPrice: signalStopLossPrice }
+                { targetPrice: signalTargetPrice, stopLossPrice: signalStopLossPrice, exitOptimization }
             );
             const actualPlanValid = isDirectionalOrderPlanValid(side, actualEntryPrice, actualOrderPlan);
             const fallbackPlanValid = isDirectionalOrderPlanValid(side, actualEntryPrice, orderPlan);
