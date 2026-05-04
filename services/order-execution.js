@@ -75,19 +75,19 @@ const createOrderExecutionHelpers = ({
         const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
-        const market = exchange.markets[db.pair];
+        const spotPair = String(db.pair || "").split(":")[0];
+        const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
         const orderSizeUsdt = Math.max(0, toFiniteNumber(gridOrder?.orderSizeUsdt, db.gridOrderSizeUsdt));
-        const rawQty = (orderSizeUsdt * db.leverage) / gridOrder.price;
+        const rawQty = orderSizeUsdt / gridOrder.price;
         const quantity = formatAmountToMarketPrecision(db.pair, rawQty);
-        const sizeValidation = validateOrderSize(market, quantity, gridOrder.price);
+        const sizeValidation = validateOrderSize(marketInfo, quantity, gridOrder.price);
         if (!sizeValidation.valid) {
             console.warn(`[GRID][WARN] Skipping ${gridOrder.side.toUpperCase()} ${gridOrder.price}: ${sizeValidation.reason}`);
             return false;
         }
 
         const params = buildExchangeOrderParams({
-            side: gridOrder.side,
-            positionSide: getOrderPositionSide(gridOrder.side)
+            side: gridOrder.side
         });
         params.newClientOrderId = gridOrder.clientOrderId;
 
@@ -99,7 +99,7 @@ const createOrderExecutionHelpers = ({
 
         try {
             await exchange.createOrder(
-                db.pair,
+                spotPair,
                 "limit",
                 gridOrder.side,
                 quantity,
@@ -122,7 +122,7 @@ const createOrderExecutionHelpers = ({
                 if (cancelled) {
                     try {
                         await exchange.createOrder(
-                            db.pair,
+                            spotPair,
                             "limit",
                             gridOrder.side,
                             quantity,
@@ -158,12 +158,13 @@ const createOrderExecutionHelpers = ({
         const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
+        const spotPair = String(db.pair || "").split(":")[0];
         if (!Number.isFinite(position?.targetPrice) || position.targetPrice <= 0) return null;
         if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
         const closeSide = position.side === "buy" ? "sell" : "buy";
         const quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
-        const market = exchange.markets[db.pair];
-        const sizeValidation = validateOrderSize(market, quantity, position.targetPrice, { allowReduceOnlyClose: true });
+        const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
+        const sizeValidation = validateOrderSize(marketInfo, quantity, position.targetPrice, { allowReduceOnlyClose: true });
         if (!sizeValidation.valid) {
             console.warn(`[TP][WARN] Skipping TP placement: ${sizeValidation.reason}`);
             return null;
@@ -171,9 +172,7 @@ const createOrderExecutionHelpers = ({
         if (sizeValidation.warning) console.warn(`[TP][WARN] ${sizeValidation.warning}`);
 
         const params = buildExchangeOrderParams({
-            side: closeSide,
-            reduceOnly: true,
-            positionSide: getClosePositionSide(position)
+            side: closeSide
         });
         const clientOrderId = position?.tpClientOrderId || getTpClientOrderId(position);
         params.newClientOrderId = clientOrderId;
@@ -194,7 +193,7 @@ const createOrderExecutionHelpers = ({
 
         try {
             const order = await exchange.createOrder(
-                db.pair,
+                spotPair,
                 "limit",
                 closeSide,
                 quantity,
@@ -216,7 +215,7 @@ const createOrderExecutionHelpers = ({
                 if (cancelled) {
                     try {
                         const retryOrder = await exchange.createOrder(
-                            db.pair,
+                            spotPair,
                             "limit",
                             closeSide,
                             quantity,
@@ -237,7 +236,7 @@ const createOrderExecutionHelpers = ({
                 console.warn(`[TP][WARN] Existing clientOrderId ${clientOrderId} is unusable. Retrying with replacement ${replacementClientOrderId}.`);
                 try {
                     const retryOrder = await exchange.createOrder(
-                        db.pair,
+                        spotPair,
                         "limit",
                         closeSide,
                         quantity,
@@ -261,29 +260,24 @@ const createOrderExecutionHelpers = ({
         const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
+        const spotPair = String(db.pair || "").split(":")[0];
         if (!Number.isFinite(position?.stopLossPrice) || position.stopLossPrice <= 0) return null;
         if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
         const closeSide = position.side === "buy" ? "sell" : "buy";
         const quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
-        const market = exchange.markets[db.pair];
-        const sizeValidation = validateOrderSize(market, quantity, position.stopLossPrice, { allowReduceOnlyClose: true });
+        const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
+        const sizeValidation = validateOrderSize(marketInfo, quantity, position.stopLossPrice, { allowReduceOnlyClose: true });
         if (!sizeValidation.valid) {
             console.warn(`[SL][WARN] Skipping SL placement: ${sizeValidation.reason}`);
             return null;
         }
         if (sizeValidation.warning) console.warn(`[SL][WARN] ${sizeValidation.warning}`);
 
-        const useClosePositionOrder = !isHedgeModeEnabled();
-        const params = buildExchangeOrderParams({
-            side: closeSide,
-            reduceOnly: !useClosePositionOrder,
-            positionSide: getClosePositionSide(position),
-            closePosition: useClosePositionOrder
-        });
+        const params = buildExchangeOrderParams({ side: closeSide });
         const clientOrderId = position?.slClientOrderId || getSlClientOrderId(position);
         params.newClientOrderId = clientOrderId;
         params.stopPrice = formatPriceToMarketPrecision(db.pair, position.stopLossPrice);
-        params.workingType = "MARK_PRICE";
+        const limitPrice = formatPriceToMarketPrecision(db.pair, position.side === "buy" ? position.stopLossPrice * 0.999 : position.stopLossPrice * 1.001);
 
         const existingOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
         if (existingOrder) {
@@ -301,16 +295,15 @@ const createOrderExecutionHelpers = ({
 
         try {
             const order = await exchange.createOrder(
-                db.pair,
-                "STOP_MARKET",
+                spotPair,
+                "STOP_LOSS_LIMIT",
                 closeSide,
-                useClosePositionOrder ? undefined : quantity,
-                undefined,
+                quantity,
+                limitPrice,
                 params
             );
             metrics.api.orders++;
-            const orderModeLabel = useClosePositionOrder ? "close-position STOP_MARKET" : "reduce-only STOP_MARKET";
-            console.log(`[SL][INFO] Placed ${orderModeLabel} ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${useClosePositionOrder ? "FULL" : quantity}`);
+            console.log(`[SL][INFO] Placed STOP_LOSS_LIMIT ${closeSide.toUpperCase()} @ stop ${params.stopPrice} limit ${limitPrice} qty ${quantity}`);
             return attachClientOrderIdFallback(order, clientOrderId);
         } catch (error) {
             if (isDuplicateClientOrderIdError(error)) {
@@ -324,16 +317,15 @@ const createOrderExecutionHelpers = ({
                 if (cancelled) {
                     try {
                         const retryOrder = await exchange.createOrder(
-                            db.pair,
-                            "STOP_MARKET",
+                            spotPair,
+                            "STOP_LOSS_LIMIT",
                             closeSide,
-                            useClosePositionOrder ? undefined : quantity,
-                            undefined,
+                            quantity,
+                            limitPrice,
                             params
                         );
                         metrics.api.orders++;
-                        const retryModeLabel = useClosePositionOrder ? "close-position STOP_MARKET" : "reduce-only STOP_MARKET";
-                        console.log(`[SL][INFO] Retry succeeded: placed ${retryModeLabel} ${closeSide.toUpperCase()} @ stop ${params.stopPrice}`);
+                        console.log(`[SL][INFO] Retry succeeded: placed STOP_LOSS_LIMIT ${closeSide.toUpperCase()} @ stop ${params.stopPrice} limit ${limitPrice}`);
                         return attachClientOrderIdFallback(retryOrder, clientOrderId);
                     } catch (retryError) {
                         console.error(`[SL][ERROR] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
@@ -346,11 +338,11 @@ const createOrderExecutionHelpers = ({
                 console.warn(`[SL][WARN] Existing clientOrderId ${clientOrderId} is unusable. Retrying with replacement ${replacementClientOrderId}.`);
                 try {
                     const retryOrder = await exchange.createOrder(
-                        db.pair,
-                        "STOP_MARKET",
+                        spotPair,
+                        "STOP_LOSS_LIMIT",
                         closeSide,
-                        useClosePositionOrder ? undefined : quantity,
-                        undefined,
+                        quantity,
+                        limitPrice,
                         { ...params, newClientOrderId: replacementClientOrderId }
                     );
                     metrics.api.orders++;

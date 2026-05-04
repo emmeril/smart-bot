@@ -27,10 +27,10 @@ const createRuntimeExchangeBootstrapHelpers = ({
     const initializeExchange = async () => {
         try {
             validateExchangeCredentials();
-            const nextExchange = new ccxt.binanceusdm({
+            const nextExchange = new ccxt.binance({
                 apiKey: process.env.API_KEY,
                 secret: process.env.API_SECRET,
-                options: { defaultType: "future", adjustForTimeDifference: true },
+                options: { defaultType: "spot", adjustForTimeDifference: true },
                 enableRateLimit: true,
                 timeout: 20000,
                 recvWindow: 10000
@@ -63,103 +63,22 @@ const createRuntimeExchangeBootstrapHelpers = ({
     };
 
     const detectPositionMode = async () => {
-        const exchange = getExchange();
-        const db = getDb();
-        try {
-            const result = await exchange.fetchPositionMode(db?.pair, { subType: "linear" });
-            const hedged = result?.hedged === true || result?.dualSidePosition === true;
-            const accountPositionMode = { hedged, label: hedged ? "HEDGE" : "ONE_WAY" };
-            setAccountPositionMode(accountPositionMode);
-            console.log(`[EXCHANGE][INFO] Position mode detected: ${accountPositionMode.label}`);
-            return accountPositionMode;
-        } catch (error) {
-            const fallbackMode = { hedged: false, label: "ONE_WAY" };
-            setAccountPositionMode(fallbackMode);
-            console.warn(`[EXCHANGE][WARN] Failed to detect position mode. Falling back to ONE_WAY. ${error.message}`);
-            return fallbackMode;
-        }
+        const spotMode = { hedged: false, label: "SPOT" };
+        setAccountPositionMode(spotMode);
+        console.log("[EXCHANGE][INFO] Spot mode enabled (no hedge/position side state).");
+        return spotMode;
     };
 
     const setMarginMode = async () => {
-        const exchange = getExchange();
-        const db = getDb();
-        try {
-            if (!db) return false;
-            const marginMode = (db.marginMode || "isolated").toLowerCase();
-            const openPositions = await fetchOpenExchangePositions();
-            if (openPositions.length > 0) {
-                console.log(`[MARGIN][INFO] Skipping margin mode update while ${openPositions.length} position(s) are open on ${db.pair}.`);
-                return false;
-            }
-            const managedOrders = await fetchManagedOpenOrdersSnapshot();
-            if (managedOrders.triggerOrdersFetchFailed) {
-                console.log(`[MARGIN][INFO] Skipping margin mode update because trigger open orders could not be verified on ${db.pair}.`);
-                return false;
-            }
-            const openOrderCount = managedOrders.grid.length + managedOrders.tp.length + managedOrders.sl.length;
-            if (openOrderCount > 0) {
-                console.log(`[MARGIN][INFO] Skipping margin mode update while ${openOrderCount} open managed order(s) exist on ${db.pair}.`);
-                return false;
-            }
-            await exchange.setMarginMode(marginMode, db.pair);
-            console.log(`[MARGIN][INFO] Margin mode set to: ${marginMode.toUpperCase()}`);
-            return true;
-        } catch (error) {
-            const errorCode = extractExchangeErrorCode(error);
-            const errorMessage = String(error?.message || error || "");
-            if (!errorMessage.includes("No need to change margin mode") && errorCode !== -4067) {
-                console.warn("[MARGIN][WARN] Margin mode warning:", errorMessage);
-            }
-            return false;
-        }
+        console.log("[MARGIN][INFO] Spot trading mode: margin configuration skipped.");
+        return true;
     };
 
     const setLeverage = async () => {
-        const exchange = getExchange();
         const db = getDb();
-        try {
-            if (!db) return false;
-            const symbol = db.pair;
-            const leverage = Math.max(1, Math.trunc(toFiniteNumber(db.leverage, 1)));
-            if (!symbol) return false;
-
-            const lastAppliedLeverageState = getLastAppliedLeverageState();
-            if (lastAppliedLeverageState.symbol === symbol && lastAppliedLeverageState.leverage === leverage) return true;
-
-            const openPositions = await fetchOpenExchangePositions();
-            if (openPositions.length > 0) {
-                console.log(`[LEVERAGE][INFO] Skipping leverage update while ${openPositions.length} position(s) are open on ${symbol}.`);
-                return false;
-            }
-
-            const managedOrders = await fetchManagedOpenOrdersSnapshot();
-            if (managedOrders.triggerOrdersFetchFailed) {
-                console.log(`[LEVERAGE][INFO] Skipping leverage update because trigger open orders could not be verified on ${symbol}.`);
-                return false;
-            }
-            const openOrderCount = managedOrders.grid.length + managedOrders.tp.length + managedOrders.sl.length;
-            if (openOrderCount > 0) {
-                console.log(`[LEVERAGE][INFO] Skipping leverage update while ${openOrderCount} open managed order(s) exist on ${symbol}.`);
-                return false;
-            }
-
-            await exchange.setLeverage(leverage, symbol);
-            setLastAppliedLeverageState({ symbol, leverage });
-            console.log(`[LEVERAGE][INFO] Leverage set to: ${leverage}x`);
-            return true;
-        } catch (error) {
-            const errorCode = extractExchangeErrorCode(error);
-            const errorMessage = String(error?.message || error || "");
-            if (!errorMessage.includes("No need to change leverage") && errorCode !== -4028) {
-                console.warn("[LEVERAGE][WARN] Leverage warning:", errorMessage);
-            } else {
-                setLastAppliedLeverageState({
-                    symbol: db?.pair || "",
-                    leverage: Math.max(1, Math.trunc(toFiniteNumber(db?.leverage, 1)))
-                });
-            }
-            return false;
-        }
+        if (db?.pair) setLastAppliedLeverageState({ symbol: db.pair, leverage: 1 });
+        console.log("[LEVERAGE][INFO] Spot trading mode: leverage fixed at 1x.");
+        return true;
     };
 
     return {
