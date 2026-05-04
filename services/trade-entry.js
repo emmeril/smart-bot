@@ -62,6 +62,7 @@ const createTradeEntryHelpers = ({
             }
             await setLeverage();
 
+            const spotPair = String(db.pair || "").split(":")[0];
             const tickerPrice = await getPrice(true);
             if (!Number.isFinite(tickerPrice) || tickerPrice <= 0) {
                 console.error("[ORDER][ERROR] Invalid ticker price. Order skipped.");
@@ -72,6 +73,7 @@ const createTradeEntryHelpers = ({
             const hasSignalPrice = Number(signalPrice) > 0;
             const entryPrice = hasSignalPrice ? Number(signalPrice) : tickerPrice;
             const qty = db.gridOrderSizeUsdt / entryPrice;
+            const market = exchange.markets[spotPair] || exchange.markets[db.pair];
             const market = exchange.markets[db.pair];
             const adjustedQty = formatAmountToMarketPrecision(db.pair, qty);
             const sizeValidation = validateOrderSize(market, adjustedQty, tickerPrice);
@@ -111,7 +113,7 @@ const createTradeEntryHelpers = ({
             }
 
             const order = await exchange.createOrder(
-                db.pair,
+                spotPair,
                 "market",
                 side,
                 adjustedQty,
@@ -139,7 +141,7 @@ const createTradeEntryHelpers = ({
                 console.error(`[ORDER][ERROR] Unable to derive a valid TP/SL plan after fill for ${side.toUpperCase()} order. Closing position to avoid unmanaged exposure.`);
                 try {
                     await exchange.createOrder(
-                        db.pair,
+                        spotPair,
                         "market",
                         closeSide,
                         actualQuantity,
