@@ -284,31 +284,36 @@ const createGridRuntimeHelpers = ({
     };
 
     const getMinimumGridOrderSizeUsdt = (market, referencePrice) => {
-        const db = getDb();
         const safeReferencePrice = toFiniteNumber(referencePrice, NaN);
         if (!Number.isFinite(safeReferencePrice) || safeReferencePrice <= 0) return 0;
-        const leverage = Math.max(1, toFiniteNumber(db.leverage, 1));
-        const minAmount = toFiniteNumber(market?.limits?.amount?.min, 0);
-        const minCost = toFiniteNumber(market?.limits?.cost?.min, 0);
-        const amountFloorUsdt = Number.isFinite(minAmount) && minAmount > 0 ? (minAmount * safeReferencePrice) / leverage : 0;
-        const costFloorUsdt = Number.isFinite(minCost) && minCost > 0 ? minCost / leverage : 0;
-        return Math.max(costFloorUsdt, amountFloorUsdt, 0);
+
+        const minAmount = toFiniteNumber(market?.limits?.amount?.min, NaN);
+        const minCost = toFiniteNumber(market?.limits?.cost?.min, NaN);
+        const filters = Array.isArray(market?.info?.filters) ? market.info.filters : [];
+        const minNotionalFilter = filters.find((filter) => String(filter?.filterType || '').toUpperCase() === 'MIN_NOTIONAL');
+        const notionalFilter = filters.find((filter) => String(filter?.filterType || '').toUpperCase() === 'NOTIONAL');
+        const minNotional = toFiniteNumber(
+            minCost,
+            toFiniteNumber(notionalFilter?.minNotional, toFiniteNumber(minNotionalFilter?.minNotional, NaN))
+        );
+
+        const amountFloorUsdt = Number.isFinite(minAmount) && minAmount > 0 ? (minAmount * safeReferencePrice) : 0;
+        const notionalFloorUsdt = Number.isFinite(minNotional) && minNotional > 0 ? minNotional : 0;
+        return Math.max(amountFloorUsdt, notionalFloorUsdt, 0);
     };
 
     const getMinimumValidatedGridOrderSizeUsdt = (market, referencePrice) => {
-        const db = getDb();
         const safeReferencePrice = toFiniteNumber(referencePrice, NaN);
         const baseMinimum = getMinimumGridOrderSizeUsdt(market, safeReferencePrice);
         if (!Number.isFinite(baseMinimum) || baseMinimum <= 0 || !market || !Number.isFinite(safeReferencePrice) || safeReferencePrice <= 0) {
             return Math.max(0, baseMinimum);
         }
 
-        const leverage = Math.max(1, toFiniteNumber(db.leverage, 1));
         let candidate = baseMinimum;
         const increment = Math.max(baseMinimum * 0.01, 0.01);
 
         for (let attempt = 0; attempt < 25; attempt++) {
-            const rawQty = (candidate * leverage) / safeReferencePrice;
+            const rawQty = candidate / safeReferencePrice;
             const quantity = formatAmountToMarketPrecision(db.pair, rawQty);
             const sizeValidation = validateOrderSize(market, quantity, safeReferencePrice);
             if (sizeValidation.valid) return candidate;
@@ -365,7 +370,7 @@ const createGridRuntimeHelpers = ({
             return { count: 0, maxConfigured, mode: configuredOrdersPerSide <= 0 ? "FULL_AUTO" : "CAPPED", reason: "INVALID_INPUT" };
         }
 
-        const rawQty = (safePerOrderMargin * Math.max(1, toFiniteNumber(db.leverage, 1))) / safeReferencePrice;
+        const rawQty = safePerOrderMargin / safeReferencePrice;
         const quantity = formatAmountToMarketPrecision(db.pair, rawQty);
         const sizeValidation = validateOrderSize(market, quantity, safeReferencePrice);
         if (!sizeValidation.valid) {
