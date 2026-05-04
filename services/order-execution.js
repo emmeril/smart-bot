@@ -76,11 +76,11 @@ const createOrderExecutionHelpers = ({
         const metrics = getMetrics();
         const db = getDb();
         const spotPair = String(db.pair || "").split(":")[0];
-        const market = exchange.markets[spotPair] || exchange.markets[db.pair];
+        const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
         const orderSizeUsdt = Math.max(0, toFiniteNumber(gridOrder?.orderSizeUsdt, db.gridOrderSizeUsdt));
         const rawQty = orderSizeUsdt / gridOrder.price;
         const quantity = formatAmountToMarketPrecision(db.pair, rawQty);
-        const sizeValidation = validateOrderSize(market, quantity, gridOrder.price);
+        const sizeValidation = validateOrderSize(marketInfo, quantity, gridOrder.price);
         if (!sizeValidation.valid) {
             console.warn(`[GRID][WARN] Skipping ${gridOrder.side.toUpperCase()} ${gridOrder.price}: ${sizeValidation.reason}`);
             return false;
@@ -163,8 +163,8 @@ const createOrderExecutionHelpers = ({
         if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
         const closeSide = position.side === "buy" ? "sell" : "buy";
         const quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
-        const market = exchange.markets[spotPair] || exchange.markets[db.pair];
-        const sizeValidation = validateOrderSize(market, quantity, position.targetPrice, { allowReduceOnlyClose: true });
+        const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
+        const sizeValidation = validateOrderSize(marketInfo, quantity, position.targetPrice, { allowReduceOnlyClose: true });
         if (!sizeValidation.valid) {
             console.warn(`[TP][WARN] Skipping TP placement: ${sizeValidation.reason}`);
             return null;
@@ -265,8 +265,8 @@ const createOrderExecutionHelpers = ({
         if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
         const closeSide = position.side === "buy" ? "sell" : "buy";
         const quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
-        const market = exchange.markets[spotPair] || exchange.markets[db.pair];
-        const sizeValidation = validateOrderSize(market, quantity, position.stopLossPrice, { allowReduceOnlyClose: true });
+        const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
+        const sizeValidation = validateOrderSize(marketInfo, quantity, position.stopLossPrice, { allowReduceOnlyClose: true });
         if (!sizeValidation.valid) {
             console.warn(`[SL][WARN] Skipping SL placement: ${sizeValidation.reason}`);
             return null;

@@ -73,10 +73,9 @@ const createTradeEntryHelpers = ({
             const hasSignalPrice = Number(signalPrice) > 0;
             const entryPrice = hasSignalPrice ? Number(signalPrice) : tickerPrice;
             const qty = db.gridOrderSizeUsdt / entryPrice;
-            const market = exchange.markets[spotPair] || exchange.markets[db.pair];
-            const market = exchange.markets[db.pair];
+            const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
             const adjustedQty = formatAmountToMarketPrecision(db.pair, qty);
-            const sizeValidation = validateOrderSize(market, adjustedQty, tickerPrice);
+            const sizeValidation = validateOrderSize(marketInfo, adjustedQty, tickerPrice);
             if (!sizeValidation.valid) {
                 console.error(sizeValidation.reason);
                 return;
