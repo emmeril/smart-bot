@@ -74,6 +74,7 @@ const createTradeEntryHelpers = ({
             const entryPrice = hasSignalPrice ? Number(signalPrice) : tickerPrice;
             const qty = db.gridOrderSizeUsdt / entryPrice;
             const market = exchange.markets[spotPair] || exchange.markets[db.pair];
+            const market = exchange.markets[db.pair];
             const adjustedQty = formatAmountToMarketPrecision(db.pair, qty);
             const sizeValidation = validateOrderSize(market, adjustedQty, tickerPrice);
             if (!sizeValidation.valid) {
