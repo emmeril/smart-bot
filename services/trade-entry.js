@@ -13,6 +13,7 @@ const createTradeEntryHelpers = ({
     matchesTrackedPositionSide,
     fetchManagedOpenOrdersSnapshot,
     setLeverage,
+    fetchSpotBalances,
     getPrice,
     parseSignalOrderData,
     formatAmountToMarketPrecision,
@@ -59,10 +60,7 @@ const createTradeEntryHelpers = ({
                 console.warn(`[ORDER][WARN] Skipping ${side.toUpperCase()} order because ${managedOrderCount} managed order(s) are still open on the exchange.`);
                 return;
             }
-            if (!(await setLeverage())) {
-                console.warn(`[ORDER][WARN] Skipping ${side.toUpperCase()} order because leverage ${db.leverage}x could not be confirmed on ${db.pair}.`);
-                return;
-            }
+            await setLeverage();
 
             const tickerPrice = await getPrice(true);
             if (!Number.isFinite(tickerPrice) || tickerPrice <= 0) {
@@ -73,12 +71,28 @@ const createTradeEntryHelpers = ({
             const { signalPrice, signalATR, strategyName, riskOverrides, signalTargetPrice, signalStopLossPrice, exitOptimization } = parseSignalOrderData(signalData);
             const hasSignalPrice = Number(signalPrice) > 0;
             const entryPrice = hasSignalPrice ? Number(signalPrice) : tickerPrice;
-            const qty = (db.gridOrderSizeUsdt * db.leverage) / entryPrice;
+            const qty = db.gridOrderSizeUsdt / entryPrice;
             const market = exchange.markets[db.pair];
             const adjustedQty = formatAmountToMarketPrecision(db.pair, qty);
             const sizeValidation = validateOrderSize(market, adjustedQty, tickerPrice);
             if (!sizeValidation.valid) {
                 console.error(sizeValidation.reason);
+                return;
+            }
+
+            const balances = typeof fetchSpotBalances === "function" ? await fetchSpotBalances() : null;
+            const [baseAssetRaw = "", quoteAssetRaw = ""] = String(db.pair || "").split("/");
+            const baseAsset = baseAssetRaw.trim();
+            const quoteAsset = quoteAssetRaw.split(":")[0].trim();
+            const quoteFree = Number(balances?.[quoteAsset]?.free ?? balances?.[quoteAsset] ?? NaN);
+            const baseFree = Number(balances?.[baseAsset]?.free ?? balances?.[baseAsset] ?? NaN);
+            const estimatedNotional = adjustedQty * tickerPrice;
+            if (side === "buy" && Number.isFinite(quoteFree) && quoteFree < estimatedNotional) {
+                console.warn(`[INVENTORY][WARN] Insufficient ${quoteAsset} balance for BUY. Required ${estimatedNotional}, available ${quoteFree}.`);
+                return;
+            }
+            if (side === "sell" && Number.isFinite(baseFree) && baseFree < adjustedQty) {
+                console.warn(`[INVENTORY][WARN] Insufficient ${baseAsset} balance for SELL. Required ${adjustedQty}, available ${baseFree}.`);
                 return;
             }
 
@@ -102,7 +116,7 @@ const createTradeEntryHelpers = ({
                 side,
                 adjustedQty,
                 undefined,
-                buildExchangeOrderParams({ side, positionSide: getOrderPositionSide(side) })
+                buildExchangeOrderParams({ side })
             );
             metrics.api.orders++;
 
@@ -130,11 +144,7 @@ const createTradeEntryHelpers = ({
                         closeSide,
                         actualQuantity,
                         undefined,
-                        buildExchangeOrderParams({
-                            side: closeSide,
-                            reduceOnly: true,
-                            positionSide: getOrderPositionSide(side)
-                        })
+                        buildExchangeOrderParams({ side: closeSide })
                     );
                     metrics.api.orders++;
                 } catch (closeError) {
@@ -158,10 +168,10 @@ const createTradeEntryHelpers = ({
                 entryTime: Date.now(),
                 highestSinceEntry: actualEntryPrice,
                 lowestSinceEntry: actualEntryPrice,
-                marginMode: (db.marginMode || "isolated").toLowerCase(),
-                positionSide: getOrderPositionSide(side),
+                settlementMode: "spot",
+                positionSide: "SPOT",
                 targetProfitUSDT: resolvedOrderPlan.targetProfitUSDT,
-                leverageAtEntry: toFiniteNumber(db.leverage, 1),
+                leverageAtEntry: 1,
                 trailingEnabled: resolvedOrderPlan.trailingEnabled,
                 atrAtEntry: signalATR,
                 strategy: strategyName,
@@ -176,7 +186,7 @@ const createTradeEntryHelpers = ({
             await saveDB();
             await ensureReduceOnlyTakeProfitOrder(targetPositionKey, getActivePositionByKey(targetPositionKey));
             await ensureReduceOnlyStopLossOrder(targetPositionKey, getActivePositionByKey(targetPositionKey));
-            logTrade(side === "buy" ? "LONG" : "SHORT", actualEntryPrice, null, "OPEN", 0, strategyName);
+            logTrade(side.toUpperCase(), actualEntryPrice, null, "OPEN", 0, strategyName);
             metrics.trades.opened++;
             console.log(`[ORDER][INFO] Placed ${side.toUpperCase()} order at ${actualEntryPrice}`);
         } catch (error) {
