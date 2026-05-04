@@ -273,15 +273,11 @@ const createOrderExecutionHelpers = ({
         }
         if (sizeValidation.warning) console.warn(`[SL][WARN] ${sizeValidation.warning}`);
 
-        const useClosePositionOrder = !isHedgeModeEnabled();
-        const params = buildExchangeOrderParams({
-            side: closeSide,
-            closePosition: useClosePositionOrder
-        });
+        const params = buildExchangeOrderParams({ side: closeSide });
         const clientOrderId = position?.slClientOrderId || getSlClientOrderId(position);
         params.newClientOrderId = clientOrderId;
         params.stopPrice = formatPriceToMarketPrecision(db.pair, position.stopLossPrice);
-        params.workingType = "MARK_PRICE";
+        const limitPrice = formatPriceToMarketPrecision(db.pair, position.side === "buy" ? position.stopLossPrice * 0.999 : position.stopLossPrice * 1.001);
 
         const existingOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
         if (existingOrder) {
@@ -300,15 +296,14 @@ const createOrderExecutionHelpers = ({
         try {
             const order = await exchange.createOrder(
                 spotPair,
-                "STOP_MARKET",
+                "STOP_LOSS_LIMIT",
                 closeSide,
-                useClosePositionOrder ? undefined : quantity,
-                undefined,
+                quantity,
+                limitPrice,
                 params
             );
             metrics.api.orders++;
-            const orderModeLabel = useClosePositionOrder ? "close-position STOP_MARKET" : "reduce-only STOP_MARKET";
-            console.log(`[SL][INFO] Placed ${orderModeLabel} ${closeSide.toUpperCase()} @ stop ${params.stopPrice} for qty ${useClosePositionOrder ? "FULL" : quantity}`);
+            console.log(`[SL][INFO] Placed STOP_LOSS_LIMIT ${closeSide.toUpperCase()} @ stop ${params.stopPrice} limit ${limitPrice} qty ${quantity}`);
             return attachClientOrderIdFallback(order, clientOrderId);
         } catch (error) {
             if (isDuplicateClientOrderIdError(error)) {
@@ -323,15 +318,14 @@ const createOrderExecutionHelpers = ({
                     try {
                         const retryOrder = await exchange.createOrder(
                             spotPair,
-                            "STOP_MARKET",
+                            "STOP_LOSS_LIMIT",
                             closeSide,
-                            useClosePositionOrder ? undefined : quantity,
-                            undefined,
+                            quantity,
+                            limitPrice,
                             params
                         );
                         metrics.api.orders++;
-                        const retryModeLabel = useClosePositionOrder ? "close-position STOP_MARKET" : "reduce-only STOP_MARKET";
-                        console.log(`[SL][INFO] Retry succeeded: placed ${retryModeLabel} ${closeSide.toUpperCase()} @ stop ${params.stopPrice}`);
+                        console.log(`[SL][INFO] Retry succeeded: placed STOP_LOSS_LIMIT ${closeSide.toUpperCase()} @ stop ${params.stopPrice} limit ${limitPrice}`);
                         return attachClientOrderIdFallback(retryOrder, clientOrderId);
                     } catch (retryError) {
                         console.error(`[SL][ERROR] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
@@ -345,10 +339,10 @@ const createOrderExecutionHelpers = ({
                 try {
                     const retryOrder = await exchange.createOrder(
                         spotPair,
-                        "STOP_MARKET",
+                        "STOP_LOSS_LIMIT",
                         closeSide,
-                        useClosePositionOrder ? undefined : quantity,
-                        undefined,
+                        quantity,
+                        limitPrice,
                         { ...params, newClientOrderId: replacementClientOrderId }
                     );
                     metrics.api.orders++;
