@@ -77,7 +77,7 @@ const createOrderExecutionHelpers = ({
         const db = getDb();
         const market = exchange.markets[db.pair];
         const orderSizeUsdt = Math.max(0, toFiniteNumber(gridOrder?.orderSizeUsdt, db.gridOrderSizeUsdt));
-        const rawQty = (orderSizeUsdt * db.leverage) / gridOrder.price;
+        const rawQty = orderSizeUsdt / gridOrder.price;
         const quantity = formatAmountToMarketPrecision(db.pair, rawQty);
         const sizeValidation = validateOrderSize(market, quantity, gridOrder.price);
         if (!sizeValidation.valid) {
@@ -86,8 +86,7 @@ const createOrderExecutionHelpers = ({
         }
 
         const params = buildExchangeOrderParams({
-            side: gridOrder.side,
-            positionSide: getOrderPositionSide(gridOrder.side)
+            side: gridOrder.side
         });
         params.newClientOrderId = gridOrder.clientOrderId;
 
@@ -171,9 +170,7 @@ const createOrderExecutionHelpers = ({
         if (sizeValidation.warning) console.warn(`[TP][WARN] ${sizeValidation.warning}`);
 
         const params = buildExchangeOrderParams({
-            side: closeSide,
-            reduceOnly: true,
-            positionSide: getClosePositionSide(position)
+            side: closeSide
         });
         const clientOrderId = position?.tpClientOrderId || getTpClientOrderId(position);
         params.newClientOrderId = clientOrderId;
@@ -276,8 +273,6 @@ const createOrderExecutionHelpers = ({
         const useClosePositionOrder = !isHedgeModeEnabled();
         const params = buildExchangeOrderParams({
             side: closeSide,
-            reduceOnly: !useClosePositionOrder,
-            positionSide: getClosePositionSide(position),
             closePosition: useClosePositionOrder
         });
         const clientOrderId = position?.slClientOrderId || getSlClientOrderId(position);
