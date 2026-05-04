@@ -1182,6 +1182,11 @@ const { placeOrder } = createTradeEntryHelpers({
     matchesTrackedPositionSide,
     fetchManagedOpenOrdersSnapshot,
     setLeverage: (...args) => setLeverage(...args),
+    fetchSpotBalances: async () => {
+        if (!exchange || typeof exchange.fetchBalance !== "function") return null;
+        const balance = await exchange.fetchBalance();
+        return balance?.free || balance || null;
+    },
     getPrice: (...args) => getPrice(...args),
     parseSignalOrderData,
     formatAmountToMarketPrecision,

@@ -28,29 +28,20 @@ const createRuntimePositionUtils = ({
     printOrderSample,
     printPositionLine
 }) => {
-    const buildExchangeOrderParams = ({ side, reduceOnly = false, positionSide, closePosition = false } = {}) => {
-        const params = {
-            newOrderRespType: "RESULT"
-        };
-        if (isHedgeModeEnabled()) {
-            const resolvedPositionSide = positionSide || getOrderPositionSide(side);
-            if (resolvedPositionSide && resolvedPositionSide !== "BOTH") params.positionSide = resolvedPositionSide;
-        } else if (closePosition) {
-            params.closePosition = true;
-        } else if (reduceOnly) {
-            params.reduceOnly = true;
-        }
-        return params;
-    };
+    const buildExchangeOrderParams = () => ({
+        newOrderRespType: "RESULT"
+    });
 
     const fetchOpenExchangePositions = async () => {
         const exchange = getExchange();
         const db = getDb();
         const metrics = getMetrics();
+        if (typeof exchange?.fetchPositions !== "function") return [];
         metrics.api.positions++;
-        const positions = await exchange.fetchPositions([db.pair]);
+        const pair = String(db?.pair || "").split(":")[0];
+        const positions = await exchange.fetchPositions([pair]);
         return positions.filter((position) => (
-            normalizeSymbol(position.symbol) === normalizeSymbol(db.pair) &&
+            normalizeSymbol(position.symbol) === normalizeSymbol(pair) &&
             Math.abs(getExchangePositionContracts(position)) > 0
         ));
     };
@@ -111,7 +102,6 @@ const createRuntimePositionUtils = ({
     };
 
     const calculatePositionPnL = (position, currentPrice, quantityOverride = null) => {
-        const db = getDb();
         const quantity = Number.isFinite(quantityOverride) ? quantityOverride : position.quantity;
         const exchangePnlSnapshot = !Number.isFinite(quantityOverride) ? position?.exchangePnlSnapshot : null;
         const hasFreshExchangePnl = exchangePnlSnapshot &&
@@ -134,8 +124,8 @@ const createRuntimePositionUtils = ({
             };
         }
 
-        const entryValue = position.entryPrice * quantity;
-        const leverageAtEntry = Math.max(1, toFiniteNumber(position?.leverageAtEntry, db.leverage));
+        const entryValue = Math.max(1e-8, position.entryPrice * quantity);
+        const leverageAtEntry = 1;
         const snapshotMarkPrice = toFiniteNumber(exchangePnlSnapshot?.markPrice, NaN);
         const priceSource = Number.isFinite(snapshotMarkPrice) && snapshotMarkPrice > 0
             ? snapshotMarkPrice
@@ -144,7 +134,7 @@ const createRuntimePositionUtils = ({
         const grossProfitUSDT = position.side === "buy"
             ? (priceSource - position.entryPrice) * quantity
             : (position.entryPrice - priceSource) * quantity;
-        const referenceInitialMargin = Math.max(entryValue / leverageAtEntry, 1e-8);
+        const referenceInitialMargin = entryValue;
         const profitPercent = (grossProfitUSDT / referenceInitialMargin) * 100;
         const displayProfitPercent = (grossProfitUSDT / referenceInitialMargin) * 100;
 
