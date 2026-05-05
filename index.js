@@ -1277,6 +1277,7 @@ const {
         registerRuntimeCommands();
     } catch (error) {
         console.error("[APP][ERROR] Bot startup failed:", error.message);
+        if (error?.stack) console.error("[APP][ERROR] Startup stack trace:\n" + error.stack);
         process.exit(1);
     }
 })();
