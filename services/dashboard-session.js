@@ -34,7 +34,9 @@ const createDashboardSessionHelpers = ({ username, password, sessionSecret, sess
 
     const verifyDashboardSessionToken = (token) => {
         if (!token || typeof token !== "string") return null;
-        const [payload, signature] = token.split(".");
+        const segments = token.split(".");
+        if (segments.length !== 2) return null;
+        const [payload, signature] = segments;
         if (!payload || !signature) return null;
         const expected = crypto.createHmac("sha256", sessionSecret).update(payload).digest("hex");
         if (!safeBufferEqual(signature, expected)) return null;
@@ -43,6 +45,7 @@ const createDashboardSessionHelpers = ({ username, password, sessionSecret, sess
             if (!parsed || parsed.u !== username) return null;
             const issuedAt = Number(parsed.iat);
             if (!Number.isFinite(issuedAt)) return null;
+            if (issuedAt > Date.now()) return null;
             if (Date.now() - issuedAt > sessionTtlMs) return null;
             return { username: parsed.u, issuedAt };
         } catch {
