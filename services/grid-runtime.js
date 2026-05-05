@@ -311,10 +311,11 @@ const createGridRuntimeHelpers = ({
 
         let candidate = baseMinimum;
         const increment = Math.max(baseMinimum * 0.01, 0.01);
+        const pair = market?.symbol || getDb()?.pair || null;
 
         for (let attempt = 0; attempt < 25; attempt++) {
             const rawQty = candidate / safeReferencePrice;
-            const quantity = formatAmountToMarketPrecision(db.pair, rawQty);
+            const quantity = pair ? formatAmountToMarketPrecision(pair, rawQty) : rawQty;
             const sizeValidation = validateOrderSize(market, quantity, safeReferencePrice);
             if (sizeValidation.valid) return candidate;
             candidate += increment;
