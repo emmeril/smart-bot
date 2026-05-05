@@ -166,13 +166,16 @@ const createDashboardStatusHelpers = ({
         };
     };
 
-    const buildDashboardPayload = () => ({
-        config: getDb() ? { ...getDb() } : getDefaultConfig(),
-        defaults: getDefaultConfig(),
-        schema: dashboardEditableFields,
-        status: buildDashboardStatus(),
-        serverTime: Date.now()
-    });
+    const buildDashboardPayload = () => {
+        const db = getDb();
+        return {
+            config: db ? { ...db } : getDefaultConfig(),
+            defaults: getDefaultConfig(),
+            schema: dashboardEditableFields,
+            status: buildDashboardStatus(),
+            serverTime: Date.now()
+        };
+    };
 
     return {
         buildDashboardStatus,
