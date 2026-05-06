@@ -38,11 +38,11 @@ const createRuntimeReportingHelpers = ({
         );
 
         console.log("\n" + "=".repeat(70));
-        console.log("BINANCE-STYLE FUTURES GRID BOT");
+        console.log("BINANCE-STYLE SPOT GRID BOT");
         console.log("=".repeat(70));
         console.log(`Balance: $${totalUSDT.toFixed(2)}`);
         console.log(`Pair: ${db.pair}`);
-        console.log(`Strategy: ${String(db.strategy || "futures_grid").toUpperCase()} on ${db.gridTimeframe}`);
+        console.log(`Strategy: ${String(db.strategy || "spot_grid").toUpperCase()} on ${db.gridTimeframe}`);
         console.log(`Preset Profile: ${gridSummary.presetName.toUpperCase()}`);
         console.log(`Position Mode: ${accountPositionMode.label}`);
         const gridLevelsLabel = gridSummary.gridLevelsMode === "AUTO"
@@ -68,8 +68,7 @@ const createRuntimeReportingHelpers = ({
         console.log(`Volume filter: ${db.minVolumeRatio}x over ${db.volumePeriod} periods`);
         console.log(`Session: ${db.sessionStartUTC}-${db.sessionEndUTC} UTC`);
         console.log(`Trailing ATR: ${formatTrailingLabel()}`);
-        console.log(`Leverage: ${db.leverage}x`);
-        console.log(`Margin Mode: ${String(db.marginMode || "isolated").toUpperCase()}`);
+        console.log(`Mode: ${String(db.marginMode || "spot").toUpperCase()}`);
         console.log(`Daily target: $${db.dailyProfitTargetUsdt} (max ${db.maxTradesPerDay} trades)`);
         console.log("=".repeat(70) + "\n");
     };

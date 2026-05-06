@@ -14,7 +14,7 @@ test("buildCloseNotificationMessage formats TP alerts with trading details", () 
             side: "buy",
             entryPrice: 100,
             quantity: 2,
-            strategy: "FUTURES_GRID",
+            strategy: "SPOT_GRID",
             symbol: "DOGE/USDT:USDT"
         },
         reason: "PROFIT_TARGET",
@@ -41,7 +41,7 @@ test("buildCloseNotificationMessage formats manual and sync-close alerts", () =>
             side: "sell",
             entryPrice: 100,
             quantity: 1,
-            strategy: "FUTURES_GRID",
+            strategy: "SPOT_GRID",
             symbol: "DOGE/USDT:USDT"
         },
         reason: "MANUAL_CLOSE",
@@ -56,7 +56,7 @@ test("buildCloseNotificationMessage formats manual and sync-close alerts", () =>
             side: "buy",
             entryPrice: 100,
             quantity: 1,
-            strategy: "FUTURES_GRID",
+            strategy: "SPOT_GRID",
             symbol: "DOGE/USDT:USDT"
         },
         reason: "POSITION_SYNC_REMOVED",

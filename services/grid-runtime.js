@@ -58,7 +58,6 @@ const createGridRuntimeHelpers = ({
     };
     const GRID_BUFFER_BASELINE = 0.14;
     const LEGACY_AUTO_PRESET_VALUES = {
-        leverage: [10, 8],
         gridTargetProfitUsdt: [0.5, 0.4, 0.35, 0.25],
         targetProfitAtrMultiplier: [0.75, 0.8, 0.7, 0.6],
         targetProfitMinUsdt: [0.25, 0.3, 0.2, 0.15],
@@ -165,7 +164,7 @@ const createGridRuntimeHelpers = ({
         const gridTakeProfitLevels = Math.max(0, Math.trunc(toFiniteNumber(db.gridTakeProfitLevels, defaultConfig.gridTakeProfitLevels)));
         const neededCandles = Math.max(gridLookbackCandles + 5, volumePeriod + 10, atrPeriod + 30, entryBbPeriod + 30, entryAdxPeriod + 40, 180);
         return {
-            strategy: "futures_grid",
+            strategy: "spot_grid",
             volumePeriod,
             atrPeriod,
             entryRsiPeriod,
@@ -717,7 +716,7 @@ const createGridRuntimeHelpers = ({
     const applyAutoPairGridPreset = (config, autoPairGridPresets) => {
         if (!config || typeof config !== "object") return { config, changed: false, presetName: null };
         const strategy = String(config.strategy || "").toLowerCase();
-        if (strategy && strategy !== "futures_grid") return { config, changed: false, presetName: null };
+        if (strategy && strategy !== "spot_grid") return { config, changed: false, presetName: null };
         const presets = autoPairGridPresets && typeof autoPairGridPresets === "object" ? autoPairGridPresets : {};
 
         const presetName = resolveAutoPairPresetName(config.pair);
@@ -742,8 +741,7 @@ const createGridRuntimeHelpers = ({
             }
         }
 
-        const rawMarginMode = typeof config.marginMode === "string" ? config.marginMode.trim().toLowerCase() : "";
-        if (validMarginModes.includes(rawMarginMode)) nextConfig.marginMode = rawMarginMode;
+        nextConfig.marginMode = "spot";
 
         const activeGridFingerprint = String(nextConfig.activeGridState?.fingerprint || "");
         const expectedGridFingerprint = buildGridStateFingerprintForConfig(nextConfig);
@@ -752,7 +750,7 @@ const createGridRuntimeHelpers = ({
             nextConfig.activeGridState = null;
         }
 
-        nextConfig.strategy = "futures_grid";
+        nextConfig.strategy = "spot_grid";
         return { config: nextConfig, changed, presetName };
     };
 

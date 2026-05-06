@@ -14,7 +14,7 @@ const createHelpers = ({ createOrderImpl, isHedgeModeEnabled = false } = {}) => 
     return createOrderExecutionHelpers({
         getExchange: () => exchange,
         getMetrics: () => ({ api: { orders: 0 } }),
-        getDb: () => ({ pair: "DOGE/USDT:USDT", leverage: 10 }),
+        getDb: () => ({ pair: "DOGE/USDT:USDT" }),
         isHedgeModeEnabled: () => isHedgeModeEnabled,
         toFiniteNumber: (value, fallback = NaN) => {
             const numeric = Number(value);
@@ -134,7 +134,7 @@ test("ensureReduceOnlyTakeProfitOrder serializes concurrent sync for the same po
             }
         }),
         getMetrics: () => ({ api: { orders: 0 } }),
-        getDb: () => ({ pair: "DOGE/USDT:USDT", leverage: 10 }),
+        getDb: () => ({ pair: "DOGE/USDT:USDT" }),
         isHedgeModeEnabled: () => false,
         toFiniteNumber: (value, fallback = NaN) => {
             const numeric = Number(value);

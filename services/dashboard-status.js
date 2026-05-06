@@ -40,8 +40,7 @@ const createDashboardStatusHelpers = ({
             lastDailyReset: toFiniteNumber(db?.lastDailyReset, 0),
             pair: db?.pair || defaultConfig.pair,
             strategy: db?.strategy || defaultConfig.strategy,
-            marginMode: db?.marginMode || defaultConfig.marginMode,
-            leverage: Math.max(1, Math.trunc(toFiniteNumber(db?.leverage, defaultConfig.leverage)))
+            marginMode: db?.marginMode || defaultConfig.marginMode
         };
     };
 

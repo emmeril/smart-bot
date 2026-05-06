@@ -113,12 +113,12 @@ const createRuntimeMarketDataHelpers = ({
     const logTrade = (side, entry, exit, status, pnl = 0, strategyOverride = null) => {
         const db = getDb();
         try {
-            ensureFileExists(logPath, "timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy\n");
+            ensureFileExists(logPath, "timestamp,pair,side,entry,exit,status,pnl,trade_mode,stop_loss_percent,strategy\n");
             const timestamp = new Date().toISOString();
             const parsedTime = Date.parse(timestamp);
             setLastTradeAt(Number.isFinite(parsedTime) ? parsedTime : Date.now());
-            const marginMode = (db.marginMode || "isolated").toUpperCase();
-            const strategy = strategyOverride || getPrimaryActivePosition()?.strategy || `FUTURES_GRID_${String(db.gridTimeframe || "5m").toUpperCase()}`;
+            const tradeMode = (db.marginMode || "spot").toUpperCase();
+            const strategy = strategyOverride || getPrimaryActivePosition()?.strategy || `SPOT_GRID_${String(db.gridTimeframe || "5m").toUpperCase()}`;
             const line = [
                 timestamp,
                 escapeCsvField(db.pair),
@@ -127,8 +127,7 @@ const createRuntimeMarketDataHelpers = ({
                 escapeCsvField(exit || ""),
                 escapeCsvField(status),
                 escapeCsvField(pnl.toFixed(4)),
-                escapeCsvField(db.leverage),
-                escapeCsvField(marginMode),
+                escapeCsvField(tradeMode),
                 escapeCsvField(db.gridStopLossPercent),
                 escapeCsvField(strategy)
             ].join(",") + "\n";

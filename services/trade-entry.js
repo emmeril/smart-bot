@@ -12,7 +12,6 @@ const createTradeEntryHelpers = ({
     isHedgeModeEnabled,
     matchesTrackedPositionSide,
     fetchManagedOpenOrdersSnapshot,
-    setLeverage,
     fetchSpotBalances,
     getPrice,
     parseSignalOrderData,
@@ -60,7 +59,6 @@ const createTradeEntryHelpers = ({
                 console.warn(`[ORDER][WARN] Skipping ${side.toUpperCase()} order because ${managedOrderCount} managed order(s) are still open on the exchange.`);
                 return;
             }
-            await setLeverage();
 
             const spotPair = String(db.pair || "").split(":")[0];
             const tickerPrice = await getPrice(true);
@@ -172,7 +170,6 @@ const createTradeEntryHelpers = ({
                 settlementMode: "spot",
                 positionSide: "SPOT",
                 targetProfitUSDT: resolvedOrderPlan.targetProfitUSDT,
-                leverageAtEntry: 1,
                 trailingEnabled: resolvedOrderPlan.trailingEnabled,
                 atrAtEntry: signalATR,
                 strategy: strategyName,

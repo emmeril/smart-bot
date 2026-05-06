@@ -76,7 +76,6 @@ let lastGridExposureLogKey = "";
 let lastGridSizingSkipLogAt = 0;
 let lastGridSizingSkipReason = "";
 let hasLoggedTriggerOrderFetchFallback = false;
-let lastAppliedLeverageState = { symbol: "", leverage: 0 };
 const gridSizingStateLogCache = new Map();
 let isShuttingDown = false;
 let accountPositionMode = { hedged: false, label: "ONE_WAY" };
@@ -505,6 +504,11 @@ const {
     getOrderTriggerPrice: (...args) => getOrderTriggerPrice(...args),
     isManagedOrderPriceMatch: (...args) => isManagedOrderPriceMatch(...args),
     getPositionSyncQtyTolerance: () => POSITION_SYNC_QTY_TOLERANCE,
+    fetchSpotBalances: async () => {
+        if (!exchange || typeof exchange.fetchBalance !== "function") return null;
+        const balance = await exchange.fetchBalance();
+        return balance?.free || balance || null;
+    },
     upsertActivePosition: (...args) => upsertActivePosition(...args),
     saveDB: (...args) => saveDB(...args),
     cancelTpOrders,
@@ -807,7 +811,6 @@ const {
     initializeExchange: (...args) => initializeExchange(...args),
     detectPositionMode: (...args) => detectPositionMode(...args),
     setMarginMode: (...args) => setMarginMode(...args),
-    setLeverage: (...args) => setLeverage(...args),
     syncPositionWithExchange: (...args) => syncPositionWithExchange(...args),
     startPnLMonitoring: (...args) => startPnLMonitoring(...args),
     startPositionSync: (...args) => startPositionSync(...args),
@@ -910,7 +913,6 @@ const {
     syncExchangeRuntimeSettings: async () => {
         if (!exchange) return;
         await setMarginMode();
-        await setLeverage();
     },
     buildDashboardPayload
 });
@@ -935,8 +937,7 @@ const { startWebDashboard } = createRuntimeDashboardHelpers({
 
 const AUTO_PAIR_GRID_PRESETS = {
     universal: {
-        strategy: "futures_grid",
-        leverage: 6,
+        strategy: "spot_grid",
         gridTargetProfitUsdt: 0.5,
         autoTargetProfitEnabled: true,
         targetProfitAtrMultiplier: 2.4,
@@ -1043,9 +1044,6 @@ const syncPositionWithExchange = async () => {
             getPositionMapKeys(nextPositionsMap).forEach((key) => {
                 if (!currentPositionsMap[key]) return;
                 currentPositionsMap[key].exchangePnlSnapshot = nextPositionsMap[key].exchangePnlSnapshot;
-                if (Number.isFinite(nextPositionsMap[key].leverageAtEntry)) {
-                    currentPositionsMap[key].leverageAtEntry = nextPositionsMap[key].leverageAtEntry;
-                }
             });
             setActivePositionsMap(currentPositionsMap);
             for (const [positionKey, currentPosition] of Object.entries(currentPositionsMap)) {
@@ -1082,16 +1080,13 @@ const syncPositionWithExchange = async () => {
 const {
     initializeExchange,
     detectPositionMode,
-    setMarginMode,
-    setLeverage
+    setMarginMode
 } = createRuntimeExchangeBootstrapHelpers({
     getDb: () => db,
     getExchange: () => exchange,
     setExchange: (value) => { exchange = value; },
     getAccountPositionMode: () => accountPositionMode,
     setAccountPositionMode: (value) => { accountPositionMode = value; },
-    getLastAppliedLeverageState: () => lastAppliedLeverageState,
-    setLastAppliedLeverageState: (value) => { lastAppliedLeverageState = value; },
     toFiniteNumber,
     sleep,
     extractExchangeErrorCode,
@@ -1181,7 +1176,6 @@ const { placeOrder } = createTradeEntryHelpers({
     fetchOpenExchangePositions: (...args) => fetchOpenExchangePositions(...args),
     matchesTrackedPositionSide,
     fetchManagedOpenOrdersSnapshot,
-    setLeverage: (...args) => setLeverage(...args),
     fetchSpotBalances: async () => {
         if (!exchange || typeof exchange.fetchBalance !== "function") return null;
         const balance = await exchange.fetchBalance();

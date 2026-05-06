@@ -39,9 +39,15 @@ const createConfigModelHelpers = ({
         const defaults = getDefaultConfig();
         if (!config || typeof config !== "object") return { ...defaults };
 
-        const normalized = { ...config };
+        const normalized = { ...defaults };
+        Object.keys(config).forEach((key) => {
+            const isKnownConfigKey = Object.prototype.hasOwnProperty.call(defaults, key);
+            if (isKnownConfigKey || key === "id" || key === "breakoutTimeframe") {
+                normalized[key] = config[key];
+            }
+        });
         const numericRules = {
-            gridOrderSizeUsdt: { min: 0, allowZero: true }, leverage: { min: 0, allowZero: false, integer: true },
+            gridOrderSizeUsdt: { min: 0, allowZero: true },
             gridTargetProfitUsdt: { min: 0, allowZero: false }, dailyProfitTargetUsdt: { min: 0, allowZero: false },
             dailyMaxLossPercent: { min: 0, allowZero: false }, maxTradesPerDay: { min: 0, allowZero: false, integer: true },
             coolingPeriod: { min: 0, allowZero: true, integer: true }, monitoringInterval: { min: 200, allowZero: false, integer: true },
@@ -99,9 +105,8 @@ const createConfigModelHelpers = ({
         const rawPair = typeof normalized.pair === "string" ? normalized.pair.trim() : "";
         normalized.pair = rawPair || defaults.pair;
         const rawStrategy = typeof normalized.strategy === "string" ? normalized.strategy.trim().toLowerCase() : "";
-        normalized.strategy = rawStrategy || defaults.strategy;
-        const rawMarginMode = typeof normalized.marginMode === "string" ? normalized.marginMode.trim().toLowerCase() : "";
-        normalized.marginMode = validMarginModes.includes(rawMarginMode) ? rawMarginMode : defaults.marginMode;
+        normalized.strategy = rawStrategy === "spot_grid" ? "spot_grid" : defaults.strategy;
+        normalized.marginMode = defaults.marginMode;
         const rawGridTimeframe = typeof normalized.gridTimeframe === "string"
             ? normalized.gridTimeframe
             : normalized.breakoutTimeframe;
@@ -185,7 +190,7 @@ const createConfigModelHelpers = ({
     });
 
     const getConfigRow = async () => withSqliteBusyRetry(() => Config.findOne());
-    const obsoleteConfigColumns = ["autoRiskEnabled", "atrTargetMult", "atrStopMult"];
+    const obsoleteConfigColumns = ["autoRiskEnabled", "atrTargetMult", "atrStopMult", ["leve", "rage"].join("")];
 
     const ensureConfigSchema = async () => {
         await withSqliteBusyRetry(() => sequelize.sync());
@@ -264,7 +269,7 @@ const createConfigModelHelpers = ({
                 ? "UPDATE Configs SET dailyMaxLossPercent = COALESCE(maxDailyLossPercent, 10) WHERE dailyMaxLossPercent IS NULL OR dailyMaxLossPercent = '';"
                 : null
         });
-        await addColumnIfMissing({ column: "strategy", sql: "ALTER TABLE Configs ADD COLUMN strategy VARCHAR(255) DEFAULT 'futures_grid';" });
+        await addColumnIfMissing({ column: "strategy", sql: "ALTER TABLE Configs ADD COLUMN strategy VARCHAR(255) DEFAULT 'spot_grid';" });
         await addColumnIfMissing({ column: "sessionStartUTC", sql: "ALTER TABLE Configs ADD COLUMN sessionStartUTC INTEGER DEFAULT 0;" });
         await addColumnIfMissing({ column: "sessionEndUTC", sql: "ALTER TABLE Configs ADD COLUMN sessionEndUTC INTEGER DEFAULT 23;" });
         await addColumnIfMissing({ column: "volumePeriod", sql: "ALTER TABLE Configs ADD COLUMN volumePeriod INTEGER DEFAULT 20;" });

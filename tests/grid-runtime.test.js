@@ -7,7 +7,6 @@ test("filterGridOrdersForActiveExposure keeps only the active side in one-way mo
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({
             pair: "DOGE/USDT:USDT",
-            leverage: 10,
             gridLevels: 8,
             gridOrdersPerSide: 2,
             gridOrderSizeUsdt: 5
@@ -64,7 +63,6 @@ test("filterGridOrdersForActiveExposure keeps both sides in hedge mode", () => {
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({
             pair: "DOGE/USDT:USDT",
-            leverage: 10,
             gridLevels: 8,
             gridOrdersPerSide: 2,
             gridOrderSizeUsdt: 5
@@ -121,7 +119,6 @@ test("resolveEffectiveGridLevels keeps manual values and derives sane automatic 
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({
             pair: "DOGE/USDT:USDT",
-            leverage: 10,
             gridLevels: 0,
             gridOrdersPerSide: 2,
             gridOrderSizeUsdt: 5,
@@ -211,7 +208,6 @@ test("resolveEffectiveGridRangePercent and entry buffer use universal normalized
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({
             pair: "DOGE/USDT:USDT",
-            leverage: 10,
             gridLevels: 0,
             gridOrdersPerSide: 2,
             gridOrderSizeUsdt: 5,
@@ -286,7 +282,6 @@ test("applyAutoPairGridPreset clears stale activeGridState when fingerprint only
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({
             pair: "DOGE/USDT:USDT",
-            leverage: 10,
             gridLevels: 2,
             gridOrdersPerSide: 2,
             gridOrderSizeUsdt: 5,
@@ -337,7 +332,7 @@ test("applyAutoPairGridPreset clears stale activeGridState when fingerprint only
     });
 
     const result = helpers.applyAutoPairGridPreset({
-        strategy: "futures_grid",
+        strategy: "spot_grid",
         pair: "DOGE/USDT:USDT",
         marginMode: "isolated",
         gridLevels: 2,

@@ -25,6 +25,7 @@ const createOrderExecutionHelpers = ({
     getOrderTriggerPrice,
     isManagedOrderPriceMatch,
     getPositionSyncQtyTolerance,
+    fetchSpotBalances,
     upsertActivePosition,
     saveDB,
     cancelTpOrders,
@@ -83,6 +84,22 @@ const createOrderExecutionHelpers = ({
         const sizeValidation = validateOrderSize(marketInfo, quantity, gridOrder.price);
         if (!sizeValidation.valid) {
             console.warn(`[GRID][WARN] Skipping ${gridOrder.side.toUpperCase()} ${gridOrder.price}: ${sizeValidation.reason}`);
+            return false;
+        }
+
+        const balances = typeof fetchSpotBalances === "function" ? await fetchSpotBalances() : null;
+        const [baseAssetRaw = "", quoteAssetRaw = ""] = String(db.pair || "").split("/");
+        const baseAsset = baseAssetRaw.trim();
+        const quoteAsset = quoteAssetRaw.split(":")[0].trim();
+        const quoteFree = Number(balances?.[quoteAsset]?.free ?? balances?.[quoteAsset] ?? NaN);
+        const baseFree = Number(balances?.[baseAsset]?.free ?? balances?.[baseAsset] ?? NaN);
+        const estimatedNotional = quantity * gridOrder.price;
+        if (gridOrder.side === "buy" && Number.isFinite(quoteFree) && quoteFree < estimatedNotional) {
+            console.warn(`[GRID][WARN] Skipping BUY grid order because ${quoteAsset} balance is insufficient.`);
+            return false;
+        }
+        if (gridOrder.side === "sell" && Number.isFinite(baseFree) && baseFree < quantity) {
+            console.warn(`[GRID][WARN] Skipping SELL grid order because ${baseAsset} balance is insufficient.`);
             return false;
         }
 

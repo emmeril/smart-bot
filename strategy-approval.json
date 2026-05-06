@@ -36,7 +36,6 @@
   "approvedConfig": {
     "strategy": "pullback",
     "usdtPerTrade": 10,
-    "leverage": 10,
     "targetProfitUSDT": 0.5,
     "targetDailyProfit": 1,
     "maxDailyLossPercent": 10,
@@ -120,7 +119,6 @@
       "approvedConfig": {
         "strategy": "pullback",
         "usdtPerTrade": 10,
-        "leverage": 10,
         "targetProfitUSDT": 0.5,
         "targetDailyProfit": 1,
         "maxDailyLossPercent": 10,

@@ -35,7 +35,7 @@ test("closePosition keeps remaining position active after a partial close and re
         stopLossPrice: 95,
         targetProfitUSDT: 20,
         stopLossUSDT: -10,
-        strategy: "FUTURES_GRID"
+        strategy: "SPOT_GRID"
     };
 
     let fetchPositionsCall = 0;
@@ -323,7 +323,7 @@ test("finalizeClosedPosition sends a TP notification after a successful close", 
         entryPrice: 100,
         entryTime: 1000,
         orderId: "open-order",
-        strategy: "FUTURES_GRID"
+        strategy: "SPOT_GRID"
     };
 
     const helpers = createPositionLifecycleHelpers({
@@ -412,7 +412,7 @@ test("finalizeClosedPosition sends a manual close notification after a successfu
         entryPrice: 100,
         entryTime: 1000,
         orderId: "open-order",
-        strategy: "FUTURES_GRID"
+        strategy: "SPOT_GRID"
     };
 
     const helpers = createPositionLifecycleHelpers({
@@ -500,7 +500,7 @@ test("clearMissingPositionState sends a sync notification when a tracked positio
         entryPrice: 100,
         entryTime: 1000,
         orderId: "open-order",
-        strategy: "FUTURES_GRID"
+        strategy: "SPOT_GRID"
     };
 
     const helpers = createPositionLifecycleHelpers({

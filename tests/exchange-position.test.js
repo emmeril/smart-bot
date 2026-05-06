@@ -15,7 +15,6 @@ test("buildSyncedActivePosition preserves existing exit plan when quantity and e
         getExchangeClientOrderId: (order) => String(order?.clientOrderId || ""),
         getDb: () => ({
             pair: "DOGE/USDT:USDT",
-            leverage: 10,
             marginMode: "isolated",
             trailingEnabled: true,
             trailingActivateATR: 1.2,
@@ -43,12 +42,11 @@ test("buildSyncedActivePosition preserves existing exit plan when quantity and e
         stopLossPrice: 96,
         targetProfitUSDT: 22,
         stopLossUSDT: -8,
-        strategy: "FUTURES_GRID",
+        strategy: "SPOT_GRID",
         trailingEnabled: false,
         trailingActivateATR: 2,
         trailingOffsetATR: 1,
         atrAtEntry: 1.5,
-        leverageAtEntry: 10,
         highestSinceEntry: 108,
         lowestSinceEntry: 99,
         entryTime: 1234567890
@@ -61,7 +59,6 @@ test("buildSyncedActivePosition preserves existing exit plan when quantity and e
             contracts: 2,
             entryPrice: 100,
             markPrice: 105,
-            leverage: 10,
             unrealizedPnl: 10
         },
         100,
@@ -76,7 +73,7 @@ test("buildSyncedActivePosition preserves existing exit plan when quantity and e
     assert.equal(synced.trailingEnabled, false);
     assert.equal(synced.trailingActivateATR, 2);
     assert.equal(synced.trailingOffsetATR, 1);
-    assert.equal(synced.strategy, "FUTURES_GRID");
+    assert.equal(synced.strategy, "SPOT_GRID");
 });
 
 test("shouldRefreshSyncedPosition returns true when quantity changes beyond sync tolerance", () => {
@@ -91,7 +88,6 @@ test("shouldRefreshSyncedPosition returns true when quantity changes beyond sync
         getExchangeClientOrderId: (order) => String(order?.clientOrderId || ""),
         getDb: () => ({
             pair: "DOGE/USDT:USDT",
-            leverage: 10,
             marginMode: "isolated"
         }),
         getSignalParameters: () => ({ gridLevels: 8, gridTakeProfitLevels: 0, gridStopLossLevels: 0 }),

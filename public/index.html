@@ -945,7 +945,7 @@
       <div class="brand">
         <div class="brand-mark">SB</div>
         <div class="brand-copy">
-          <strong>Smart Bot Futures Grid</strong>
+          <strong>Smart Bot Spot Grid</strong>
           <span>Trading console untuk runtime, posisi, dan konfigurasi live</span>
         </div>
       </div>
@@ -963,7 +963,7 @@
         <h1>Kontrol trading yang ringkas dan mudah dipindai.</h1>
         <p class="lede">Pantau runtime, periksa posisi aktif, dan sesuaikan konfigurasi dari satu dashboard dengan fokus pada informasi yang paling penting.</p>
         <div class="hero-badges">
-          <span class="signal-chip">Strategy <strong>futures_grid</strong></span>
+          <span class="signal-chip">Strategy <strong>spot_grid</strong></span>
           <span class="signal-chip">Exchange <strong>Binance USDT-M</strong></span>
           <span class="signal-chip">Mode <strong id="heroMode">Syncing...</strong></span>
         </div>
@@ -981,7 +981,7 @@
     <section class="panel status-strip">
       <div class="status-item"><span class="status-label">Status bot</span><strong id="botStatus">Memuat...</strong></div>
       <div class="status-item"><span class="status-label">Pair aktif</span><strong id="pairStatus">-</strong></div>
-      <div class="status-item"><span class="status-label">Mode margin</span><strong id="marginStatus">-</strong></div>
+      <div class="status-item"><span class="status-label">Mode trading</span><strong id="marginStatus">-</strong></div>
       <div class="status-item"><span class="status-label">Terakhir update</span><strong id="updatedStatus">-</strong></div>
     </section>
 
@@ -1016,7 +1016,7 @@
       <article class="terminal-card">
         <h3>Bot Signals</h3>
         <div class="terminal-badges">
-          <span class="signal-chip">Leverage <strong id="signalLeverage">-</strong></span>
+          <span class="signal-chip">Trade mode <strong id="signalLeverage">-</strong></span>
           <span class="signal-chip">Position mode <strong id="signalPositionMode">-</strong></span>
           <span class="signal-chip">Grid state <strong id="signalGridState">-</strong></span>
           <span class="signal-chip">Exchange <strong id="signalExchange">-</strong></span>
@@ -1259,9 +1259,8 @@
       const exchangeHealthy = Boolean(status.exchangeHealthy);
       const needsRecoverySync = Boolean(status.needsRecoverySync);
       const gridState = status.activeGridState ? "Active" : "Idle";
-      const leverageValue = Number.isFinite(Number(status.leverage)) ? `${formatNumber(status.leverage)}x` : "-";
       const positionModeValue = status.positionMode || "-";
-      const marginModeValue = String(status.marginMode || "-").toUpperCase();
+      const tradeModeValue = String(status.marginMode || "spot").toUpperCase();
       const runtimeStatus = getRuntimeStatusSummary(status);
       const exchangeLabel = !exchangeConnected
         ? "Offline"
@@ -1270,7 +1269,7 @@
         { label: "Bot", value: runtimeStatus.label, note: runtimeStatus.description },
         { label: "Positions", value: String(status.activePositions), note: status.activeGridState ? "Grid state active" : "No local grid state" },
         { label: "Realized PnL", value: `${formatNumber(status.dailyPnL)} USDT`, note: `${status.dailyTrades} trades today | ${String(status.dailyPnlSource || "local").toLowerCase()}` },
-        { label: "Leverage", value: leverageValue, note: `${marginModeValue} | ${positionModeValue}` }
+        { label: "Mode", value: tradeModeValue, note: positionModeValue }
       ];
       statusCards.innerHTML = cards.map((card) => `
         <article class="metric-card">
@@ -1282,17 +1281,17 @@
       botStatus.textContent = runtimeStatus.label;
       botStatus.className = formatPill(runtimeStatus.label);
       pairStatus.textContent = status.pair || "-";
-      marginStatus.textContent = `${marginModeValue} / ${positionModeValue}`;
+      marginStatus.textContent = `${tradeModeValue} / ${positionModeValue}`;
       updatedStatus.textContent = formatDateTime(status.lastUpdated);
       topbarStatus.textContent = runtimeStatus.label === "Running" ? "Runtime bot aktif" : runtimeStatus.label;
-      topbarMeta.textContent = `${status.pair || "-"} | ${marginModeValue} | ${exchangeLabel}${status.exchangeRecoveryReason ? ` | ${status.exchangeRecoveryReason}` : ""}`;
-      heroMode.textContent = `${marginModeValue} / ${positionModeValue}`;
+      topbarMeta.textContent = `${status.pair || "-"} | ${tradeModeValue} | ${exchangeLabel}${status.exchangeRecoveryReason ? ` | ${status.exchangeRecoveryReason}` : ""}`;
+      heroMode.textContent = `${tradeModeValue} / ${positionModeValue}`;
       runtimePair.textContent = status.pair || "-";
       runtimeEngine.textContent = runtimeStatus.label;
       runtimeEngine.className = formatPill(runtimeStatus.label);
       runtimePositions.textContent = String(status.activePositions ?? "-");
       runtimeTrades.textContent = String(status.dailyTrades ?? "-");
-      signalLeverage.textContent = leverageValue;
+      signalLeverage.textContent = tradeModeValue;
       signalPositionMode.textContent = positionModeValue;
       signalGridState.textContent = gridState;
       signalExchange.textContent = exchangeLabel;

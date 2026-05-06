@@ -1,4 +1,4 @@
-const createRuntimeSchedulerHelpers = ({ initializeExchange, detectPositionMode, setMarginMode, setLeverage, syncPositionWithExchange, startPnLMonitoring, startPositionSync, startMetricsReporting, startConfigAutoReload, shutdown }) => {
+const createRuntimeSchedulerHelpers = ({ initializeExchange, detectPositionMode, setMarginMode, syncPositionWithExchange, startPnLMonitoring, startPositionSync, startMetricsReporting, startConfigAutoReload, shutdown }) => {
     const configureRecurringTask = (currentTimer, currentInterval, desiredInterval, label, callback, assignTimer, assignInterval) => {
         if (currentTimer && currentInterval === desiredInterval) return currentTimer;
         if (currentTimer) {
@@ -21,7 +21,6 @@ const createRuntimeSchedulerHelpers = ({ initializeExchange, detectPositionMode,
         await initializeExchange();
         await detectPositionMode();
         await setMarginMode();
-        await setLeverage();
         await syncPositionWithExchange();
         startPnLMonitoring();
         startPositionSync();

@@ -5,8 +5,7 @@ const { createTradeLogicHelpers } = require("../services/trade-logic");
 
 test("buildOrderPlan derives stop loss from actual position margin when auto size is enabled", () => {
     const db = {
-        pair: "DOGE/USDT:USDT",
-        leverage: 10,
+        pair: "DOGE/USDT",
         gridOrderSizeUsdt: 0,
         gridTargetProfitUsdt: 0.5,
         gridStopLossPercent: 5,
@@ -32,15 +31,14 @@ test("buildOrderPlan derives stop loss from actual position margin when auto siz
 
     const orderPlan = helpers.buildOrderPlan("buy", 100, 2, NaN, {}, {});
 
-    assert.equal(orderPlan.stopLossUSDT, -1);
-    assert.equal(orderPlan.stopLossPrice, 99.5);
+    assert.equal(orderPlan.stopLossUSDT, -10);
+    assert.equal(orderPlan.stopLossPrice, 95);
     assert.equal(orderPlan.targetPrice, 100.25);
 });
 
 test("buildOrderPlan normalizes ATR stop distance and reward-risk target across assets", () => {
     const db = {
-        pair: "BTC/USDT:USDT",
-        leverage: 10,
+        pair: "BTC/USDT",
         gridOrderSizeUsdt: 0,
         gridTargetProfitUsdt: 0.5,
         gridStopLossPercent: 5,
@@ -75,16 +73,15 @@ test("buildOrderPlan normalizes ATR stop distance and reward-risk target across 
 
     assert.equal(orderPlan.stopLossMode, "AUTO_ATR");
     assert.equal(orderPlan.targetProfitMode, "AUTO_RR_ATR");
-    assert.equal(orderPlan.stopLossPrice, 97);
-    assert.equal(orderPlan.targetPrice, 106);
-    assert.equal(orderPlan.stopLossUSDT, -3);
-    assert.equal(orderPlan.targetProfitUSDT, 6);
+    assert.equal(orderPlan.stopLossPrice, 95);
+    assert.equal(orderPlan.targetPrice, 110);
+    assert.equal(orderPlan.stopLossUSDT, -5);
+    assert.equal(orderPlan.targetProfitUSDT, 10);
 });
 
 test("buildOrderPlan uses optimization context when provided by the live signal", () => {
     const db = {
         pair: "BTC/USDT:USDT",
-        leverage: 10,
         gridOrderSizeUsdt: 0,
         gridTargetProfitUsdt: 0.5,
         gridStopLossPercent: 5,

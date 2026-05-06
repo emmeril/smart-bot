@@ -14,7 +14,7 @@ const createTradeLogicHelpers = ({
     const normalizeSignalOrderDefaults = (signalData) => ({
         signalPrice: signalData,
         signalATR: null,
-        strategyName: "FUTURES_GRID",
+        strategyName: "SPOT_GRID",
         riskOverrides: {},
         signalTargetPrice: null,
         signalStopLossPrice: null,
@@ -28,7 +28,7 @@ const createTradeLogicHelpers = ({
         return {
             signalPrice: signalData.price,
             signalATR: toFiniteNumber(signalData.atr, null),
-            strategyName: signalData.strategy ? String(signalData.strategy) : "FUTURES_GRID",
+            strategyName: signalData.strategy ? String(signalData.strategy) : "SPOT_GRID",
             riskOverrides: signalData.riskOverrides || {},
             signalTargetPrice: toFiniteNumber(signalData.targetPrice, null),
             signalStopLossPrice: toFiniteNumber(signalData.stopLossPrice, null),
@@ -64,22 +64,21 @@ const createTradeLogicHelpers = ({
         return Number.isFinite(roundedPrice) ? roundedPrice : price;
     };
 
-    const resolvePriceDistanceFromMarginRiskPercent = (entryPrice, leverage, marginRiskPercent) => {
+    const resolvePriceDistanceFromRiskPercent = (entryPrice, riskPercent) => {
         if (!Number.isFinite(entryPrice) || entryPrice <= 0) return NaN;
-        return entryPrice * (Math.abs(marginRiskPercent) / 100) / Math.max(1, leverage);
+        return entryPrice * (Math.abs(riskPercent) / 100);
     };
 
-    const resolveMarginRiskPercentFromPriceDistance = (entryPrice, leverage, priceDistance) => {
+    const resolveRiskPercentFromPriceDistance = (entryPrice, priceDistance) => {
         if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(priceDistance) || priceDistance <= 0) return NaN;
-        return (priceDistance / entryPrice) * Math.max(1, leverage) * 100;
+        return (priceDistance / entryPrice) * 100;
     };
 
     const resolveStopLossPlan = (signalATR, entryPrice, adjustedQty) => {
         const db = getDb();
-        const leverage = Math.max(1, toFiniteNumber(db.leverage, 1));
         const baseStopLossPercent = Math.max(0, toFiniteNumber(db.gridStopLossPercent, 5));
         const atrValue = Math.abs(toFiniteNumber(signalATR, NaN));
-        const staticStopLossDistance = resolvePriceDistanceFromMarginRiskPercent(entryPrice, leverage, baseStopLossPercent);
+        const staticStopLossDistance = resolvePriceDistanceFromRiskPercent(entryPrice, baseStopLossPercent);
         const autoStopLossEnabled = db.autoStopLossEnabled !== false;
 
         if (!autoStopLossEnabled || !Number.isFinite(atrValue) || atrValue <= 0 || !Number.isFinite(entryPrice) || entryPrice <= 0) {
@@ -98,11 +97,11 @@ const createTradeLogicHelpers = ({
             toFiniteNumber(db.stopLossMaxPercent, Math.max(baseStopLossPercent * 1.5, minStopLossPercent))
         );
         const atrStopDistance = atrValue * atrMultiplier;
-        const minStopDistance = resolvePriceDistanceFromMarginRiskPercent(entryPrice, leverage, minStopLossPercent);
-        const maxStopDistance = resolvePriceDistanceFromMarginRiskPercent(entryPrice, leverage, maxStopLossPercent);
+        const minStopDistance = resolvePriceDistanceFromRiskPercent(entryPrice, minStopLossPercent);
+        const maxStopDistance = resolvePriceDistanceFromRiskPercent(entryPrice, maxStopLossPercent);
         const suggestedStopDistance = Math.max(staticStopLossDistance, atrStopDistance);
         const stopLossDistance = clampNumber(suggestedStopDistance, minStopDistance, maxStopDistance);
-        const stopLossPercent = resolveMarginRiskPercentFromPriceDistance(entryPrice, leverage, stopLossDistance);
+        const stopLossPercent = resolveRiskPercentFromPriceDistance(entryPrice, stopLossDistance);
 
         return {
             stopLossDistance,
@@ -115,7 +114,6 @@ const createTradeLogicHelpers = ({
     const resolveTargetProfitPlan = (signalATR, entryPrice, adjustedQty, stopLossDistance) => {
         const db = getDb();
         const numericQty = Math.abs(toFiniteNumber(adjustedQty, 0));
-        const leverage = Math.max(1, toFiniteNumber(db.leverage, 1));
         const baseTargetProfitUSDT = Math.max(0, toFiniteNumber(db.gridTargetProfitUsdt, 0.5));
         const atrValue = Math.abs(toFiniteNumber(signalATR, NaN));
         const staticTargetDistance = numericQty > 0 ? baseTargetProfitUSDT / numericQty : NaN;
@@ -202,9 +200,8 @@ const createTradeLogicHelpers = ({
 
         const targetProfitUSDT = Math.abs(targetPrice - entryPrice) * numericQty;
         const stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * numericQty;
-        const stopLossPercent = resolveMarginRiskPercentFromPriceDistance(
+        const stopLossPercent = resolveRiskPercentFromPriceDistance(
             entryPrice,
-            Math.max(1, toFiniteNumber(db.leverage, 1)),
             Math.abs(stopLossPrice - entryPrice)
         );
 
@@ -263,7 +260,7 @@ const createTradeLogicHelpers = ({
             stopLossPrice = resolveRoundedPlanPrice(db.pair, explicitStopLossPrice);
             stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
             stopLossDistance = Math.abs(stopLossPrice - entryPrice);
-            stopLossPercent = resolveMarginRiskPercentFromPriceDistance(entryPrice, Math.max(1, toFiniteNumber(db.leverage, 1)), stopLossDistance);
+            stopLossPercent = resolveRiskPercentFromPriceDistance(entryPrice, stopLossDistance);
             stopLossMode = "EXPLICIT";
         } else if (optimizationPayload && optimizationPayload.enabled !== false) {
             const optimizedPlan = resolveOptimizedOrderPlan(side, entryPrice, numericQty, signalATR, optimizationPayload);
@@ -343,7 +340,7 @@ const createTradeLogicHelpers = ({
     const logOrderPlan = (strategyName, entryPrice, adjustedQty, orderPlan) => {
         const db = getDb();
         console.log("   Order Details:");
-        console.log(formatOrderPlanLine("Amount", `${db.gridOrderSizeUsdt} USDT x ${db.leverage}x = ${(db.gridOrderSizeUsdt * db.leverage).toFixed(2)} USDT`));
+        console.log(formatOrderPlanLine("Amount", `${db.gridOrderSizeUsdt} USDT`));
         console.log(formatOrderPlanLine("Quantity", formatOrderPlanQuantityLabel(adjustedQty)));
         console.log(formatOrderPlanLine("Entry Price", entryPrice));
         console.log(formatOrderPlanLine("Strategy", strategyName));

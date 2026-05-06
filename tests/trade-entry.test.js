@@ -29,7 +29,6 @@ test("placeOrder exits early after emergency close when no valid TP/SL plan can 
         getDb: () => ({
             pair: "DOGE/USDT:USDT",
             gridOrderSizeUsdt: 5,
-            leverage: 10,
             marginMode: "isolated"
         }),
         getExchange: () => exchange,
@@ -44,12 +43,11 @@ test("placeOrder exits early after emergency close when no valid TP/SL plan can 
         isHedgeModeEnabled: () => false,
         matchesTrackedPositionSide: () => false,
         fetchManagedOpenOrdersSnapshot: async () => ({ triggerOrdersFetchFailed: false, grid: [], tp: [], sl: [] }),
-        setLeverage: async () => true,
         getPrice: async () => 100,
         parseSignalOrderData: () => ({
             signalPrice: 100,
             signalATR: null,
-            strategyName: "FUTURES_GRID",
+            strategyName: "SPOT_GRID",
             riskOverrides: {},
             signalTargetPrice: null,
             signalStopLossPrice: null

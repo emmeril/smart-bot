@@ -325,9 +325,7 @@ const createPositionLifecycleHelpers = ({
                     position.quantity,
                     undefined,
                     buildExchangeOrderParams({
-                        side: closeSide,
-                        reduceOnly: true,
-                        positionSide: getClosePositionSide(position)
+                        side: closeSide
                     })
                 );
                 metrics.api.orders++;

@@ -1,6 +1,6 @@
-# Smart Bot Futures Grid
+# Smart Bot Spot Grid
 
-Bot trading otomatis berbasis Node.js untuk Binance USDT-M Futures dengan strategi utama `futures_grid`. Proyek ini menggabungkan engine trading, sinkronisasi posisi exchange, penyimpanan konfigurasi di SQLite, dan dashboard web untuk memantau status bot serta mengubah parameter runtime tanpa perlu restart proses.
+Bot trading otomatis berbasis Node.js untuk Binance Spot dengan strategi utama `spot_grid`. Proyek ini menggabungkan engine trading, sinkronisasi posisi exchange, penyimpanan konfigurasi di SQLite, dan dashboard web untuk memantau status bot serta mengubah parameter runtime tanpa perlu restart proses.
 
 ## Ringkasan
 
@@ -12,14 +12,14 @@ Bot ini dirancang untuk gaya trading grid yang adaptif:
 - posisi dan order aktif di exchange disinkronkan kembali saat bot restart
 - konfigurasi disimpan di database SQLite dan dapat diubah dari dashboard
 
-Strategi yang tersedia saat ini adalah `futures_grid`.
+Strategi yang tersedia saat ini adalah `spot_grid`.
 
 ## Fitur Utama
 
-- Grid futures berbasis level harga dari candle terbaru
+- Grid spot berbasis level harga dari candle terbaru
 - Support `LONG` dan `SHORT`
-- Support `isolated` dan `cross` margin
-- Deteksi mode akun Binance Futures untuk menyesuaikan perilaku order
+- Mode spot tunggal, tanpa margin tambahan
+- Deteksi mode akun spot untuk menyesuaikan perilaku order
 - Recovery state posisi aktif setelah restart
 - Auto reload konfigurasi runtime dari database
 - Dashboard web dengan login sesi
@@ -64,14 +64,14 @@ Strategi yang tersedia saat ini adalah `futures_grid`.
 ## Kebutuhan
 
 - Node.js 18 atau lebih baru
-- Akun Binance Futures USDT-M
-- API key Binance yang punya izin trading futures
+- Akun Binance Spot
+- API key Binance yang punya izin trading spot
 
 Saran keamanan:
 
 - jangan aktifkan izin withdraw pada API key
 - mulai dari ukuran kecil atau akun uji terlebih dulu
-- pastikan pahami risiko leverage dan futures sebelum bot dijalankan live
+- pastikan pahami risiko trading spot sebelum bot dijalankan live
 
 ## Instalasi
 
@@ -165,7 +165,6 @@ Beberapa field penting yang bisa diatur dari dashboard:
 
 - `pair`
 - `marginMode`
-- `leverage`
 - `monitoringInterval`
 - `coolingPeriod`
 - `gridOrderSizeUsdt`
@@ -194,7 +193,7 @@ Beberapa field penting yang bisa diatur dari dashboard:
 
 ## Cara Kerja Strategi Grid
 
-Secara umum strategi `futures_grid` di proyek ini bekerja seperti berikut:
+Secara umum strategi `spot_grid` di proyek ini bekerja seperti berikut:
 
 1. Bot mengambil candle sesuai `gridTimeframe`.
 2. Bot menghitung range grid dari data lookback dan parameter range.
@@ -218,9 +217,8 @@ Berikut parameter yang paling sering dipakai:
 Contoh set konfigurasi dasar yang cukup aman untuk mulai uji kecil:
 
 ```text
-pair=BTC/USDT:USDT
-marginMode=isolated
-leverage=10
+pair=BTC/USDT
+marginMode=spot
 gridOrderSizeUsdt=5
 gridLevels=8
 gridLookbackCandles=120
@@ -244,7 +242,7 @@ allowShort=true
 
 Parameter berikut memang valid jika di-set `0`:
 
-- `gridOrderSizeUsdt=0`: bot memakai mode ukuran order otomatis atau `FULL_AUTO`, lalu menghitung size efektif dari balance, leverage, dan minimum order exchange
+- `gridOrderSizeUsdt=0`: bot memakai mode ukuran order otomatis atau `FULL_AUTO`, lalu menghitung size efektif dari balance dan minimum order exchange
 - `gridTakeProfitLevels=0`: take profit memakai mode otomatis ke grid berikutnya
 - `gridOrdersPerSide=0`: jumlah ladder order per sisi dihitung otomatis sesuai balance dan jumlah level grid
 - `gridStopLossLevels=0`: stop loss grid memakai mode otomatis berbasis range atau ATR, bukan fixed step manual
@@ -273,20 +271,18 @@ Catatan penting:
 
 ### General
 
-- `strategy`: strategi aktif, saat ini `futures_grid`
-- `pair`: simbol futures, contoh `DOGE/USDT:USDT`
-- `marginMode`: `isolated` atau `cross`
-- `leverage`: leverage futures
+- `strategy`: strategi aktif, saat ini `spot_grid`
+- `pair`: simbol spot, contoh `DOGE/USDT`
+- `marginMode`: `spot`
 - `monitoringInterval`: jeda monitor runtime dalam milidetik
 - `coolingPeriod`: jeda setelah trade sebelum evaluasi berikutnya
 
 Example:
 
 ```text
-strategy=futures_grid
-pair=BTC/USDT:USDT
-marginMode=isolated
-leverage=10
+strategy=spot_grid
+pair=BTC/USDT
+marginMode=spot
 monitoringInterval=500
 coolingPeriod=3000
 ```
@@ -414,14 +410,14 @@ File penting:
 Trade log di `trades.csv` berisi kolom seperti:
 
 ```text
-timestamp,pair,side,entry,exit,status,pnl,leverage,margin_mode,stop_loss_percent,strategy
+timestamp,pair,side,entry,exit,status,pnl,trade_mode,stop_loss_percent,strategy
 ```
 
 ## Sinkronisasi dan Recovery
 
 Salah satu bagian penting bot ini adalah sinkronisasi state lokal dengan exchange. Saat proses dijalankan ulang, bot akan berusaha:
 
-- membaca posisi futures yang masih aktif
+- membaca posisi spot yang masih aktif
 - memetakan order grid, take profit, dan stop loss yang masih terbuka
 - memulihkan state lokal agar tidak membuka posisi ganda secara tidak sengaja
 
@@ -429,8 +425,8 @@ Ini penting untuk menjaga runtime tetap konsisten setelah crash, restart server,
 
 ## Catatan Operasional
 
-- Bot ini ditujukan untuk Binance Futures USDT-M.
-- Pair futures harus sesuai format exchange yang didukung `ccxt`, misalnya `DOGE/USDT:USDT`.
+- Bot ini ditujukan untuk Binance Spot.
+- Pair spot harus sesuai format exchange yang didukung `ccxt`, misalnya `DOGE/USDT`.
 - Timezone filter sesi memakai UTC, bukan WIB.
 - Perubahan config dari dashboard tidak mengharuskan restart jika proses auto reload aktif.
 - `gridOrderSizeUsdt` atau `gridOrdersPerSide` bernilai `0` dapat dipakai runtime untuk menghitung nilai efektif secara adaptif pada kondisi tertentu.

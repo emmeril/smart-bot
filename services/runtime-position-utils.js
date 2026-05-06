@@ -125,7 +125,6 @@ const createRuntimePositionUtils = ({
         }
 
         const entryValue = Math.max(1e-8, position.entryPrice * quantity);
-        const leverageAtEntry = 1;
         const snapshotMarkPrice = toFiniteNumber(exchangePnlSnapshot?.markPrice, NaN);
         const priceSource = Number.isFinite(snapshotMarkPrice) && snapshotMarkPrice > 0
             ? snapshotMarkPrice

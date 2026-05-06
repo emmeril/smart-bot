@@ -161,7 +161,7 @@ const createRuntimeSignalGridHelpers = ({
             canShort: safeCanShort,
             setupDetected: safeCanLong || safeCanShort,
             detailTitle: "BINANCE GRID ANALYSIS",
-            strategyName: "FUTURES_GRID",
+            strategyName: "SPOT_GRID",
             longPlan: safeCanLong ? { targetPrice: longTargetPrice, stopLossPrice: longStopPrice, gridIndex: lowerIndex } : null,
             shortPlan: safeCanShort ? { targetPrice: shortTargetPrice, stopLossPrice: shortStopPrice, gridIndex: upperIndex } : null,
             extraDetailLines: [
@@ -270,7 +270,7 @@ const createRuntimeSignalGridHelpers = ({
             if (!db) return {};
             setSignalCount(getSignalCount() + 1);
             metrics.signals.analyzed++;
-            const strategy = String(db.strategy || "futures_grid").toLowerCase();
+            const strategy = String(db.strategy || "spot_grid").toLowerCase();
             const now = Date.now();
             if (now - getLastLogTime() > 5000) {
                 console.log(`[SIGNAL][INFO] #${getSignalCount()} Analyzing ${strategy.toUpperCase()} setup (${db.gridTimeframe})...`);
@@ -295,7 +295,7 @@ const createRuntimeSignalGridHelpers = ({
                 typeof getRecentTrades === "function" ? getRecentTrades(25) : Promise.resolve([])
             ]);
 
-            const signalState = strategy === "futures_grid"
+            const signalState = strategy === "spot_grid"
                 ? evaluateGridSignal(snapshot, params)
                 : (typeof evaluateCrossoverSignal === "function"
                     ? evaluateCrossoverSignal(snapshot, params)
@@ -382,7 +382,7 @@ const createRuntimeSignalGridHelpers = ({
     const syncGridOrders = async () => {
         const db = getDb();
         const exchange = getExchange();
-        if (!db || String(db.strategy || "futures_grid").toLowerCase() !== "futures_grid") return;
+        if (!db || String(db.strategy || "spot_grid").toLowerCase() !== "spot_grid") return;
         if (getIsSyncingGridOrders()) return;
         setIsSyncingGridOrders(true);
 

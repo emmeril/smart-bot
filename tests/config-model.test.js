@@ -4,7 +4,6 @@ const assert = require("node:assert/strict");
 const { createConfigModelHelpers } = require("../services/config-model");
 
 const defaultConfig = {
-    leverage: 10,
     maxTradesPerDay: 20,
     monitoringInterval: 500,
     gridLevels: 8,
@@ -43,9 +42,9 @@ const defaultConfig = {
     entryBbStdDev: 2,
     entryBbLongThreshold: 0.2,
     entryBbShortThreshold: 0.8,
-    pair: "DOGE/USDT:USDT",
-    strategy: "futures_grid",
-    marginMode: "isolated",
+    pair: "DOGE/USDT",
+    strategy: "spot_grid",
+    marginMode: "spot",
     gridTimeframe: "5m",
     activePosition: null,
     activeGridState: null,
@@ -65,7 +64,7 @@ const createHelpers = () => createConfigModelHelpers({
     Config: {},
     booleanConfigKeys: ["trailingEnabled", "allowLong", "allowShort", "autoTargetProfitEnabled", "autoStopLossEnabled"],
     defaultConfig,
-    validMarginModes: ["cross", "isolated"],
+    validMarginModes: ["spot"],
     withSqliteBusyRetry: async (fn) => fn(),
     getDefaultConfig: () => ({ ...defaultConfig }),
     toFiniteNumber: (value, fallback = 0) => {
@@ -81,13 +80,11 @@ test("normalizeConfig rejects fractional integer inputs that truncate below the 
     const helpers = createHelpers();
 
     const normalized = helpers.normalizeConfig({
-        leverage: 0.5,
         maxTradesPerDay: 0.5,
         monitoringInterval: 199.9,
         gridLevels: 3.9
     });
 
-    assert.equal(normalized.leverage, defaultConfig.leverage);
     assert.equal(normalized.maxTradesPerDay, defaultConfig.maxTradesPerDay);
     assert.equal(normalized.monitoringInterval, defaultConfig.monitoringInterval);
     assert.equal(normalized.gridLevels, defaultConfig.gridLevels);
@@ -97,13 +94,11 @@ test("normalizeConfig still accepts valid integer-like numeric strings", () => {
     const helpers = createHelpers();
 
     const normalized = helpers.normalizeConfig({
-        leverage: "7.9",
         maxTradesPerDay: "12",
         monitoringInterval: "900",
         gridLevels: "10"
     });
 
-    assert.equal(normalized.leverage, 7);
     assert.equal(normalized.maxTradesPerDay, 12);
     assert.equal(normalized.monitoringInterval, 900);
     assert.equal(normalized.gridLevels, 10);

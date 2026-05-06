@@ -8,10 +8,9 @@ const sequelize = new Sequelize({
 });
 
 const Config = sequelize.define("Config", {
-    strategy: { type: DataTypes.STRING, defaultValue: "futures_grid" },
-    pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT:USDT" },
+    strategy: { type: DataTypes.STRING, defaultValue: "spot_grid" },
+    pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT" },
     gridOrderSizeUsdt: { type: DataTypes.FLOAT, defaultValue: 0 },
-    leverage: { type: DataTypes.INTEGER, defaultValue: 10 },
     gridTargetProfitUsdt: { type: DataTypes.FLOAT, defaultValue: 0.5 },
     dailyProfitTargetUsdt: { type: DataTypes.FLOAT, defaultValue: 1.0 },
     dailyMaxLossPercent: { type: DataTypes.FLOAT, defaultValue: 10 },
@@ -23,7 +22,7 @@ const Config = sequelize.define("Config", {
     dailyTrades: { type: DataTypes.INTEGER, defaultValue: 0 },
     dailyPnlSource: { type: DataTypes.STRING, defaultValue: "local" },
     dailyPnlSyncedAt: { type: DataTypes.BIGINT, defaultValue: 0 },
-    marginMode: { type: DataTypes.STRING, defaultValue: "isolated" },
+    marginMode: { type: DataTypes.STRING, defaultValue: "spot" },
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: 500 },
     gridStopLossPercent: { type: DataTypes.FLOAT, defaultValue: 5 },
 
@@ -70,12 +69,11 @@ const Config = sequelize.define("Config", {
 }, { timestamps: false });
 
 const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort", "autoTargetProfitEnabled", "autoStopLossEnabled"];
-const VALID_MARGIN_MODES = ["cross", "isolated"];
+const VALID_MARGIN_MODES = ["spot"];
 const DEFAULT_CONFIG = {
-    strategy: "futures_grid",
-    pair: "DOGE/USDT:USDT",
+    strategy: "spot_grid",
+    pair: "DOGE/USDT",
     gridOrderSizeUsdt: 0,
-    leverage: 10,
     gridTargetProfitUsdt: 0.5,
     dailyProfitTargetUsdt: 1.0,
     dailyMaxLossPercent: 10,
@@ -87,7 +85,7 @@ const DEFAULT_CONFIG = {
     dailyTrades: 0,
     dailyPnlSource: "local",
     dailyPnlSyncedAt: 0,
-    marginMode: "isolated",
+    marginMode: "spot",
     monitoringInterval: 500,
     gridStopLossPercent: 5,
     autoStopLossEnabled: true,
@@ -129,10 +127,8 @@ const DEFAULT_CONFIG = {
 };
 
 const DASHBOARD_EDITABLE_FIELDS = [
-    { key: "strategy", label: "Strategy", section: "General", type: "select", options: ["futures_grid"], description: "Main strategy used by the bot." },
-    { key: "pair", label: "Pair", section: "General", type: "text", placeholder: "DOGE/USDT:USDT", description: "Futures symbol to trade." },
-    { key: "marginMode", label: "Margin Mode", section: "General", type: "select", options: ["isolated", "cross"], description: "Margin mode used on the exchange." },
-    { key: "leverage", label: "Leverage", section: "General", type: "number", min: 1, step: 1, description: "Futures leverage." },
+    { key: "strategy", label: "Strategy", section: "General", type: "select", options: ["spot_grid"], description: "Main strategy used by the bot." },
+    { key: "pair", label: "Pair", section: "General", type: "text", placeholder: "DOGE/USDT", description: "Spot symbol to trade." },
     { key: "monitoringInterval", label: "Monitoring Interval", section: "General", type: "number", min: 200, step: 100, description: "PnL monitoring interval in milliseconds." },
     { key: "coolingPeriod", label: "Cooling Period", section: "General", type: "number", min: 0, step: 500, description: "Cooldown after a trade in milliseconds. Set 0 to disable cooldown." },
     { key: "gridOrderSizeUsdt", label: "Grid Order Size (USDT)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Order size per grid entry in USDT. Set 0 for automatic sizing." },
@@ -180,7 +176,7 @@ const DASHBOARD_EDITABLE_FIELDS = [
 ];
 
 const DASHBOARD_EDITABLE_KEYS = new Set(DASHBOARD_EDITABLE_FIELDS.map((field) => field.key));
-const RUNTIME_PROTECTED_CONFIG_KEYS = ["strategy", "pair", "leverage", "marginMode", "gridTimeframe"];
+const RUNTIME_PROTECTED_CONFIG_KEYS = ["strategy", "pair", "marginMode", "gridTimeframe"];
 const DASHBOARD_PROTECTED_KEYS = new Set(RUNTIME_PROTECTED_CONFIG_KEYS);
 const DASHBOARD_USERNAME = String(process.env.DASHBOARD_USERNAME || "admin");
 const DASHBOARD_PASSWORD = String(process.env.DASHBOARD_PASSWORD || "admin123");

@@ -8,7 +8,7 @@ test("runTradingCycle skips config reload while runtime position mutation is in 
     let schedulerRefreshCalls = 0;
 
     const helpers = createRuntimeCycleHelpers({
-        getDb: () => ({ strategy: "futures_grid" }),
+        getDb: () => ({ strategy: "spot_grid" }),
         getLastTradeAt: () => 0,
         setRuntimeCommandsRegistered: () => {},
         getRuntimeCommandsRegistered: () => false,

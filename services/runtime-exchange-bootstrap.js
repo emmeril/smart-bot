@@ -6,8 +6,6 @@ const createRuntimeExchangeBootstrapHelpers = ({
     setExchange,
     getAccountPositionMode,
     setAccountPositionMode,
-    getLastAppliedLeverageState,
-    setLastAppliedLeverageState,
     toFiniteNumber,
     sleep,
     extractExchangeErrorCode,
@@ -74,19 +72,11 @@ const createRuntimeExchangeBootstrapHelpers = ({
         return true;
     };
 
-    const setLeverage = async () => {
-        const db = getDb();
-        if (db?.pair) setLastAppliedLeverageState({ symbol: db.pair, leverage: 1 });
-        console.log("[LEVERAGE][INFO] Spot trading mode: leverage fixed at 1x.");
-        return true;
-    };
-
     return {
         validateExchangeCredentials,
         initializeExchange,
         detectPositionMode,
-        setMarginMode,
-        setLeverage
+        setMarginMode
     };
 };
 

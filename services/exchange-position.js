@@ -141,7 +141,6 @@ const createExchangePositionHelpers = ({
         );
         const exchangePercentage = toFiniteNumber(exchangePosition?.percentage, NaN);
         const initialMargin = Math.abs(toFiniteNumber(exchangePosition?.initialMargin, toFiniteNumber(exchangePosition?.collateral, NaN)));
-        const leverageAtEntry = Math.max(1, Math.abs(toFiniteNumber(exchangePosition?.leverage, currentDb.leverage)));
         const exitReferencePrice = Number.isFinite(normalizedMarkPrice) && normalizedMarkPrice > 0 ? normalizedMarkPrice : fallbackPrice;
         let profitPercent = exchangePercentage;
         if (!Number.isFinite(profitPercent) && Number.isFinite(initialMargin) && initialMargin > 0 && Number.isFinite(exchangeUnrealizedPnl)) {
@@ -154,7 +153,6 @@ const createExchangePositionHelpers = ({
             currentPrice: exitReferencePrice,
             markPrice: normalizedMarkPrice,
             initialMargin,
-            leverageAtEntry,
             timestamp: Date.now(),
             source: "exchange"
         };
@@ -182,9 +180,9 @@ const createExchangePositionHelpers = ({
         return openPositions[0];
     };
 
-    const resolvePriceDistanceFromMarginRiskPercent = (entryPrice, leverage, marginRiskPercent) => {
+    const resolvePriceDistanceFromRiskPercent = (entryPrice, riskPercent) => {
         if (!Number.isFinite(entryPrice) || entryPrice <= 0) return NaN;
-        return entryPrice * (Math.abs(marginRiskPercent) / 100) / Math.max(1, leverage);
+        return entryPrice * (Math.abs(riskPercent) / 100);
     };
 
     const resolveAutoTargetProfitUSDT = (entryPrice, quantity, atrAtEntry = NaN) => {
@@ -197,7 +195,6 @@ const createExchangePositionHelpers = ({
         }
 
         const atrMultiplier = Math.max(0.1, toFiniteNumber(currentDb.targetProfitAtrMultiplier, 2.4));
-        const leverage = Math.max(1, toFiniteNumber(currentDb.leverage, 1));
         const baseStopLossPercent = Math.max(0, toFiniteNumber(currentDb.gridStopLossPercent, 5));
         const riskRewardRatio = Math.max(0.5, toFiniteNumber(currentDb.riskRewardRatio, 1.6));
         const stopLossAtrMultiplier = Math.max(0.05, toFiniteNumber(currentDb.stopLossAtrMultiplier, 1.6));
@@ -211,10 +208,10 @@ const createExchangePositionHelpers = ({
             minTargetProfitUSDT,
             toFiniteNumber(currentDb.targetProfitMaxUsdt, Math.max(baseTargetProfitUSDT * 3, minTargetProfitUSDT))
         );
-        const staticStopDistance = resolvePriceDistanceFromMarginRiskPercent(entryPrice, leverage, baseStopLossPercent);
+        const staticStopDistance = resolvePriceDistanceFromRiskPercent(entryPrice, baseStopLossPercent);
         const atrStopDistance = atrValue * stopLossAtrMultiplier;
-        const minStopDistance = resolvePriceDistanceFromMarginRiskPercent(entryPrice, leverage, minStopLossPercent);
-        const maxStopDistance = resolvePriceDistanceFromMarginRiskPercent(entryPrice, leverage, maxStopLossPercent);
+        const minStopDistance = resolvePriceDistanceFromRiskPercent(entryPrice, minStopLossPercent);
+        const maxStopDistance = resolvePriceDistanceFromRiskPercent(entryPrice, maxStopLossPercent);
         const normalizedStopDistance = Math.min(maxStopDistance, Math.max(minStopDistance, Math.max(staticStopDistance, atrStopDistance)));
         const rewardRiskTargetUSDT = Math.abs(normalizedStopDistance * riskRewardRatio * quantity);
         const atrTargetProfitUSDT = atrValue * quantity * atrMultiplier;
@@ -231,7 +228,6 @@ const createExchangePositionHelpers = ({
             return baseStopLossPercent;
         }
 
-        const leverage = Math.max(1, toFiniteNumber(currentDb.leverage, 1));
         const atrMultiplier = Math.max(0.05, toFiniteNumber(currentDb.stopLossAtrMultiplier, 1.6));
         const minStopLossPercent = Math.max(0.1, toFiniteNumber(currentDb.stopLossMinPercent, Math.min(baseStopLossPercent, 2.5)));
         const maxStopLossPercent = Math.max(
@@ -239,7 +235,7 @@ const createExchangePositionHelpers = ({
             toFiniteNumber(currentDb.stopLossMaxPercent, Math.max(baseStopLossPercent * 1.5, minStopLossPercent))
         );
         const atrDistance = atrValue * atrMultiplier;
-        const atrBasedPercent = (atrDistance / entryPrice) * leverage * 100;
+        const atrBasedPercent = (atrDistance / entryPrice) * 100;
         const suggestedStopLossPercent = Math.max(baseStopLossPercent, atrBasedPercent);
         return Math.min(maxStopLossPercent, Math.max(minStopLossPercent, suggestedStopLossPercent));
     };
@@ -267,8 +263,7 @@ const createExchangePositionHelpers = ({
         const gridExitPlan = buildGridExitPlan({ side, entryIndex: derivedGridIndex, levels, step, params: signalParams, gridState });
         const fallbackTargetProfitUSDT = resolveAutoTargetProfitUSDT(entryPrice, contracts, preservedAtrAtEntry);
         const fallbackStopLossPercent = resolveAutoStopLossPercent(preservedAtrAtEntry, entryPrice);
-        const fallbackLeverage = Math.max(1, toFiniteNumber(existingPosition?.leverageAtEntry, currentDb.leverage));
-        const fallbackStopLossUSDT = -Math.abs((contracts * entryPrice / fallbackLeverage) * (fallbackStopLossPercent / 100));
+        const fallbackStopLossUSDT = -Math.abs((contracts * entryPrice) * (fallbackStopLossPercent / 100));
         const targetPrice = Number.isFinite(gridExitPlan.targetPrice)
             ? gridExitPlan.targetPrice
             : (side === "buy"
@@ -307,10 +302,9 @@ const createExchangePositionHelpers = ({
             highestSinceEntry: preservedHighestSinceEntry,
             lowestSinceEntry: preservedLowestSinceEntry,
             atrAtEntry: preservedAtrAtEntry,
-            marginMode: (currentDb.marginMode || "isolated").toLowerCase(),
+            marginMode: (currentDb.marginMode || "spot").toLowerCase(),
             positionSide,
             targetProfitUSDT: preservedTargetProfitUSDT,
-            leverageAtEntry: toFiniteNumber(exchangePnlSnapshot?.leverageAtEntry, toFiniteNumber(currentDb.leverage, 1)),
             trailingEnabled: preserveExitPlan ? preservedTrailingEnabled : Boolean(currentDb.trailingEnabled),
             trailingActivateATR: preserveExitPlan ? preservedTrailingActivateATR : toFiniteNumber(currentDb.trailingActivateATR, 1.2),
             trailingOffsetATR: preserveExitPlan ? preservedTrailingOffsetATR : toFiniteNumber(currentDb.trailingOffsetATR, 0.6),

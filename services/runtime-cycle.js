@@ -114,26 +114,26 @@ const createRuntimeCycleHelpers = ({
         if (hasRuntimePositionMutationInFlight()) return;
         await reloadConfig();
         refreshRuntimeSchedulers();
-        const strategy = String(db?.strategy || "futures_grid").toLowerCase();
+        const strategy = String(db?.strategy || "spot_grid").toLowerCase();
 
         await resetDailyStateIfNeeded(Date.now());
         if (typeof syncDailyPnlWithExchange === "function") await syncDailyPnlWithExchange();
         if (!canOpenNewPositions()) {
-            logExchangeRecoveryBlock(strategy === "futures_grid" ? "grid entries" : "new position entries");
+            logExchangeRecoveryBlock(strategy === "spot_grid" ? "grid entries" : "new position entries");
             return;
         }
 
         const pauseReason = await getTradingPauseReason();
         if (pauseReason) {
             console.log(pauseReason);
-            if (strategy === "futures_grid") {
+            if (strategy === "spot_grid") {
                 const openGridOrders = await fetchOpenGridOrders();
                 if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "PAUSED");
             }
             return;
         }
 
-        if (strategy === "futures_grid") {
+        if (strategy === "spot_grid") {
             await syncGridOrders();
             return;
         }
@@ -143,7 +143,6 @@ const createRuntimeCycleHelpers = ({
 
         const signal = await analyzeSignal();
         if (signal.canLong && !getActivePositionByKey(isHedgeModeEnabled() ? "LONG" : "BOTH")) await placeOrder("buy", signal);
-        if (signal.canShort && !getActivePositionByKey(isHedgeModeEnabled() ? "SHORT" : "BOTH")) await placeOrder("sell", signal);
     };
 
     const startMetricsReporting = (currentTimer, setMetricsTimer) => {
