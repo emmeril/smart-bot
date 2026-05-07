@@ -1067,7 +1067,7 @@
 	          <p class="eyebrow">Konfigurasi</p>
 	          <h2>Parameter trading</h2>
 	        </div>
-	        <p class="muted">Semua field di bawah akan divalidasi kembali di sisi server sebelum disimpan.</p>
+	        <p class="muted">Yang tampil hanya General dan Risk Management. Parameter lain tetap dipertahankan di server.</p>
 	      </div>
 	      <div class="config-legend">
 	        <span class="field-badge">AUTO 0</span>
@@ -1091,7 +1091,8 @@
   </main>
 
   <script>
-    const SECTION_ORDER = ["General", "Risk", "Grid", "Session", "Trailing", "Direction"];
+    const SECTION_ORDER = ["General", "Risk"];
+    const VISIBLE_SECTION_SET = new Set(SECTION_ORDER);
     const state = { config: null, defaults: null, schema: [], status: null, serverTime: 0 };
     let formDirty = false;
     let autoRefreshTimer = null;
@@ -1511,12 +1512,12 @@
       const map = new Map();
       for (const field of schema) {
         const section = field.section || "General";
+        if (!VISIBLE_SECTION_SET.has(section)) continue;
         if (!map.has(section)) map.set(section, []);
         map.get(section).push(field);
       }
       const ordered = [];
       for (const section of SECTION_ORDER) if (map.has(section)) ordered.push([section, map.get(section)]);
-      for (const entry of map.entries()) if (!SECTION_ORDER.includes(entry[0])) ordered.push(entry);
       return ordered;
     }
 
@@ -1609,8 +1610,10 @@
     }
 
     function collectConfig() {
-      const payload = {};
+      const payload = { ...(state.config || {}) };
       for (const field of state.schema) {
+        const section = field.section || "General";
+        if (!VISIBLE_SECTION_SET.has(section)) continue;
         const el = form.elements[field.key];
         if (!el) continue;
         if (field.type === "boolean") {
