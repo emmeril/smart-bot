@@ -1017,6 +1017,14 @@ const syncPositionWithExchange = async () => {
     isSyncingPosition = true;
     try {
         if (!db || !exchange) return;
+        const maybeMarkPositionSyncHealthy = () => {
+            if (exchange?.options?.smartBotPrivateAuthFailed) {
+                const authError = new Error("Binance private API authentication is failing. Trading remains paused until API_KEY/API_SECRET are corrected.");
+                markExchangeUnhealthy(authError, "position sync");
+                return;
+            }
+            markExchangeHealthy("position sync");
+        };
         const now = Date.now();
         if (now - lastSyncLogAt >= SYNC_LOG_TTL) {
             console.log(`[SYNC][INFO] Checking positions for ${db.pair}...`);
@@ -1050,7 +1058,7 @@ const syncPositionWithExchange = async () => {
                 await ensureReduceOnlyTakeProfitOrder(positionKey, currentPosition);
                 await ensureReduceOnlyStopLossOrder(positionKey, currentPosition);
             }
-            markExchangeHealthy("position sync");
+            maybeMarkPositionSyncHealthy();
             return;
         }
 
@@ -1069,7 +1077,7 @@ const syncPositionWithExchange = async () => {
             await ensureReduceOnlyTakeProfitOrder(positionKey, syncedPosition);
             await ensureReduceOnlyStopLossOrder(positionKey, syncedPosition);
         }
-        markExchangeHealthy("position sync");
+        maybeMarkPositionSyncHealthy();
     } catch (error) {
         markExchangeUnhealthy(error, "position sync");
         console.error("[SYNC][ERROR] Position sync failed:", error.message);

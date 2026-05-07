@@ -26,14 +26,20 @@ const createRuntimeExchangeBootstrapHelpers = ({
         try {
             validateExchangeCredentials();
             const nextExchange = new ccxt.binance({
-                apiKey: process.env.API_KEY,
-                secret: process.env.API_SECRET,
-                options: { defaultType: "spot", adjustForTimeDifference: true },
+                apiKey: String(process.env.API_KEY || "").trim(),
+                secret: String(process.env.API_SECRET || "").trim(),
+                options: {
+                    defaultType: "spot",
+                    adjustForTimeDifference: true,
+                    fetchCurrencies: false,
+                    recvWindow: 10000
+                },
                 enableRateLimit: true,
-                timeout: 20000,
-                recvWindow: 10000
+                timeout: 20000
             });
             nextExchange.options.adjustForTimeDifference = true;
+            nextExchange.options.fetchCurrencies = false;
+            nextExchange.options.recvWindow = 10000;
 
             const loadExchangeMetadata = async () => {
                 await nextExchange.loadTimeDifference();
@@ -52,6 +58,16 @@ const createRuntimeExchangeBootstrapHelpers = ({
             setExchange(nextExchange);
             const timeDifference = toFiniteNumber(nextExchange.timeDifference, 0);
             console.log(`[EXCHANGE][INFO] Connected${timeDifference ? ` (time difference ${timeDifference}ms)` : ""}`);
+
+            try {
+                await nextExchange.fetchBalance();
+                nextExchange.options.smartBotPrivateAuthFailed = false;
+            } catch (error) {
+                nextExchange.options.smartBotPrivateAuthFailed = true;
+                markExchangeUnhealthy(error, "private API authentication");
+                console.error("[EXCHANGE][ERROR] Private API authentication failed. Verify API_KEY/API_SECRET belong to the same Binance account, are for the correct environment, and have spot trading/API permissions enabled.");
+            }
+
             return nextExchange;
         } catch (error) {
             markExchangeUnhealthy(error, "exchange initialization");
