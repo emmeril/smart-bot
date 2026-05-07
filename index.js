@@ -39,6 +39,7 @@ const { createDashboardSessionHelpers } = require("./services/dashboard-session"
 const { createExchangePositionHelpers } = require("./services/exchange-position");
 const { createManagedOrdersHelpers } = require("./services/managed-orders");
 const { createOrderExecutionHelpers } = require("./services/order-execution");
+const { createOrderValidationHelpers } = require("./services/order-validation");
 const { createPositionLifecycleHelpers } = require("./services/position-lifecycle");
 const { createPnlTrackerHelpers } = require("./services/pnl-tracker");
 const { createTradeEntryHelpers } = require("./services/trade-entry");
@@ -447,31 +448,7 @@ const {
     calcATR
 });
 
-const validateOrderSize = (market, quantity, referencePrice, options = {}) => {
-    const { allowReduceOnlyClose = false } = options;
-    if (!market || !Number.isFinite(referencePrice) || referencePrice <= 0) {
-        return { valid: false, reason: "[ORDER][ERROR] Invalid market or reference price." };
-    }
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-        return { valid: false, reason: "[ORDER][ERROR] Invalid order quantity after precision adjustment." };
-    }
-    const minAmount = Number(market?.limits?.amount?.min);
-    if (Number.isFinite(minAmount) && quantity < minAmount) {
-        return { valid: false, reason: `[ORDER][ERROR] Quantity ${quantity} is below exchange minimum ${minAmount}. Order skipped.` };
-    }
-    const notional = quantity * referencePrice;
-    const minCost = Number(market?.limits?.cost?.min);
-    if (Number.isFinite(minCost) && Number.isFinite(notional) && notional < minCost) {
-        if (allowReduceOnlyClose) {
-            return {
-                valid: true,
-                warning: `[ORDER][WARN] Reduce-only close notional ${notional.toFixed(6)} is below exchange minimum ${minCost}. Allowing placement because the order only closes an existing position.`
-            };
-        }
-        return { valid: false, reason: `[ORDER][ERROR] Order notional ${notional.toFixed(6)} is below exchange minimum ${minCost}. Order skipped.` };
-    }
-    return { valid: true };
-};
+const { validateOrderSize } = createOrderValidationHelpers({ toFiniteNumber });
 
 const {
     placeGridEntryOrder,

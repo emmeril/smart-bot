@@ -22,7 +22,9 @@ const createRuntimeExchangeUtils = ({ toFiniteNumber }) => {
     const isDuplicateClientOrderIdError = (error) => {
         const payload = String(error?.message || error || "");
         const code = extractExchangeErrorCode(error);
-        return code === -4116 || /clientorderid is duplicated|duplicated/i.test(payload);
+        return code === -4116 ||
+            (code === -2010 && /duplicate order sent/i.test(payload)) ||
+            /clientorderid is duplicated|duplicated|duplicate order sent/i.test(payload);
     };
 
     const getExchangeClientOrderId = (order) => (

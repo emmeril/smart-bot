@@ -73,7 +73,7 @@ const createTradeEntryHelpers = ({
             const qty = db.gridOrderSizeUsdt / entryPrice;
             const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
             const adjustedQty = formatAmountToMarketPrecision(db.pair, qty);
-            const sizeValidation = validateOrderSize(marketInfo, adjustedQty, tickerPrice);
+            const sizeValidation = validateOrderSize(marketInfo, adjustedQty, tickerPrice, { orderType: "MARKET" });
             if (!sizeValidation.valid) {
                 console.error(sizeValidation.reason);
                 return;

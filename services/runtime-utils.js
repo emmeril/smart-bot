@@ -9,15 +9,60 @@ const createRuntimeUtils = ({
     getIsClosingPosition,
     getIsSyncingPosition
 }) => {
+    const getErrorStatus = (error) => {
+        const candidates = [
+            error?.status,
+            error?.statusCode,
+            error?.httpStatus,
+            error?.response?.status,
+            error?.response?.statusCode
+        ];
+        for (const candidate of candidates) {
+            const parsed = Number(candidate);
+            if (Number.isFinite(parsed)) return parsed;
+        }
+        return NaN;
+    };
+
+    const getRetryAfterMs = (error) => {
+        const headers = error?.headers || error?.responseHeaders || error?.response?.headers || {};
+        const retryAfter = headers["Retry-After"] || headers["retry-after"];
+        const parsed = Number(retryAfter);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed * 1000 : NaN;
+    };
+
+    const getExchangeErrorCode = (error) => {
+        const directCode = Number(error?.code);
+        if (Number.isFinite(directCode)) return directCode;
+        const payload = String(error?.message || error || "");
+        const match = payload.match(/"code"\s*:\s*(-?\d+)/);
+        return match ? Number(match[1]) : NaN;
+    };
+
+    const isBinanceRateLimitError = (error) => {
+        const status = getErrorStatus(error);
+        const code = getExchangeErrorCode(error);
+        const payload = String(error?.message || error || "");
+        return status === 429 || status === 418 || code === -1003 || code === -1015 || /too many requests|too much request weight|ip banned|too many new orders/i.test(payload);
+    };
+
     const retry = async (fn, retries = 3, delay = 1000) => {
         for (let i = 0; i < retries; i++) {
             try {
                 return await fn();
             } catch (error) {
                 if (i === retries - 1) throw error;
-                console.log(`[RETRY][INFO] Attempt ${i + 1} failed, retrying in ${delay}ms...`);
-                await new Promise((resolve) => setTimeout(resolve, delay));
-                delay *= 2;
+                const status = getErrorStatus(error);
+                const rateLimited = isBinanceRateLimitError(error);
+                const retryAfterMs = getRetryAfterMs(error);
+                if (status === 418) {
+                    const waitLabel = Number.isFinite(retryAfterMs) ? ` Retry-After=${Math.ceil(retryAfterMs / 1000)}s.` : "";
+                    throw new Error(`Binance IP ban response received. Stop requests until the ban window expires.${waitLabel}`);
+                }
+                const nextDelay = rateLimited && Number.isFinite(retryAfterMs) ? retryAfterMs : delay;
+                console.log(`[RETRY][INFO] Attempt ${i + 1} failed, retrying in ${nextDelay}ms${rateLimited ? " after Binance rate-limit response" : ""}...`);
+                await new Promise((resolve) => setTimeout(resolve, nextDelay));
+                delay = rateLimited ? Math.max(delay * 2, nextDelay) : delay * 2;
             }
         }
     };
