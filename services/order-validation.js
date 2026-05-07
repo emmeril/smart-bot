@@ -57,18 +57,68 @@ const createOrderValidationHelpers = ({ toFiniteNumber }) => {
         return null;
     };
 
-    const validateNotional = (market, notional) => {
+    const validatePercentPrice = (market, referencePrice, orderSide) => {
+        const genericFilter = getFilter(market, "PERCENT_PRICE");
+        const sideFilter = getFilter(market, "PERCENT_PRICE_BY_SIDE");
+        const avgPrice = toNumber(
+            market?.averagePrice,
+            toNumber(market?.info?.lastPrice, toNumber(market?.info?.weightedAvgPrice, NaN))
+        );
+        const effectivePrice = Number.isFinite(referencePrice) ? referencePrice : avgPrice;
+        if (!Number.isFinite(effectivePrice) || effectivePrice <= 0) return null;
+
+        if (sideFilter) {
+            const side = String(orderSide || "").toUpperCase();
+            const isBuy = side === "BUY";
+            const lowerMultiplier = toNumber(
+                isBuy ? sideFilter?.bidMultiplierDown : sideFilter?.askMultiplierDown,
+                NaN
+            );
+            const upperMultiplier = toNumber(
+                isBuy ? sideFilter?.bidMultiplierUp : sideFilter?.askMultiplierUp,
+                NaN
+            );
+            if (isEnabledPositive(lowerMultiplier) && effectivePrice < avgPrice * lowerMultiplier) {
+                return `Price ${effectivePrice} is below PERCENT_PRICE_BY_SIDE minimum.`;
+            }
+            if (isEnabledPositive(upperMultiplier) && effectivePrice > avgPrice * upperMultiplier) {
+                return `Price ${effectivePrice} is above PERCENT_PRICE_BY_SIDE maximum.`;
+            }
+            return null;
+        }
+
+        if (genericFilter) {
+            const lowerMultiplier = toNumber(genericFilter?.multiplierDown, NaN);
+            const upperMultiplier = toNumber(genericFilter?.multiplierUp, NaN);
+            if (isEnabledPositive(lowerMultiplier) && effectivePrice < avgPrice * lowerMultiplier) {
+                return `Price ${effectivePrice} is below PERCENT_PRICE minimum.`;
+            }
+            if (isEnabledPositive(upperMultiplier) && effectivePrice > avgPrice * upperMultiplier) {
+                return `Price ${effectivePrice} is above PERCENT_PRICE maximum.`;
+            }
+        }
+
+        return null;
+    };
+
+    const validateNotional = (market, notional, orderType) => {
         const minNotionalFilter = getFilter(market, "MIN_NOTIONAL");
         const notionalFilter = getFilter(market, "NOTIONAL");
+        const isMarketOrder = String(orderType || "").toUpperCase() === "MARKET";
+        const hasNotionalFilter = Boolean(notionalFilter);
         const minNotional = toNumber(
             notionalFilter?.minNotional,
             toNumber(minNotionalFilter?.minNotional, toNumber(market?.limits?.cost?.min, NaN))
         );
         const maxNotional = toNumber(notionalFilter?.maxNotional, toNumber(market?.limits?.cost?.max, NaN));
-        if (isEnabledPositive(minNotional) && notional < minNotional) {
+        const minAppliesToMarket = isMarketOrder ? Boolean(minNotionalFilter?.applyToMarket ?? true) : true;
+        const maxAppliesToMarket = isMarketOrder ? (hasNotionalFilter ? Boolean(notionalFilter?.applyMaxToMarket ?? true) : true) : true;
+        const minNotionalApplies = isMarketOrder ? (hasNotionalFilter ? Boolean(notionalFilter?.applyMinToMarket ?? true) : minAppliesToMarket) : true;
+
+        if (minNotionalApplies && isEnabledPositive(minNotional) && notional < minNotional) {
             return `Order notional ${notional.toFixed(6)} is below exchange minimum ${minNotional}. Order skipped.`;
         }
-        if (isEnabledPositive(maxNotional) && notional > maxNotional) {
+        if (maxAppliesToMarket && isEnabledPositive(maxNotional) && notional > maxNotional) {
             return `Order notional ${notional.toFixed(6)} is above exchange maximum ${maxNotional}. Order skipped.`;
         }
         return null;
@@ -76,15 +126,27 @@ const createOrderValidationHelpers = ({ toFiniteNumber }) => {
 
     const validateOrderSize = (market, quantity, referencePrice, options = {}) => {
         const orderType = String(options.orderType || "").toUpperCase();
+        const orderSide = String(options.side || "").toUpperCase();
+        const skipPriceFilter = Boolean(options.skipPriceFilter);
+        const skipNotional = Boolean(options.skipNotional);
+        const marketPrice = toNumber(options.marketPrice, referencePrice);
+        const priceForNotional = orderType === "MARKET" ? marketPrice : referencePrice;
         if (!market || !Number.isFinite(referencePrice) || referencePrice <= 0) {
-            return { valid: false, reason: "[ORDER][ERROR] Invalid market or reference price." };
+            if (orderType !== "MARKET") {
+                return { valid: false, reason: "[ORDER][ERROR] Invalid market or reference price." };
+            }
         }
         if (!Number.isFinite(quantity) || quantity <= 0) {
             return { valid: false, reason: "[ORDER][ERROR] Invalid order quantity after precision adjustment." };
         }
 
-        const priceError = validatePriceFilter(market, referencePrice);
-        if (priceError) return { valid: false, reason: `[ORDER][ERROR] ${priceError}` };
+        if (!skipPriceFilter && orderType !== "MARKET") {
+            const priceError = validatePriceFilter(market, referencePrice);
+            if (priceError) return { valid: false, reason: `[ORDER][ERROR] ${priceError}` };
+
+            const percentPriceError = validatePercentPrice(market, referencePrice, orderSide);
+            if (percentPriceError) return { valid: false, reason: `[ORDER][ERROR] ${percentPriceError}` };
+        }
 
         const lotSizeError = validateQuantityFilter(market, quantity, "LOT_SIZE");
         if (lotSizeError) return { valid: false, reason: `[ORDER][ERROR] ${lotSizeError}` };
@@ -97,9 +159,12 @@ const createOrderValidationHelpers = ({ toFiniteNumber }) => {
             }
         }
 
-        const notional = quantity * referencePrice;
-        const notionalError = validateNotional(market, notional);
-        if (notionalError) return { valid: false, reason: `[ORDER][ERROR] ${notionalError}` };
+        if (!skipNotional) {
+            const notionalReference = Number.isFinite(priceForNotional) && priceForNotional > 0 ? priceForNotional : referencePrice;
+            const notional = quantity * notionalReference;
+            const notionalError = validateNotional(market, notional, orderType);
+            if (notionalError) return { valid: false, reason: `[ORDER][ERROR] ${notionalError}` };
+        }
         return { valid: true };
     };
 

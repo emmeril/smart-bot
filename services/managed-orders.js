@@ -14,6 +14,76 @@ const createManagedOrdersHelpers = ({
     setHasLoggedTriggerOrderFetchFallback
 }) => {
     const describeError = (error) => String(error?.message || error || "Unknown error");
+    const getErrorStatus = (error) => {
+        const candidates = [error?.status, error?.statusCode, error?.httpStatus, error?.response?.status, error?.response?.statusCode];
+        for (const candidate of candidates) {
+            const parsed = Number(candidate);
+            if (Number.isFinite(parsed)) return parsed;
+        }
+        return NaN;
+    };
+
+    const getRetryAfterMs = (error) => {
+        const headers = error?.headers || error?.responseHeaders || error?.response?.headers || {};
+        const retryAfter = headers["Retry-After"] || headers["retry-after"];
+        const parsed = Number(retryAfter);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed * 1000 : NaN;
+    };
+
+    const getExchangeErrorCode = (error) => {
+        const directCode = Number(error?.code);
+        if (Number.isFinite(directCode)) return directCode;
+        const payload = String(error?.message || error || "");
+        const match = payload.match(/"code"\s*:\s*(-?\d+)/);
+        return match ? Number(match[1]) : NaN;
+    };
+
+    const isTimestampError = (error) => {
+        const code = getExchangeErrorCode(error);
+        const message = String(error?.message || error || "");
+        return code === -1021 || /timestamp.*outside of the recvWindow|timestamp for this request was/i.test(message);
+    };
+
+    const isRateLimitError = (error) => {
+        const status = getErrorStatus(error);
+        const code = getExchangeErrorCode(error);
+        const payload = String(error?.message || error || "");
+        return status === 429 || status === 418 || code === -1003 || code === -1015 || /too many requests|too much request weight|ip banned|too many new orders/i.test(payload);
+    };
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const runPrivateApiWithRecovery = async (operation, label = "private API request") => {
+        let refreshedTimestamp = false;
+        let delayMs = 1000;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                return await operation();
+            } catch (error) {
+                const exchange = getExchange();
+                if (isTimestampError(error) && !refreshedTimestamp && typeof exchange?.loadTimeDifference === "function") {
+                    refreshedTimestamp = true;
+                    try {
+                        await exchange.loadTimeDifference();
+                    } catch (refreshError) {
+                        console.warn(`[EXCHANGE][WARN] Failed to refresh time difference after timestamp error: ${describeError(refreshError)}`);
+                    }
+                    continue;
+                }
+
+                if (!isRateLimitError(error) || attempt === 2) throw error;
+                const retryAfterMs = getRetryAfterMs(error);
+                if (getErrorStatus(error) === 418) {
+                    const waitLabel = Number.isFinite(retryAfterMs) ? ` Retry-After=${Math.ceil(retryAfterMs / 1000)}s.` : "";
+                    throw new Error(`Binance IP ban response received during ${label}. Stop requests until the ban window expires.${waitLabel}`);
+                }
+                const waitMs = Number.isFinite(retryAfterMs) ? retryAfterMs : delayMs;
+                console.warn(`[EXCHANGE][WARN] Rate limit during ${label}. Retrying in ${waitMs}ms.`);
+                await sleep(waitMs);
+                delayMs = Math.max(delayMs * 2, waitMs * 2);
+            }
+        }
+    };
 
     const getManagedOrderId = (order) => String(order?.id || order?.orderId || order?.info?.orderId || "");
 
@@ -48,13 +118,19 @@ const createManagedOrdersHelpers = ({
         const exchange = getExchange();
         const metrics = getMetrics();
         metrics.api.orders++;
-        const fetchedRegularOrders = await exchange.fetchOpenOrders(symbol);
+        const fetchedRegularOrders = await runPrivateApiWithRecovery(
+            () => exchange.fetchOpenOrders(symbol),
+            "open-order snapshot"
+        );
         let fetchedTriggerOrders = [];
         let triggerOrdersFetchFailed = false;
 
         try {
             metrics.api.orders++;
-            fetchedTriggerOrders = await exchange.fetchOpenOrders(symbol, undefined, undefined, { trigger: true });
+            fetchedTriggerOrders = await runPrivateApiWithRecovery(
+                () => exchange.fetchOpenOrders(symbol, undefined, undefined, { trigger: true }),
+                "trigger open-order snapshot"
+            );
         } catch (error) {
             triggerOrdersFetchFailed = true;
             if (!getHasLoggedTriggerOrderFetchFallback()) {
@@ -126,7 +202,10 @@ const createManagedOrdersHelpers = ({
                     console.warn(`[${label}][WARN] Failed to cancel ${label.toLowerCase()} order without exchange id.`);
                     continue;
                 }
-                await exchange.cancelOrder(orderId, currentDb.pair, cancelOptions);
+                await runPrivateApiWithRecovery(
+                    () => exchange.cancelOrder(orderId, currentDb.pair, cancelOptions),
+                    `${label.toLowerCase()} order cancellation`
+                );
                 metrics.api.orders++;
             } catch (error) {
                 console.warn(`[${label}][WARN] Failed to cancel ${label.toLowerCase()} order ${order.id}: ${describeError(error)}`);
@@ -183,7 +262,10 @@ const createManagedOrdersHelpers = ({
                         console.warn(`[${label}][WARN] Failed to cancel duplicate ${label.toLowerCase()} order without exchange id.`);
                         continue;
                     }
-                    await exchange.cancelOrder(duplicateOrderId, currentDb.pair, cancelParams);
+                    await runPrivateApiWithRecovery(
+                        () => exchange.cancelOrder(duplicateOrderId, currentDb.pair, cancelParams),
+                        `${label.toLowerCase()} duplicate cancellation`
+                    );
                     metrics.api.orders++;
                 } catch (error) {
                     console.warn(`[${label}][WARN] Failed to cancel duplicate ${label.toLowerCase()} order ${duplicateOrder.id}: ${describeError(error)}`);
@@ -202,7 +284,10 @@ const createManagedOrdersHelpers = ({
         if (order) {
             const orderId = getManagedOrderId(order);
             if (!orderId) return false;
-            await exchange.cancelOrder(orderId, symbol);
+            await runPrivateApiWithRecovery(
+                () => exchange.cancelOrder(orderId, symbol),
+                "client-order cancellation"
+            );
             metrics.api.orders++;
             console.log(`[CANCEL][INFO] Cancelled order with clientOrderId ${clientOrderId}`);
             return true;
@@ -212,7 +297,10 @@ const createManagedOrdersHelpers = ({
         if (triggerOrder) {
             const triggerOrderId = getManagedOrderId(triggerOrder);
             if (!triggerOrderId) return false;
-            await exchange.cancelOrder(triggerOrderId, symbol, { trigger: true });
+            await runPrivateApiWithRecovery(
+                () => exchange.cancelOrder(triggerOrderId, symbol, { trigger: true }),
+                "trigger client-order cancellation"
+            );
             metrics.api.orders++;
             console.log(`[CANCEL][INFO] Cancelled trigger order with clientOrderId ${clientOrderId}`);
             return true;

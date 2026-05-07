@@ -486,6 +486,7 @@ const {
         const balance = await exchange.fetchBalance();
         return balance?.free || balance || null;
     },
+    getPrice: async (...args) => getPrice(...args),
     upsertActivePosition: (...args) => upsertActivePosition(...args),
     saveDB: (...args) => saveDB(...args),
     cancelTpOrders,
