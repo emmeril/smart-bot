@@ -33,13 +33,11 @@
     "maxDrawdownUSDT": true,
     "score": true
   },
-  "approvedConfig": {
-    "strategy": "pullback",
-    "usdtPerTrade": 10,
-    "targetProfitUSDT": 0.5,
-    "targetDailyProfit": 1,
-    "maxDailyLossPercent": 10,
-    "maxTradesPerDay": 3,
+    "approvedConfig": {
+      "strategy": "pullback",
+      "usdtPerTrade": 10,
+      "targetProfitUSDT": 0.5,
+      "maxTradesPerDay": 3,
     "coolingPeriod": 3000,
     "stopLossPercent": 5,
     "breakoutPeriod": 20,
@@ -120,8 +118,6 @@
         "strategy": "pullback",
         "usdtPerTrade": 10,
         "targetProfitUSDT": 0.5,
-        "targetDailyProfit": 1,
-        "maxDailyLossPercent": 10,
         "maxTradesPerDay": 3,
         "coolingPeriod": 3000,
         "stopLossPercent": 5,

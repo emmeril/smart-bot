@@ -146,9 +146,7 @@ const checkConfig = (config) => {
         "allowShort",
         "monitoringInterval",
         "coolingPeriod",
-        "maxTradesPerDay",
-        "dailyProfitTargetUsdt",
-        "dailyMaxLossPercent"
+        "maxTradesPerDay"
     ];
 
     const raw = config || {};

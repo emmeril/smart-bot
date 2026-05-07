@@ -69,7 +69,7 @@ const createRuntimeReportingHelpers = ({
         console.log(`Session: ${db.sessionStartUTC}-${db.sessionEndUTC} UTC`);
         console.log(`Trailing ATR: ${formatTrailingLabel()}`);
         console.log(`Mode: ${String(db.marginMode || "spot").toUpperCase()}`);
-        console.log(`Daily target: $${db.dailyProfitTargetUsdt} (max ${db.maxTradesPerDay} trades)`);
+        console.log(`Daily trades cap: ${db.maxTradesPerDay}`);
         console.log("=".repeat(70) + "\n");
     };
 

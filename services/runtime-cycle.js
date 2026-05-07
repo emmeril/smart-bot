@@ -9,7 +9,6 @@ const createRuntimeCycleHelpers = ({
     saveDB,
     resetDailyPnlState,
     syncDailyPnlWithExchange,
-    getTotalUSDTBalance,
     reloadConfig,
     refreshRuntimeSchedulers,
     hasRuntimePositionMutationInFlight,
@@ -55,18 +54,8 @@ const createRuntimeCycleHelpers = ({
         return true;
     };
 
-    const getDailyRiskLimit = async () => {
-        const db = getDb();
-        const totalUSDT = await getTotalUSDTBalance();
-        if (!Number.isFinite(totalUSDT) || totalUSDT <= 0) return null;
-        return totalUSDT * db.dailyMaxLossPercent / 100;
-    };
-
     const getTradingPauseReason = async () => {
         const db = getDb();
-        const maxDailyLoss = await getDailyRiskLimit();
-        if (db.dailyPnL >= db.dailyProfitTargetUsdt) return `[PAUSE] Daily target reached: $${db.dailyPnL.toFixed(2)}. Trading paused.`;
-        if (Number.isFinite(maxDailyLoss) && db.dailyPnL <= -maxDailyLoss) return `[PAUSE] Daily loss limit reached: $${db.dailyPnL.toFixed(2)}. Trading paused.`;
         if (db.dailyTrades >= db.maxTradesPerDay) return `[PAUSE] Max trades per day (${db.maxTradesPerDay}) reached.`;
         return null;
     };
@@ -161,7 +150,6 @@ const createRuntimeCycleHelpers = ({
     return {
         isNewTradingDay,
         resetDailyStateIfNeeded,
-        getDailyRiskLimit,
         getTradingPauseReason,
         isCoolingDown,
         handleRuntimeCommand,

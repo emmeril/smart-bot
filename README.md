@@ -170,8 +170,6 @@ Beberapa field penting yang bisa diatur dari dashboard:
 - `gridOrderSizeUsdt`
 - `gridTargetProfitUsdt`
 - `gridStopLossPercent`
-- `dailyProfitTargetUsdt`
-- `dailyMaxLossPercent`
 - `maxTradesPerDay`
 - `gridLevels`
 - `gridLookbackCandles`
@@ -228,8 +226,6 @@ gridTakeProfitLevels=0
 gridOrdersPerSide=2
 gridStopLossLevels=0
 gridTimeframe=5m
-dailyProfitTargetUsdt=3
-dailyMaxLossPercent=5
 maxTradesPerDay=10
 sessionStartUTC=0
 sessionEndUTC=23
@@ -267,7 +263,7 @@ Catatan penting:
 - `0` pada `gridOrderSizeUsdt`, `gridTakeProfitLevels`, `gridOrdersPerSide`, dan `gridStopLossLevels` berarti mode otomatis
 - `0` pada `coolingPeriod` berarti nonaktif
 - `0` pada `sessionStartUTC` atau `sessionEndUTC` hanyalah nilai jam UTC, bukan berarti filter sesi dimatikan
-- parameter seperti `dailyProfitTargetUsdt`, `dailyMaxLossPercent`, `maxTradesPerDay`, `gridTargetProfitUsdt`, `gridStopLossPercent`, `gridLevels`, dan `gridRangePercent` tidak didesain untuk `0`
+- parameter seperti `maxTradesPerDay`, `gridTargetProfitUsdt`, `gridStopLossPercent`, `gridLevels`, dan `gridRangePercent` tidak didesain untuk `0`
 
 ### General
 
@@ -294,8 +290,6 @@ Contoh ini cocok untuk setup awal yang masih responsif, tapi belum terlalu agres
 - `gridOrderSizeUsdt`: nominal per order grid dalam USDT
 - `gridTargetProfitUsdt`: target profit nominal
 - `gridStopLossPercent`: stop loss persentase
-- `dailyProfitTargetUsdt`: target profit harian sebelum pause
-- `dailyMaxLossPercent`: batas rugi harian sebelum pause
 - `maxTradesPerDay`: batas jumlah trade harian
 - `autoTargetProfitEnabled`: aktifkan TP otomatis berbasis ATR
 - `autoStopLossEnabled`: aktifkan SL otomatis berbasis ATR
@@ -306,14 +300,12 @@ Example:
 gridOrderSizeUsdt=5
 gridTargetProfitUsdt=0.5
 gridStopLossPercent=4
-dailyProfitTargetUsdt=3
-dailyMaxLossPercent=5
 maxTradesPerDay=10
 autoTargetProfitEnabled=true
 autoStopLossEnabled=true
 ```
 
-Contoh ini berarti setiap order grid memakai ukuran `5 USDT`, bot berhenti sementara jika profit harian sudah `3 USDT`, dan juga berhenti jika batas rugi harian tercapai.
+Contoh ini berarti setiap order grid memakai ukuran `5 USDT`, dan bot dibatasi sampai `10 trade` per hari.
 
 ### Grid
 

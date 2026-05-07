@@ -48,8 +48,8 @@ const createConfigModelHelpers = ({
         });
         const numericRules = {
             gridOrderSizeUsdt: { min: 0, allowZero: true },
-            gridTargetProfitUsdt: { min: 0, allowZero: false }, dailyProfitTargetUsdt: { min: 0, allowZero: false },
-            dailyMaxLossPercent: { min: 0, allowZero: false }, maxTradesPerDay: { min: 0, allowZero: false, integer: true },
+            gridTargetProfitUsdt: { min: 0, allowZero: false },
+            maxTradesPerDay: { min: 0, allowZero: false, integer: true },
             coolingPeriod: { min: 0, allowZero: true, integer: true }, monitoringInterval: { min: 200, allowZero: false, integer: true },
             gridStopLossPercent: { min: 0, allowZero: false }, gridLevels: { min: 0, allowZero: true, integer: true },
             gridLookbackCandles: { min: 20, allowZero: false, integer: true }, gridRangePercent: { min: 0, allowZero: true },
@@ -173,10 +173,6 @@ const createConfigModelHelpers = ({
         delete hydrated.stopLossPercent;
         if (hydrated.gridTimeframe === undefined && typeof hydrated.breakoutTimeframe === "string") hydrated.gridTimeframe = hydrated.breakoutTimeframe;
         delete hydrated.breakoutTimeframe;
-        if (hydrated.dailyProfitTargetUsdt === undefined && hydrated.targetDailyProfit !== undefined) hydrated.dailyProfitTargetUsdt = hydrated.targetDailyProfit;
-        delete hydrated.targetDailyProfit;
-        if (hydrated.dailyMaxLossPercent === undefined && hydrated.maxDailyLossPercent !== undefined) hydrated.dailyMaxLossPercent = hydrated.maxDailyLossPercent;
-        delete hydrated.maxDailyLossPercent;
         hydrated.activePosition = normalizeActivePositionState(hydrated.activePosition);
         hydrated.activeGridState = safeParseJSON(hydrated.activeGridState, null);
         return normalizeConfig(hydrated);
@@ -255,20 +251,6 @@ const createConfigModelHelpers = ({
         await addColumnIfMissing({ column: "activeGridState", sql: "ALTER TABLE Configs ADD COLUMN activeGridState TEXT DEFAULT NULL;" });
         await addColumnIfMissing({ column: "dailyPnlSource", sql: "ALTER TABLE Configs ADD COLUMN dailyPnlSource VARCHAR(255) DEFAULT 'local';" });
         await addColumnIfMissing({ column: "dailyPnlSyncedAt", sql: "ALTER TABLE Configs ADD COLUMN dailyPnlSyncedAt BIGINT DEFAULT 0;" });
-        await addColumnIfMissing({
-            column: "dailyProfitTargetUsdt",
-            sql: "ALTER TABLE Configs ADD COLUMN dailyProfitTargetUsdt FLOAT DEFAULT 1;",
-            legacyCopySql: columnNames.has("targetDailyProfit")
-                ? "UPDATE Configs SET dailyProfitTargetUsdt = COALESCE(targetDailyProfit, 1) WHERE dailyProfitTargetUsdt IS NULL OR dailyProfitTargetUsdt = '';"
-                : null
-        });
-        await addColumnIfMissing({
-            column: "dailyMaxLossPercent",
-            sql: "ALTER TABLE Configs ADD COLUMN dailyMaxLossPercent FLOAT DEFAULT 10;",
-            legacyCopySql: columnNames.has("maxDailyLossPercent")
-                ? "UPDATE Configs SET dailyMaxLossPercent = COALESCE(maxDailyLossPercent, 10) WHERE dailyMaxLossPercent IS NULL OR dailyMaxLossPercent = '';"
-                : null
-        });
         await addColumnIfMissing({ column: "strategy", sql: "ALTER TABLE Configs ADD COLUMN strategy VARCHAR(255) DEFAULT 'spot_grid';" });
         await addColumnIfMissing({ column: "sessionStartUTC", sql: "ALTER TABLE Configs ADD COLUMN sessionStartUTC INTEGER DEFAULT 0;" });
         await addColumnIfMissing({ column: "sessionEndUTC", sql: "ALTER TABLE Configs ADD COLUMN sessionEndUTC INTEGER DEFAULT 23;" });
