@@ -237,7 +237,7 @@ trailingEnabled=true
 trailingActivateATR=1.2
 trailingOffsetATR=0.6
 allowLong=true
-allowShort=true
+allowShort=false
 ```
 
 Parameter berikut memang valid jika di-set `0`:
@@ -392,7 +392,7 @@ Example:
 
 ```text
 allowLong=true
-allowShort=true
+allowShort=false
 ```
 
 Contoh ini membuat bot memasang ladder dua arah seperti spot grid Binance: buy order memakai saldo USDT, sedangkan sell order hanya dipasang jika saldo aset base tersedia.

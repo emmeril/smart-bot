@@ -62,7 +62,7 @@ const Config = sequelize.define("Config", {
     entryBbLongThreshold: { type: DataTypes.FLOAT, defaultValue: 0.18 },
     entryBbShortThreshold: { type: DataTypes.FLOAT, defaultValue: 0.82 },
     allowLong: { type: DataTypes.BOOLEAN, defaultValue: true },
-    allowShort: { type: DataTypes.BOOLEAN, defaultValue: true },
+    allowShort: { type: DataTypes.BOOLEAN, defaultValue: false },
 
     lastDailyReset: { type: DataTypes.BIGINT, defaultValue: () => Date.now() },
     lastUpdated: { type: DataTypes.BIGINT, defaultValue: () => Date.now() }
@@ -123,7 +123,7 @@ const DEFAULT_CONFIG = {
     entryBbLongThreshold: 0.18,
     entryBbShortThreshold: 0.82,
     allowLong: true,
-    allowShort: true
+    allowShort: false
 };
 
 const DASHBOARD_EDITABLE_FIELDS = [

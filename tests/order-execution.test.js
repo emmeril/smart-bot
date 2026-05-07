@@ -108,33 +108,49 @@ test("placeReduceOnlyStopLossOrder preserves replacement clientOrderId when exch
     assert.equal(order.info.origClientOrderId, "smartsl_old_new");
 });
 
-test("ensureReduceOnlyTakeProfitOrder serializes concurrent sync for the same position", async () => {
-    const openOrders = [];
-    let createCalls = 0;
+test("ensureReduceOnlyTakeProfitOrder serializes concurrent OCO sync for the same spot position", async () => {
+    const openTpOrders = [];
+    const openSlOrders = [];
+    let ocoCalls = 0;
     const serializedHelpers = createOrderExecutionHelpers({
         getExchange: () => ({
             markets: {
-                "DOGE/USDT:USDT": {}
+                "DOGE/USDT": { id: "DOGEUSDT" },
+                "DOGE/USDT:USDT": { id: "DOGEUSDT" }
             },
-            createOrder: async (_pair, _type, _side, qty, price, params) => {
-                createCalls += 1;
+            privatePostOrderOco: async (params) => {
+                ocoCalls += 1;
                 await new Promise((resolve) => setImmediate(resolve));
-                const order = {
-                    id: `tp-order-${createCalls}`,
-                    amount: qty,
-                    price,
-                    clientOrderId: params.newClientOrderId,
-                    info: {
-                        clientOrderId: params.newClientOrderId,
-                        origClientOrderId: params.newClientOrderId
-                    }
+                const tpOrder = {
+                    id: `tp-order-${ocoCalls}`,
+                    amount: Number(params.quantity),
+                    price: Number(params.price),
+                    side: String(params.side).toLowerCase(),
+                    clientOrderId: params.limitClientOrderId,
+                    info: { clientOrderId: params.limitClientOrderId, origClientOrderId: params.limitClientOrderId }
                 };
-                openOrders.push(order);
-                return order;
+                const slOrder = {
+                    id: `sl-order-${ocoCalls}`,
+                    amount: Number(params.quantity),
+                    stopPrice: Number(params.stopPrice),
+                    side: String(params.side).toLowerCase(),
+                    clientOrderId: params.stopClientOrderId,
+                    info: { clientOrderId: params.stopClientOrderId, origClientOrderId: params.stopClientOrderId, stopPrice: params.stopPrice }
+                };
+                openTpOrders.push(tpOrder);
+                openSlOrders.push(slOrder);
+                return {
+                    orderListId: `oco-${ocoCalls}`,
+                    listClientOrderId: params.listClientOrderId,
+                    orderReports: [
+                        { orderId: tpOrder.id, clientOrderId: tpOrder.clientOrderId, type: "LIMIT_MAKER", side: params.side, origQty: params.quantity, price: params.price },
+                        { orderId: slOrder.id, clientOrderId: slOrder.clientOrderId, type: "STOP_LOSS_LIMIT", side: params.side, origQty: params.quantity, stopPrice: params.stopPrice }
+                    ]
+                };
             }
         }),
         getMetrics: () => ({ api: { orders: 0 } }),
-        getDb: () => ({ pair: "DOGE/USDT:USDT" }),
+        getDb: () => ({ pair: "DOGE/USDT:USDT", marginMode: "spot" }),
         isHedgeModeEnabled: () => false,
         toFiniteNumber: (value, fallback = NaN) => {
             const numeric = Number(value);
@@ -152,15 +168,15 @@ test("ensureReduceOnlyTakeProfitOrder serializes concurrent sync for the same po
         getOrderPositionSide: (side) => side === "buy" ? "LONG" : "SHORT",
         getClosePositionSide: (position) => position.positionSide || "BOTH",
         findOpenGridOrderByClientOrderId: async () => null,
-        findOpenOrderByClientOrderId: async (clientOrderId) => openOrders.find((order) => order.clientOrderId === clientOrderId) || null,
+        findOpenOrderByClientOrderId: async (clientOrderId) => [...openTpOrders, ...openSlOrders].find((order) => order.clientOrderId === clientOrderId) || null,
         isDuplicateClientOrderIdError: (error) => String(error?.message || "").includes("duplicated"),
         cancelOrderByClientOrderId: async () => false,
         syncPositionWithExchange: async () => {},
         getExchangeClientOrderId: (order) => order?.clientOrderId || order?.info?.clientOrderId || order?.info?.origClientOrderId || "",
         getTpClientOrderId: () => "smarttp_same",
         getSlClientOrderId: () => "smartsl_old",
-        fetchOpenTpOrders: async () => openOrders,
-        fetchOpenSlOrders: async () => [],
+        fetchOpenTpOrders: async () => openTpOrders,
+        fetchOpenSlOrders: async () => openSlOrders,
         matchesOrderToTrackedPosition: () => true,
         getOrderQuantity: (order) => order?.amount,
         getOrderTriggerPrice: (order) => order?.stopPrice ?? order?.info?.stopPrice ?? NaN,
@@ -177,8 +193,10 @@ test("ensureReduceOnlyTakeProfitOrder serializes concurrent sync for the same po
         side: "buy",
         quantity: 10,
         targetPrice: 0.25,
+        stopLossPrice: 0.2,
         positionSide: "BOTH",
-        tpClientOrderId: "smarttp_same"
+        tpClientOrderId: "smarttp_same",
+        slClientOrderId: "smartsl_same"
     };
 
     await Promise.all([
@@ -186,6 +204,7 @@ test("ensureReduceOnlyTakeProfitOrder serializes concurrent sync for the same po
         serializedHelpers.ensureReduceOnlyTakeProfitOrder("BOTH", position)
     ]);
 
-    assert.equal(createCalls, 1);
-    assert.equal(openOrders.length, 1);
+    assert.equal(ocoCalls, 1);
+    assert.equal(openTpOrders.length, 1);
+    assert.equal(openSlOrders.length, 1);
 });

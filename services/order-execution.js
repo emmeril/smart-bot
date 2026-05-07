@@ -64,6 +64,107 @@ const createOrderExecutionHelpers = ({
         return nextOrder;
     };
 
+    const getSpotPair = (pair) => String(pair || "").split(":")[0];
+
+    const getBinanceSymbolId = (spotPair) => {
+        const exchange = getExchange();
+        const marketInfo = exchange?.markets?.[spotPair] || exchange?.markets?.[getDb()?.pair] || null;
+        if (marketInfo?.id) return marketInfo.id;
+        return String(spotPair || "").replace("/", "").replace(":", "");
+    };
+
+    const normalizeBinanceOrderReport = (report, symbol, fallbackClientOrderId = "") => {
+        if (!report || typeof report !== "object") return null;
+        const clientOrderId = String(report.clientOrderId || report.origClientOrderId || fallbackClientOrderId || "");
+        return attachClientOrderIdFallback({
+            id: String(report.orderId || report.id || ""),
+            symbol,
+            type: String(report.type || "").toLowerCase(),
+            side: String(report.side || "").toLowerCase(),
+            amount: toFiniteNumber(report.origQty ?? report.executedQty, NaN),
+            price: toFiniteNumber(report.price, NaN),
+            stopPrice: toFiniteNumber(report.stopPrice, NaN),
+            clientOrderId,
+            info: report
+        }, clientOrderId);
+    };
+
+    const extractOcoLegs = (ocoResponse, symbol, tpClientOrderId, slClientOrderId) => {
+        const reports = Array.isArray(ocoResponse?.orderReports)
+            ? ocoResponse.orderReports
+            : (Array.isArray(ocoResponse?.info?.orderReports) ? ocoResponse.info.orderReports : []);
+        const normalizedReports = reports
+            .map((report) => normalizeBinanceOrderReport(report, symbol))
+            .filter(Boolean);
+        const tpOrder = normalizedReports.find((order) => getExchangeClientOrderId(order) === tpClientOrderId)
+            || normalizedReports.find((order) => !String(order?.type || "").toUpperCase().includes("STOP"))
+            || attachClientOrderIdFallback({ id: null, symbol, info: {} }, tpClientOrderId);
+        const slOrder = normalizedReports.find((order) => getExchangeClientOrderId(order) === slClientOrderId)
+            || normalizedReports.find((order) => String(order?.type || "").toUpperCase().includes("STOP") || Number.isFinite(getOrderTriggerPrice(order)))
+            || attachClientOrderIdFallback({ id: null, symbol, info: {} }, slClientOrderId);
+        return {
+            orderListId: ocoResponse?.orderListId || ocoResponse?.info?.orderListId || null,
+            listClientOrderId: ocoResponse?.listClientOrderId || ocoResponse?.info?.listClientOrderId || null,
+            tpOrder: attachClientOrderIdFallback(tpOrder, tpClientOrderId),
+            slOrder: attachClientOrderIdFallback(slOrder, slClientOrderId),
+            raw: ocoResponse
+        };
+    };
+
+    const placeBinanceOcoOrder = async ({
+        spotPair,
+        closeSide,
+        quantity,
+        targetPrice,
+        stopPrice,
+        stopLimitPrice,
+        listClientOrderId,
+        tpClientOrderId,
+        slClientOrderId
+    }) => {
+        const exchange = getExchange();
+        const symbolId = getBinanceSymbolId(spotPair);
+        const request = {
+            symbol: symbolId,
+            side: String(closeSide || "").toUpperCase(),
+            quantity,
+            price: targetPrice,
+            stopPrice,
+            stopLimitPrice,
+            stopLimitTimeInForce: "GTC",
+            listClientOrderId,
+            limitClientOrderId: tpClientOrderId,
+            stopClientOrderId: slClientOrderId,
+            newOrderRespType: "RESULT"
+        };
+
+        if (typeof exchange.privatePostOrderOco === "function") {
+            return await exchange.privatePostOrderOco(request);
+        }
+
+        if (typeof exchange.privatePostOrderListOco === "function") {
+            return await exchange.privatePostOrderListOco({
+                symbol: symbolId,
+                side: request.side,
+                quantity,
+                aboveType: closeSide === "sell" ? "LIMIT_MAKER" : "STOP_LOSS_LIMIT",
+                abovePrice: closeSide === "sell" ? targetPrice : stopLimitPrice,
+                aboveStopPrice: closeSide === "sell" ? undefined : stopPrice,
+                aboveTimeInForce: closeSide === "sell" ? undefined : "GTC",
+                aboveClientOrderId: closeSide === "sell" ? tpClientOrderId : slClientOrderId,
+                belowType: closeSide === "sell" ? "STOP_LOSS_LIMIT" : "LIMIT_MAKER",
+                belowPrice: closeSide === "sell" ? stopLimitPrice : targetPrice,
+                belowStopPrice: closeSide === "sell" ? stopPrice : undefined,
+                belowTimeInForce: closeSide === "sell" ? "GTC" : undefined,
+                belowClientOrderId: closeSide === "sell" ? slClientOrderId : tpClientOrderId,
+                listClientOrderId,
+                newOrderRespType: "RESULT"
+            });
+        }
+
+        throw new Error("Binance OCO endpoint is not available in this CCXT exchange instance.");
+    };
+
     const shouldAdoptExistingManagedOrder = (position, orderIdKey, clientIdKey) => {
         if (!position || typeof position !== "object") return false;
         const hasAttachedManagedOrder = Boolean(position?.[orderIdKey] || position?.[clientIdKey]);
@@ -76,7 +177,7 @@ const createOrderExecutionHelpers = ({
         const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
-        const spotPair = String(db.pair || "").split(":")[0];
+        const spotPair = getSpotPair(db.pair);
         const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
         const orderSizeUsdt = Math.max(0, toFiniteNumber(gridOrder?.orderSizeUsdt, db.gridOrderSizeUsdt));
         const rawQty = orderSizeUsdt / gridOrder.price;
@@ -175,7 +276,7 @@ const createOrderExecutionHelpers = ({
         const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
-        const spotPair = String(db.pair || "").split(":")[0];
+        const spotPair = getSpotPair(db.pair);
         if (!Number.isFinite(position?.targetPrice) || position.targetPrice <= 0) return null;
         if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
         const closeSide = position.side === "buy" ? "sell" : "buy";
@@ -277,7 +378,7 @@ const createOrderExecutionHelpers = ({
         const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
-        const spotPair = String(db.pair || "").split(":")[0];
+        const spotPair = getSpotPair(db.pair);
         if (!Number.isFinite(position?.stopLossPrice) || position.stopLossPrice <= 0) return null;
         if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
         const closeSide = position.side === "buy" ? "sell" : "buy";
@@ -375,6 +476,73 @@ const createOrderExecutionHelpers = ({
         }
     };
 
+    const placeOcoExitOrder = async (position) => {
+        const exchange = getExchange();
+        const metrics = getMetrics();
+        const db = getDb();
+        const spotPair = getSpotPair(db.pair);
+        if (!Number.isFinite(position?.targetPrice) || position.targetPrice <= 0) return null;
+        if (!Number.isFinite(position?.stopLossPrice) || position.stopLossPrice <= 0) return null;
+        if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
+
+        const closeSide = position.side === "buy" ? "sell" : "buy";
+        const quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
+        const targetPrice = formatPriceToMarketPrecision(db.pair, position.targetPrice);
+        const stopPrice = formatPriceToMarketPrecision(db.pair, position.stopLossPrice);
+        const stopLimitPrice = formatPriceToMarketPrecision(db.pair, position.side === "buy" ? position.stopLossPrice * 0.999 : position.stopLossPrice * 1.001);
+        const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
+        const tpValidation = validateOrderSize(marketInfo, quantity, targetPrice, { orderType: "LIMIT" });
+        const slValidation = validateOrderSize(marketInfo, quantity, stopPrice, { orderType: "STOP_LOSS_LIMIT" });
+        if (!tpValidation.valid) {
+            console.warn(`[OCO][WARN] Skipping OCO placement: TP ${tpValidation.reason}`);
+            return null;
+        }
+        if (!slValidation.valid) {
+            console.warn(`[OCO][WARN] Skipping OCO placement: SL ${slValidation.reason}`);
+            return null;
+        }
+        if (tpValidation.warning) console.warn(`[OCO][WARN] TP ${tpValidation.warning}`);
+        if (slValidation.warning) console.warn(`[OCO][WARN] SL ${slValidation.warning}`);
+
+        const tpClientOrderId = position?.tpClientOrderId || getTpClientOrderId(position);
+        const slClientOrderId = position?.slClientOrderId || getSlClientOrderId(position);
+        const listClientOrderId = `smartoco_${String(position.positionSide || "SPOT").toLowerCase()}_${String(closeSide).slice(0, 1)}_${String(targetPrice).replace(/[^\d]/g, "")}`.slice(0, 36);
+
+        const existingTpOrder = await findOpenOrderByClientOrderId(tpClientOrderId, db.pair);
+        const existingSlOrder = await findOpenOrderByClientOrderId(slClientOrderId, db.pair);
+        if (existingTpOrder && existingSlOrder) {
+            console.log(`[OCO][INFO] Existing exchange OCO legs already active for ${listClientOrderId}. Reusing them.`);
+            return { tpOrder: existingTpOrder, slOrder: existingSlOrder, listClientOrderId };
+        }
+
+        try {
+            const ocoResponse = await placeBinanceOcoOrder({
+                spotPair,
+                closeSide,
+                quantity,
+                targetPrice,
+                stopPrice,
+                stopLimitPrice,
+                listClientOrderId,
+                tpClientOrderId,
+                slClientOrderId
+            });
+            metrics.api.orders++;
+            console.log(`[OCO][INFO] Placed ${closeSide.toUpperCase()} OCO TP @ ${targetPrice} | SL stop ${stopPrice} limit ${stopLimitPrice} qty ${quantity}`);
+            return extractOcoLegs(ocoResponse, spotPair, tpClientOrderId, slClientOrderId);
+        } catch (error) {
+            if (isDuplicateClientOrderIdError(error)) {
+                console.warn(`[OCO][WARN] Duplicate OCO clientOrderId detected. Syncing open orders before retry.`);
+                const duplicateTpOrder = await findOpenOrderByClientOrderId(tpClientOrderId, db.pair);
+                const duplicateSlOrder = await findOpenOrderByClientOrderId(slClientOrderId, db.pair);
+                if (duplicateTpOrder && duplicateSlOrder) return { tpOrder: duplicateTpOrder, slOrder: duplicateSlOrder, listClientOrderId };
+                await syncPositionWithExchange();
+                return null;
+            }
+            throw error;
+        }
+    };
+
     const syncManagedReduceOnlyOrder = async ({
         positionKey,
         position,
@@ -443,7 +611,94 @@ const createOrderExecutionHelpers = ({
         console.log(`${attachLogPrefix} Attached exchange ${label} to ${positionKey}`);
     };
 
+    const hasMatchingTpOrder = (order, position) => {
+        if (!order) return false;
+        const orderPrice = toFiniteNumber(order.price, NaN);
+        const orderAmount = getOrderQuantity(order);
+        return isManagedOrderPriceMatch(position.targetPrice, orderPrice)
+            && Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
+    };
+
+    const hasMatchingSlOrder = (order, position) => {
+        if (!order) return false;
+        const orderStopPrice = getOrderTriggerPrice(order);
+        const orderAmount = getOrderQuantity(order);
+        const closePositionOrder = Boolean(order?.closePosition || order?.info?.closePosition || !Number.isFinite(orderAmount) || orderAmount <= 0);
+        if (!isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice)) return false;
+        if (closePositionOrder) return true;
+        return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
+    };
+
+    const syncOcoExitOrder = async (positionKey, sourcePosition) => {
+        return await runManagedOrderSync(`OCO:${positionKey}`, async () => {
+            const position = { ...sourcePosition };
+            if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
+            if (!Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
+
+            const matchingTpOrders = (await fetchOpenTpOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
+            const matchingSlOrders = (await fetchOpenSlOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
+            const matchingTpOrder = matchingTpOrders.find((order) => hasMatchingTpOrder(order, position)) || null;
+            const matchingSlOrder = matchingSlOrders.find((order) => hasMatchingSlOrder(order, position)) || null;
+
+            if (matchingTpOrder && matchingSlOrder) {
+                const duplicateTpOrders = matchingTpOrders.filter((order) => order !== matchingTpOrder);
+                const duplicateSlOrders = matchingSlOrders.filter((order) => order !== matchingSlOrder);
+                if (duplicateTpOrders.length > 0) await cancelTpOrders(duplicateTpOrders, "OCO_TP_DUPLICATE");
+                if (duplicateSlOrders.length > 0) await cancelSlOrders(duplicateSlOrders, "OCO_SL_DUPLICATE");
+
+                const nextTpClientOrderId = getExchangeClientOrderId(matchingTpOrder) || position.tpClientOrderId || getTpClientOrderId(position);
+                const nextSlClientOrderId = getExchangeClientOrderId(matchingSlOrder) || position.slClientOrderId || getSlClientOrderId(position);
+                const nextTpOrderId = matchingTpOrder.id || position.tpOrderId || null;
+                const nextSlOrderId = matchingSlOrder.id || position.slOrderId || null;
+                const nextTargetPrice = toFiniteNumber(matchingTpOrder.price, position.targetPrice);
+                const nextStopLossPrice = getOrderTriggerPrice(matchingSlOrder);
+
+                if (
+                    position.tpOrderId !== nextTpOrderId ||
+                    position.tpClientOrderId !== nextTpClientOrderId ||
+                    position.slOrderId !== nextSlOrderId ||
+                    position.slClientOrderId !== nextSlClientOrderId ||
+                    position.targetPrice !== nextTargetPrice ||
+                    position.stopLossPrice !== nextStopLossPrice
+                ) {
+                    console.log(`[OCO] Synced existing OCO exit for ${positionKey} TP @ ${nextTargetPrice} | SL @ ${nextStopLossPrice}`);
+                    position.tpOrderId = nextTpOrderId;
+                    position.tpClientOrderId = nextTpClientOrderId;
+                    position.slOrderId = nextSlOrderId;
+                    position.slClientOrderId = nextSlClientOrderId;
+                    position.targetPrice = nextTargetPrice;
+                    position.stopLossPrice = nextStopLossPrice;
+                    upsertActivePosition(position);
+                    await saveDB();
+                }
+                return;
+            }
+
+            if (matchingTpOrders.length > 0 || matchingSlOrders.length > 0) {
+                console.log(`[OCO] Existing exit orders for ${positionKey} no longer match target. Replacing OCO...`);
+                if (matchingTpOrders.length > 0) await cancelTpOrders(matchingTpOrders, "OCO_REPLACE");
+                if (matchingSlOrders.length > 0) await cancelSlOrders(matchingSlOrders, "OCO_REPLACE");
+            } else {
+                console.log(`[OCO] No exchange OCO exit found for ${positionKey}. Creating replacement...`);
+            }
+
+            const placedOco = await placeOcoExitOrder(position);
+            if (!placedOco?.tpOrder || !placedOco?.slOrder) return;
+            position.tpOrderId = placedOco.tpOrder.id || null;
+            position.tpClientOrderId = getExchangeClientOrderId(placedOco.tpOrder) || getTpClientOrderId(position);
+            position.slOrderId = placedOco.slOrder.id || null;
+            position.slClientOrderId = getExchangeClientOrderId(placedOco.slOrder) || getSlClientOrderId(position);
+            upsertActivePosition(position);
+            await saveDB();
+            console.log(`[OCO] Attached exchange OCO exit to ${positionKey}`);
+        });
+    };
+
     const ensureReduceOnlyTakeProfitOrder = async (positionKey, sourcePosition) => {
+        const db = getDb();
+        if (String(db?.marginMode || "spot").toLowerCase() === "spot") {
+            return syncOcoExitOrder(positionKey, sourcePosition);
+        }
         return await runManagedOrderSync(`TP:${positionKey}`, async () => {
             const position = { ...sourcePosition };
             if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
@@ -479,6 +734,10 @@ const createOrderExecutionHelpers = ({
     };
 
     const ensureReduceOnlyStopLossOrder = async (positionKey, sourcePosition) => {
+        const db = getDb();
+        if (String(db?.marginMode || "spot").toLowerCase() === "spot") {
+            return syncOcoExitOrder(positionKey, sourcePosition);
+        }
         return await runManagedOrderSync(`SL:${positionKey}`, async () => {
             const position = { ...sourcePosition };
             if (!position || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
@@ -522,6 +781,7 @@ const createOrderExecutionHelpers = ({
         placeGridEntryOrder,
         placeReduceOnlyTakeProfitOrder,
         placeReduceOnlyStopLossOrder,
+        placeOcoExitOrder,
         ensureReduceOnlyTakeProfitOrder,
         ensureReduceOnlyStopLossOrder
     };
