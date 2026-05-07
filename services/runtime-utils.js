@@ -72,8 +72,9 @@ const createRuntimeUtils = ({
 
     const getExchangeRecoveryReason = () => {
         const exchangeHealth = getExchangeHealth();
+        if (!exchangeHealth.isHealthy && exchangeHealth.lastError) return exchangeHealth.lastError;
         if (exchangeHealth.needsRecoverySync) return "Waiting for successful recovery sync";
-        if (!exchangeHealth.isHealthy) return exchangeHealth.lastError || "Exchange connection is degraded";
+        if (!exchangeHealth.isHealthy) return "Exchange connection is degraded";
         return "";
     };
 

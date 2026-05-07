@@ -20,14 +20,28 @@ const createRuntimeExchangeBootstrapHelpers = ({
         if (!apiKey || !apiSecret) {
             throw new Error("Missing API_KEY or API_SECRET in .env");
         }
+        const privateAuthError = apiKey === apiSecret
+            ? new Error("Invalid Binance API credentials: API_SECRET is the same as API_KEY. Use the separate secret key shown by Binance when the API key is created.")
+            : null;
+        return { apiKey, apiSecret, privateAuthError };
+    };
+
+    const markPrivateAuthFailed = (exchange, error, options = {}) => {
+        exchange.options.smartBotPrivateAuthFailed = true;
+        markExchangeUnhealthy(error, "private API authentication");
+        if (options.credentialsAreDuplicated) {
+            console.error("[EXCHANGE][ERROR] Private API authentication failed: API_SECRET is currently the same as API_KEY. Paste the separate Binance secret key into .env, then restart the bot.");
+            return;
+        }
+        console.error("[EXCHANGE][ERROR] Private API authentication failed. Verify API_KEY/API_SECRET belong to the same Binance account, are for the correct environment, and have spot trading/API permissions enabled.");
     };
 
     const initializeExchange = async () => {
         try {
-            validateExchangeCredentials();
+            const { apiKey, apiSecret, privateAuthError } = validateExchangeCredentials();
             const nextExchange = new ccxt.binance({
-                apiKey: String(process.env.API_KEY || "").trim(),
-                secret: String(process.env.API_SECRET || "").trim(),
+                apiKey,
+                secret: apiSecret,
                 options: {
                     defaultType: "spot",
                     adjustForTimeDifference: true,
@@ -59,13 +73,15 @@ const createRuntimeExchangeBootstrapHelpers = ({
             const timeDifference = toFiniteNumber(nextExchange.timeDifference, 0);
             console.log(`[EXCHANGE][INFO] Connected${timeDifference ? ` (time difference ${timeDifference}ms)` : ""}`);
 
-            try {
-                await nextExchange.fetchBalance();
-                nextExchange.options.smartBotPrivateAuthFailed = false;
-            } catch (error) {
-                nextExchange.options.smartBotPrivateAuthFailed = true;
-                markExchangeUnhealthy(error, "private API authentication");
-                console.error("[EXCHANGE][ERROR] Private API authentication failed. Verify API_KEY/API_SECRET belong to the same Binance account, are for the correct environment, and have spot trading/API permissions enabled.");
+            if (privateAuthError) {
+                markPrivateAuthFailed(nextExchange, privateAuthError, { credentialsAreDuplicated: true });
+            } else {
+                try {
+                    await nextExchange.fetchBalance();
+                    nextExchange.options.smartBotPrivateAuthFailed = false;
+                } catch (error) {
+                    markPrivateAuthFailed(nextExchange, error);
+                }
             }
 
             return nextExchange;

@@ -159,6 +159,9 @@ const createRuntimeMarketDataHelpers = ({
         const exchange = getExchange();
         const metrics = getMetrics();
         const balanceCache = getBalanceCache();
+        if (exchange?.options?.smartBotPrivateAuthFailed) {
+            return balanceCache.totalUSDT || 0;
+        }
         try {
             const now = Date.now();
             if (!forceRefresh && now - balanceCache.lastUpdate < balanceCacheTtl) return balanceCache.totalUSDT;

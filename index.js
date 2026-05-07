@@ -1017,12 +1017,8 @@ const syncPositionWithExchange = async () => {
     isSyncingPosition = true;
     try {
         if (!db || !exchange) return;
+        if (exchange?.options?.smartBotPrivateAuthFailed) return;
         const maybeMarkPositionSyncHealthy = () => {
-            if (exchange?.options?.smartBotPrivateAuthFailed) {
-                const authError = new Error("Binance private API authentication is failing. Trading remains paused until API_KEY/API_SECRET are corrected.");
-                markExchangeUnhealthy(authError, "position sync");
-                return;
-            }
             markExchangeHealthy("position sync");
         };
         const now = Date.now();

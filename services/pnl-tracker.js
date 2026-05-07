@@ -73,6 +73,7 @@ const createPnlTrackerHelpers = ({
     const supportsExchangeTradeSync = () => {
         const exchange = getExchange();
         if (!exchange || typeof exchange.fetchMyTrades !== "function") return false;
+        if (exchange.options?.smartBotPrivateAuthFailed) return false;
         if (exchange.has && exchange.has.fetchMyTrades === false) return false;
         return true;
     };
@@ -126,7 +127,10 @@ const createPnlTrackerHelpers = ({
     const syncDailyPnlWithExchange = async ({ force = false } = {}) => {
         const db = getDb();
         if (!db) return buildDailyPnlSnapshot();
-        if (!supportsExchangeTradeSync()) return buildDailyPnlSnapshot(db);
+        if (!supportsExchangeTradeSync()) {
+            lastExchangePnlSyncAt = Date.now();
+            return buildDailyPnlSnapshot(db);
+        }
 
         const now = Date.now();
         if (!force && (now - lastExchangePnlSyncAt) < EXCHANGE_PNL_SYNC_TTL_MS) {
