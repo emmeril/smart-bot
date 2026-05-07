@@ -1067,7 +1067,7 @@
 	          <p class="eyebrow">Konfigurasi</p>
 	          <h2>Parameter trading</h2>
 	        </div>
-	        <p class="muted">Yang tampil hanya General dan Risk Management. Parameter lain tetap dipertahankan di server.</p>
+	        <p class="muted">Semua field di bawah akan divalidasi kembali di sisi server sebelum disimpan.</p>
 	      </div>
 	      <div class="config-legend">
 	        <span class="field-badge">AUTO 0</span>
@@ -1091,8 +1091,7 @@
   </main>
 
   <script>
-    const SECTION_ORDER = ["General", "Risk"];
-    const VISIBLE_SECTION_SET = new Set(SECTION_ORDER);
+    const SECTION_ORDER = ["General", "Risk", "Grid", "Session", "Trailing", "Direction"];
     const state = { config: null, defaults: null, schema: [], status: null, serverTime: 0 };
     let formDirty = false;
     let autoRefreshTimer = null;
@@ -1266,19 +1265,9 @@
       const exchangeLabel = !exchangeConnected
         ? "Offline"
         : (needsRecoverySync ? "Recovery sync" : (exchangeHealthy ? "Healthy" : "Degraded"));
-      const balanceTotalValue = Number(status.balanceTotalUSDT);
-      const balanceAvailableValue = Number(status.balanceAvailableUSDT);
-      const balanceTotal = Number.isFinite(balanceTotalValue) ? `${formatNumber(balanceTotalValue)} USDT` : "N/A";
-      const balanceAvailable = Number.isFinite(balanceAvailableValue) ? `${formatNumber(balanceAvailableValue)} USDT` : "N/A";
-      const balanceNote = status.balanceError
-        ? `Sync failed: ${status.balanceError}`
-        : (Number.isFinite(Number(status.balanceLastUpdated)) && Number(status.balanceLastUpdated) > 0
-          ? `Available ${balanceAvailable} | ${formatDateTime(status.balanceLastUpdated)}`
-          : `Available ${balanceAvailable} | menunggu sinkronisasi`);
       const cards = [
         { label: "Bot", value: runtimeStatus.label, note: runtimeStatus.description },
         { label: "Positions", value: String(status.activePositions), note: status.activeGridState ? "Grid state active" : "No local grid state" },
-        { label: "Balance", value: balanceTotal, note: balanceNote },
         { label: "Realized PnL", value: `${formatNumber(status.dailyPnL)} USDT`, note: `${status.dailyTrades} trades today | ${String(status.dailyPnlSource || "local").toLowerCase()}` },
         { label: "Mode", value: tradeModeValue, note: positionModeValue }
       ];
@@ -1522,12 +1511,12 @@
       const map = new Map();
       for (const field of schema) {
         const section = field.section || "General";
-        if (!VISIBLE_SECTION_SET.has(section)) continue;
         if (!map.has(section)) map.set(section, []);
         map.get(section).push(field);
       }
       const ordered = [];
       for (const section of SECTION_ORDER) if (map.has(section)) ordered.push([section, map.get(section)]);
+      for (const entry of map.entries()) if (!SECTION_ORDER.includes(entry[0])) ordered.push(entry);
       return ordered;
     }
 
@@ -1620,10 +1609,8 @@
     }
 
     function collectConfig() {
-      const payload = { ...(state.config || {}) };
+      const payload = {};
       for (const field of state.schema) {
-        const section = field.section || "General";
-        if (!VISIBLE_SECTION_SET.has(section)) continue;
         const el = form.elements[field.key];
         if (!el) continue;
         if (field.type === "boolean") {
@@ -1702,10 +1689,6 @@
       try {
         const data = await api("/api/status");
         renderLiveStatus(data);
-        if (state.status) {
-          state.status = { ...state.status, ...data };
-          renderMetrics(state.status);
-        }
       } catch (error) {
         if (!silent) showToast(error.message || "Gagal memuat status live", "error");
       }

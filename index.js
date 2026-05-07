@@ -56,7 +56,7 @@ let lastLogTime = Date.now();
 let lastPnlLog = Date.now();
 let lastPositionRuntimePersistAt = 0;
 let lastTradeAt = 0;
-let balanceCache = { totalUSDT: 0, availableUSDT: 0, lastUpdate: 0, lastError: null };
+let balanceCache = { totalUSDT: 0, availableUSDT: 0, lastUpdate: 0 };
 let tickerCache = { price: null, lastUpdate: 0 };
 let ohlcvCache = { key: "", data: null, lastUpdate: 0 };
 let pnlMonitorTimer = null;
@@ -586,8 +586,6 @@ const {
     fetchManagedOpenOrdersSnapshot: (...args) => fetchManagedOpenOrdersSnapshot(...args),
     getGridRuntimeSummary: (...args) => getGridRuntimeSummary(...args),
     getExchangeRecoveryReason,
-    getBalanceCache: () => balanceCache,
-    getTotalUSDTBalance: (...args) => getTotalUSDTBalance(...args),
     getAccountPositionMode: () => accountPositionMode,
     getIsPlacingOrder: () => isPlacingOrder,
     getIsClosingPosition: () => isClosingPosition,

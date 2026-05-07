@@ -5,8 +5,6 @@ const createDashboardStatusHelpers = ({
     getExchange,
     getExchangeHealth,
     getExchangeRecoveryReason,
-    getBalanceCache,
-    getTotalUSDTBalance,
     getAccountPositionMode,
     getActivePositionsMap,
     getActivePositionEntries,
@@ -25,7 +23,6 @@ const createDashboardStatusHelpers = ({
         const db = getDb();
         const exchangeHealth = getExchangeHealth();
         const activePositionsMap = getActivePositionsMap(db?.activePosition);
-        const balanceCache = typeof getBalanceCache === "function" ? getBalanceCache() : null;
         return {
             botRunning: !getIsShuttingDown(),
             exchangeConnected: Boolean(getExchange()),
@@ -41,10 +38,6 @@ const createDashboardStatusHelpers = ({
             dailyPnlSyncedAt: toFiniteNumber(db?.dailyPnlSyncedAt, 0),
             lastUpdated: toFiniteNumber(db?.lastUpdated, 0),
             lastDailyReset: toFiniteNumber(db?.lastDailyReset, 0),
-            balanceTotalUSDT: toFiniteNumber(balanceCache?.totalUSDT, null),
-            balanceAvailableUSDT: toFiniteNumber(balanceCache?.availableUSDT, null),
-            balanceLastUpdated: toFiniteNumber(balanceCache?.lastUpdate, 0),
-            balanceError: balanceCache?.lastError || null,
             pair: db?.pair || defaultConfig.pair,
             strategy: db?.strategy || defaultConfig.strategy,
             marginMode: db?.marginMode || defaultConfig.marginMode
@@ -75,15 +68,6 @@ const createDashboardStatusHelpers = ({
                 error: "Config is not ready yet"
             };
         }
-
-        if (typeof getTotalUSDTBalance === "function") {
-            try {
-                await getTotalUSDTBalance();
-            } catch (error) {
-                console.warn(`[STATUS][WARN] Failed to refresh balance snapshot: ${error.message}`);
-            }
-        }
-        const balanceCache = typeof getBalanceCache === "function" ? getBalanceCache() : null;
 
         let dailyPnlSnapshot = typeof buildDailyPnlSnapshot === "function"
             ? buildDailyPnlSnapshot(db)
@@ -162,10 +146,6 @@ const createDashboardStatusHelpers = ({
             needsRecoverySync: Boolean(getExchangeHealth()?.needsRecoverySync),
             exchangeRecoveryReason: getExchangeRecoveryReason() || null,
             positionMode: getAccountPositionMode()?.label || "UNKNOWN",
-            balanceTotalUSDT: toFiniteNumber(balanceCache?.totalUSDT, null),
-            balanceAvailableUSDT: toFiniteNumber(balanceCache?.availableUSDT, null),
-            balanceLastUpdated: toFiniteNumber(balanceCache?.lastUpdate, 0),
-            balanceError: balanceCache?.lastError || null,
             dailyPnL: toFiniteNumber(dailyPnlSnapshot.dailyPnL, 0),
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(dailyPnlSnapshot.dailyTrades, 0))),
             dailyPnlSource: String(dailyPnlSnapshot.dailyPnlSource || "local").toLowerCase(),
