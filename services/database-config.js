@@ -171,8 +171,8 @@ const DASHBOARD_EDITABLE_FIELDS = [
     { key: "entryBbStdDev", label: "BB Std Dev", section: "Entry Filters", type: "number", min: 1, step: 0.1, description: "Bollinger Band standard deviation width." },
     { key: "entryBbLongThreshold", label: "BB Long %B Max", section: "Entry Filters", type: "number", min: 0, max: 0.5, step: 0.05, description: "Maximum Bollinger %B allowed for long entries." },
     { key: "entryBbShortThreshold", label: "BB Short %B Min", section: "Entry Filters", type: "number", min: 0.5, max: 1, step: 0.05, description: "Minimum Bollinger %B required for short entries." },
-    { key: "allowLong", label: "Allow Long", section: "Direction", type: "boolean", description: "Allow long entries." },
-    { key: "allowShort", label: "Allow Short", section: "Direction", type: "boolean", description: "Allow short entries." }
+    { key: "allowLong", label: "Allow Buy Grid", section: "Direction", type: "boolean", description: "Allow buy ladder orders below the current spot price." },
+    { key: "allowShort", label: "Allow Sell Grid", section: "Direction", type: "boolean", description: "Allow sell ladder orders above the current spot price using only owned base asset balance." }
 ];
 
 const DASHBOARD_EDITABLE_KEYS = new Set(DASHBOARD_EDITABLE_FIELDS.map((field) => field.key));

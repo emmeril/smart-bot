@@ -99,7 +99,7 @@ const createOrderExecutionHelpers = ({
             return false;
         }
         if (gridOrder.side === "sell" && Number.isFinite(baseFree) && baseFree < quantity) {
-            console.warn(`[GRID][WARN] Skipping SELL grid order because ${baseAsset} balance is insufficient.`);
+            console.warn(`[GRID][WARN] Skipping SELL grid order because ${baseAsset} balance is insufficient. Spot grid sell orders only use owned base balance.`);
             return false;
         }
 

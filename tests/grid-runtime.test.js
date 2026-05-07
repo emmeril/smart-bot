@@ -278,6 +278,84 @@ test("resolveEffectiveGridRangePercent and entry buffer use universal normalized
     }), 0.116);
 });
 
+test("buildGridEntryOrders honors buy and sell grid toggles", () => {
+    const helpers = createGridRuntimeHelpers({
+        getDb: () => ({
+            pair: "DOGE/USDT",
+            gridLevels: 4,
+            gridOrdersPerSide: 2,
+            gridOrderSizeUsdt: 5,
+            allowLong: true,
+            allowShort: false
+        }),
+        getExchange: () => ({ markets: { "DOGE/USDT": {} } }),
+        getBalanceCache: () => ({ totalUSDT: 100, availableUSDT: 100 }),
+        getTickerCache: () => ({ price: 100 }),
+        getSaveDB: () => async () => {},
+        defaultConfig: {
+            volumePeriod: 20,
+            atrPeriod: 14,
+            gridLookbackCandles: 20,
+            gridLevels: 4,
+            gridTakeProfitLevels: 0,
+            gridOrdersPerSide: 2,
+            gridOrderSizeUsdt: 5,
+            gridRangePercent: 4,
+            gridEntryBufferPercent: 0.1,
+            gridStopLossLevels: 0
+        },
+        validMarginModes: ["spot"],
+        normalizeSymbol: (symbol) => String(symbol || "").toUpperCase(),
+        toFiniteNumber: (value, fallback) => {
+            const numericValue = Number(value);
+            return Number.isFinite(numericValue) ? numericValue : fallback;
+        },
+        clamp: (value, min, max) => Math.min(Math.max(value, min), max),
+        formatPriceToMarketPrecision: (_pair, price) => Number(Number(price).toFixed(4)),
+        formatAmountToMarketPrecision: (_pair, amount) => Number(Number(amount).toFixed(8)),
+        validateOrderSize: () => ({ valid: true }),
+        isDirectionalOrderPlanValid: () => true,
+        getClosePositionSide: () => "BOTH",
+        isHedgeModeEnabled: () => false,
+        getActivePositionsList: () => [],
+        getExchangePositionSide: (position) => position.side,
+        gridClientOrderPrefix: "smartgrid",
+        tpClientOrderPrefix: "smarttp",
+        slClientOrderPrefix: "smartsl"
+    });
+
+    const params = {
+        configuredGridLevels: 4,
+        configuredGridRangePercent: 4,
+        configuredGridEntryBufferPercent: 0.1,
+        gridLookbackCandles: 20,
+        gridRangePercent: 4,
+        gridLevels: 4,
+        gridEntryBufferPercent: 0.1,
+        gridOrderSizeUsdt: 5,
+        gridOrdersPerSide: 2,
+        gridTakeProfitLevels: 0,
+        gridStopLossLevels: 0
+    };
+    const gridState = {
+        lowerBound: 96,
+        upperBound: 104,
+        referencePrice: 100,
+        levels: [96, 98, 100, 102, 104],
+        step: 2,
+        fingerprint: helpers.getGridStateFingerprint(params)
+    };
+
+    const orders = helpers.buildGridEntryOrders(
+        { currentPrice: 100, currentATR: 1 },
+        params,
+        gridState
+    );
+
+    assert.ok(orders.length > 0);
+    assert.ok(orders.every((order) => order.side === "buy"));
+});
+
 test("applyAutoPairGridPreset clears stale activeGridState when fingerprint only matches by substring", () => {
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({

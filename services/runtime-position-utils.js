@@ -36,6 +36,9 @@ const createRuntimePositionUtils = ({
         const exchange = getExchange();
         const db = getDb();
         const metrics = getMetrics();
+        const marginMode = String(db?.marginMode || "spot").toLowerCase();
+        const defaultType = String(exchange?.options?.defaultType || "spot").toLowerCase();
+        if (marginMode === "spot" || defaultType === "spot") return [];
         if (typeof exchange?.fetchPositions !== "function") return [];
         metrics.api.positions++;
         const pair = String(db?.pair || "").split(":")[0];

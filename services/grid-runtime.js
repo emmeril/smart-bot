@@ -508,8 +508,10 @@ const createGridRuntimeHelpers = ({
         const maxSellPrice = snapshot.currentPrice * (1 + (params.gridEntryBufferPercent / 100));
         const buyOrders = [];
         const sellOrders = [];
+        const allowBuyGrid = db?.allowLong !== false;
+        const allowSellGrid = db?.allowShort !== false;
 
-        for (let i = levels.length - 2; i >= 0; i--) {
+        for (let i = levels.length - 2; allowBuyGrid && i >= 0; i--) {
             const price = formatPriceToMarketPrecision(db.pair, levels[i]);
             const exitPlan = buildGridExitPlan({ side: "buy", entryIndex: i, levels, step, params, gridState: resolvedGridState, atr: snapshot?.currentATR });
             const targetPrice = exitPlan.targetPrice;
@@ -525,7 +527,7 @@ const createGridRuntimeHelpers = ({
             }
         }
 
-        for (let i = 1; i < levels.length; i++) {
+        for (let i = 1; allowSellGrid && i < levels.length; i++) {
             const price = formatPriceToMarketPrecision(db.pair, levels[i]);
             const exitPlan = buildGridExitPlan({ side: "sell", entryIndex: i, levels, step, params, gridState: resolvedGridState, atr: snapshot?.currentATR });
             const targetPrice = exitPlan.targetPrice;

@@ -7,7 +7,7 @@ Bot trading otomatis berbasis Node.js untuk Binance Spot dengan strategi utama `
 Bot ini dirancang untuk gaya trading grid yang adaptif:
 
 - range grid dihitung dari candle historis sesuai timeframe aktif
-- bot membuat ladder order `buy` dan `sell` di sekitar harga berjalan
+- bot membuat ladder order `buy` di bawah harga dan `sell` di atas harga berjalan
 - target profit dan stop loss bisa mengikuti level grid atau menyesuaikan ATR
 - posisi dan order aktif di exchange disinkronkan kembali saat bot restart
 - konfigurasi disimpan di database SQLite dan dapat diubah dari dashboard
@@ -17,7 +17,7 @@ Strategi yang tersedia saat ini adalah `spot_grid`.
 ## Fitur Utama
 
 - Grid spot berbasis level harga dari candle terbaru
-- Support `LONG` dan `SHORT`
+- Mode spot murni: buy memakai saldo quote, sell hanya memakai aset base yang sudah dimiliki
 - Mode spot tunggal, tanpa margin tambahan
 - Deteksi mode akun spot untuk menyesuaikan perilaku order
 - Recovery state posisi aktif setelah restart
@@ -385,17 +385,17 @@ Contoh ini berarti trailing stop baru aktif setelah harga bergerak sejauh `1.2x 
 
 ### Direction
 
-- `allowLong`: izinkan entry long
-- `allowShort`: izinkan entry short
+- `allowLong`: izinkan ladder buy di bawah harga berjalan
+- `allowShort`: izinkan ladder sell di atas harga berjalan, hanya memakai aset base yang dimiliki
 
 Example:
 
 ```text
 allowLong=true
-allowShort=false
+allowShort=true
 ```
 
-Contoh ini cocok jika kamu hanya ingin bot mencari peluang `LONG` dan menonaktifkan entry `SHORT`.
+Contoh ini membuat bot memasang ladder dua arah seperti spot grid Binance: buy order memakai saldo USDT, sedangkan sell order hanya dipasang jika saldo aset base tersedia.
 
 ## Penyimpanan Data
 
@@ -417,8 +417,8 @@ timestamp,pair,side,entry,exit,status,pnl,trade_mode,stop_loss_percent,strategy
 
 Salah satu bagian penting bot ini adalah sinkronisasi state lokal dengan exchange. Saat proses dijalankan ulang, bot akan berusaha:
 
-- membaca posisi spot yang masih aktif
-- memetakan order grid, take profit, dan stop loss yang masih terbuka
+- membaca order spot yang masih aktif
+- memetakan order grid yang masih terbuka
 - memulihkan state lokal agar tidak membuka posisi ganda secara tidak sengaja
 
 Ini penting untuk menjaga runtime tetap konsisten setelah crash, restart server, atau restart manual.
