@@ -50,8 +50,7 @@ const createHelpers = ({ createOrderImpl, isHedgeModeEnabled = false } = {}) => 
         saveDB: async () => {},
         cancelTpOrders: async () => {},
         cancelSlOrders: async () => {},
-        buildReplacementClientOrderId: (clientOrderId) => `${clientOrderId}_new`,
-        getPrice: async () => 0.22
+        buildReplacementClientOrderId: (clientOrderId) => `${clientOrderId}_new`
     });
 };
 
@@ -187,8 +186,7 @@ test("ensureReduceOnlyTakeProfitOrder serializes concurrent OCO sync for the sam
         saveDB: async () => {},
         cancelTpOrders: async () => {},
         cancelSlOrders: async () => {},
-        buildReplacementClientOrderId: (clientOrderId) => `${clientOrderId}_new`,
-        getPrice: async () => 0.22
+        buildReplacementClientOrderId: (clientOrderId) => `${clientOrderId}_new`
     });
 
     const position = {
@@ -209,67 +207,4 @@ test("ensureReduceOnlyTakeProfitOrder serializes concurrent OCO sync for the sam
     assert.equal(ocoCalls, 1);
     assert.equal(openTpOrders.length, 1);
     assert.equal(openSlOrders.length, 1);
-});
-
-test("placeOcoExitOrder skips placement when rounded prices do not straddle market price", async () => {
-    let ocoCalls = 0;
-    const helpers = createOrderExecutionHelpers({
-        getExchange: () => ({
-            markets: {
-                "DOGE/USDT": { id: "DOGEUSDT" },
-                "DOGE/USDT:USDT": { id: "DOGEUSDT" }
-            },
-            privatePostOrderListOco: async () => {
-                ocoCalls += 1;
-                return {};
-            }
-        }),
-        getMetrics: () => ({ api: { orders: 0 } }),
-        getDb: () => ({ pair: "DOGE/USDT:USDT", marginMode: "spot" }),
-        isHedgeModeEnabled: () => false,
-        toFiniteNumber: (value, fallback = NaN) => {
-            const numeric = Number(value);
-            return Number.isFinite(numeric) ? numeric : fallback;
-        },
-        formatAmountToMarketPrecision: (_pair, amount) => amount,
-        formatPriceToMarketPrecision: (_pair, price) => price,
-        validateOrderSize: () => ({ valid: true }),
-        buildExchangeOrderParams: ({ side } = {}) => ({ side }),
-        getOrderPositionSide: (side) => side === "buy" ? "LONG" : "SHORT",
-        getClosePositionSide: (position) => position.positionSide || "BOTH",
-        findOpenGridOrderByClientOrderId: async () => null,
-        findOpenOrderByClientOrderId: async () => null,
-        isDuplicateClientOrderIdError: () => false,
-        cancelOrderByClientOrderId: async () => false,
-        syncPositionWithExchange: async () => {},
-        getExchangeClientOrderId: (order) => order?.clientOrderId || order?.info?.clientOrderId || order?.info?.origClientOrderId || "",
-        getTpClientOrderId: () => "smarttp_same",
-        getSlClientOrderId: () => "smartsl_same",
-        fetchOpenTpOrders: async () => [],
-        fetchOpenSlOrders: async () => [],
-        matchesOrderToTrackedPosition: () => true,
-        getOrderQuantity: (order) => order?.amount,
-        getOrderTriggerPrice: (order) => order?.stopPrice ?? order?.info?.stopPrice ?? NaN,
-        isManagedOrderPriceMatch: (a, b) => a === b,
-        getPositionSyncQtyTolerance: () => 0.001,
-        upsertActivePosition: () => {},
-        saveDB: async () => {},
-        cancelTpOrders: async () => {},
-        cancelSlOrders: async () => {},
-        buildReplacementClientOrderId: (clientOrderId) => `${clientOrderId}_new`,
-        getPrice: async () => 0.26
-    });
-
-    const order = await helpers.placeOcoExitOrder({
-        side: "buy",
-        quantity: 10,
-        targetPrice: 0.25,
-        stopLossPrice: 0.2,
-        positionSide: "BOTH",
-        tpClientOrderId: "smarttp_same",
-        slClientOrderId: "smartsl_same"
-    });
-
-    assert.equal(order, null);
-    assert.equal(ocoCalls, 0);
 });

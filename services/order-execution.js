@@ -30,120 +30,9 @@ const createOrderExecutionHelpers = ({
     saveDB,
     cancelTpOrders,
     cancelSlOrders,
-    buildReplacementClientOrderId,
-    getPrice
+    buildReplacementClientOrderId
 }) => {
     const managedOrderSyncChains = new Map();
-    const isTimestampError = (error) => {
-        const code = Number(error?.code);
-        const message = String(error?.message || error || "");
-        return code === -1021 || /timestamp.*outside of the recvWindow|timestamp for this request was/i.test(message);
-    };
-
-    const getErrorStatus = (error) => {
-        const candidates = [error?.status, error?.statusCode, error?.httpStatus, error?.response?.status, error?.response?.statusCode];
-        for (const candidate of candidates) {
-            const parsed = Number(candidate);
-            if (Number.isFinite(parsed)) return parsed;
-        }
-        return NaN;
-    };
-
-    const getRetryAfterMs = (error) => {
-        const headers = error?.headers || error?.responseHeaders || error?.response?.headers || {};
-        const retryAfter = headers["Retry-After"] || headers["retry-after"];
-        const parsed = Number(retryAfter);
-        return Number.isFinite(parsed) && parsed > 0 ? parsed * 1000 : NaN;
-    };
-
-    const getExchangeErrorCode = (error) => {
-        const directCode = Number(error?.code);
-        if (Number.isFinite(directCode)) return directCode;
-        const payload = String(error?.message || error || "");
-        const match = payload.match(/"code"\s*:\s*(-?\d+)/);
-        return match ? Number(match[1]) : NaN;
-    };
-
-    const isRateLimitError = (error) => {
-        const status = getErrorStatus(error);
-        const code = getExchangeErrorCode(error);
-        const payload = String(error?.message || error || "");
-        return status === 429 || status === 418 || code === -1003 || code === -1015 || /too many requests|too much request weight|ip banned|too many new orders/i.test(payload);
-    };
-
-    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-    const runPrivateApiWithRecovery = async (operation, label = "private API request") => {
-        let refreshedTimestamp = false;
-        let delayMs = 1000;
-        for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-                return await operation();
-            } catch (error) {
-                const exchange = getExchange();
-                if (isTimestampError(error) && !refreshedTimestamp && typeof exchange?.loadTimeDifference === "function") {
-                    refreshedTimestamp = true;
-                    try {
-                        await exchange.loadTimeDifference();
-                    } catch (refreshError) {
-                        console.warn(`[EXCHANGE][WARN] Failed to refresh time difference after timestamp error: ${String(refreshError?.message || refreshError)}`);
-                    }
-                    continue;
-                }
-
-                if (!isRateLimitError(error) || attempt === 2) throw error;
-                const retryAfterMs = getRetryAfterMs(error);
-                if (getErrorStatus(error) === 418) {
-                    const waitLabel = Number.isFinite(retryAfterMs) ? ` Retry-After=${Math.ceil(retryAfterMs / 1000)}s.` : "";
-                    throw new Error(`Binance IP ban response received during ${label}. Stop requests until the ban window expires.${waitLabel}`);
-                }
-                const waitMs = Number.isFinite(retryAfterMs) ? retryAfterMs : delayMs;
-                console.warn(`[EXCHANGE][WARN] Rate limit during ${label}. Retrying in ${waitMs}ms.`);
-                await sleep(waitMs);
-                delayMs = Math.max(delayMs * 2, waitMs * 2);
-            }
-        }
-    };
-
-    const createOrderWithTimestampRecovery = async (...args) => {
-        const exchange = getExchange();
-        return await runPrivateApiWithRecovery(() => exchange.createOrder(...args), "order placement");
-    };
-
-    const resolveOcoReferencePrice = async (spotPair) => {
-        if (typeof getPrice === "function") {
-            const currentPrice = toFiniteNumber(await getPrice(true), NaN);
-            if (Number.isFinite(currentPrice) && currentPrice > 0) return currentPrice;
-        }
-
-        const exchange = getExchange();
-        if (typeof exchange?.fetchTicker !== "function") return NaN;
-        const ticker = await exchange.fetchTicker(spotPair);
-        return toFiniteNumber(ticker?.last ?? ticker?.close ?? ticker?.info?.lastPrice, NaN);
-    };
-
-    const validateOcoPriceDirection = ({ closeSide, targetPrice, stopPrice, stopLimitPrice, currentPrice }) => {
-        if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
-            return "current market price could not be verified";
-        }
-        if (closeSide === "sell") {
-            if (!(targetPrice > currentPrice && currentPrice > stopPrice)) {
-                return `SELL OCO must satisfy targetPrice > currentPrice > stopPrice (${targetPrice} > ${currentPrice} > ${stopPrice}).`;
-            }
-            if (!(stopLimitPrice <= stopPrice)) {
-                return `SELL STOP_LOSS_LIMIT limit price must be at or below stopPrice (${stopLimitPrice} <= ${stopPrice}).`;
-            }
-            return "";
-        }
-
-        if (!(targetPrice < currentPrice && currentPrice < stopPrice)) {
-            return `BUY OCO must satisfy targetPrice < currentPrice < stopPrice (${targetPrice} < ${currentPrice} < ${stopPrice}).`;
-        }
-        if (!(stopLimitPrice >= stopPrice)) {
-            return `BUY STOP_LOSS_LIMIT limit price must be at or above stopPrice (${stopLimitPrice} >= ${stopPrice}).`;
-        }
-        return "";
-    };
 
     const runManagedOrderSync = async (key, operation) => {
         const chainKey = String(key || "");
@@ -249,8 +138,12 @@ const createOrderExecutionHelpers = ({
             newOrderRespType: "RESULT"
         };
 
+        if (typeof exchange.privatePostOrderOco === "function") {
+            return await exchange.privatePostOrderOco(request);
+        }
+
         if (typeof exchange.privatePostOrderListOco === "function") {
-            return await runPrivateApiWithRecovery(() => exchange.privatePostOrderListOco({
+            return await exchange.privatePostOrderListOco({
                 symbol: symbolId,
                 side: request.side,
                 quantity,
@@ -266,11 +159,7 @@ const createOrderExecutionHelpers = ({
                 belowClientOrderId: closeSide === "sell" ? slClientOrderId : tpClientOrderId,
                 listClientOrderId,
                 newOrderRespType: "RESULT"
-            }), "OCO placement");
-        }
-
-        if (typeof exchange.privatePostOrderOco === "function") {
-            return await runPrivateApiWithRecovery(() => exchange.privatePostOrderOco(request), "legacy OCO placement");
+            });
         }
 
         throw new Error("Binance OCO endpoint is not available in this CCXT exchange instance.");
@@ -293,7 +182,7 @@ const createOrderExecutionHelpers = ({
         const orderSizeUsdt = Math.max(0, toFiniteNumber(gridOrder?.orderSizeUsdt, db.gridOrderSizeUsdt));
         const rawQty = orderSizeUsdt / gridOrder.price;
         const quantity = formatAmountToMarketPrecision(db.pair, rawQty);
-        const sizeValidation = validateOrderSize(marketInfo, quantity, gridOrder.price, { orderType: "LIMIT", side: gridOrder.side });
+        const sizeValidation = validateOrderSize(marketInfo, quantity, gridOrder.price, { orderType: "LIMIT" });
         if (!sizeValidation.valid) {
             console.warn(`[GRID][WARN] Skipping ${gridOrder.side.toUpperCase()} ${gridOrder.price}: ${sizeValidation.reason}`);
             return false;
@@ -327,7 +216,7 @@ const createOrderExecutionHelpers = ({
         }
 
         try {
-            await createOrderWithTimestampRecovery(
+            await exchange.createOrder(
                 spotPair,
                 "limit",
                 gridOrder.side,
@@ -350,7 +239,7 @@ const createOrderExecutionHelpers = ({
                 const cancelled = await cancelOrderByClientOrderId(gridOrder.clientOrderId, db.pair);
                 if (cancelled) {
                     try {
-                        await createOrderWithTimestampRecovery(
+                        await exchange.createOrder(
                             spotPair,
                             "limit",
                             gridOrder.side,
@@ -393,7 +282,7 @@ const createOrderExecutionHelpers = ({
         const closeSide = position.side === "buy" ? "sell" : "buy";
         const quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
         const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
-        const sizeValidation = validateOrderSize(marketInfo, quantity, position.targetPrice, { orderType: "LIMIT", side: closeSide });
+        const sizeValidation = validateOrderSize(marketInfo, quantity, position.targetPrice, { orderType: "LIMIT" });
         if (!sizeValidation.valid) {
             console.warn(`[TP][WARN] Skipping TP placement: ${sizeValidation.reason}`);
             return null;
@@ -421,7 +310,7 @@ const createOrderExecutionHelpers = ({
         }
 
         try {
-            const order = await createOrderWithTimestampRecovery(
+            const order = await exchange.createOrder(
                 spotPair,
                 "limit",
                 closeSide,
@@ -443,7 +332,7 @@ const createOrderExecutionHelpers = ({
                 const cancelled = await cancelOrderByClientOrderId(clientOrderId, db.pair);
                 if (cancelled) {
                     try {
-                        const retryOrder = await createOrderWithTimestampRecovery(
+                        const retryOrder = await exchange.createOrder(
                             spotPair,
                             "limit",
                             closeSide,
@@ -464,7 +353,7 @@ const createOrderExecutionHelpers = ({
                 const replacementClientOrderId = buildReplacementClientOrderId(clientOrderId);
                 console.warn(`[TP][WARN] Existing clientOrderId ${clientOrderId} is unusable. Retrying with replacement ${replacementClientOrderId}.`);
                 try {
-                    const retryOrder = await createOrderWithTimestampRecovery(
+                    const retryOrder = await exchange.createOrder(
                         spotPair,
                         "limit",
                         closeSide,
@@ -495,30 +384,18 @@ const createOrderExecutionHelpers = ({
         const closeSide = position.side === "buy" ? "sell" : "buy";
         const quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
         const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
+        const sizeValidation = validateOrderSize(marketInfo, quantity, position.stopLossPrice, { orderType: "STOP_LOSS_LIMIT" });
+        if (!sizeValidation.valid) {
+            console.warn(`[SL][WARN] Skipping SL placement: ${sizeValidation.reason}`);
+            return null;
+        }
+        if (sizeValidation.warning) console.warn(`[SL][WARN] ${sizeValidation.warning}`);
+
         const params = buildExchangeOrderParams({ side: closeSide });
         const clientOrderId = position?.slClientOrderId || getSlClientOrderId(position);
         params.newClientOrderId = clientOrderId;
         params.stopPrice = formatPriceToMarketPrecision(db.pair, position.stopLossPrice);
         const limitPrice = formatPriceToMarketPrecision(db.pair, position.side === "buy" ? position.stopLossPrice * 0.999 : position.stopLossPrice * 1.001);
-        const stopPriceValidation = validateOrderSize(marketInfo, quantity, params.stopPrice, {
-            orderType: "STOP_LOSS_LIMIT",
-            side: closeSide,
-            skipNotional: true
-        });
-        if (!stopPriceValidation.valid) {
-            console.warn(`[SL][WARN] Skipping SL placement: ${stopPriceValidation.reason}`);
-            return null;
-        }
-        const limitValidation = validateOrderSize(marketInfo, quantity, limitPrice, {
-            orderType: "STOP_LOSS_LIMIT",
-            side: closeSide
-        });
-        if (!limitValidation.valid) {
-            console.warn(`[SL][WARN] Skipping SL placement: ${limitValidation.reason}`);
-            return null;
-        }
-        if (stopPriceValidation.warning) console.warn(`[SL][WARN] ${stopPriceValidation.warning}`);
-        if (limitValidation.warning) console.warn(`[SL][WARN] ${limitValidation.warning}`);
 
         const existingOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
         if (existingOrder) {
@@ -535,7 +412,7 @@ const createOrderExecutionHelpers = ({
         }
 
         try {
-            const order = await createOrderWithTimestampRecovery(
+            const order = await exchange.createOrder(
                 spotPair,
                 "STOP_LOSS_LIMIT",
                 closeSide,
@@ -557,7 +434,7 @@ const createOrderExecutionHelpers = ({
                 const cancelled = await cancelOrderByClientOrderId(clientOrderId, db.pair);
                 if (cancelled) {
                     try {
-                        const retryOrder = await createOrderWithTimestampRecovery(
+                        const retryOrder = await exchange.createOrder(
                             spotPair,
                             "STOP_LOSS_LIMIT",
                             closeSide,
@@ -578,7 +455,7 @@ const createOrderExecutionHelpers = ({
                 const replacementClientOrderId = buildReplacementClientOrderId(clientOrderId);
                 console.warn(`[SL][WARN] Existing clientOrderId ${clientOrderId} is unusable. Retrying with replacement ${replacementClientOrderId}.`);
                 try {
-                    const retryOrder = await createOrderWithTimestampRecovery(
+                    const retryOrder = await exchange.createOrder(
                         spotPair,
                         "STOP_LOSS_LIMIT",
                         closeSide,
@@ -614,16 +491,8 @@ const createOrderExecutionHelpers = ({
         const stopPrice = formatPriceToMarketPrecision(db.pair, position.stopLossPrice);
         const stopLimitPrice = formatPriceToMarketPrecision(db.pair, position.side === "buy" ? position.stopLossPrice * 0.999 : position.stopLossPrice * 1.001);
         const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
-        const tpValidation = validateOrderSize(marketInfo, quantity, targetPrice, { orderType: "LIMIT", side: closeSide });
-        const slValidation = validateOrderSize(marketInfo, quantity, stopPrice, {
-            orderType: "STOP_LOSS_LIMIT",
-            side: closeSide,
-            skipNotional: true
-        });
-        const slLimitValidation = validateOrderSize(marketInfo, quantity, stopLimitPrice, {
-            orderType: "STOP_LOSS_LIMIT",
-            side: closeSide
-        });
+        const tpValidation = validateOrderSize(marketInfo, quantity, targetPrice, { orderType: "LIMIT" });
+        const slValidation = validateOrderSize(marketInfo, quantity, stopPrice, { orderType: "STOP_LOSS_LIMIT" });
         if (!tpValidation.valid) {
             console.warn(`[OCO][WARN] Skipping OCO placement: TP ${tpValidation.reason}`);
             return null;
@@ -632,26 +501,8 @@ const createOrderExecutionHelpers = ({
             console.warn(`[OCO][WARN] Skipping OCO placement: SL ${slValidation.reason}`);
             return null;
         }
-        if (!slLimitValidation.valid) {
-            console.warn(`[OCO][WARN] Skipping OCO placement: SL limit ${slLimitValidation.reason}`);
-            return null;
-        }
         if (tpValidation.warning) console.warn(`[OCO][WARN] TP ${tpValidation.warning}`);
         if (slValidation.warning) console.warn(`[OCO][WARN] SL ${slValidation.warning}`);
-        if (slLimitValidation.warning) console.warn(`[OCO][WARN] SL limit ${slLimitValidation.warning}`);
-
-        let currentPrice = NaN;
-        try {
-            currentPrice = await resolveOcoReferencePrice(spotPair);
-        } catch (error) {
-            console.warn(`[OCO][WARN] Skipping OCO placement: failed to fetch current price (${describeError(error)}).`);
-            return null;
-        }
-        const ocoDirectionError = validateOcoPriceDirection({ closeSide, targetPrice, stopPrice, stopLimitPrice, currentPrice });
-        if (ocoDirectionError) {
-            console.warn(`[OCO][WARN] Skipping OCO placement: ${ocoDirectionError}`);
-            return null;
-        }
 
         const tpClientOrderId = position?.tpClientOrderId || getTpClientOrderId(position);
         const slClientOrderId = position?.slClientOrderId || getSlClientOrderId(position);
@@ -937,6 +788,15 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
+
+
+
+
+
+
+
+
+
 
 
 
