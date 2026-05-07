@@ -172,11 +172,16 @@ const createRuntimeMarketDataHelpers = ({
                 ...balanceCache,
                 totalUSDT,
                 availableUSDT,
-                lastUpdate: now
+                lastUpdate: now,
+                lastError: null
             });
             return getBalanceCache().totalUSDT;
         } catch (error) {
             console.error("[MARKET][ERROR] Failed to fetch balance:", error.message);
+            setBalanceCache({
+                ...balanceCache,
+                lastError: error.message || "Failed to fetch balance"
+            });
             return getBalanceCache().totalUSDT || 0;
         }
     };

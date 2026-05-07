@@ -44,6 +44,7 @@ const createDashboardStatusHelpers = ({
             balanceTotalUSDT: toFiniteNumber(balanceCache?.totalUSDT, null),
             balanceAvailableUSDT: toFiniteNumber(balanceCache?.availableUSDT, null),
             balanceLastUpdated: toFiniteNumber(balanceCache?.lastUpdate, 0),
+            balanceError: balanceCache?.lastError || null,
             pair: db?.pair || defaultConfig.pair,
             strategy: db?.strategy || defaultConfig.strategy,
             marginMode: db?.marginMode || defaultConfig.marginMode
@@ -164,6 +165,7 @@ const createDashboardStatusHelpers = ({
             balanceTotalUSDT: toFiniteNumber(balanceCache?.totalUSDT, null),
             balanceAvailableUSDT: toFiniteNumber(balanceCache?.availableUSDT, null),
             balanceLastUpdated: toFiniteNumber(balanceCache?.lastUpdate, 0),
+            balanceError: balanceCache?.lastError || null,
             dailyPnL: toFiniteNumber(dailyPnlSnapshot.dailyPnL, 0),
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(dailyPnlSnapshot.dailyTrades, 0))),
             dailyPnlSource: String(dailyPnlSnapshot.dailyPnlSource || "local").toLowerCase(),
