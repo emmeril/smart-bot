@@ -47,6 +47,9 @@ const createManagedOrdersHelpers = ({
     const fetchOpenOrdersSnapshot = async (symbol) => {
         const exchange = getExchange();
         const metrics = getMetrics();
+        if (!exchange || typeof exchange.fetchOpenOrders !== "function" || !symbol) {
+            return { regularOrders: [], triggerOrders: [], triggerOrdersFetchFailed: false };
+        }
         metrics.api.orders++;
         const fetchedRegularOrders = await exchange.fetchOpenOrders(symbol);
         let fetchedTriggerOrders = [];
@@ -71,6 +74,7 @@ const createManagedOrdersHelpers = ({
 
     const fetchOpenGridOrders = async () => {
         const currentDb = getDb();
+        if (!currentDb?.pair) return [];
         const { regularOrders } = await fetchOpenOrdersSnapshot(currentDb.pair);
         return regularOrders.filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(currentDb.pair) && isGridEntryOrder(order));
     };
@@ -83,12 +87,14 @@ const createManagedOrdersHelpers = ({
 
     const fetchOpenTpOrders = async () => {
         const currentDb = getDb();
+        if (!currentDb?.pair) return [];
         const { regularOrders } = await fetchOpenOrdersSnapshot(currentDb.pair);
         return regularOrders.filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(currentDb.pair) && isTpReduceOnlyOrder(order));
     };
 
     const fetchOpenSlOrders = async () => {
         const currentDb = getDb();
+        if (!currentDb?.pair) return [];
         const { triggerOrders } = await fetchOpenOrdersSnapshot(currentDb.pair);
         return triggerOrders.filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(currentDb.pair) && isSlReduceOnlyOrder(order));
     };
@@ -103,6 +109,7 @@ const createManagedOrdersHelpers = ({
 
     const fetchManagedOpenOrdersSnapshot = async () => {
         const currentDb = getDb();
+        if (!currentDb?.pair) return { grid: [], tp: [], sl: [], triggerOrdersFetchFailed: false };
         const { regularOrders, triggerOrders, triggerOrdersFetchFailed } = await fetchOpenOrdersSnapshot(currentDb.pair);
         const managedOrders = [...regularOrders, ...triggerOrders].filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(currentDb.pair));
         return {

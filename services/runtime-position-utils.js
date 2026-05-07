@@ -155,21 +155,24 @@ const createRuntimePositionUtils = ({
     const printDetailedStatus = async () => {
         const db = getDb();
         if (!db) return;
-        const currentPrice = await getPrice();
+        const exchange = getExchange();
+        const currentPrice = exchange ? await getPrice() : NaN;
         const activeEntries = getActivePositionEntries();
         let openExchangePositions = [];
         let managedOrders = { grid: [], tp: [], sl: [] };
 
-        try {
-            openExchangePositions = await fetchOpenExchangePositions();
-        } catch (error) {
-            console.warn(`[STATUS][WARN] Failed to fetch exchange positions: ${error.message}`);
-        }
+        if (exchange) {
+            try {
+                openExchangePositions = await fetchOpenExchangePositions();
+            } catch (error) {
+                console.warn(`[STATUS][WARN] Failed to fetch exchange positions: ${error.message}`);
+            }
 
-        try {
-            managedOrders = await fetchManagedOpenOrdersSnapshot();
-        } catch (error) {
-            console.warn(`[STATUS][WARN] Failed to fetch managed open orders: ${error.message}`);
+            try {
+                managedOrders = await fetchManagedOpenOrdersSnapshot();
+            } catch (error) {
+                console.warn(`[STATUS][WARN] Failed to fetch managed open orders: ${error.message}`);
+            }
         }
         const gridSummary = getGridRuntimeSummary(currentPrice, managedOrders);
         const recoveryReason = getExchangeRecoveryReason();

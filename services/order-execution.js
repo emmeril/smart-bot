@@ -80,11 +80,13 @@ const createOrderExecutionHelpers = ({
         if (!exchange || typeof exchange.fetchOrder !== "function" || !clientOrderId || !symbol) return null;
 
         const lookupAttempts = [
-            () => exchange.fetchOrder(clientOrderId, symbol),
             () => exchange.fetchOrder(undefined, symbol, { origClientOrderId: clientOrderId }),
             () => exchange.fetchOrder(null, symbol, { origClientOrderId: clientOrderId }),
             () => exchange.fetchOrder(undefined, symbol, { clientOrderId })
         ];
+        if (/^\d{1,20}$/.test(String(clientOrderId))) {
+            lookupAttempts.push(() => exchange.fetchOrder(clientOrderId, symbol));
+        }
 
         for (const lookup of lookupAttempts) {
             try {
@@ -918,7 +920,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
 

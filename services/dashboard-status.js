@@ -90,22 +90,24 @@ const createDashboardStatusHelpers = ({
         let exchangePositions = [];
         let managedOrders = { grid: [], tp: [], sl: [] };
 
-        try {
-            currentPrice = await getPrice();
-        } catch {
-            currentPrice = NaN;
-        }
+        if (getExchange()) {
+            try {
+                currentPrice = await getPrice();
+            } catch {
+                currentPrice = NaN;
+            }
 
-        try {
-            exchangePositions = await fetchOpenExchangePositions();
-        } catch (error) {
-            console.warn(`[STATUS][WARN] Failed to fetch exchange positions: ${error.message}`);
-        }
+            try {
+                exchangePositions = await fetchOpenExchangePositions();
+            } catch (error) {
+                console.warn(`[STATUS][WARN] Failed to fetch exchange positions: ${error.message}`);
+            }
 
-        try {
-            managedOrders = await fetchManagedOpenOrdersSnapshot();
-        } catch (error) {
-            console.warn(`[STATUS][WARN] Failed to fetch managed open orders: ${error.message}`);
+            try {
+                managedOrders = await fetchManagedOpenOrdersSnapshot();
+            } catch (error) {
+                console.warn(`[STATUS][WARN] Failed to fetch managed open orders: ${error.message}`);
+            }
         }
 
         const activePositions = getActivePositionEntries().map(([positionKey, position]) => {
