@@ -168,7 +168,7 @@ const createTradeEntryHelpers = ({
                 highestSinceEntry: actualEntryPrice,
                 lowestSinceEntry: actualEntryPrice,
                 settlementMode: "spot",
-                positionSide: "SPOT",
+                positionSide: targetPositionKey,
                 targetProfitUSDT: resolvedOrderPlan.targetProfitUSDT,
                 trailingEnabled: resolvedOrderPlan.trailingEnabled,
                 atrAtEntry: signalATR,

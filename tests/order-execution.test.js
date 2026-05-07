@@ -3,12 +3,39 @@ const assert = require("node:assert/strict");
 
 const { createOrderExecutionHelpers } = require("../services/order-execution");
 
-const createHelpers = ({ createOrderImpl, isHedgeModeEnabled = false } = {}) => {
+const createHelpers = ({ createOrderImpl, fetchOrderImpl, isHedgeModeEnabled = false, state = {} } = {}) => {
     const exchange = {
         markets: {
             "DOGE/USDT:USDT": {}
         },
-        createOrder: createOrderImpl
+        createOrder: createOrderImpl,
+        fetchOrder: fetchOrderImpl,
+        privatePostOrderOco: async (params) => {
+            const tpOrder = {
+                id: "tp-order-oco",
+                amount: Number(params.quantity),
+                price: Number(params.price),
+                side: String(params.side).toLowerCase(),
+                clientOrderId: params.limitClientOrderId,
+                info: { clientOrderId: params.limitClientOrderId, origClientOrderId: params.limitClientOrderId }
+            };
+            const slOrder = {
+                id: "sl-order-oco",
+                amount: Number(params.quantity),
+                stopPrice: Number(params.stopPrice),
+                side: String(params.side).toLowerCase(),
+                clientOrderId: params.stopClientOrderId,
+                info: { clientOrderId: params.stopClientOrderId, origClientOrderId: params.stopClientOrderId, stopPrice: params.stopPrice }
+            };
+            state.openTpOrders = [tpOrder];
+            state.openSlOrders = [slOrder];
+            return {
+                orderReports: [
+                    { orderId: tpOrder.id, clientOrderId: tpOrder.clientOrderId, type: "LIMIT_MAKER", side: params.side, origQty: params.quantity, price: params.price },
+                    { orderId: slOrder.id, clientOrderId: slOrder.clientOrderId, type: "STOP_LOSS_LIMIT", side: params.side, origQty: params.quantity, stopPrice: params.stopPrice }
+                ]
+            };
+        }
     };
 
     return createOrderExecutionHelpers({
@@ -39,15 +66,20 @@ const createHelpers = ({ createOrderImpl, isHedgeModeEnabled = false } = {}) => 
         getExchangeClientOrderId: (order) => order?.clientOrderId || order?.info?.clientOrderId || order?.info?.origClientOrderId || "",
         getTpClientOrderId: () => "smarttp_old",
         getSlClientOrderId: () => "smartsl_old",
-        fetchOpenTpOrders: async () => [],
-        fetchOpenSlOrders: async () => [],
+        fetchOpenTpOrders: async () => state.openTpOrders || [],
+        fetchOpenSlOrders: async () => state.openSlOrders || [],
         matchesOrderToTrackedPosition: () => true,
         getOrderQuantity: (order) => order?.amount,
         getOrderTriggerPrice: (order) => order?.stopPrice ?? order?.info?.stopPrice ?? NaN,
         isManagedOrderPriceMatch: (a, b) => a === b,
         getPositionSyncQtyTolerance: () => 0.001,
-        upsertActivePosition: () => {},
-        saveDB: async () => {},
+        fetchSpotBalances: async () => ({ USDT: { free: 100 }, DOGE: { free: 1000 } }),
+        getActivePositionByKey: (key) => state.activePositions?.[key] || null,
+        upsertActivePosition: (position) => {
+            state.activePositions = state.activePositions || {};
+            state.activePositions[position.positionSide] = position;
+        },
+        saveDB: async () => { state.saveCount = (state.saveCount || 0) + 1; },
         cancelTpOrders: async () => {},
         cancelSlOrders: async () => {},
         buildReplacementClientOrderId: (clientOrderId) => `${clientOrderId}_new`
@@ -106,6 +138,53 @@ test("placeReduceOnlyStopLossOrder preserves replacement clientOrderId when exch
     assert.equal(order.clientOrderId, "smartsl_old_new");
     assert.equal(order.info.clientOrderId, "smartsl_old_new");
     assert.equal(order.info.origClientOrderId, "smartsl_old_new");
+});
+
+test("placeGridEntryOrder adopts a filled spot grid order into activePosition", async () => {
+    const state = {};
+    let createOrderCalls = 0;
+    let fetchOrderCalls = 0;
+    const helpers = createHelpers({
+        state,
+        createOrderImpl: async () => {
+            createOrderCalls += 1;
+            return { id: "unexpected-new-grid-order" };
+        },
+        fetchOrderImpl: async (_id, _symbol, params = {}) => {
+            fetchOrderCalls += 1;
+            if (fetchOrderCalls === 1) throw new Error("Order does not exist.");
+            assert.equal(params.origClientOrderId, "smartgrid_buy_4_011");
+            return {
+                id: "filled-grid-1",
+                status: "closed",
+                side: "buy",
+                amount: 10,
+                filled: 10,
+                average: 0.11,
+                timestamp: 12345,
+                info: { status: "FILLED", clientOrderId: "smartgrid_buy_4_011" }
+            };
+        }
+    });
+
+    const adopted = await helpers.placeGridEntryOrder({
+        side: "buy",
+        price: 0.11,
+        orderSizeUsdt: 1.1,
+        targetPrice: 0.12,
+        stopLossPrice: 0.105,
+        clientOrderId: "smartgrid_buy_4_011"
+    });
+
+    assert.equal(adopted, true);
+    assert.equal(createOrderCalls, 0);
+    assert.equal(state.saveCount, 3);
+    assert.equal(state.activePositions.LONG.side, "buy");
+    assert.equal(state.activePositions.LONG.entryPrice, 0.11);
+    assert.equal(state.activePositions.LONG.quantity, 10);
+    assert.equal(state.activePositions.LONG.positionSide, "LONG");
+    assert.equal(state.activePositions.LONG.tpClientOrderId, "smarttp_old");
+    assert.equal(state.activePositions.LONG.slClientOrderId, "smartsl_old");
 });
 
 test("ensureReduceOnlyTakeProfitOrder serializes concurrent OCO sync for the same spot position", async () => {

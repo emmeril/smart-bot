@@ -486,6 +486,7 @@ const {
         const balance = await exchange.fetchBalance();
         return balance?.free || balance || null;
     },
+    getActivePositionByKey: (...args) => getActivePositionByKey(...args),
     upsertActivePosition: (...args) => upsertActivePosition(...args),
     saveDB: (...args) => saveDB(...args),
     cancelTpOrders,

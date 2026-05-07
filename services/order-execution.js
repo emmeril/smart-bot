@@ -26,6 +26,7 @@ const createOrderExecutionHelpers = ({
     isManagedOrderPriceMatch,
     getPositionSyncQtyTolerance,
     fetchSpotBalances,
+    getActivePositionByKey,
     upsertActivePosition,
     saveDB,
     cancelTpOrders,
@@ -65,6 +66,133 @@ const createOrderExecutionHelpers = ({
     };
 
     const getSpotPair = (pair) => String(pair || "").split(":")[0];
+
+    const isUnknownOrderLookupError = (error) => {
+        const message = String(error?.message || error || "").toLowerCase();
+        return message.includes("order does not exist")
+            || message.includes("unknown order")
+            || message.includes("order not found")
+            || message.includes("-2013");
+    };
+
+    const fetchOrderByClientOrderId = async (clientOrderId, symbol) => {
+        const exchange = getExchange();
+        if (!exchange || typeof exchange.fetchOrder !== "function" || !clientOrderId || !symbol) return null;
+
+        const lookupAttempts = [
+            () => exchange.fetchOrder(clientOrderId, symbol),
+            () => exchange.fetchOrder(undefined, symbol, { origClientOrderId: clientOrderId }),
+            () => exchange.fetchOrder(null, symbol, { origClientOrderId: clientOrderId }),
+            () => exchange.fetchOrder(undefined, symbol, { clientOrderId })
+        ];
+
+        for (const lookup of lookupAttempts) {
+            try {
+                const order = await lookup();
+                return attachClientOrderIdFallback(order, clientOrderId);
+            } catch (error) {
+                if (isUnknownOrderLookupError(error)) continue;
+                throw error;
+            }
+        }
+
+        return null;
+    };
+
+    const getOrderStatus = (order) => String(order?.status || order?.info?.status || "").toLowerCase();
+
+    const isFilledOrder = (order) => {
+        if (!order || typeof order !== "object") return false;
+        const filledQuantity = getOrderQuantity(order);
+        const status = getOrderStatus(order);
+        return filledQuantity > getPositionSyncQtyTolerance()
+            && (status === "closed" || status === "filled" || String(order?.info?.status || "").toUpperCase() === "FILLED");
+    };
+
+    const resolveFilledOrderPrice = (order, fallbackPrice, filledQuantity) => {
+        const averagePrice = toFiniteNumber(order?.average, 0);
+        const directPrice = toFiniteNumber(order?.price, 0);
+        const orderCost = toFiniteNumber(order?.cost, 0);
+        const infoAveragePrice = toFiniteNumber(order?.info?.avgPrice, 0);
+        const infoCummulativeQuoteQty = toFiniteNumber(order?.info?.cummulativeQuoteQty, 0);
+        const infoCumQuoteQty = toFiniteNumber(order?.info?.cumQuoteQty, 0);
+        if (averagePrice > 0) return averagePrice;
+        if (infoAveragePrice > 0) return infoAveragePrice;
+        if (filledQuantity > 0 && orderCost > 0) return orderCost / filledQuantity;
+        if (filledQuantity > 0 && infoCummulativeQuoteQty > 0) return infoCummulativeQuoteQty / filledQuantity;
+        if (filledQuantity > 0 && infoCumQuoteQty > 0) return infoCumQuoteQty / filledQuantity;
+        if (directPrice > 0) return directPrice;
+        return fallbackPrice;
+    };
+
+    const buildSpotGridPositionFromFilledOrder = (gridOrder, filledOrder) => {
+        const db = getDb();
+        const quantity = getOrderQuantity(filledOrder);
+        const entryPrice = resolveFilledOrderPrice(filledOrder, gridOrder.price, quantity);
+        const side = String(filledOrder?.side || gridOrder.side || "").toLowerCase();
+        const targetPrice = toFiniteNumber(gridOrder.targetPrice, NaN);
+        const stopLossPrice = toFiniteNumber(gridOrder.stopLossPrice, NaN);
+        const targetProfitUSDT = Number.isFinite(targetPrice) && Number.isFinite(entryPrice)
+            ? Math.abs(targetPrice - entryPrice) * quantity
+            : toFiniteNumber(db.gridTargetProfitUsdt, 0);
+        const stopLossUSDT = Number.isFinite(stopLossPrice) && Number.isFinite(entryPrice)
+            ? -Math.abs(stopLossPrice - entryPrice) * quantity
+            : -Math.abs((quantity * entryPrice) * (Math.max(0, toFiniteNumber(db.gridStopLossPercent, 0)) / 100));
+
+        return {
+            side,
+            entryPrice,
+            targetPrice,
+            stopLossPrice,
+            stopLossUSDT,
+            orderId: filledOrder?.id || filledOrder?.orderId || filledOrder?.info?.orderId || getExchangeClientOrderId(filledOrder),
+            quantity,
+            entryTime: toFiniteNumber(filledOrder?.timestamp, Date.now()),
+            highestSinceEntry: entryPrice,
+            lowestSinceEntry: entryPrice,
+            settlementMode: "spot",
+            positionSide: getOrderPositionSide(side),
+            targetProfitUSDT,
+            trailingEnabled: Boolean(db.trailingEnabled),
+            atrAtEntry: NaN,
+            strategy: "SPOT_GRID",
+            trailingActivateATR: toFiniteNumber(db.trailingActivateATR, 1.2),
+            trailingOffsetATR: toFiniteNumber(db.trailingOffsetATR, 0.6),
+            tpOrderId: null,
+            tpClientOrderId: null,
+            slOrderId: null,
+            slClientOrderId: null
+        };
+    };
+
+    const adoptFilledGridEntryOrder = async (gridOrder) => {
+        const db = getDb();
+        const positionKey = getOrderPositionSide(gridOrder?.side);
+        if (typeof getActivePositionByKey === "function" && getActivePositionByKey(positionKey)) return true;
+
+        let filledOrder = null;
+        try {
+            filledOrder = await fetchOrderByClientOrderId(gridOrder?.clientOrderId, getSpotPair(db.pair));
+        } catch (error) {
+            console.warn(`[GRID][WARN] Failed to inspect historical grid order ${gridOrder?.clientOrderId}: ${describeError(error)}`);
+            return false;
+        }
+
+        if (!isFilledOrder(filledOrder)) return false;
+
+        const position = buildSpotGridPositionFromFilledOrder(gridOrder, filledOrder);
+        if (!position.side || !Number.isFinite(position.entryPrice) || position.entryPrice <= 0 || !Number.isFinite(position.quantity) || position.quantity <= 0) {
+            console.warn(`[GRID][WARN] Filled grid order ${gridOrder.clientOrderId} could not be converted to a valid active position.`);
+            return false;
+        }
+
+        upsertActivePosition(position);
+        await saveDB();
+        await ensureReduceOnlyTakeProfitOrder(positionKey, position);
+        await ensureReduceOnlyStopLossOrder(positionKey, position);
+        console.log(`[GRID][INFO] Adopted filled ${position.side.toUpperCase()} grid order ${gridOrder.clientOrderId} as active spot position @ ${position.entryPrice}`);
+        return true;
+    };
 
     const getBinanceSymbolId = (spotPair) => {
         const exchange = getExchange();
@@ -214,6 +342,8 @@ const createOrderExecutionHelpers = ({
             console.log(`[GRID][INFO] Existing order already on exchange for ${gridOrder.clientOrderId}. Skipping duplicate placement.`);
             return true;
         }
+
+        if (await adoptFilledGridEntryOrder(gridOrder)) return true;
 
         try {
             await exchange.createOrder(
@@ -788,7 +918,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
 
