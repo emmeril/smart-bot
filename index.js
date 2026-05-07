@@ -1003,6 +1003,17 @@ const syncPositionWithExchange = async () => {
             console.log(`[SYNC][INFO] Checking positions for ${db.pair}...`);
             lastSyncLogAt = now;
         }
+        const isSpotRuntime = String(db?.marginMode || "spot").toLowerCase() === "spot"
+            || String(exchange?.options?.defaultType || "spot").toLowerCase() === "spot";
+        if (isSpotRuntime) {
+            const currentPositionsMap = getActivePositionsMap();
+            for (const [positionKey, currentPosition] of Object.entries(currentPositionsMap)) {
+                await ensureReduceOnlyTakeProfitOrder(positionKey, currentPosition);
+                await ensureReduceOnlyStopLossOrder(positionKey, currentPosition);
+            }
+            maybeMarkPositionSyncHealthy();
+            return;
+        }
         const openPositions = await fetchOpenExchangePositions();
         const currentPrice = await getPrice();
         const currentPositionsMap = getActivePositionsMap();

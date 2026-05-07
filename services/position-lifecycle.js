@@ -276,50 +276,62 @@ const createPositionLifecycleHelpers = ({
                 return;
             }
 
-            const currentPos = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
-            if (!currentPos) {
-                console.log("[POSITION][INFO] No matching open position on exchange. Removing local active position.");
-                await clearMissingPositionState(position, "POSITION_MISSING", positionKey);
-                return;
-            }
-            const actualQuantity = Math.abs(getExchangePositionContracts(currentPos));
-            if (Math.abs(actualQuantity - quantity) > getPositionSyncQtyTolerance()) {
-                console.log("[POSITION][INFO] Position size changed on exchange. Updating local record.");
-                position.quantity = actualQuantity;
-                position.entryPrice = getExchangePositionEntryPrice(currentPos, position.entryPrice);
-                const recalculatedPlan = buildOrderPlan(
-                    side,
-                    position.entryPrice,
-                    position.quantity,
-                    position.atrAtEntry,
-                    {
-                        trailingActivateATR: position.trailingActivateATR,
-                        trailingOffsetATR: position.trailingOffsetATR
-                    }
-                );
-                position.targetPrice = recalculatedPlan.targetPrice;
-                position.stopLossPrice = recalculatedPlan.stopLossPrice;
-                position.targetProfitUSDT = recalculatedPlan.targetProfitUSDT;
-                position.stopLossUSDT = recalculatedPlan.stopLossUSDT;
-                position.tpOrderId = null;
-                position.tpClientOrderId = null;
-                position.slOrderId = null;
-                position.slClientOrderId = null;
-                upsertActivePosition(position);
-                await saveDB();
+            const isSpotRuntime = String(db?.marginMode || "").toLowerCase() === "spot"
+                || String(exchange?.options?.defaultType || "").toLowerCase() === "spot";
+            if (!isSpotRuntime) {
+                const currentPos = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
+                if (!currentPos) {
+                    console.log("[POSITION][INFO] No matching open position on exchange. Removing local active position.");
+                    await clearMissingPositionState(position, "POSITION_MISSING", positionKey);
+                    return;
+                }
+                const actualQuantity = Math.abs(getExchangePositionContracts(currentPos));
+                if (Math.abs(actualQuantity - quantity) > getPositionSyncQtyTolerance()) {
+                    console.log("[POSITION][INFO] Position size changed on exchange. Updating local record.");
+                    position.quantity = actualQuantity;
+                    position.entryPrice = getExchangePositionEntryPrice(currentPos, position.entryPrice);
+                    const recalculatedPlan = buildOrderPlan(
+                        side,
+                        position.entryPrice,
+                        position.quantity,
+                        position.atrAtEntry,
+                        {
+                            trailingActivateATR: position.trailingActivateATR,
+                            trailingOffsetATR: position.trailingOffsetATR
+                        }
+                    );
+                    position.targetPrice = recalculatedPlan.targetPrice;
+                    position.stopLossPrice = recalculatedPlan.stopLossPrice;
+                    position.targetProfitUSDT = recalculatedPlan.targetProfitUSDT;
+                    position.stopLossUSDT = recalculatedPlan.stopLossUSDT;
+                    position.tpOrderId = null;
+                    position.tpClientOrderId = null;
+                    position.slOrderId = null;
+                    position.slClientOrderId = null;
+                    upsertActivePosition(position);
+                    await saveDB();
+                }
             }
 
             const closeSide = side === "buy" ? "sell" : "buy";
+            const closeSymbol = isSpotRuntime ? String(db.pair || "").split(":")[0] : db.pair;
             console.log(`[POSITION][INFO] Closing position ${positionKey}...`);
             const matchingTpOrders = (await fetchOpenTpOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
-            if (matchingTpOrders.length > 0) await cancelTpOrders(matchingTpOrders, "MANUAL_CLOSE");
             const matchingSlOrders = (await fetchOpenSlOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
+            const hasAttachedSpotExit = Boolean(position.tpOrderId || position.tpClientOrderId || position.slOrderId || position.slClientOrderId);
+            const reasonLooksExchangeFilled = reason === "PROFIT_TARGET" || reason === "STOP_LOSS";
+            if (isSpotRuntime && reasonLooksExchangeFilled && hasAttachedSpotExit && matchingTpOrders.length === 0 && matchingSlOrders.length === 0) {
+                console.log("[POSITION][INFO] Spot OCO exit is no longer open. Removing local active position using estimated fill state.");
+                await clearMissingPositionState(position, `SPOT_OCO_${reason}`, positionKey);
+                return;
+            }
+            if (matchingTpOrders.length > 0) await cancelTpOrders(matchingTpOrders, "MANUAL_CLOSE");
             if (matchingSlOrders.length > 0) await cancelSlOrders(matchingSlOrders, "MANUAL_CLOSE");
 
             let closeOrder;
             try {
                 closeOrder = await exchange.createOrder(
-                    db.pair,
+                    closeSymbol,
                     "market",
                     closeSide,
                     position.quantity,
@@ -363,7 +375,7 @@ const createPositionLifecycleHelpers = ({
                 : Number.isFinite(Number(closeOrder?.lastTradeTimestamp))
                     ? Number(closeOrder.lastTradeTimestamp)
                     : Date.now();
-            const remainingPosition = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
+            const remainingPosition = isSpotRuntime ? null : findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
             if (remainingPosition) {
                 const remainingContracts = Math.abs(getExchangePositionContracts(remainingPosition));
                 if (remainingContracts > getPositionSyncQtyTolerance()) {
