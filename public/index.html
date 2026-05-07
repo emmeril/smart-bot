@@ -1266,9 +1266,17 @@
       const exchangeLabel = !exchangeConnected
         ? "Offline"
         : (needsRecoverySync ? "Recovery sync" : (exchangeHealthy ? "Healthy" : "Degraded"));
+      const balanceTotalValue = Number(status.balanceTotalUSDT);
+      const balanceAvailableValue = Number(status.balanceAvailableUSDT);
+      const balanceTotal = Number.isFinite(balanceTotalValue) ? `${formatNumber(balanceTotalValue)} USDT` : "N/A";
+      const balanceAvailable = Number.isFinite(balanceAvailableValue) ? `${formatNumber(balanceAvailableValue)} USDT` : "N/A";
+      const balanceNote = Number.isFinite(Number(status.balanceLastUpdated)) && Number(status.balanceLastUpdated) > 0
+        ? `Available ${balanceAvailable} | ${formatDateTime(status.balanceLastUpdated)}`
+        : `Available ${balanceAvailable} | menunggu sinkronisasi`;
       const cards = [
         { label: "Bot", value: runtimeStatus.label, note: runtimeStatus.description },
         { label: "Positions", value: String(status.activePositions), note: status.activeGridState ? "Grid state active" : "No local grid state" },
+        { label: "Balance", value: balanceTotal, note: balanceNote },
         { label: "Realized PnL", value: `${formatNumber(status.dailyPnL)} USDT`, note: `${status.dailyTrades} trades today | ${String(status.dailyPnlSource || "local").toLowerCase()}` },
         { label: "Mode", value: tradeModeValue, note: positionModeValue }
       ];
@@ -1692,6 +1700,10 @@
       try {
         const data = await api("/api/status");
         renderLiveStatus(data);
+        if (state.status) {
+          state.status = { ...state.status, ...data };
+          renderMetrics(state.status);
+        }
       } catch (error) {
         if (!silent) showToast(error.message || "Gagal memuat status live", "error");
       }

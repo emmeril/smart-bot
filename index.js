@@ -586,6 +586,8 @@ const {
     fetchManagedOpenOrdersSnapshot: (...args) => fetchManagedOpenOrdersSnapshot(...args),
     getGridRuntimeSummary: (...args) => getGridRuntimeSummary(...args),
     getExchangeRecoveryReason,
+    getBalanceCache: () => balanceCache,
+    getTotalUSDTBalance: (...args) => getTotalUSDTBalance(...args),
     getAccountPositionMode: () => accountPositionMode,
     getIsPlacingOrder: () => isPlacingOrder,
     getIsClosingPosition: () => isClosingPosition,
