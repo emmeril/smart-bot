@@ -39,6 +39,10 @@ const createRuntimeMarketDataHelpers = ({
         try {
             const now = Date.now();
             if (!forceRefresh && now - tickerCache.lastUpdate < tickerCacheTtl) return tickerCache.price;
+            if (!exchange || typeof exchange.fetchTicker !== "function" || !db?.pair) {
+                console.warn("[MARKET][WARN] Price fetch skipped because exchange or pair is not ready.");
+                return tickerCache.price;
+            }
             const ticker = await retry(() => exchange.fetchTicker(db.pair));
             metrics.api.ticker++;
             const latestPrice = toFiniteNumber(ticker?.last, null);
@@ -62,6 +66,10 @@ const createRuntimeMarketDataHelpers = ({
         const now = Date.now();
         if (!forceRefresh && ohlcvCache.key === cacheKey && now - ohlcvCache.lastUpdate < ohlcvCacheTtl && Array.isArray(ohlcvCache.data)) {
             return ohlcvCache.data;
+        }
+        if (!exchange || typeof exchange.fetchOHLCV !== "function" || !db?.pair) {
+            console.warn("[MARKET][WARN] OHLCV fetch skipped because exchange or pair is not ready.");
+            return getOhlcvCache().data || [];
         }
         try {
             const ohlcv = await retry(() => exchange.fetchOHLCV(db.pair, timeframe, undefined, limit));
@@ -159,6 +167,10 @@ const createRuntimeMarketDataHelpers = ({
         const exchange = getExchange();
         const metrics = getMetrics();
         const balanceCache = getBalanceCache();
+        if (!exchange || typeof exchange.fetchBalance !== "function") {
+            console.warn("[MARKET][WARN] Balance fetch skipped because exchange is not ready.");
+            return balanceCache.totalUSDT || 0;
+        }
         if (exchange?.options?.smartBotPrivateAuthFailed) {
             return balanceCache.totalUSDT || 0;
         }
