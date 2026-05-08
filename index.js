@@ -436,9 +436,58 @@ const markPositionSyncHealthy = () => {
 };
 
 const ensureManagedOrdersForPositions = async (positionsMap) => {
+    const isSpotRuntime = String(db?.marginMode || "spot").toLowerCase() === "spot"
+        || String(exchange?.options?.defaultType || "spot").toLowerCase() === "spot";
+    let spotBalances = null;
+    let didClearDustPosition = false;
+
+    const resolveMarketMinQty = (pair) => {
+        const market = exchange?.markets?.[pair];
+        if (!market) return NaN;
+        const filters = Array.isArray(market.info?.filters) ? market.info.filters : [];
+        const lotSizeFilter = filters.find((filter) => String(filter?.filterType || "").toUpperCase() === "LOT_SIZE");
+        return toFiniteNumber(lotSizeFilter?.minQty, toFiniteNumber(market?.limits?.amount?.min, NaN));
+    };
+
+    const shouldAutoClearSpotDustPosition = async (position) => {
+        if (!isSpotRuntime || !position) return false;
+        if (!String(position?.ocoBlockedReason || "").includes("LOT_SIZE")) return false;
+        const minQty = resolveMarketMinQty(db?.pair);
+        if (!Number.isFinite(minQty) || minQty <= 0) return false;
+        const trackedQty = toFiniteNumber(position?.quantity, NaN);
+        if (!Number.isFinite(trackedQty) || trackedQty <= 0 || trackedQty >= minQty) return false;
+
+        if (!spotBalances) {
+            try {
+                const balanceSnapshot = await exchange.fetchBalance();
+                spotBalances = balanceSnapshot?.free || balanceSnapshot || {};
+            } catch (balanceError) {
+                console.warn(`[SYNC][WARN] Failed to fetch spot balance for dust cleanup: ${balanceError.message}`);
+                return false;
+            }
+        }
+
+        const [baseAssetRaw = ""] = String(db?.pair || "").split("/");
+        const baseAsset = baseAssetRaw.trim();
+        const baseFree = toFiniteNumber(spotBalances?.[baseAsset], NaN);
+        if (!Number.isFinite(baseFree) || baseFree <= 0) return true;
+        return baseFree < minQty;
+    };
+
     for (const [positionKey, currentPosition] of Object.entries(positionsMap)) {
+        if (await shouldAutoClearSpotDustPosition(currentPosition)) {
+            const minQty = resolveMarketMinQty(db?.pair);
+            console.warn(`[SYNC][WARN] Auto-cleared dust spot position ${positionKey}: qty ${currentPosition.quantity} below minimum ${minQty}.`);
+            removeActivePositionByKey(positionKey);
+            didClearDustPosition = true;
+            continue;
+        }
         await ensureReduceOnlyTakeProfitOrder(positionKey, currentPosition);
         await ensureReduceOnlyStopLossOrder(positionKey, currentPosition);
+    }
+
+    if (didClearDustPosition) {
+        await saveDB();
     }
 };
 
