@@ -16,7 +16,10 @@ const createRuntimeDashboardHelpers = ({
     buildDashboardPayload,
     buildLiveStatusPayload,
     applyDashboardConfigUpdate,
-    resetDashboardConfig
+    resetDashboardConfig,
+    removeDashboardPosition,
+    cancelDashboardOrder,
+    cancelDashboardOrderGroup
 }) => {
     const loginAttempts = new Map();
 
@@ -242,6 +245,66 @@ const createRuntimeDashboardHelpers = ({
                 res.json({ ok: true, message: "Konfigurasi dikembalikan ke default", ...result });
             } catch (error) {
                 res.status(400).json({ ok: false, error: error.message });
+            }
+        });
+
+        app.post("/api/positions/:positionKey/remove", requireSameOriginForStateChange, async (req, res) => {
+            try {
+                const positionKey = String(req.params?.positionKey || "").trim().toUpperCase();
+                if (!positionKey) {
+                    res.status(400).json({ ok: false, error: "Position key is required" });
+                    return;
+                }
+                if (typeof removeDashboardPosition !== "function") {
+                    res.status(503).json({ ok: false, error: "Remove position is unavailable" });
+                    return;
+                }
+                const result = await removeDashboardPosition(positionKey);
+                if (!result?.ok) {
+                    res.status(400).json({ ok: false, error: result?.error || "Failed to remove position" });
+                    return;
+                }
+                res.json({ ok: true, message: result.message || `Posisi ${positionKey} diproses untuk ditutup` });
+            } catch (error) {
+                res.status(500).json({ ok: false, error: error.message });
+            }
+        });
+
+        app.post("/api/orders/cancel", requireSameOriginForStateChange, async (req, res) => {
+            try {
+                if (typeof cancelDashboardOrder !== "function") {
+                    res.status(503).json({ ok: false, error: "Cancel order is unavailable" });
+                    return;
+                }
+                const orderType = String(req.body?.orderType || "").trim().toLowerCase();
+                const clientOrderId = String(req.body?.clientOrderId || "").trim();
+                const orderId = String(req.body?.orderId || "").trim();
+                const result = await cancelDashboardOrder({ orderType, clientOrderId, orderId });
+                if (!result?.ok) {
+                    res.status(400).json({ ok: false, error: result?.error || "Failed to cancel order" });
+                    return;
+                }
+                res.json({ ok: true, message: result.message || "Order berhasil dibatalkan" });
+            } catch (error) {
+                res.status(500).json({ ok: false, error: error.message });
+            }
+        });
+
+        app.post("/api/orders/cancel-group", requireSameOriginForStateChange, async (req, res) => {
+            try {
+                if (typeof cancelDashboardOrderGroup !== "function") {
+                    res.status(503).json({ ok: false, error: "Cancel order group is unavailable" });
+                    return;
+                }
+                const orderType = String(req.body?.orderType || "").trim().toLowerCase();
+                const result = await cancelDashboardOrderGroup(orderType);
+                if (!result?.ok) {
+                    res.status(400).json({ ok: false, error: result?.error || "Failed to cancel order group" });
+                    return;
+                }
+                res.json({ ok: true, message: result.message || "Order grup berhasil dibatalkan" });
+            } catch (error) {
+                res.status(500).json({ ok: false, error: error.message });
             }
         });
 

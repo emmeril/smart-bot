@@ -132,6 +132,9 @@
     .panel-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
     .live-grid { display: grid; gap: 12px; }
     .live-lists { display: grid; gap: 12px; margin-top: 16px; }
+    .live-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+    .live-list-head h3 { margin: 0; }
+    .btn-xs { min-height: 32px; padding: 6px 10px; font-size: 0.75rem; }
     .live-items { display: grid; gap: 8px; }
     .live-item { min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; }
     .live-item strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 0.875rem; font-weight: 700; }
@@ -336,11 +339,16 @@
             </div>
             <div class="live-lists">
               <section class="live-list">
-                <h3>Detail posisi</h3>
+                <div class="live-list-head">
+                  <h3>Detail posisi</h3>
+                  <button id="clearPositionsBtn" class="btn btn-danger btn-xs" type="button">Hapus semua</button>
+                </div>
                 <div id="livePositionsList" class="live-items"></div>
               </section>
               <section class="live-list">
-                <h3>Ringkasan order</h3>
+                <div class="live-list-head">
+                  <h3>Ringkasan order</h3>
+                </div>
                 <div id="liveOrdersList" class="live-items"></div>
               </section>
             </div>
@@ -415,6 +423,7 @@
     const liveOrdersMeta = document.getElementById("liveOrdersMeta");
     const livePositionsList = document.getElementById("livePositionsList");
     const liveOrdersList = document.getElementById("liveOrdersList");
+    const clearPositionsBtn = document.getElementById("clearPositionsBtn");
     const livePnlTrend = document.getElementById("livePnlTrend");
     const realizedPnlValue = document.getElementById("realizedPnlValue");
     const realizedPnlMeta = document.getElementById("realizedPnlMeta");
@@ -467,6 +476,73 @@
           toast.textContent = "";
         }
       }, 4200);
+    }
+
+    async function removePosition(positionKey) {
+      const key = String(positionKey || "").trim().toUpperCase();
+      if (!key) return;
+      const ok = confirm("Hapus posisi " + key + "? Posisi akan ditutup oleh bot.");
+      if (!ok) return;
+      try {
+        const data = await api("/api/positions/" + encodeURIComponent(key) + "/remove", { method: "POST" });
+        showToast(data.message || ("Posisi " + key + " diproses"), "success");
+        await loadLiveStatus(true);
+      } catch (error) {
+        showToast(error.message || "Gagal hapus posisi", "error");
+      }
+    }
+
+    async function removeAllPositions() {
+      const cards = Array.from(livePositionsList.querySelectorAll("[data-position-key]"));
+      const keys = cards.map((node) => String(node.dataset.positionKey || "").trim()).filter(Boolean);
+      if (keys.length === 0) {
+        showToast("Tidak ada posisi untuk dihapus", "info");
+        return;
+      }
+      const ok = confirm("Hapus semua posisi aktif (" + keys.length + ")?");
+      if (!ok) return;
+      for (const key of keys) {
+        try {
+          await api("/api/positions/" + encodeURIComponent(key) + "/remove", { method: "POST" });
+        } catch (error) {
+          showToast(error.message || ("Gagal hapus posisi " + key), "error");
+        }
+      }
+      await loadLiveStatus(true);
+      showToast("Permintaan hapus semua posisi sudah dikirim", "success");
+    }
+
+    async function cancelOrder(orderType, clientOrderId, orderId) {
+      const type = String(orderType || "").toLowerCase();
+      const ref = clientOrderId || orderId || "order";
+      const ok = confirm("Cancel order " + ref + "?");
+      if (!ok) return;
+      try {
+        const data = await api("/api/orders/cancel", {
+          method: "POST",
+          body: JSON.stringify({ orderType: type, clientOrderId, orderId })
+        });
+        showToast(data.message || ("Order " + ref + " dibatalkan"), "success");
+        await loadLiveStatus(true);
+      } catch (error) {
+        showToast(error.message || "Gagal cancel order", "error");
+      }
+    }
+
+    async function cancelOrderGroup(orderType) {
+      const type = String(orderType || "").toLowerCase();
+      const ok = confirm("Cancel semua order " + type.toUpperCase() + "?");
+      if (!ok) return;
+      try {
+        const data = await api("/api/orders/cancel-group", {
+          method: "POST",
+          body: JSON.stringify({ orderType: type })
+        });
+        showToast(data.message || ("Order " + type.toUpperCase() + " dibatalkan"), "success");
+        await loadLiveStatus(true);
+      } catch (error) {
+        showToast(error.message || "Gagal cancel grup order", "error");
+      }
     }
 
     function formatNumber(value) {
@@ -751,10 +827,13 @@
       } else {
         positions.slice(0, 4).forEach((position) => {
           const item = document.createElement("div");
+          const positionKey = String(position.key || position.side || "POSITION");
           const pnlValue = Number(position.pnlUSDT || 0);
           item.className = "live-item " + (pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral"));
+          item.dataset.positionKey = positionKey;
           const pnlSign = pnlValue >= 0 ? "+" : "";
-          item.innerHTML = '<strong>' + String(position.key || position.side || "POSITION") + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
+          item.innerHTML = '<div class="live-list-head"><strong>' + positionKey + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
+            '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Hapus</button></div>' +
             '<span>Qty ' + formatNumber(position.quantity) + ' | Entry ' + formatNumber(position.entryPrice) + ' | Mark ' + formatNumber(position.currentPrice) + '</span>' +
             '<span>PnL ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span>' +
             '<span>TP ' + formatNumber(position.targetPrice) + ' | SL ' + formatNumber(position.stopLossPrice) + '</span>';
@@ -778,6 +857,7 @@
         groups.forEach((group) => {
           const wrapper = document.createElement("div");
           wrapper.className = "live-item neutral";
+          const groupType = String(group.label || "").toLowerCase();
           const rows = group.list.slice(0, 4).map((order) => {
             const side = String(order.side || order.positionSide || '-').toUpperCase();
             const badgeClass = sideBadgeClass(order.side || order.positionSide);
@@ -785,11 +865,14 @@
             const amount = order.amount === null || order.amount === undefined ? '-' : formatNumber(order.amount);
             const refId = order.clientOrderId || order.id || 'order';
             const trigger = order.triggerPrice === null || order.triggerPrice === undefined ? '-' : formatNumber(order.triggerPrice);
+            const orderId = order.id || "";
+            const clientOrderId = order.clientOrderId || "";
             return '<div class="live-table-row"><div>' + refId + '</div><div><span class="' + badgeClass + '">' + side + '</span></div><div>' + price + '</div><div>' + amount + '</div></div>' +
               '<div class="live-table-row" style="margin-top:6px; grid-template-columns: 1fr 1fr 1fr 1fr; font-size:0.8rem; color: var(--muted);">' +
-              '<div>Type: ' + String(order.type || '-') + '</div><div>Pos: ' + String(order.positionSide || '-') + '</div><div>Trig: ' + trigger + '</div><div>RO: ' + String(Boolean(order.reduceOnly)) + '</div></div>';
+              '<div>Type: ' + String(order.type || '-') + '</div><div>Pos: ' + String(order.positionSide || '-') + '</div><div>Trig: ' + trigger + '</div><div>RO: ' + String(Boolean(order.reduceOnly)) + '</div></div>' +
+              '<div style="margin-top:6px;"><button class="btn btn-danger btn-xs js-cancel-order" type="button" data-order-type="' + groupType + '" data-client-order-id="' + String(clientOrderId) + '" data-order-id="' + String(orderId) + '">Cancel</button></div>';
           }).join('');
-          wrapper.innerHTML = '<strong>' + group.label + ' (' + group.list.length + ')</strong><div class="live-table"><div class="live-table-head"><div>Order</div><div>Side</div><div>Price</div><div>Qty</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
+          wrapper.innerHTML = '<div class="live-list-head"><strong>' + group.label + ' (' + group.list.length + ')</strong><button class="btn btn-danger btn-xs js-cancel-group" type="button" data-order-type="' + groupType + '">Cancel semua</button></div><div class="live-table"><div class="live-table-head"><div>Order</div><div>Side</div><div>Price</div><div>Qty</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
           liveOrdersList.appendChild(wrapper);
         });
       }
@@ -1015,6 +1098,28 @@
     saveBtn.addEventListener("click", saveDashboard);
     refreshBtn.addEventListener("click", () => loadDashboard(false));
     resetBtn.addEventListener("click", resetDashboard);
+    clearPositionsBtn.addEventListener("click", removeAllPositions);
+    livePositionsList.addEventListener("click", async (event) => {
+      const target = event.target.closest(".js-remove-position");
+      if (!target) return;
+      const key = target.dataset.positionKey || "";
+      await removePosition(key);
+    });
+    liveOrdersList.addEventListener("click", async (event) => {
+      const cancelButton = event.target.closest(".js-cancel-order");
+      if (cancelButton) {
+        await cancelOrder(
+          cancelButton.dataset.orderType || "",
+          cancelButton.dataset.clientOrderId || "",
+          cancelButton.dataset.orderId || ""
+        );
+        return;
+      }
+      const cancelGroupButton = event.target.closest(".js-cancel-group");
+      if (cancelGroupButton) {
+        await cancelOrderGroup(cancelGroupButton.dataset.orderType || "");
+      }
+    });
 
     startAutoRefresh();
     startLiveRefresh();

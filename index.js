@@ -910,6 +910,67 @@ const {
     buildDashboardPayload
 });
 
+const removeDashboardPosition = async (positionKey) => {
+    const normalizedKey = toPositionMapKey(positionKey);
+    const trackedPosition = getActivePositionByKey(normalizedKey);
+    if (!trackedPosition) return { ok: false, error: `Posisi ${normalizedKey} tidak ditemukan.` };
+    await closePosition(normalizedKey, "DASHBOARD_REMOVE");
+    return { ok: true, message: `Permintaan hapus posisi ${normalizedKey} sudah dikirim.` };
+};
+
+const cancelDashboardOrder = async ({ orderType, clientOrderId, orderId }) => {
+    const normalizedType = String(orderType || "").toLowerCase();
+    if (!["grid", "tp", "sl"].includes(normalizedType)) {
+        return { ok: false, error: "Tipe order tidak valid. Gunakan grid, tp, atau sl." };
+    }
+
+    const openOrders = await fetchManagedOpenOrdersSnapshot();
+    const sourceOrders = normalizedType === "grid"
+        ? (openOrders.grid || [])
+        : normalizedType === "tp"
+            ? (openOrders.tp || [])
+            : (openOrders.sl || []);
+    const targetOrder = sourceOrders.find((order) => {
+        const currentClientOrderId = String(getExchangeClientOrderId(order) || "");
+        const currentOrderId = String(order?.id || "");
+        return (clientOrderId && currentClientOrderId === clientOrderId) || (orderId && currentOrderId === orderId);
+    });
+
+    if (!targetOrder) {
+        return { ok: false, error: "Order tidak ditemukan atau sudah tertutup." };
+    }
+
+    if (normalizedType === "grid") await cancelGridOrders([targetOrder], "DASHBOARD_CANCEL");
+    else if (normalizedType === "tp") await cancelTpOrders([targetOrder], "DASHBOARD_CANCEL");
+    else await cancelSlOrders([targetOrder], "DASHBOARD_CANCEL");
+
+    const reference = getExchangeClientOrderId(targetOrder) || targetOrder.id || "order";
+    return { ok: true, message: `Order ${reference} berhasil dibatalkan.` };
+};
+
+const cancelDashboardOrderGroup = async (orderType) => {
+    const normalizedType = String(orderType || "").toLowerCase();
+    if (!["grid", "tp", "sl"].includes(normalizedType)) {
+        return { ok: false, error: "Tipe grup order tidak valid. Gunakan grid, tp, atau sl." };
+    }
+
+    const openOrders = await fetchManagedOpenOrdersSnapshot();
+    const sourceOrders = normalizedType === "grid"
+        ? (openOrders.grid || [])
+        : normalizedType === "tp"
+            ? (openOrders.tp || [])
+            : (openOrders.sl || []);
+    if (sourceOrders.length === 0) {
+        return { ok: false, error: `Tidak ada order ${normalizedType.toUpperCase()} terbuka.` };
+    }
+
+    if (normalizedType === "grid") await cancelGridOrders(sourceOrders, "DASHBOARD_CANCEL_GROUP");
+    else if (normalizedType === "tp") await cancelTpOrders(sourceOrders, "DASHBOARD_CANCEL_GROUP");
+    else await cancelSlOrders(sourceOrders, "DASHBOARD_CANCEL_GROUP");
+
+    return { ok: true, message: `${sourceOrders.length} order ${normalizedType.toUpperCase()} berhasil dibatalkan.` };
+};
+
 const { startWebDashboard } = createRuntimeDashboardHelpers({
     publicDir: path.join(__dirname, "public"),
     toFiniteNumber,
@@ -925,7 +986,10 @@ const { startWebDashboard } = createRuntimeDashboardHelpers({
     buildDashboardPayload,
     buildLiveStatusPayload,
     applyDashboardConfigUpdate,
-    resetDashboardConfig
+    resetDashboardConfig,
+    removeDashboardPosition,
+    cancelDashboardOrder,
+    cancelDashboardOrderGroup
 });
 
 const AUTO_PAIR_GRID_PRESETS = {
