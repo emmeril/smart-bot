@@ -715,11 +715,28 @@ const createOrderExecutionHelpers = ({
         if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
 
         const closeSide = position.side === "buy" ? "sell" : "buy";
-        const quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
+        let quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
         const targetPrice = formatPriceToMarketPrecision(db.pair, position.targetPrice);
         const stopPrice = formatPriceToMarketPrecision(db.pair, position.stopLossPrice);
         const stopLimitPrice = formatPriceToMarketPrecision(db.pair, position.side === "buy" ? position.stopLossPrice * 0.999 : position.stopLossPrice * 1.001);
         const marketInfo = exchange.markets[spotPair] || exchange.markets[db.pair];
+
+        if (closeSide === "sell" && typeof fetchSpotBalances === "function") {
+            const balances = await fetchSpotBalances();
+            const [baseAssetRaw = ""] = String(db.pair || "").split("/");
+            const baseAsset = baseAssetRaw.trim();
+            const baseFreeRaw = Number(balances?.[baseAsset]?.free ?? balances?.[baseAsset] ?? NaN);
+            if (Number.isFinite(baseFreeRaw) && baseFreeRaw > 0 && quantity > baseFreeRaw) {
+                const safeBaseFree = Math.max(0, baseFreeRaw * 0.999);
+                const clampedQty = formatAmountToMarketPrecision(db.pair, safeBaseFree);
+                if (Number.isFinite(clampedQty) && clampedQty > 0) {
+                    console.warn(`[OCO][WARN] Spot balance clamp applied for ${baseAsset}: requested qty ${quantity} > free ${baseFreeRaw}. Using qty ${clampedQty}.`);
+                    quantity = clampedQty;
+                    position.quantity = clampedQty;
+                }
+            }
+        }
+
         const tpValidation = validateOrderSize(marketInfo, quantity, targetPrice, { orderType: "LIMIT" });
         const slValidation = validateOrderSize(marketInfo, quantity, stopPrice, { orderType: "STOP_LOSS_LIMIT" });
         if (!tpValidation.valid) {
@@ -1021,7 +1038,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
 
