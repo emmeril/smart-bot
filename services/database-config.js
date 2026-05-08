@@ -45,6 +45,7 @@ const Config = sequelize.define("Config", {
     stopLossMinPercent: { type: DataTypes.FLOAT, defaultValue: 1.2 },
     stopLossMaxPercent: { type: DataTypes.FLOAT, defaultValue: 3.5 },
     autoTargetProfitEnabled: { type: DataTypes.BOOLEAN, defaultValue: true },
+    gridRecalculateExitsOnScaleIn: { type: DataTypes.BOOLEAN, defaultValue: true },
     targetProfitAtrMultiplier: { type: DataTypes.FLOAT, defaultValue: 1.8 },
     targetProfitMinUsdt: { type: DataTypes.FLOAT, defaultValue: 0.05 },
     targetProfitMaxUsdt: { type: DataTypes.FLOAT, defaultValue: 1.2 },
@@ -66,7 +67,7 @@ const Config = sequelize.define("Config", {
     lastUpdated: { type: DataTypes.BIGINT, defaultValue: () => Date.now() }
 }, { timestamps: false });
 
-const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort", "autoTargetProfitEnabled", "autoStopLossEnabled"];
+const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort", "autoTargetProfitEnabled", "autoStopLossEnabled", "gridRecalculateExitsOnScaleIn"];
 const VALID_MARGIN_MODES = ["spot"];
 const DEFAULT_CONFIG = {
     strategy: "spot_grid",
@@ -89,6 +90,7 @@ const DEFAULT_CONFIG = {
     stopLossMinPercent: 1.2,
     stopLossMaxPercent: 3.5,
     autoTargetProfitEnabled: true,
+    gridRecalculateExitsOnScaleIn: true,
     targetProfitAtrMultiplier: 1.8,
     targetProfitMinUsdt: 0.05,
     targetProfitMaxUsdt: 1.2,
@@ -130,6 +132,7 @@ const DASHBOARD_EDITABLE_FIELDS = [
     { key: "gridOrderSizeUsdt", label: "Grid Order Size (USDT)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Order size per grid entry in USDT. Set 0 for automatic sizing." },
     { key: "gridTargetProfitUsdt", label: "Target Profit (USDT)", section: "Risk", type: "number", min: 0.1, step: 0.1, description: "Take-profit target in USDT." },
     { key: "autoTargetProfitEnabled", label: "Auto Target Profit", section: "Risk", type: "boolean", description: "Use ATR-based TP with a capped range instead of a fixed profit." },
+    { key: "gridRecalculateExitsOnScaleIn", label: "Recalculate TP/SL on Scale-In", section: "Risk", type: "boolean", description: "When enabled, every additional filled grid entry recalculates TP/SL from the latest average entry and total position size." },
     { key: "targetProfitAtrMultiplier", label: "TP ATR Multiplier", section: "Risk", type: "number", min: 0.1, step: 0.05, description: "ATR multiplier used to derive automatic target profit." },
     { key: "targetProfitMinUsdt", label: "TP Min (USDT)", section: "Risk", type: "number", min: 0, step: 0.05, description: "Lower bound for automatic target profit." },
     { key: "targetProfitMaxUsdt", label: "TP Max (USDT)", section: "Risk", type: "number", min: 0, step: 0.1, description: "Upper bound for automatic target profit." },

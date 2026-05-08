@@ -475,6 +475,7 @@ const {
     formatAmountToMarketPrecision,
     formatPriceToMarketPrecision,
     validateOrderSize,
+    buildOrderPlan,
     buildExchangeOrderParams: (...args) => buildExchangeOrderParams(...args),
     getOrderPositionSide: (...args) => getOrderPositionSide(...args),
     getClosePositionSide: (...args) => getClosePositionSide(...args),

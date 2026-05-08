@@ -7,6 +7,7 @@ const createOrderExecutionHelpers = ({
     formatAmountToMarketPrecision,
     formatPriceToMarketPrecision,
     validateOrderSize,
+    buildOrderPlan,
     buildExchangeOrderParams,
     getOrderPositionSide,
     getClosePositionSide,
@@ -180,12 +181,30 @@ const createOrderExecutionHelpers = ({
             ? (((Number.isFinite(currentEntry) ? currentEntry : 0) * currentQty) + ((Number.isFinite(filledEntry) ? filledEntry : 0) * filledQty)) / mergedQty
             : filledEntry;
 
-        const mergedTargetPrice = Number.isFinite(toFiniteNumber(currentPosition.targetPrice, NaN))
+        let mergedTargetPrice = Number.isFinite(toFiniteNumber(currentPosition.targetPrice, NaN))
             ? toFiniteNumber(currentPosition.targetPrice, NaN)
             : toFiniteNumber(filledPosition.targetPrice, NaN);
-        const mergedStopLossPrice = Number.isFinite(toFiniteNumber(currentPosition.stopLossPrice, NaN))
+        let mergedStopLossPrice = Number.isFinite(toFiniteNumber(currentPosition.stopLossPrice, NaN))
             ? toFiniteNumber(currentPosition.stopLossPrice, NaN)
             : toFiniteNumber(filledPosition.stopLossPrice, NaN);
+
+        if (db.gridRecalculateExitsOnScaleIn !== false && typeof buildOrderPlan === "function") {
+            const recalculatedPlan = buildOrderPlan(
+                filledPosition.side || currentPosition.side,
+                mergedEntryPrice,
+                mergedQty,
+                toFiniteNumber(currentPosition.atrAtEntry, NaN),
+                {
+                    trailingActivateATR: toFiniteNumber(currentPosition.trailingActivateATR, db.trailingActivateATR),
+                    trailingOffsetATR: toFiniteNumber(currentPosition.trailingOffsetATR, db.trailingOffsetATR)
+                },
+                {}
+            );
+            if (Number.isFinite(recalculatedPlan?.targetPrice) && Number.isFinite(recalculatedPlan?.stopLossPrice)) {
+                mergedTargetPrice = recalculatedPlan.targetPrice;
+                mergedStopLossPrice = recalculatedPlan.stopLossPrice;
+            }
+        }
 
         const targetProfitUSDT = Number.isFinite(mergedTargetPrice) && Number.isFinite(mergedEntryPrice)
             ? Math.abs(mergedTargetPrice - mergedEntryPrice) * mergedQty
@@ -1038,7 +1057,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
 

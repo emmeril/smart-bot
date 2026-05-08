@@ -238,6 +238,7 @@ const createConfigModelHelpers = ({
                 ? "UPDATE Configs SET autoTargetProfitEnabled = COALESCE(autoTpEnabled, 1) WHERE autoTargetProfitEnabled IS NULL OR autoTargetProfitEnabled = '';"
                 : null
         });
+        await addColumnIfMissing({ column: "gridRecalculateExitsOnScaleIn", sql: "ALTER TABLE Configs ADD COLUMN gridRecalculateExitsOnScaleIn BOOLEAN DEFAULT 1;" });
         await addColumnIfMissing({ column: "targetProfitAtrMultiplier", sql: "ALTER TABLE Configs ADD COLUMN targetProfitAtrMultiplier FLOAT DEFAULT 2.4;" });
         await addColumnIfMissing({ column: "targetProfitMinUsdt", sql: "ALTER TABLE Configs ADD COLUMN targetProfitMinUsdt FLOAT DEFAULT 0.25;" });
         await addColumnIfMissing({ column: "targetProfitMaxUsdt", sql: "ALTER TABLE Configs ADD COLUMN targetProfitMaxUsdt FLOAT DEFAULT 5;" });
