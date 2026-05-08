@@ -23,6 +23,8 @@ const createRuntimeMarketDataHelpers = ({
     getOrderQuantity,
     getOrderTriggerPrice
 }) => {
+    const MAX_LOG_TAIL_BYTES = 64 * 1024;
+
     const formatOrderSummary = (order, typeLabel) => {
         const side = String(order?.side || "").toUpperCase();
         const amount = getOrderQuantity(order);
@@ -46,7 +48,7 @@ const createRuntimeMarketDataHelpers = ({
             const ticker = await retry(() => exchange.fetchTicker(db.pair));
             metrics.api.ticker++;
             const latestPrice = toFiniteNumber(ticker?.last, null);
-            if (latestPrice) {
+            if (Number.isFinite(latestPrice)) {
                 setTickerCache({ ...tickerCache, price: latestPrice, lastUpdate: now });
             }
             return latestPrice;
@@ -213,11 +215,23 @@ const createRuntimeMarketDataHelpers = ({
     const getLastTradeTimestampFromLog = () => {
         try {
             if (!fs.existsSync(logPath)) return 0;
-            const content = fs.readFileSync(logPath, "utf8");
+            const stats = fs.statSync(logPath);
+            if (!Number.isFinite(stats?.size) || stats.size <= 0) return 0;
+            const bytesToRead = Math.min(stats.size, MAX_LOG_TAIL_BYTES);
+            const start = Math.max(0, stats.size - bytesToRead);
+            const fileDescriptor = fs.openSync(logPath, "r");
+            const buffer = Buffer.alloc(bytesToRead);
+            let bytesRead = 0;
+            try {
+                bytesRead = fs.readSync(fileDescriptor, buffer, 0, bytesToRead, start);
+            } finally {
+                fs.closeSync(fileDescriptor);
+            }
+            const content = buffer.toString("utf8", 0, bytesRead);
             if (!content) return 0;
             const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-            if (lines.length <= 1) return 0;
-            for (let i = lines.length - 1; i >= 1; i--) {
+            if (lines.length === 0) return 0;
+            for (let i = lines.length - 1; i >= 0; i--) {
                 const timestamp = String(lines[i]).split(",")[0];
                 const parsed = Date.parse(timestamp);
                 if (Number.isFinite(parsed)) return parsed;
