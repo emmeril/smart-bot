@@ -167,10 +167,65 @@ const createOrderExecutionHelpers = ({
         };
     };
 
+    const mergeSpotGridPosition = (currentPosition, filledPosition) => {
+        const db = getDb();
+        if (!currentPosition || typeof currentPosition !== "object") return { ...filledPosition };
+
+        const currentQty = Math.max(0, toFiniteNumber(currentPosition.quantity, 0));
+        const filledQty = Math.max(0, toFiniteNumber(filledPosition.quantity, 0));
+        const currentEntry = toFiniteNumber(currentPosition.entryPrice, NaN);
+        const filledEntry = toFiniteNumber(filledPosition.entryPrice, NaN);
+        const mergedQty = currentQty + filledQty;
+        const mergedEntryPrice = mergedQty > 0
+            ? (((Number.isFinite(currentEntry) ? currentEntry : 0) * currentQty) + ((Number.isFinite(filledEntry) ? filledEntry : 0) * filledQty)) / mergedQty
+            : filledEntry;
+
+        const mergedTargetPrice = Number.isFinite(toFiniteNumber(currentPosition.targetPrice, NaN))
+            ? toFiniteNumber(currentPosition.targetPrice, NaN)
+            : toFiniteNumber(filledPosition.targetPrice, NaN);
+        const mergedStopLossPrice = Number.isFinite(toFiniteNumber(currentPosition.stopLossPrice, NaN))
+            ? toFiniteNumber(currentPosition.stopLossPrice, NaN)
+            : toFiniteNumber(filledPosition.stopLossPrice, NaN);
+
+        const targetProfitUSDT = Number.isFinite(mergedTargetPrice) && Number.isFinite(mergedEntryPrice)
+            ? Math.abs(mergedTargetPrice - mergedEntryPrice) * mergedQty
+            : toFiniteNumber(currentPosition.targetProfitUSDT, toFiniteNumber(db.gridTargetProfitUsdt, 0));
+        const stopLossUSDT = Number.isFinite(mergedStopLossPrice) && Number.isFinite(mergedEntryPrice)
+            ? -Math.abs(mergedStopLossPrice - mergedEntryPrice) * mergedQty
+            : toFiniteNumber(currentPosition.stopLossUSDT, -Math.abs((mergedQty * mergedEntryPrice) * (Math.max(0, toFiniteNumber(db.gridStopLossPercent, 0)) / 100)));
+
+        return {
+            ...currentPosition,
+            side: filledPosition.side || currentPosition.side,
+            entryPrice: mergedEntryPrice,
+            quantity: mergedQty,
+            targetPrice: mergedTargetPrice,
+            stopLossPrice: mergedStopLossPrice,
+            targetProfitUSDT,
+            stopLossUSDT,
+            orderId: filledPosition.orderId || currentPosition.orderId || null,
+            entryTime: Math.min(
+                toFiniteNumber(currentPosition.entryTime, Date.now()),
+                toFiniteNumber(filledPosition.entryTime, Date.now())
+            ),
+            highestSinceEntry: Math.max(
+                toFiniteNumber(currentPosition.highestSinceEntry, mergedEntryPrice),
+                toFiniteNumber(filledPosition.entryPrice, mergedEntryPrice)
+            ),
+            lowestSinceEntry: Math.min(
+                toFiniteNumber(currentPosition.lowestSinceEntry, mergedEntryPrice),
+                toFiniteNumber(filledPosition.entryPrice, mergedEntryPrice)
+            ),
+            tpOrderId: currentPosition.tpOrderId || null,
+            tpClientOrderId: currentPosition.tpClientOrderId || null,
+            slOrderId: currentPosition.slOrderId || null,
+            slClientOrderId: currentPosition.slClientOrderId || null
+        };
+    };
+
     const adoptFilledGridEntryOrder = async (gridOrder) => {
         const db = getDb();
         const positionKey = getOrderPositionSide(gridOrder?.side);
-        if (typeof getActivePositionByKey === "function" && getActivePositionByKey(positionKey)) return true;
 
         let filledOrder = null;
         try {
@@ -182,17 +237,35 @@ const createOrderExecutionHelpers = ({
 
         if (!isFilledOrder(filledOrder)) return false;
 
-        const position = buildSpotGridPositionFromFilledOrder(gridOrder, filledOrder);
-        if (!position.side || !Number.isFinite(position.entryPrice) || position.entryPrice <= 0 || !Number.isFinite(position.quantity) || position.quantity <= 0) {
+        const filledPosition = buildSpotGridPositionFromFilledOrder(gridOrder, filledOrder);
+        if (!filledPosition.side || !Number.isFinite(filledPosition.entryPrice) || filledPosition.entryPrice <= 0 || !Number.isFinite(filledPosition.quantity) || filledPosition.quantity <= 0) {
             console.warn(`[GRID][WARN] Filled grid order ${gridOrder.clientOrderId} could not be converted to a valid active position.`);
             return false;
+        }
+
+        const currentPosition = typeof getActivePositionByKey === "function"
+            ? getActivePositionByKey(positionKey)
+            : null;
+        const position = mergeSpotGridPosition(currentPosition, filledPosition);
+        if (currentPosition) {
+            const previousQty = toFiniteNumber(currentPosition.quantity, 0);
+            const previousEntry = toFiniteNumber(currentPosition.entryPrice, NaN);
+            const nextQty = toFiniteNumber(position.quantity, 0);
+            const nextEntry = toFiniteNumber(position.entryPrice, NaN);
+            const filledQty = toFiniteNumber(filledPosition.quantity, 0);
+            const filledEntry = toFiniteNumber(filledPosition.entryPrice, NaN);
+            console.log(
+                `[GRID][AUDIT] ${positionKey} scaled-in via ${gridOrder.clientOrderId} | `
+                + `qty ${previousQty} + ${filledQty} => ${nextQty} | `
+                + `entry ${Number.isFinite(previousEntry) ? previousEntry : "N/A"} + ${Number.isFinite(filledEntry) ? filledEntry : "N/A"} => ${Number.isFinite(nextEntry) ? nextEntry : "N/A"}`
+            );
         }
 
         upsertActivePosition(position);
         await saveDB();
         await ensureReduceOnlyTakeProfitOrder(positionKey, position);
         await ensureReduceOnlyStopLossOrder(positionKey, position);
-        console.log(`[GRID][INFO] Adopted filled ${position.side.toUpperCase()} grid order ${gridOrder.clientOrderId} as active spot position @ ${position.entryPrice}`);
+        console.log(`[GRID][INFO] Adopted filled ${position.side.toUpperCase()} grid order ${gridOrder.clientOrderId} into active spot position @ ${position.entryPrice} qty ${position.quantity}`);
         return true;
     };
 
@@ -924,8 +997,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
-
 
 
 
