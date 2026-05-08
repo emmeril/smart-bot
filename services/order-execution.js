@@ -783,11 +783,11 @@ const createOrderExecutionHelpers = ({
         const slValidation = validateOrderSize(marketInfo, quantity, stopPrice, { orderType: "STOP_LOSS_LIMIT" });
         if (!tpValidation.valid) {
             console.warn(`[OCO][WARN] Skipping OCO placement: TP ${tpValidation.reason}`);
-            return null;
+            return { blocked: true, reason: `TP ${tpValidation.reason}` };
         }
         if (!slValidation.valid) {
             console.warn(`[OCO][WARN] Skipping OCO placement: SL ${slValidation.reason}`);
-            return null;
+            return { blocked: true, reason: `SL ${slValidation.reason}` };
         }
         if (tpValidation.warning) console.warn(`[OCO][WARN] TP ${tpValidation.warning}`);
         if (slValidation.warning) console.warn(`[OCO][WARN] SL ${slValidation.warning}`);
@@ -949,6 +949,15 @@ const createOrderExecutionHelpers = ({
             const position = { ...sourcePosition };
             if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
             if (!Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
+            const protectionFingerprint = [
+                formatAmountToMarketPrecision(getDb().pair, Number(position.quantity || 0)),
+                formatPriceToMarketPrecision(getDb().pair, Number(position.targetPrice || 0)),
+                formatPriceToMarketPrecision(getDb().pair, Number(position.stopLossPrice || 0))
+            ].join("|");
+
+            if (position.ocoBlockedReason && position.ocoBlockedFingerprint === protectionFingerprint) {
+                return;
+            }
 
             const matchingTpOrders = (await fetchOpenTpOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
             const matchingSlOrders = (await fetchOpenSlOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
@@ -1005,11 +1014,24 @@ const createOrderExecutionHelpers = ({
             }
 
             const placedOco = await placeOcoExitOrder(position);
+            if (placedOco?.blocked) {
+                const nextReason = String(placedOco.reason || "OCO placement blocked by exchange constraints.");
+                if (position.ocoBlockedReason !== nextReason || position.ocoBlockedFingerprint !== protectionFingerprint) {
+                    console.warn(`[OCO][WARN] OCO replacement paused for ${positionKey}: ${nextReason}`);
+                    position.ocoBlockedReason = nextReason;
+                    position.ocoBlockedFingerprint = protectionFingerprint;
+                    upsertActivePosition(position);
+                    await saveDB();
+                }
+                return;
+            }
             if (!placedOco?.tpOrder || !placedOco?.slOrder) return;
             position.tpOrderId = placedOco.tpOrder.id || null;
             position.tpClientOrderId = getExchangeClientOrderId(placedOco.tpOrder) || getTpClientOrderId(position);
             position.slOrderId = placedOco.slOrder.id || null;
             position.slClientOrderId = getExchangeClientOrderId(placedOco.slOrder) || getSlClientOrderId(position);
+            position.ocoBlockedReason = null;
+            position.ocoBlockedFingerprint = null;
             upsertActivePosition(position);
             await saveDB();
             console.log(`[OCO] Attached exchange OCO exit to ${positionKey}`);
@@ -1115,9 +1137,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
-
-
 
 
 
