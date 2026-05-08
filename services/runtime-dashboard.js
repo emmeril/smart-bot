@@ -31,7 +31,59 @@ const createRuntimeDashboardHelpers = ({
         windowMs: Math.max(1000, Math.trunc(toFiniteNumber(process.env.DASHBOARD_LOGIN_WINDOW_MS, 15 * 60 * 1000)))
     });
 
-    const getLoginAttemptKey = (req) => normalizeClientAddress(req?.socket?.remoteAddress || req?.ip || req?.headers?.["x-forwarded-for"]);
+    const getLoginAttemptKey = (req) => normalizeClientAddress(req?.ip || req?.socket?.remoteAddress);
+
+    const normalizeHostAlias = (value) => {
+        const host = String(value || "").trim().toLowerCase();
+        if (!host) return "";
+        if (host === "::1" || host === "[::1]" || host === "localhost") return "127.0.0.1";
+        if (host.startsWith("::ffff:")) return host.slice(7);
+        return host;
+    };
+
+    const parseHostAndPort = (hostHeader) => {
+        const input = String(hostHeader || "").trim();
+        if (!input) return { host: "", port: "" };
+        if (input.startsWith("[")) {
+            const closingIndex = input.indexOf("]");
+            if (closingIndex > 0) {
+                const host = input.slice(1, closingIndex);
+                const remainder = input.slice(closingIndex + 1);
+                const port = remainder.startsWith(":") ? remainder.slice(1) : "";
+                return { host, port };
+            }
+        }
+        const separator = input.lastIndexOf(":");
+        if (separator > -1 && input.indexOf(":") === separator) {
+            return { host: input.slice(0, separator), port: input.slice(separator + 1) };
+        }
+        return { host: input, port: "" };
+    };
+
+    const parseOriginHostPort = (value) => {
+        try {
+            const parsed = new URL(String(value || "").trim());
+            return {
+                host: normalizeHostAlias(parsed.hostname),
+                port: parsed.port || (parsed.protocol === "https:" ? "443" : "80")
+            };
+        } catch {
+            return null;
+        }
+    };
+
+    const isSameOriginRequest = (req) => {
+        const hostHeader = req?.headers?.host;
+        const sourceHeader = req?.headers?.origin || req?.headers?.referer;
+        if (!hostHeader || !sourceHeader) return true;
+        const requestHostPort = parseHostAndPort(hostHeader);
+        const sourceHostPort = parseOriginHostPort(sourceHeader);
+        if (!sourceHostPort) return false;
+        return (
+            normalizeHostAlias(requestHostPort.host) === sourceHostPort.host &&
+            String(requestHostPort.port || "80") === String(sourceHostPort.port || "80")
+        );
+    };
 
     const sweepExpiredLoginAttempts = (now = Date.now()) => {
         const { windowMs } = getLoginRateLimitConfig();
@@ -77,6 +129,11 @@ const createRuntimeDashboardHelpers = ({
         res.redirect("/login");
     };
 
+    const requireSameOriginForStateChange = (req, res, next) => {
+        if (isSameOriginRequest(req)) return next();
+        res.status(403).send("Forbidden");
+    };
+
     const createDashboardApp = () => {
         const app = express();
         app.disable("x-powered-by");
@@ -115,7 +172,7 @@ const createRuntimeDashboardHelpers = ({
             res.redirect("/login?error=1");
         });
 
-        app.post("/logout", (req, res) => {
+        app.post("/logout", requireSameOriginForStateChange, (req, res) => {
             clearDashboardSessionCookie(res);
             res.redirect("/login");
         });
@@ -167,7 +224,7 @@ const createRuntimeDashboardHelpers = ({
             }
         });
 
-        app.put("/api/config", async (req, res) => {
+        app.put("/api/config", requireSameOriginForStateChange, async (req, res) => {
             try {
                 const incoming = req.body && typeof req.body === "object" && req.body.config && typeof req.body.config === "object"
                     ? req.body.config
@@ -179,7 +236,7 @@ const createRuntimeDashboardHelpers = ({
             }
         });
 
-        app.post("/api/config/reset", async (req, res) => {
+        app.post("/api/config/reset", requireSameOriginForStateChange, async (req, res) => {
             try {
                 const result = await resetDashboardConfig();
                 res.json({ ok: true, message: "Konfigurasi dikembalikan ke default", ...result });

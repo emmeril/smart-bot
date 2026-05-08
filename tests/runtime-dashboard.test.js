@@ -113,3 +113,46 @@ test("same-origin protection allows loopback host aliases for logout forms", asy
         await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
 });
+
+test("same-origin protection rejects cross-site logout requests", async () => {
+    const helpers = createRuntimeDashboardHelpers({
+        publicDir: process.cwd(),
+        toFiniteNumber: (value, fallback = 0) => {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : fallback;
+        },
+        isDashboardAuthenticated: () => true,
+        isDashboardLoginValid: () => false,
+        setDashboardSessionCookie: () => {},
+        clearDashboardSessionCookie: () => {},
+        getIsShuttingDown: () => false,
+        getDb: () => ({}),
+        getExchange: () => ({}),
+        getExchangeHealth: () => ({ isHealthy: true, needsRecoverySync: false }),
+        getExchangeRecoveryReason: () => "",
+        buildDashboardPayload: () => ({}),
+        buildLiveStatusPayload: async () => ({ ok: true }),
+        applyDashboardConfigUpdate: async () => ({}),
+        resetDashboardConfig: async () => ({})
+    });
+
+    const app = helpers.createDashboardApp();
+    const server = await new Promise((resolve) => {
+        const instance = app.listen(0, "127.0.0.1", () => resolve(instance));
+    });
+
+    try {
+        const { port } = server.address();
+        const response = await fetch(`http://127.0.0.1:${port}/logout`, {
+            method: "POST",
+            headers: {
+                origin: "http://evil.example"
+            },
+            redirect: "manual"
+        });
+
+        assert.equal(response.status, 403);
+    } finally {
+        await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+});
