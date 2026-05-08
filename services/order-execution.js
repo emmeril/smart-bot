@@ -223,15 +223,41 @@ const createOrderExecutionHelpers = ({
         };
     };
 
+    const hasAdoptedGridClientOrderId = (position, clientOrderId) => {
+        if (!position || !clientOrderId) return false;
+        const adoptedIds = Array.isArray(position.adoptedGridClientOrderIds)
+            ? position.adoptedGridClientOrderIds
+            : [];
+        return adoptedIds.includes(clientOrderId);
+    };
+
+    const recordAdoptedGridClientOrderId = (position, clientOrderId) => {
+        const adoptedIds = Array.isArray(position?.adoptedGridClientOrderIds)
+            ? position.adoptedGridClientOrderIds
+            : [];
+        const nextIds = [...adoptedIds, clientOrderId].filter(Boolean);
+        // Keep tail only so persisted state remains compact.
+        return nextIds.slice(-100);
+    };
+
     const adoptFilledGridEntryOrder = async (gridOrder) => {
         const db = getDb();
         const positionKey = getOrderPositionSide(gridOrder?.side);
+        const gridClientOrderId = String(gridOrder?.clientOrderId || "");
+        if (!gridClientOrderId) return false;
+
+        const currentPosition = typeof getActivePositionByKey === "function"
+            ? getActivePositionByKey(positionKey)
+            : null;
+        if (hasAdoptedGridClientOrderId(currentPosition, gridClientOrderId)) {
+            return true;
+        }
 
         let filledOrder = null;
         try {
-            filledOrder = await fetchOrderByClientOrderId(gridOrder?.clientOrderId, getSpotPair(db.pair));
+            filledOrder = await fetchOrderByClientOrderId(gridClientOrderId, getSpotPair(db.pair));
         } catch (error) {
-            console.warn(`[GRID][WARN] Failed to inspect historical grid order ${gridOrder?.clientOrderId}: ${describeError(error)}`);
+            console.warn(`[GRID][WARN] Failed to inspect historical grid order ${gridClientOrderId}: ${describeError(error)}`);
             return false;
         }
 
@@ -239,14 +265,12 @@ const createOrderExecutionHelpers = ({
 
         const filledPosition = buildSpotGridPositionFromFilledOrder(gridOrder, filledOrder);
         if (!filledPosition.side || !Number.isFinite(filledPosition.entryPrice) || filledPosition.entryPrice <= 0 || !Number.isFinite(filledPosition.quantity) || filledPosition.quantity <= 0) {
-            console.warn(`[GRID][WARN] Filled grid order ${gridOrder.clientOrderId} could not be converted to a valid active position.`);
+            console.warn(`[GRID][WARN] Filled grid order ${gridClientOrderId} could not be converted to a valid active position.`);
             return false;
         }
 
-        const currentPosition = typeof getActivePositionByKey === "function"
-            ? getActivePositionByKey(positionKey)
-            : null;
         const position = mergeSpotGridPosition(currentPosition, filledPosition);
+        position.adoptedGridClientOrderIds = recordAdoptedGridClientOrderId(position, gridClientOrderId);
         if (currentPosition) {
             const previousQty = toFiniteNumber(currentPosition.quantity, 0);
             const previousEntry = toFiniteNumber(currentPosition.entryPrice, NaN);
@@ -265,7 +289,7 @@ const createOrderExecutionHelpers = ({
         await saveDB();
         await ensureReduceOnlyTakeProfitOrder(positionKey, position);
         await ensureReduceOnlyStopLossOrder(positionKey, position);
-        console.log(`[GRID][INFO] Adopted filled ${position.side.toUpperCase()} grid order ${gridOrder.clientOrderId} into active spot position @ ${position.entryPrice} qty ${position.quantity}`);
+        console.log(`[GRID][INFO] Adopted filled ${position.side.toUpperCase()} grid order ${gridClientOrderId} into active spot position @ ${position.entryPrice} qty ${position.quantity}`);
         return true;
     };
 
@@ -997,7 +1021,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
 
