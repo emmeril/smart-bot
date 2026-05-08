@@ -110,6 +110,7 @@ const POSITION_SYNC_ENTRY_TOLERANCE_PCT = 0.05;
 const GRID_CLIENT_ORDER_PREFIX = "smartgrid";
 const TP_CLIENT_ORDER_PREFIX = "smarttp";
 const SL_CLIENT_ORDER_PREFIX = "smartsl";
+const ORDER_SAMPLE_LIMIT = 4;
 
 let metrics = {
     windowStart: Date.now(),
@@ -406,7 +407,7 @@ const printStatusLine = (label, value) => {
 };
 
 const printOrderSample = (orders, typeLabel) => {
-    orders.slice(0, 4).forEach((order) => console.log(`   ${formatOrderSummary(order, typeLabel)}`));
+    orders.slice(0, ORDER_SAMPLE_LIMIT).forEach((order) => console.log(`   ${formatOrderSummary(order, typeLabel)}`));
 };
 
 const printPositionLine = (positionKey, position, currentPrice) => {
@@ -427,6 +428,17 @@ const buildRiskOverrides = () => {
         trailingActivateATR: toFiniteNumber(currentDb?.trailingActivateATR, 1.5),
         trailingOffsetATR: toFiniteNumber(currentDb?.trailingOffsetATR, 0.75)
     };
+};
+
+const markPositionSyncHealthy = () => {
+    markExchangeHealthy("position sync");
+};
+
+const ensureManagedOrdersForPositions = async (positionsMap) => {
+    for (const [positionKey, currentPosition] of Object.entries(positionsMap)) {
+        await ensureReduceOnlyTakeProfitOrder(positionKey, currentPosition);
+        await ensureReduceOnlyStopLossOrder(positionKey, currentPosition);
+    }
 };
 
 const {
@@ -493,7 +505,6 @@ const {
     cancelSlOrders,
     buildReplacementClientOrderId
 });
-
 
 const isLegacySinglePosition = (value) => value && typeof value === "object" && !Array.isArray(value) && ("entryPrice" in value || "quantity" in value || "side" in value);
 
@@ -996,9 +1007,6 @@ const syncPositionWithExchange = async () => {
     try {
         if (!db || !exchange) return;
         if (exchange?.options?.smartBotPrivateAuthFailed) return;
-        const maybeMarkPositionSyncHealthy = () => {
-            markExchangeHealthy("position sync");
-        };
         const now = Date.now();
         if (now - lastSyncLogAt >= SYNC_LOG_TTL) {
             console.log(`[SYNC][INFO] Checking positions for ${db.pair}...`);
@@ -1007,12 +1015,8 @@ const syncPositionWithExchange = async () => {
         const isSpotRuntime = String(db?.marginMode || "spot").toLowerCase() === "spot"
             || String(exchange?.options?.defaultType || "spot").toLowerCase() === "spot";
         if (isSpotRuntime) {
-            const currentPositionsMap = getActivePositionsMap();
-            for (const [positionKey, currentPosition] of Object.entries(currentPositionsMap)) {
-                await ensureReduceOnlyTakeProfitOrder(positionKey, currentPosition);
-                await ensureReduceOnlyStopLossOrder(positionKey, currentPosition);
-            }
-            maybeMarkPositionSyncHealthy();
+            await ensureManagedOrdersForPositions(getActivePositionsMap());
+            markPositionSyncHealthy();
             return;
         }
         const openPositions = await fetchOpenExchangePositions();
@@ -1039,11 +1043,8 @@ const syncPositionWithExchange = async () => {
                 currentPositionsMap[key].exchangePnlSnapshot = nextPositionsMap[key].exchangePnlSnapshot;
             });
             setActivePositionsMap(currentPositionsMap);
-            for (const [positionKey, currentPosition] of Object.entries(currentPositionsMap)) {
-                await ensureReduceOnlyTakeProfitOrder(positionKey, currentPosition);
-                await ensureReduceOnlyStopLossOrder(positionKey, currentPosition);
-            }
-            maybeMarkPositionSyncHealthy();
+            await ensureManagedOrdersForPositions(currentPositionsMap);
+            markPositionSyncHealthy();
             return;
         }
 
@@ -1058,11 +1059,8 @@ const syncPositionWithExchange = async () => {
         if (getPositionMapCount(nextPositionsMap) === 0) console.log("[SYNC][INFO] Cleared local active positions from exchange state");
         else console.log(`[SYNC][INFO] Synced active positions: ${getPositionMapKeys(nextPositionsMap).join(", ")}`);
 
-        for (const [positionKey, syncedPosition] of Object.entries(nextPositionsMap)) {
-            await ensureReduceOnlyTakeProfitOrder(positionKey, syncedPosition);
-            await ensureReduceOnlyStopLossOrder(positionKey, syncedPosition);
-        }
-        maybeMarkPositionSyncHealthy();
+        await ensureManagedOrdersForPositions(nextPositionsMap);
+        markPositionSyncHealthy();
     } catch (error) {
         markExchangeUnhealthy(error, "position sync");
         console.error("[SYNC][ERROR] Position sync failed:", error.message);

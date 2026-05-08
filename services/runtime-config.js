@@ -1,9 +1,12 @@
 const createRuntimeConfigHelpers = ({ defaultConfig }) => {
-    const getDefaultConfig = () => ({
-        ...defaultConfig,
-        lastDailyReset: Date.now(),
-        lastUpdated: Date.now()
-    });
+    const getDefaultConfig = () => {
+        const now = Date.now();
+        return {
+            ...defaultConfig,
+            lastDailyReset: now,
+            lastUpdated: now
+        };
+    };
 
     return { getDefaultConfig };
 };

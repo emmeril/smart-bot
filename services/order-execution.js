@@ -751,15 +751,21 @@ const createOrderExecutionHelpers = ({
             && Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
     };
 
+    const isClosePositionManagedOrder = (order, orderAmount) => (
+        Boolean(order?.closePosition || order?.info?.closePosition || !Number.isFinite(orderAmount) || orderAmount <= 0)
+    );
+
     const hasMatchingSlOrder = (order, position) => {
         if (!order) return false;
         const orderStopPrice = getOrderTriggerPrice(order);
         const orderAmount = getOrderQuantity(order);
-        const closePositionOrder = Boolean(order?.closePosition || order?.info?.closePosition || !Number.isFinite(orderAmount) || orderAmount <= 0);
+        const closePositionOrder = isClosePositionManagedOrder(order, orderAmount);
         if (!isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice)) return false;
         if (closePositionOrder) return true;
         return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
     };
+
+    const isSpotMarginMode = () => String(getDb()?.marginMode || "spot").toLowerCase() === "spot";
 
     const syncOcoExitOrder = async (positionKey, sourcePosition) => {
         return await runManagedOrderSync(`OCO:${positionKey}`, async () => {
@@ -827,8 +833,7 @@ const createOrderExecutionHelpers = ({
     };
 
     const ensureReduceOnlyTakeProfitOrder = async (positionKey, sourcePosition) => {
-        const db = getDb();
-        if (String(db?.marginMode || "spot").toLowerCase() === "spot") {
+        if (isSpotMarginMode()) {
             return syncOcoExitOrder(positionKey, sourcePosition);
         }
         return await runManagedOrderSync(`TP:${positionKey}`, async () => {
@@ -866,8 +871,7 @@ const createOrderExecutionHelpers = ({
     };
 
     const ensureReduceOnlyStopLossOrder = async (positionKey, sourcePosition) => {
-        const db = getDb();
-        if (String(db?.marginMode || "spot").toLowerCase() === "spot") {
+        if (isSpotMarginMode()) {
             return syncOcoExitOrder(positionKey, sourcePosition);
         }
         return await runManagedOrderSync(`SL:${positionKey}`, async () => {
@@ -876,14 +880,14 @@ const createOrderExecutionHelpers = ({
             const matchingSlOrders = (await fetchOpenSlOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
             const adoptableOrder = matchingSlOrders.find((order) => {
                 const orderAmount = getOrderQuantity(order);
-                const closePositionOrder = Boolean(order?.closePosition || order?.info?.closePosition || !Number.isFinite(orderAmount) || orderAmount <= 0);
+                const closePositionOrder = isClosePositionManagedOrder(order, orderAmount);
                 if (closePositionOrder) return true;
                 return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
             }) || null;
             const matchingOrder = matchingSlOrders.find((order) => {
                 const orderStopPrice = getOrderTriggerPrice(order);
                 const orderAmount = getOrderQuantity(order);
-                const closePositionOrder = Boolean(order?.closePosition || order?.info?.closePosition || !Number.isFinite(orderAmount) || orderAmount <= 0);
+                const closePositionOrder = isClosePositionManagedOrder(order, orderAmount);
                 if (!isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice)) return false;
                 if (closePositionOrder) return true;
                 return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
@@ -920,7 +924,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
 

@@ -240,32 +240,28 @@ const createGridRuntimeHelpers = ({
         const lowerBound = toFiniteNumber(gridState?.lowerBound, safeLevels[0]);
         const upperBound = toFiniteNumber(gridState?.upperBound, safeLevels[safeLevels.length - 1]);
         const autoStopMode = !(toFiniteNumber(params?.gridStopLossLevels, 0) > 0);
+        const mode = autoStopMode ? "AUTO_RANGE_SL" : "FIXED_STEP_SL";
+        const buildExitResult = (targetPrice, rawStop) => ({
+            targetPrice: formatPriceToMarketPrecision(db.pair, targetPrice),
+            stopLossPrice: formatPriceToMarketPrecision(db.pair, rawStop),
+            takeProfitLevels,
+            stopLossSteps,
+            mode
+        });
 
         if (normalizedSide === "buy") {
             const targetIndex = clamp(safeEntryIndex + takeProfitLevels, 1, safeLevels.length - 1);
             const rawStop = autoStopMode
                 ? lowerBound - (safeStep * stopLossSteps)
                 : toFiniteNumber(safeLevels[safeEntryIndex], lowerBound) - (safeStep * stopLossSteps);
-            return {
-                targetPrice: formatPriceToMarketPrecision(db.pair, safeLevels[targetIndex]),
-                stopLossPrice: formatPriceToMarketPrecision(db.pair, rawStop),
-                takeProfitLevels,
-                stopLossSteps,
-                mode: autoStopMode ? "AUTO_RANGE_SL" : "FIXED_STEP_SL"
-            };
+            return buildExitResult(safeLevels[targetIndex], rawStop);
         }
 
         const targetIndex = clamp(safeEntryIndex - takeProfitLevels, 0, Math.max(0, safeLevels.length - 2));
         const rawStop = autoStopMode
             ? upperBound + (safeStep * stopLossSteps)
             : toFiniteNumber(safeLevels[safeEntryIndex], upperBound) + (safeStep * stopLossSteps);
-        return {
-            targetPrice: formatPriceToMarketPrecision(db.pair, safeLevels[targetIndex]),
-            stopLossPrice: formatPriceToMarketPrecision(db.pair, rawStop),
-            takeProfitLevels,
-            stopLossSteps,
-            mode: autoStopMode ? "AUTO_RANGE_SL" : "FIXED_STEP_SL"
-        };
+        return buildExitResult(safeLevels[targetIndex], rawStop);
     };
 
     const buildGridLevels = (lowerBound, upperBound, gridLevels) => {
@@ -594,22 +590,17 @@ const createGridRuntimeHelpers = ({
         const tickerCache = getTickerCache();
         const presetName = getActiveAutoPairPresetName();
         const gridState = db?.activeGridState;
-        const effectiveGridLevels = resolveEffectiveGridLevels({
-            configuredGridLevels: db?.gridLevels,
-            pair: db?.pair,
-            gridTimeframe: db?.gridTimeframe,
-            gridRangePercent: resolveEffectiveGridRangePercent({
-                configuredGridRangePercent: db?.gridRangePercent,
-                pair: db?.pair,
-                gridTimeframe: db?.gridTimeframe,
-                gridLookbackCandles: db?.gridLookbackCandles
-            }),
-            gridLookbackCandles: db?.gridLookbackCandles
-        });
         const effectiveGridRangePercent = resolveEffectiveGridRangePercent({
             configuredGridRangePercent: db?.gridRangePercent,
             pair: db?.pair,
             gridTimeframe: db?.gridTimeframe,
+            gridLookbackCandles: db?.gridLookbackCandles
+        });
+        const effectiveGridLevels = resolveEffectiveGridLevels({
+            configuredGridLevels: db?.gridLevels,
+            pair: db?.pair,
+            gridTimeframe: db?.gridTimeframe,
+            gridRangePercent: effectiveGridRangePercent,
             gridLookbackCandles: db?.gridLookbackCandles
         });
         const effectiveGridEntryBufferPercent = resolveEffectiveGridEntryBufferPercent({
@@ -686,34 +677,32 @@ const createGridRuntimeHelpers = ({
         };
     };
 
-    const buildGridStateFingerprintForConfig = (config) => [
-        normalizeSymbol(config?.pair),
-        config?.gridTimeframe || "",
-        Math.max(0, Math.trunc(toFiniteNumber(config?.gridLevels, defaultConfig.gridLevels))),
-        resolveEffectiveGridLevels({
-            configuredGridLevels: config?.gridLevels,
-            pair: config?.pair,
-            gridTimeframe: config?.gridTimeframe,
-            gridRangePercent: resolveEffectiveGridRangePercent({
-                configuredGridRangePercent: config?.gridRangePercent,
-                pair: config?.pair,
-                gridTimeframe: config?.gridTimeframe,
-                gridLookbackCandles: config?.gridLookbackCandles
-            }),
-            gridLookbackCandles: config?.gridLookbackCandles
-        }),
-        Math.max(0, toFiniteNumber(config?.gridRangePercent, defaultConfig.gridRangePercent)),
-        Math.max(20, Math.trunc(toFiniteNumber(config?.gridLookbackCandles, defaultConfig.gridLookbackCandles))),
-        resolveEffectiveGridRangePercent({
+    const buildGridStateFingerprintForConfig = (config) => {
+        const effectiveGridRangePercent = resolveEffectiveGridRangePercent({
             configuredGridRangePercent: config?.gridRangePercent,
             pair: config?.pair,
             gridTimeframe: config?.gridTimeframe,
             gridLookbackCandles: config?.gridLookbackCandles
-        }),
-        Math.max(0, toFiniteNumber(config?.gridEntryBufferPercent, defaultConfig.gridEntryBufferPercent)),
-        Math.max(0, Math.trunc(toFiniteNumber(config?.gridTakeProfitLevels, defaultConfig.gridTakeProfitLevels))),
-        Math.max(0, toFiniteNumber(config?.gridStopLossLevels, defaultConfig.gridStopLossLevels))
-    ].join("|");
+        });
+        return [
+            normalizeSymbol(config?.pair),
+            config?.gridTimeframe || "",
+            Math.max(0, Math.trunc(toFiniteNumber(config?.gridLevels, defaultConfig.gridLevels))),
+            resolveEffectiveGridLevels({
+                configuredGridLevels: config?.gridLevels,
+                pair: config?.pair,
+                gridTimeframe: config?.gridTimeframe,
+                gridRangePercent: effectiveGridRangePercent,
+                gridLookbackCandles: config?.gridLookbackCandles
+            }),
+            Math.max(0, toFiniteNumber(config?.gridRangePercent, defaultConfig.gridRangePercent)),
+            Math.max(20, Math.trunc(toFiniteNumber(config?.gridLookbackCandles, defaultConfig.gridLookbackCandles))),
+            effectiveGridRangePercent,
+            Math.max(0, toFiniteNumber(config?.gridEntryBufferPercent, defaultConfig.gridEntryBufferPercent)),
+            Math.max(0, Math.trunc(toFiniteNumber(config?.gridTakeProfitLevels, defaultConfig.gridTakeProfitLevels))),
+            Math.max(0, toFiniteNumber(config?.gridStopLossLevels, defaultConfig.gridStopLossLevels))
+        ].join("|");
+    };
 
     const applyAutoPairGridPreset = (config, autoPairGridPresets) => {
         if (!config || typeof config !== "object") return { config, changed: false, presetName: null };

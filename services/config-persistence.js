@@ -14,19 +14,19 @@ const createConfigPersistenceHelpers = ({ getConfigRow, withSqliteBusyRetry, Con
     };
 
     const persistConfig = async (config) => {
-        const toSave = serializeConfigForSave(config);
-        const createPayload = { ...toSave };
+        const serializedConfig = serializeConfigForSave(config);
+        const createPayload = { ...serializedConfig };
         delete createPayload.id;
 
         if (config.id) {
-            const [affectedRows] = await withSqliteBusyRetry(() => Config.update(toSave, { where: { id: config.id } }));
+            const [affectedRows] = await withSqliteBusyRetry(() => Config.update(serializedConfig, { where: { id: config.id } }));
             if (affectedRows > 0) return config.id;
         }
 
         const firstRow = await getConfigRow();
         if (firstRow) {
             config.id = firstRow.id;
-            const [fallbackAffectedRows] = await withSqliteBusyRetry(() => Config.update(toSave, { where: { id: firstRow.id } }));
+            const [fallbackAffectedRows] = await withSqliteBusyRetry(() => Config.update(serializedConfig, { where: { id: firstRow.id } }));
             if (fallbackAffectedRows > 0) return firstRow.id;
         }
 

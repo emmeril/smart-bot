@@ -22,8 +22,7 @@ const createRuntimeSchedulerHelpers = ({ initializeExchange, detectPositionMode,
         await detectPositionMode();
         await setMarginMode();
         await syncPositionWithExchange();
-        startPnLMonitoring();
-        startPositionSync();
+        refreshRuntimeSchedulers();
         startMetricsReporting();
         startConfigAutoReload();
         process.once("SIGINT", () => { shutdown("SIGINT"); });

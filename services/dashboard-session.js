@@ -44,9 +44,10 @@ const createDashboardSessionHelpers = ({ username, password, sessionSecret, sess
             const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
             if (!parsed || parsed.u !== username) return null;
             const issuedAt = Number(parsed.iat);
+            const now = Date.now();
             if (!Number.isFinite(issuedAt)) return null;
-            if (issuedAt > Date.now()) return null;
-            if (Date.now() - issuedAt > sessionTtlMs) return null;
+            if (issuedAt > now) return null;
+            if (now - issuedAt > sessionTtlMs) return null;
             return { username: parsed.u, issuedAt };
         } catch {
             return null;

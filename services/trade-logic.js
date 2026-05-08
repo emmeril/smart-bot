@@ -232,6 +232,20 @@ const createTradeLogicHelpers = ({
             : entryPrice - (stopLossUSDT / adjustedQty)
     );
 
+    const applyResolvedStopLossPlan = (side, entryPrice, adjustedQty, signalATR) => {
+        const db = getDb();
+        const resolvedStopLoss = resolveStopLossPlan(signalATR, entryPrice, adjustedQty);
+        let stopLossUSDT = resolvedStopLoss.stopLossUSDT;
+        const stopLossPercent = resolvedStopLoss.stopLossPercent;
+        const stopLossMode = resolvedStopLoss.stopLossMode;
+        let stopLossDistance = resolvedStopLoss.stopLossDistance;
+        const rawStopLossPrice = buildDirectionalStopLossPrice(side, entryPrice, stopLossUSDT, adjustedQty);
+        const stopLossPrice = resolveRoundedPlanPrice(db.pair, rawStopLossPrice);
+        stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
+        stopLossDistance = Math.abs(stopLossPrice - entryPrice);
+        return { stopLossUSDT, stopLossPercent, stopLossMode, stopLossDistance, stopLossPrice };
+    };
+
     const buildOrderPlan = (side, entryPrice, adjustedQty, signalATR, riskOverrides, explicitTargets = {}) => {
         const db = getDb();
         const numericQty = Math.abs(toFiniteNumber(adjustedQty, 0));
@@ -265,25 +279,19 @@ const createTradeLogicHelpers = ({
         } else if (optimizationPayload && optimizationPayload.enabled !== false) {
             const optimizedPlan = resolveOptimizedOrderPlan(side, entryPrice, numericQty, signalATR, optimizationPayload);
             if (optimizedPlan) return optimizedPlan;
-            const resolvedStopLoss = resolveStopLossPlan(signalATR, entryPrice, adjustedQty);
+            const resolvedStopLoss = applyResolvedStopLossPlan(side, entryPrice, adjustedQty, signalATR);
+            stopLossUSDT = resolvedStopLoss.stopLossUSDT;
             stopLossPercent = resolvedStopLoss.stopLossPercent;
             stopLossMode = resolvedStopLoss.stopLossMode;
-            stopLossUSDT = resolvedStopLoss.stopLossUSDT;
             stopLossDistance = resolvedStopLoss.stopLossDistance;
-            const rawStopLossPrice = buildDirectionalStopLossPrice(side, entryPrice, stopLossUSDT, adjustedQty);
-            stopLossPrice = resolveRoundedPlanPrice(db.pair, rawStopLossPrice);
-            stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
-            stopLossDistance = Math.abs(stopLossPrice - entryPrice);
+            stopLossPrice = resolvedStopLoss.stopLossPrice;
         } else {
-            const resolvedStopLoss = resolveStopLossPlan(signalATR, entryPrice, adjustedQty);
+            const resolvedStopLoss = applyResolvedStopLossPlan(side, entryPrice, adjustedQty, signalATR);
+            stopLossUSDT = resolvedStopLoss.stopLossUSDT;
             stopLossPercent = resolvedStopLoss.stopLossPercent;
             stopLossMode = resolvedStopLoss.stopLossMode;
-            stopLossUSDT = resolvedStopLoss.stopLossUSDT;
             stopLossDistance = resolvedStopLoss.stopLossDistance;
-            const rawStopLossPrice = buildDirectionalStopLossPrice(side, entryPrice, stopLossUSDT, adjustedQty);
-            stopLossPrice = resolveRoundedPlanPrice(db.pair, rawStopLossPrice);
-            stopLossUSDT = -Math.abs(stopLossPrice - entryPrice) * adjustedQty;
-            stopLossDistance = Math.abs(stopLossPrice - entryPrice);
+            stopLossPrice = resolvedStopLoss.stopLossPrice;
         }
 
         if (Number.isFinite(explicitTargetPrice)) {
@@ -774,11 +782,12 @@ const createTradeLogicHelpers = ({
 
     const maybeLogPositionPnL = (pnlState, exitState) => {
         const pnlLogInterval = getPnlLogInterval(pnlState, exitState);
+        const now = Date.now();
 
-        if (Date.now() - getLastPnlLog() > pnlLogInterval) {
+        if (now - getLastPnlLog() > pnlLogInterval) {
             const { displayProfitUSDT, displayProfitPercent } = getDisplayPnlValues(pnlState);
             console.log(`[PNL] ${displayProfitUSDT.toFixed(4)} USDT (${displayProfitPercent.toFixed(2)}%)`);
-            setLastPnlLog(Date.now());
+            setLastPnlLog(now);
         }
     };
 
