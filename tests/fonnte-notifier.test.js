@@ -72,6 +72,50 @@ test("buildCloseNotificationMessage formats manual and sync-close alerts", () =>
     assert.ok(syncMessage.includes("Harga eksekusi estimasi"));
 });
 
+test("buildTradeUpdateMessage formats OPEN and PARTIAL_CLOSE updates", () => {
+    const helpers = createFonnteNotifierHelpers({
+        token: "token-123",
+        target: "6281234567890"
+    });
+
+    const openMessage = helpers.buildTradeUpdateMessage({
+        event: "OPEN",
+        position: {
+            side: "buy",
+            strategy: "SPOT_GRID",
+            symbol: "DOGE/USDT:USDT"
+        },
+        entryPrice: 100,
+        quantity: 2,
+        reason: "Signal BUY",
+        occurredAt: 1700000000000
+    });
+
+    const partialMessage = helpers.buildTradeUpdateMessage({
+        event: "PARTIAL_CLOSE",
+        position: {
+            side: "sell",
+            strategy: "SPOT_GRID",
+            symbol: "DOGE/USDT:USDT"
+        },
+        entryPrice: 105,
+        exitPrice: 100,
+        quantity: 0.5,
+        realizedPnlUSDT: 2.5,
+        realizedPnlPercent: 4.2,
+        reason: "TAKE_PROFIT_PARTIAL",
+        occurredAt: 1700000000000
+    });
+
+    assert.ok(openMessage.includes("UPDATE TRADE: POSISI DIBUKA"));
+    assert.ok(openMessage.includes("Qty: 2.000000"));
+    assert.ok(openMessage.includes("Alasan: Signal BUY"));
+
+    assert.ok(partialMessage.includes("UPDATE TRADE: PARTIAL CLOSE"));
+    assert.ok(partialMessage.includes("Harga eksekusi: 100.0000"));
+    assert.ok(partialMessage.includes("Realized P/L: Profit +2.5000 USDT (+4.20%)"));
+});
+
 test("sendMessage posts a Fonnte payload with the expected headers and fields", async () => {
     const requests = [];
     const helpers = createFonnteNotifierHelpers({

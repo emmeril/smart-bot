@@ -32,7 +32,8 @@ const createOrderExecutionHelpers = ({
     saveDB,
     cancelTpOrders,
     cancelSlOrders,
-    buildReplacementClientOrderId
+    buildReplacementClientOrderId,
+    notifyTradeUpdate
 }) => {
     const managedOrderSyncChains = new Map();
 
@@ -67,6 +68,28 @@ const createOrderExecutionHelpers = ({
     };
 
     const getSpotPair = (pair) => String(pair || "").split(":")[0];
+
+    const notifyProtectionUpdate = async ({
+        position,
+        positionKey,
+        reason,
+        tpPrice,
+        slPrice
+    }) => {
+        if (typeof notifyTradeUpdate !== "function") return;
+        const db = getDb();
+        await notifyTradeUpdate({
+            event: "TP_SL_UPDATED",
+            position: {
+                ...position,
+                symbol: db?.pair || position?.symbol
+            },
+            entryPrice: position?.entryPrice,
+            quantity: position?.quantity,
+            reason: `${reason} | key=${positionKey} | TP=${Number.isFinite(tpPrice) ? tpPrice : "N/A"} | SL=${Number.isFinite(slPrice) ? slPrice : "N/A"}`,
+            occurredAt: Date.now()
+        });
+    };
 
     const isUnknownOrderLookupError = (error) => {
         const message = String(error?.message || error || "").toLowerCase();
@@ -843,6 +866,13 @@ const createOrderExecutionHelpers = ({
                 position[priceKey] = nextPrice;
                 upsertActivePosition(position);
                 await saveDB();
+                await notifyProtectionUpdate({
+                    position,
+                    positionKey,
+                    reason: `${label}_SYNCED`,
+                    tpPrice: toFiniteNumber(position.targetPrice, NaN),
+                    slPrice: toFiniteNumber(position.stopLossPrice, NaN)
+                });
             }
             return;
         }
@@ -857,6 +887,13 @@ const createOrderExecutionHelpers = ({
             position[priceKey] = nextPrice;
             upsertActivePosition(position);
             await saveDB();
+            await notifyProtectionUpdate({
+                position,
+                positionKey,
+                reason: `${label}_ADOPTED`,
+                tpPrice: toFiniteNumber(position.targetPrice, NaN),
+                slPrice: toFiniteNumber(position.stopLossPrice, NaN)
+            });
             return;
         }
 
@@ -874,6 +911,13 @@ const createOrderExecutionHelpers = ({
         upsertActivePosition(position);
         await saveDB();
         console.log(`${attachLogPrefix} Attached exchange ${label} to ${positionKey}`);
+        await notifyProtectionUpdate({
+            position,
+            positionKey,
+            reason: `${label}_REPLACED`,
+            tpPrice: toFiniteNumber(position.targetPrice, NaN),
+            slPrice: toFiniteNumber(position.stopLossPrice, NaN)
+        });
     };
 
     const hasMatchingTpOrder = (order, position) => {
@@ -941,6 +985,13 @@ const createOrderExecutionHelpers = ({
                     position.stopLossPrice = nextStopLossPrice;
                     upsertActivePosition(position);
                     await saveDB();
+                    await notifyProtectionUpdate({
+                        position,
+                        positionKey,
+                        reason: "OCO_SYNCED",
+                        tpPrice: toFiniteNumber(position.targetPrice, NaN),
+                        slPrice: toFiniteNumber(position.stopLossPrice, NaN)
+                    });
                 }
                 return;
             }
@@ -962,6 +1013,13 @@ const createOrderExecutionHelpers = ({
             upsertActivePosition(position);
             await saveDB();
             console.log(`[OCO] Attached exchange OCO exit to ${positionKey}`);
+            await notifyProtectionUpdate({
+                position,
+                positionKey,
+                reason: "OCO_REPLACED",
+                tpPrice: toFiniteNumber(position.targetPrice, NaN),
+                slPrice: toFiniteNumber(position.stopLossPrice, NaN)
+            });
         });
     };
 
@@ -1057,7 +1115,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
 

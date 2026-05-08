@@ -63,6 +63,14 @@ const createFonnteNotifierHelpers = ({
 
     const getSideLabel = (position) => (String(position?.side || "").toLowerCase() === "buy" ? "LONG" : "SHORT");
 
+    const resolveTradeEvent = (event) => {
+        const normalized = String(event || "").toUpperCase().trim();
+        if (normalized === "OPEN") return { code: "OPEN", label: "Posisi Dibuka" };
+        if (normalized === "PARTIAL_CLOSE") return { code: "PARTIAL_CLOSE", label: "Partial Close" };
+        if (normalized === "TP_SL_UPDATED") return { code: "TP_SL_UPDATED", label: "TP/SL Diperbarui" };
+        return { code: normalized || "UPDATE", label: normalized || "Update" };
+    };
+
     const buildCloseNotificationMessage = ({
         position,
         reason,
@@ -104,6 +112,54 @@ const createFonnteNotifierHelpers = ({
             `Waktu: ${formatTime(closedAt)}`,
             `Alasan: ${detailLabel}`
         ].join("\n");
+    };
+
+    const buildTradeUpdateMessage = ({
+        event,
+        position,
+        entryPrice,
+        exitPrice,
+        quantity,
+        realizedPnlUSDT,
+        realizedPnlPercent,
+        reason,
+        occurredAt
+    }) => {
+        const tradeEvent = resolveTradeEvent(event);
+        const side = getSideLabel(position || { side: String(position?.side || "").toLowerCase() });
+        const symbol = String(position?.symbol || position?.pair || process.env.TRADING_PAIR || "").trim();
+        const strategy = String(position?.strategy || "N/A").trim();
+        const eventTime = Number.isFinite(Number(occurredAt)) ? Number(occurredAt) : Date.now();
+        const hasRealizedPnl = Number.isFinite(Number(realizedPnlUSDT));
+        const pnlValue = Number(realizedPnlUSDT);
+        const pnlLabel = hasRealizedPnl && pnlValue >= 0 ? "Profit" : "Loss";
+
+        const lines = [
+            `*UPDATE TRADE: ${tradeEvent.label.toUpperCase()}*`,
+            `Pasangan: ${symbol || "N/A"}`,
+            `Sisi: ${side}`,
+            `Strategi: ${strategy}`,
+            `Harga entry: ${formatNumber(entryPrice)}`
+        ];
+
+        if (Number.isFinite(Number(exitPrice))) {
+            lines.push(`Harga eksekusi: ${formatNumber(exitPrice)}`);
+        }
+
+        if (Number.isFinite(Number(quantity))) {
+            lines.push(`Qty: ${formatNumber(quantity, 6)}`);
+        }
+
+        if (hasRealizedPnl) {
+            lines.push(`Realized P/L: ${pnlLabel} ${formatSignedNumber(realizedPnlUSDT)} USDT (${formatSignedNumber(realizedPnlPercent, 2)}%)`);
+        }
+
+        if (String(reason || "").trim()) {
+            lines.push(`Alasan: ${String(reason).trim()}`);
+        }
+
+        lines.push(`Waktu: ${formatTime(eventTime)}`);
+        return lines.join("\n");
     };
 
     const postMessage = async (payload) => {
@@ -189,13 +245,47 @@ const createFonnteNotifierHelpers = ({
         }
     };
 
+    const notifyTradeUpdate = async ({
+        event,
+        position,
+        entryPrice,
+        exitPrice,
+        quantity,
+        realizedPnlUSDT,
+        realizedPnlPercent,
+        reason,
+        occurredAt
+    }) => {
+        const message = buildTradeUpdateMessage({
+            event,
+            position,
+            entryPrice,
+            exitPrice,
+            quantity,
+            realizedPnlUSDT,
+            realizedPnlPercent,
+            reason,
+            occurredAt
+        });
+
+        try {
+            const result = await sendQueuedMessage({ message });
+            return { ok: true, result };
+        } catch (error) {
+            console.warn(`[FONNTE][WARN] Failed to send trade update notification: ${error.message}`);
+            return { ok: false, skipped: false, error: error.message };
+        }
+    };
+
     return {
         isEnabled,
         normalizeTargetList,
         formatTime,
         buildCloseNotificationMessage,
+        buildTradeUpdateMessage,
         sendMessage,
-        notifyPositionClosed
+        notifyPositionClosed,
+        notifyTradeUpdate
     };
 };
 

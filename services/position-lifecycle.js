@@ -38,7 +38,8 @@ const createPositionLifecycleHelpers = ({
     ensureReduceOnlyStopLossOrder,
     getPositionSyncQtyTolerance,
     getOrderFillSnapshot,
-    notifyPositionClosed
+    notifyPositionClosed,
+    notifyTradeUpdate
 }) => {
     const getLifecyclePositionKey = (positionKey = null, position = null) => (
         toPositionMapKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position))
@@ -245,6 +246,22 @@ const createPositionLifecycleHelpers = ({
             partialPnl.realizedProfitUSDT,
             position.strategy || null
         );
+        if (typeof notifyTradeUpdate === "function") {
+            await notifyTradeUpdate({
+                event: "PARTIAL_CLOSE",
+                position: {
+                    ...position,
+                    symbol: db?.pair || position?.symbol
+                },
+                entryPrice: position.entryPrice,
+                exitPrice,
+                quantity: closedQuantity,
+                realizedPnlUSDT: partialPnl.realizedProfitUSDT,
+                realizedPnlPercent: partialPnl.profitPercent,
+                reason,
+                occurredAt: Date.now()
+            });
+        }
         console.log(`[POSITION][INFO] Recorded partial close of ${closedQuantity} contracts: ${partialPnl.realizedProfitUSDT.toFixed(4)} USDT`);
         if (typeof applyDailyPnlDelta !== "function") await saveDB();
     };

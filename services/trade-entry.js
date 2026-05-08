@@ -28,7 +28,8 @@ const createTradeEntryHelpers = ({
     ensureReduceOnlyTakeProfitOrder,
     ensureReduceOnlyStopLossOrder,
     logTrade,
-    syncPositionWithExchange
+    syncPositionWithExchange,
+    notifyTradeUpdate
 }) => {
     const placeOrder = async (side, signalData = {}) => {
         const db = getDb();
@@ -185,6 +186,19 @@ const createTradeEntryHelpers = ({
             await ensureReduceOnlyTakeProfitOrder(targetPositionKey, getActivePositionByKey(targetPositionKey));
             await ensureReduceOnlyStopLossOrder(targetPositionKey, getActivePositionByKey(targetPositionKey));
             logTrade(side.toUpperCase(), actualEntryPrice, null, "OPEN", 0, strategyName);
+            if (typeof notifyTradeUpdate === "function") {
+                await notifyTradeUpdate({
+                    event: "OPEN",
+                    position: {
+                        ...getActivePositionByKey(targetPositionKey),
+                        symbol: db.pair
+                    },
+                    entryPrice: actualEntryPrice,
+                    quantity: actualQuantity,
+                    reason: `Signal ${side.toUpperCase()}`,
+                    occurredAt: Date.now()
+                });
+            }
             metrics.trades.opened++;
             console.log(`[ORDER][INFO] Placed ${side.toUpperCase()} order at ${actualEntryPrice}`);
         } catch (error) {

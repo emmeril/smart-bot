@@ -327,7 +327,8 @@ const isSlReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWit
 const isTriggerManagedOrder = (order, label = "") => label === "SL" || isSlReduceOnlyOrder(order) || String(order?.type || "").toUpperCase().includes("STOP");
 
 const {
-    notifyPositionClosed
+    notifyPositionClosed,
+    notifyTradeUpdate
 } = createFonnteNotifierHelpers({
     token: process.env.FONNTE_TOKEN,
     target: process.env.FONNTE_TARGET || process.env.ADMIN_PHONE,
@@ -504,7 +505,8 @@ const {
     saveDB: (...args) => saveDB(...args),
     cancelTpOrders,
     cancelSlOrders,
-    buildReplacementClientOrderId
+    buildReplacementClientOrderId,
+    notifyTradeUpdate: (...args) => notifyTradeUpdate(...args)
 });
 
 const isLegacySinglePosition = (value) => value && typeof value === "object" && !Array.isArray(value) && ("entryPrice" in value || "quantity" in value || "side" in value);
@@ -657,7 +659,8 @@ const {
     ensureReduceOnlyStopLossOrder,
     getPositionSyncQtyTolerance: () => POSITION_SYNC_QTY_TOLERANCE,
     getOrderFillSnapshot,
-    notifyPositionClosed: (...args) => notifyPositionClosed(...args)
+    notifyPositionClosed: (...args) => notifyPositionClosed(...args),
+    notifyTradeUpdate: (...args) => notifyTradeUpdate(...args)
 });
 
 const mergeRuntimeConfig = (nextConfig) => {
@@ -1188,7 +1191,8 @@ const { placeOrder } = createTradeEntryHelpers({
     ensureReduceOnlyTakeProfitOrder,
     ensureReduceOnlyStopLossOrder,
     logTrade: (...args) => logTrade(...args),
-    syncPositionWithExchange: (...args) => syncPositionWithExchange(...args)
+    syncPositionWithExchange: (...args) => syncPositionWithExchange(...args),
+    notifyTradeUpdate: (...args) => notifyTradeUpdate(...args)
 });
 
 const {
