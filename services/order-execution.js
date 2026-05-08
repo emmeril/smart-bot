@@ -311,6 +311,18 @@ const createOrderExecutionHelpers = ({
             return false;
         }
 
+        if (filledPosition.side === "buy" && typeof fetchSpotBalances === "function") {
+            const balances = await fetchSpotBalances();
+            const [baseAssetRaw = ""] = String(db.pair || "").split("/");
+            const baseAsset = baseAssetRaw.trim();
+            const baseFree = Number(balances?.[baseAsset]?.free ?? balances?.[baseAsset] ?? NaN);
+            const requiredQty = Math.max(0, toFiniteNumber(filledPosition.quantity, 0));
+            const adoptionTolerance = getPositionSyncQtyTolerance();
+            if (Number.isFinite(baseFree) && baseFree + adoptionTolerance < requiredQty) {
+                return false;
+            }
+        }
+
         const position = mergeSpotGridPosition(currentPosition, filledPosition);
         position.adoptedGridClientOrderIds = recordAdoptedGridClientOrderId(position, gridClientOrderId);
         if (currentPosition) {
@@ -1137,7 +1149,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
 
