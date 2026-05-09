@@ -567,6 +567,14 @@
       return num.toFixed(2).replace(/\.00$/, "");
     }
 
+    function formatPrice(value) {
+      if (value === null || value === undefined || value === "") return "-";
+      const num = Number(value);
+      if (!Number.isFinite(num)) return String(value);
+      if (Number.isInteger(num)) return String(num);
+      return num.toFixed(8).replace(/\.?0+$/, "");
+    }
+
     function formatDateTime(value) {
       const ts = Number(value);
       if (!Number.isFinite(ts) || ts <= 0) return "-";
@@ -868,10 +876,10 @@
           item.className = "live-item " + (pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral"));
           item.dataset.positionKey = positionKey;
           const pnlSign = pnlValue >= 0 ? "+" : "";
-          const entryPrice = formatNumber(position.entryPrice);
-          const markPrice = formatNumber(position.currentPrice);
-          const stopLossPrice = formatNumber(position.stopLossPrice);
-          const targetPrice = formatNumber(position.targetPrice);
+          const entryPrice = formatPrice(position.entryPrice);
+          const markPrice = formatPrice(position.currentPrice);
+          const stopLossPrice = formatPrice(position.stopLossPrice);
+          const targetPrice = formatPrice(position.targetPrice);
           item.innerHTML = '<div class="live-list-head"><strong>' + positionKey + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
             '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Hapus</button></div>' +
             '<span>Qty ' + formatNumber(position.quantity) + '</span>' +
@@ -899,13 +907,29 @@
           const wrapper = document.createElement("div");
           wrapper.className = "live-item neutral";
           const groupType = String(group.label || "").toLowerCase();
+          const groupPrices = group.list
+            .map((order) => Number(order?.price))
+            .filter((price) => Number.isFinite(price) && price > 0);
+          const groupTriggers = group.list
+            .map((order) => Number(order?.triggerPrice))
+            .filter((price) => Number.isFinite(price) && price > 0);
+          const minPrice = groupPrices.length > 0 ? Math.min(...groupPrices) : null;
+          const maxPrice = groupPrices.length > 0 ? Math.max(...groupPrices) : null;
+          const minTrigger = groupTriggers.length > 0 ? Math.min(...groupTriggers) : null;
+          const maxTrigger = groupTriggers.length > 0 ? Math.max(...groupTriggers) : null;
+          const priceSummary = groupPrices.length > 0
+            ? (formatPrice(minPrice) + " - " + formatPrice(maxPrice))
+            : "-";
+          const triggerSummary = groupTriggers.length > 0
+            ? (formatPrice(minTrigger) + " - " + formatPrice(maxTrigger))
+            : "-";
           const rows = group.list.slice(0, 4).map((order) => {
             const side = String(order.side || order.positionSide || '-').toUpperCase();
             const badgeClass = sideBadgeClass(order.side || order.positionSide);
-            const price = order.price === null || order.price === undefined ? '-' : formatNumber(order.price);
+            const price = order.price === null || order.price === undefined ? '-' : formatPrice(order.price);
             const amount = order.amount === null || order.amount === undefined ? '-' : formatNumber(order.amount);
             const refId = order.clientOrderId || order.id || 'order';
-            const trigger = order.triggerPrice === null || order.triggerPrice === undefined ? '-' : formatNumber(order.triggerPrice);
+            const trigger = order.triggerPrice === null || order.triggerPrice === undefined ? '-' : formatPrice(order.triggerPrice);
             const priceDetail = groupType === "sl"
               ? ('Trigger ' + trigger + ' | Limit ' + price)
               : ('Limit ' + price + ' | Trigger ' + trigger);
@@ -916,7 +940,9 @@
               '<div>Type: ' + String(order.type || '-') + '</div><div>Pos: ' + String(order.positionSide || '-') + '</div><div>Price: ' + priceDetail + '</div><div>RO: ' + String(Boolean(order.reduceOnly)) + '</div></div>' +
               '<div style="margin-top:6px;"><button class="btn btn-danger btn-xs js-cancel-order" type="button" data-order-type="' + groupType + '" data-client-order-id="' + String(clientOrderId) + '" data-order-id="' + String(orderId) + '">Cancel</button></div>';
           }).join('');
-          wrapper.innerHTML = '<div class="live-list-head"><strong>' + group.label + ' (' + group.list.length + ')</strong><button class="btn btn-danger btn-xs js-cancel-group" type="button" data-order-type="' + groupType + '">Cancel semua</button></div><div class="live-table"><div class="live-table-head"><div>Order</div><div>Side</div><div>Price</div><div>Qty</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
+          wrapper.innerHTML = '<div class="live-list-head"><strong>' + group.label + ' (' + group.list.length + ')</strong><button class="btn btn-danger btn-xs js-cancel-group" type="button" data-order-type="' + groupType + '">Cancel semua</button></div>' +
+            '<span>Price range: ' + priceSummary + ' | Trigger range: ' + triggerSummary + '</span>' +
+            '<div class="live-table"><div class="live-table-head"><div>Order</div><div>Side</div><div>Price</div><div>Qty</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
           liveOrdersList.appendChild(wrapper);
         });
       }
