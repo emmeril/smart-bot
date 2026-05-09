@@ -33,7 +33,8 @@ const createOrderExecutionHelpers = ({
     cancelTpOrders,
     cancelSlOrders,
     buildReplacementClientOrderId,
-    notifyTradeUpdate
+    notifyTradeUpdate,
+    isProtectionUpdateNotificationEnabled
 }) => {
     const managedOrderSyncChains = new Map();
     const ORDER_REQUEST_TIMEOUT_MS = 12000;
@@ -186,6 +187,7 @@ const createOrderExecutionHelpers = ({
         tpPrice,
         slPrice
     }) => {
+        if (typeof isProtectionUpdateNotificationEnabled === "function" && !isProtectionUpdateNotificationEnabled()) return;
         if (typeof notifyTradeUpdate !== "function") return;
         const db = getDb();
         await notifyTradeUpdate({

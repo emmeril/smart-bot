@@ -9,6 +9,8 @@ const createFonnteNotifierHelpers = ({
     enabled = process.env.FONNTE_NOTIFICATIONS_ENABLED
 } = {}) => {
     let sendQueue = Promise.resolve();
+    const recentMessageMap = new Map();
+    const DEDUPE_WINDOW_MS = 15000;
 
     const normalizeTargetList = (value) => (
         String(value || "")
@@ -212,10 +214,35 @@ const createFonnteNotifierHelpers = ({
         return await postMessage(formData);
     };
 
+    const shouldSkipDuplicateMessage = ({ target: messageTarget = normalizedTarget, message }) => {
+        const normalizedMessageTarget = normalizeTargetList(messageTarget);
+        const normalizedMessage = String(message || "").trim();
+        if (!normalizedMessageTarget || !normalizedMessage) return false;
+
+        const now = Date.now();
+        for (const [key, timestamp] of recentMessageMap.entries()) {
+            if (now - timestamp > DEDUPE_WINDOW_MS) recentMessageMap.delete(key);
+        }
+
+        const dedupeKey = `${normalizedMessageTarget}::${normalizedMessage}`;
+        const lastSentAt = recentMessageMap.get(dedupeKey);
+        if (Number.isFinite(lastSentAt) && now - lastSentAt <= DEDUPE_WINDOW_MS) {
+            return true;
+        }
+
+        recentMessageMap.set(dedupeKey, now);
+        return false;
+    };
+
     const sendQueuedMessage = (payload) => {
         sendQueue = sendQueue
             .catch(() => {})
-            .then(() => sendMessage(payload));
+            .then(() => {
+                if (shouldSkipDuplicateMessage(payload)) {
+                    return { ok: true, skipped: true, reason: "Duplicate message suppressed" };
+                }
+                return sendMessage(payload);
+            });
         return sendQueue;
     };
 
