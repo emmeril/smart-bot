@@ -153,6 +153,11 @@
     .live-amount.neutral { color: var(--text); }
     .live-item.positive { border-color: #a7f3d0; }
     .live-item.negative { border-color: #fecaca; }
+    .price-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+    .price-chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; line-height: 1.35; }
+    .price-chip.entry { background: #dbeafe; color: #1d4ed8; }
+    .price-chip.mark { background: #dcfce7; color: #166534; }
+    .price-chip.sl { background: #fee2e2; color: #b91c1c; }
     .live-table { display: grid; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
     .live-table-head, .live-table-row { display: grid; grid-template-columns: 1.2fr 0.7fr 0.8fr 0.8fr; align-items: center; gap: 8px; min-width: 560px; }
     .live-table-head { color: var(--muted); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -863,11 +868,16 @@
           item.className = "live-item " + (pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral"));
           item.dataset.positionKey = positionKey;
           const pnlSign = pnlValue >= 0 ? "+" : "";
+          const entryPrice = formatNumber(position.entryPrice);
+          const markPrice = formatNumber(position.currentPrice);
+          const stopLossPrice = formatNumber(position.stopLossPrice);
+          const targetPrice = formatNumber(position.targetPrice);
           item.innerHTML = '<div class="live-list-head"><strong>' + positionKey + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
             '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Hapus</button></div>' +
-            '<span>Qty ' + formatNumber(position.quantity) + ' | Entry ' + formatNumber(position.entryPrice) + ' | Mark ' + formatNumber(position.currentPrice) + '</span>' +
+            '<span>Qty ' + formatNumber(position.quantity) + '</span>' +
+            '<div class="price-chip-row"><span class="price-chip entry">Entry ' + entryPrice + '</span><span class="price-chip mark">Mark ' + markPrice + '</span><span class="price-chip sl">SL ' + stopLossPrice + '</span></div>' +
             '<span>PnL ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span>' +
-            '<span>TP ' + formatNumber(position.targetPrice) + ' | SL ' + formatNumber(position.stopLossPrice) + '</span>';
+            '<span>TP ' + targetPrice + '</span>';
           livePositionsList.appendChild(item);
         });
       }
@@ -896,11 +906,14 @@
             const amount = order.amount === null || order.amount === undefined ? '-' : formatNumber(order.amount);
             const refId = order.clientOrderId || order.id || 'order';
             const trigger = order.triggerPrice === null || order.triggerPrice === undefined ? '-' : formatNumber(order.triggerPrice);
+            const priceDetail = groupType === "sl"
+              ? ('Trigger ' + trigger + ' | Limit ' + price)
+              : ('Limit ' + price + ' | Trigger ' + trigger);
             const orderId = order.id || "";
             const clientOrderId = order.clientOrderId || "";
             return '<div class="live-table-row"><div>' + refId + '</div><div><span class="' + badgeClass + '">' + side + '</span></div><div>' + price + '</div><div>' + amount + '</div></div>' +
               '<div class="live-table-row" style="margin-top:6px; grid-template-columns: 1fr 1fr 1fr 1fr; font-size:0.8rem; color: var(--muted);">' +
-              '<div>Type: ' + String(order.type || '-') + '</div><div>Pos: ' + String(order.positionSide || '-') + '</div><div>Trig: ' + trigger + '</div><div>RO: ' + String(Boolean(order.reduceOnly)) + '</div></div>' +
+              '<div>Type: ' + String(order.type || '-') + '</div><div>Pos: ' + String(order.positionSide || '-') + '</div><div>Price: ' + priceDetail + '</div><div>RO: ' + String(Boolean(order.reduceOnly)) + '</div></div>' +
               '<div style="margin-top:6px;"><button class="btn btn-danger btn-xs js-cancel-order" type="button" data-order-type="' + groupType + '" data-client-order-id="' + String(clientOrderId) + '" data-order-id="' + String(orderId) + '">Cancel</button></div>';
           }).join('');
           wrapper.innerHTML = '<div class="live-list-head"><strong>' + group.label + ' (' + group.list.length + ')</strong><button class="btn btn-danger btn-xs js-cancel-group" type="button" data-order-type="' + groupType + '">Cancel semua</button></div><div class="live-table"><div class="live-table-head"><div>Order</div><div>Side</div><div>Price</div><div>Qty</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
