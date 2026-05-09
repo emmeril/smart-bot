@@ -35,9 +35,7 @@ Strategi yang tersedia saat ini adalah `spot_grid`.
 |-- .env.example
 |-- database.sqlite
 |-- trades.csv
-|-- log.csv
 |-- config/
-|-- db/
 |-- public/
 |   |-- index.html
 |   `-- login.html
@@ -87,10 +85,13 @@ Buat file `.env` dari `.env.example`, lalu isi minimal:
 API_KEY=binance_api_key
 API_SECRET=binance_api_secret
 ADMIN_PHONE=
+DASHBOARD_HOST=127.0.0.1
 DASHBOARD_PORT=3000
 DASHBOARD_USERNAME=admin
 DASHBOARD_PASSWORD=ganti-password-aman
 DASHBOARD_SESSION_SECRET=ganti-random-string-panjang
+FONNTE_NOTIFICATIONS_ENABLED=true
+FONNTE_NOTIFY_PROTECTION_UPDATES=false
 CONFIG_AUTO_RELOAD_INTERVAL_MS=5000
 ```
 
@@ -99,10 +100,13 @@ Keterangan env:
 - `API_KEY`: API key Binance
 - `API_SECRET`: API secret Binance
 - `ADMIN_PHONE`: sudah disediakan di template env, tetapi bukan bagian utama alur README ini
+- `DASHBOARD_HOST`: host binding dashboard, default `127.0.0.1` (lebih aman untuk lokal)
 - `DASHBOARD_PORT`: port dashboard web
 - `DASHBOARD_USERNAME`: username login dashboard
 - `DASHBOARD_PASSWORD`: password login dashboard
 - `DASHBOARD_SESSION_SECRET`: secret untuk cookie sesi dashboard
+- `FONNTE_NOTIFICATIONS_ENABLED`: aktif/nonaktif notifikasi WhatsApp
+- `FONNTE_NOTIFY_PROTECTION_UPDATES`: notifikasi tambahan saat TP/SL protection diperbarui
 - `CONFIG_AUTO_RELOAD_INTERVAL_MS`: interval pembacaan ulang konfigurasi dari database
 
 Jika kredensial dashboard tidak diisi, aplikasi memakai default lokal:
@@ -204,9 +208,8 @@ Bot juga memakai filter tambahan seperti:
 
 - filter jam trading berbasis UTC
 - filter volume minimum
-- batas profit harian
-- batas loss harian
 - batas jumlah trade per hari
+- cooldown antar trade
 
 ## Konfigurasi Penting
 
@@ -388,6 +391,7 @@ allowShort=false
 ```
 
 Contoh ini membuat bot memasang ladder dua arah seperti spot grid Binance: buy order memakai saldo USDT, sedangkan sell order hanya dipasang jika saldo aset base tersedia.
+Contoh ini membuat bot fokus ke sisi buy (long-only) karena `allowShort=false`, jadi sell ladder tidak dipasang sebagai entry.
 
 ## Penyimpanan Data
 
@@ -397,7 +401,6 @@ File penting:
 
 - `database.sqlite`: menyimpan konfigurasi dan state runtime
 - `trades.csv`: log transaksi
-- `log.csv`: file log tambahan yang sudah ada di repo
 
 Trade log di `trades.csv` berisi kolom seperti:
 
