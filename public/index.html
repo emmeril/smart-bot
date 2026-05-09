@@ -256,17 +256,17 @@
           <div class="brand-mark">SB</div>
           <div class="brand-copy">
             <strong>Smart Bot</strong>
-            <span>Operations Console</span>
+            <span>Konsol Operasional</span>
           </div>
         </div>
         <nav class="side-nav">
-          <a class="active" href="#overview">Overview</a>
-          <a href="#runtime">Runtime</a>
-          <a href="#positions">Live Monitor</a>
-          <a href="#config">Risk Settings</a>
+          <a class="active" href="#overview">Ringkasan</a>
+          <a href="#runtime">Status Runtime</a>
+          <a href="#positions">Monitor Langsung</a>
+          <a href="#config">Pengaturan Risiko</a>
         </nav>
         <div class="sidebar-card">
-          <p class="eyebrow">Workspace</p>
+          <p class="eyebrow">Ruang Kerja</p>
           <p class="muted">Pusat kontrol real-time untuk memantau performa bot dan mengelola parameter risiko.</p>
         </div>
       </aside>
@@ -278,7 +278,7 @@
               <div class="brand-mark">SB</div>
               <div class="brand-copy">
                 <strong>Smart Bot</strong>
-                <span>Operations Console</span>
+                <span>Konsol Operasional</span>
               </div>
             </div>
             <div class="topbar-status">
@@ -289,7 +289,7 @@
               </div>
             </div>
             <div class="topbar-actions">
-              <button id="refreshBtn" class="btn btn-secondary" type="button">Refresh Data</button>
+              <button id="refreshBtn" class="btn btn-secondary" type="button">Muat Ulang Data</button>
               <button id="resetBtn" class="btn btn-danger" type="button">Reset ke Default</button>
               <form action="/logout" method="post" class="m-0">
                 <button class="btn btn-secondary" type="submit">Logout</button>
@@ -299,13 +299,13 @@
 
           <header class="hero panel" id="overview">
             <div class="hero-copy">
-              <p class="eyebrow">Trading Operations</p>
-              <h1>Smart Bot Command Center</h1>
+              <p class="eyebrow">Operasional Trading</p>
+              <h1>Pusat Kendali Smart Bot</h1>
               <p class="lede">Pantau runtime, PnL, posisi aktif, dan order terbuka dalam satu workspace modern untuk keputusan lebih cepat.</p>
               <div class="hero-badges">
-                <span class="signal-chip">Strategy <strong>spot_grid</strong></span>
-                <span class="signal-chip">Exchange <strong>Binance</strong></span>
-                <span class="signal-chip">Mode <strong id="heroMode">Syncing...</strong></span>
+                <span class="signal-chip">Strategi <strong>spot_grid</strong></span>
+                <span class="signal-chip">Bursa <strong>Binance</strong></span>
+                <span class="signal-chip">Mode <strong id="heroMode">Menyinkronkan...</strong></span>
               </div>
             </div>
             <div class="hero-metrics" id="statusCards"></div>
@@ -320,7 +320,7 @@
 
           <section class="panel pnl-section" id="pnlBreakdown">
             <article class="pnl-summary-card realized">
-              <h3>Realized PnL</h3>
+              <h3>PnL Terealisasi</h3>
               <div class="pnl-display" id="realizedPnlValue">-</div>
               <div class="pnl-sub" id="realizedPnlMeta">Dari posisi yang sudah ditutup</div>
             </article>
@@ -338,7 +338,7 @@
 
           <section class="panel terminal-strip" id="runtime">
             <article class="terminal-card">
-              <h3>Runtime Activity</h3>
+              <h3>Aktivitas Runtime</h3>
               <div class="terminal-log">
                 <div><span>&gt;</span> Pair aktif: <strong id="runtimePair">-</strong></div>
                 <div><span>&gt;</span> Engine status: <strong id="runtimeEngine">Memuat...</strong></div>
@@ -349,10 +349,10 @@
             <article class="terminal-card">
               <h3>Bot Signals</h3>
               <div class="terminal-badges">
-                <span class="signal-chip">Trade mode <strong id="signalLeverage">-</strong></span>
-                <span class="signal-chip">Position mode <strong id="signalPositionMode">-</strong></span>
-                <span class="signal-chip">Grid state <strong id="signalGridState">-</strong></span>
-                <span class="signal-chip">Exchange <strong id="signalExchange">-</strong></span>
+                <span class="signal-chip">Mode Trading <strong id="signalLeverage">-</strong></span>
+                <span class="signal-chip">Mode Posisi <strong id="signalPositionMode">-</strong></span>
+                <span class="signal-chip">Status Grid <strong id="signalGridState">-</strong></span>
+                <span class="signal-chip">Bursa <strong id="signalExchange">-</strong></span>
               </div>
             </article>
           </section>
@@ -360,7 +360,7 @@
           <section class="panel live-panel" id="positions">
             <div class="panel-head">
               <div>
-                <p class="eyebrow">Live Monitor</p>
+                <p class="eyebrow">Monitor Langsung</p>
                 <h2>Posisi, PnL, dan order</h2>
               </div>
               <p class="muted">Diperbarui otomatis dari runtime bot.</p>
@@ -372,10 +372,10 @@
                 <span id="livePositionsMeta">Memuat data posisi...</span>
               </article>
               <article class="live-card">
-                <span class="label">Realized PnL</span>
+                <span class="label">PnL Terealisasi</span>
                 <strong id="livePnlValue">-</strong>
                 <span id="livePnlMeta">-</span>
-                <canvas id="livePnlTrend" class="live-sparkline" width="320" height="72" aria-label="Realized PnL trend mini chart"></canvas>
+                <canvas id="livePnlTrend" class="live-sparkline" width="320" height="72" aria-label="Grafik mini tren PnL terealisasi"></canvas>
               </article>
               <article class="live-card">
                 <span class="label">Order terbuka</span>
@@ -403,7 +403,7 @@
           <section class="panel form-panel" id="config">
             <div class="panel-head">
               <div>
-                <p class="eyebrow">Risk Settings</p>
+                <p class="eyebrow">Pengaturan Risiko</p>
                 <h2>Parameter trading</h2>
               </div>
               <p class="muted">Bagian General dan Risk Management tetap tersimpan melalui API konfigurasi.</p>
@@ -561,7 +561,7 @@
     async function cancelOrder(orderType, clientOrderId, orderId) {
       const type = String(orderType || "").toLowerCase();
       const ref = clientOrderId || orderId || "order";
-      const ok = confirm("Cancel order " + ref + "?");
+      const ok = confirm("Batalkan order " + ref + "?");
       if (!ok) return;
       try {
         const data = await api("/api/orders/cancel", {
@@ -637,7 +637,7 @@
       }
       if (!exchangeConnected) {
         return {
-          label: "Exchange Offline",
+          label: "Bursa Offline",
           description: "Bot aktif tetapi koneksi exchange belum tersedia."
         };
       }
@@ -654,7 +654,7 @@
         };
       }
       return {
-        label: "Running",
+        label: "Berjalan",
         description: "Runtime aktif dan exchange siap menerima siklus berikutnya."
       };
     }
@@ -693,10 +693,10 @@
       const recoveryClass = recoveryStatus === "Watch" ? "recovery-watch" : (recoveryStatus === "Observed" ? "recovery-observed" : "recovery-stable");
       const cards = [
         { label: "Bot", value: runtimeStatus.label, note: runtimeStatus.description, cardClass: "", badgeClass: "" },
-        { label: "Positions", value: String(status.activePositions), note: status.activeGridState ? "Grid state active" : "No local grid state", cardClass: "", badgeClass: "" },
-        { label: "Realized PnL", value: `${formatNumber(status.dailyPnL)} USDT`, note: `${status.dailyTrades} trades today | ${String(status.dailyPnlSource || "local").toLowerCase()}`, cardClass: "", badgeClass: "" },
-        { label: "Mode", value: tradeModeValue, note: positionModeValue, cardClass: "", badgeClass: "" },
-        { label: "Order Recovery", value: recoveryStatus, note: `dup ${duplicateDetected}/${duplicateResolved} | timeout ${timeoutErrors} | repl ${replacementSucceeded}/${replacementAttempts}`, cardClass: recoveryClass, badgeClass: recoveryClass }
+        { label: "Posisi", value: String(status.activePositions), note: status.activeGridState ? "Status grid aktif" : "Tidak ada status grid lokal", cardClass: "", badgeClass: "" },
+        { label: "PnL Terealisasi", value: `${formatNumber(status.dailyPnL)} USDT`, note: `${status.dailyTrades} transaksi hari ini | ${String(status.dailyPnlSource || "local").toLowerCase()}`, cardClass: "", badgeClass: "" },
+        { label: "Mode Trading", value: tradeModeValue, note: positionModeValue, cardClass: "", badgeClass: "" },
+        { label: "Pemulihan Order", value: recoveryStatus, note: `dup ${duplicateDetected}/${duplicateResolved} | timeout ${timeoutErrors} | repl ${replacementSucceeded}/${replacementAttempts}`, cardClass: recoveryClass, badgeClass: recoveryClass }
       ];
       statusCards.innerHTML = cards.map((card) => `
         <article class="metric-card ${card.cardClass || ""}">
@@ -710,7 +710,7 @@
       pairStatus.textContent = status.pair || "-";
       marginStatus.textContent = `${tradeModeValue} / ${positionModeValue}`;
       updatedStatus.textContent = formatDateTime(status.lastUpdated);
-      topbarStatus.textContent = runtimeStatus.label === "Running" ? "Runtime bot aktif" : runtimeStatus.label;
+      topbarStatus.textContent = runtimeStatus.label === "Berjalan" ? "Runtime bot aktif" : runtimeStatus.label;
       topbarMeta.textContent = `${status.pair || "-"} | ${tradeModeValue} | ${exchangeLabel}${status.exchangeRecoveryReason ? ` | ${status.exchangeRecoveryReason}` : ""}`;
       heroMode.textContent = `${tradeModeValue} / ${positionModeValue}`;
       runtimePair.textContent = status.pair || "-";
@@ -868,8 +868,8 @@
       const exchangeHealthy = Boolean(data.exchangeHealthy);
       const needsRecoverySync = Boolean(data.needsRecoverySync);
       const exchangeLabel = !exchangeConnected
-        ? "exchange offline"
-        : (needsRecoverySync ? "sinkronisasi recovery" : (exchangeHealthy ? "exchange stabil" : "exchange degradasi"));
+        ? "bursa offline"
+        : (needsRecoverySync ? "sinkronisasi pemulihan" : (exchangeHealthy ? "exchange stabil" : "exchange degradasi"));
       const recoverySuffix = data.exchangeRecoveryReason ? ` | ${data.exchangeRecoveryReason}` : "";
 
       pushPnlHistory(dailyPnl);
@@ -879,7 +879,7 @@
       renderPnLBreakdown(data);
 
       livePositionsCount.textContent = String(positions.length);
-      livePositionsMeta.textContent = data.exchangePositionsCount + " exchange position(s) | " + String(data.positionMode || "-").toUpperCase() + " | " + exchangeLabel + recoverySuffix;
+      livePositionsMeta.textContent = data.exchangePositionsCount + " posisi bursa | " + String(data.positionMode || "-").toUpperCase() + " | " + exchangeLabel + recoverySuffix;
       livePnlValue.textContent = formatLiveCurrency(dailyPnl) + " USDT";
       livePnlValue.className = "live-amount " + (dailyPnl > 0 ? "positive" : (dailyPnl < 0 ? "negative" : "neutral"));
       const pnlSource = String(data.dailyPnlSource || "local").toLowerCase();
@@ -892,7 +892,7 @@
         + ` | timeout ${timeoutErrors}`
         + ` | repl ${replacementSucceeded}/${replacementAttempts}`
         + recoveryAlert
-        + (data.triggerOrdersFetchFailed ? " | trigger snapshot fallback" : "");
+        + (data.triggerOrdersFetchFailed ? " | cadangan snapshot trigger" : "");
       liveOrdersMeta.className = recoveryAlert ? "live-meta-watch" : "";
 
       livePositionsList.innerHTML = "";
@@ -964,18 +964,18 @@
             const refId = order.clientOrderId || order.id || 'order';
             const trigger = order.triggerPrice === null || order.triggerPrice === undefined ? '-' : formatPrice(order.triggerPrice);
             const priceDetail = groupType === "sl"
-              ? ('Trigger ' + trigger + ' | Limit ' + price)
-              : ('Limit ' + price + ' | Trigger ' + trigger);
+              ? ('Trigger ' + trigger + ' | Batas ' + price)
+              : ('Batas ' + price + ' | Trigger ' + trigger);
             const orderId = order.id || "";
             const clientOrderId = order.clientOrderId || "";
             return '<div class="live-table-row"><div>' + refId + '</div><div><span class="' + badgeClass + '">' + side + '</span></div><div>' + price + '</div><div>' + amount + '</div></div>' +
               '<div class="live-table-subrow">' +
-              '<div>Type: ' + String(order.type || '-') + '</div><div>Pos: ' + String(order.positionSide || '-') + '</div><div>Price: ' + priceDetail + '</div><div>RO: ' + String(Boolean(order.reduceOnly)) + '</div></div>' +
+              '<div>Tipe: ' + String(order.type || '-') + '</div><div>Posisi: ' + String(order.positionSide || '-') + '</div><div>Harga: ' + priceDetail + '</div><div>Reduce-only: ' + String(Boolean(order.reduceOnly)) + '</div></div>' +
               '<div class="live-table-actions"><button class="btn btn-danger btn-xs js-cancel-order" type="button" data-order-type="' + groupType + '" data-client-order-id="' + String(clientOrderId) + '" data-order-id="' + String(orderId) + '">Batalkan</button></div>';
           }).join('');
           wrapper.innerHTML = '<div class="live-list-head"><strong>' + group.label + ' (' + group.list.length + ')</strong><button class="btn btn-danger btn-xs js-cancel-group" type="button" data-order-type="' + groupType + '">Batalkan Semua</button></div>' +
-            '<span class="live-order-range">Price range: ' + priceSummary + ' | Trigger range: ' + triggerSummary + '</span>' +
-            '<div class="live-table"><div class="live-table-head"><div>Order</div><div>Side</div><div>Price</div><div>Qty</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
+            '<span class="live-order-range">Rentang harga: ' + priceSummary + ' | Rentang trigger: ' + triggerSummary + '</span>' +
+            '<div class="live-table"><div class="live-table-head"><div>Order</div><div>Sisi</div><div>Harga</div><div>Kuantitas</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
           liveOrdersList.appendChild(wrapper);
         });
       }
