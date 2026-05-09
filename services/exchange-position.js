@@ -281,7 +281,14 @@ const createExchangePositionHelpers = ({
         const entryChanged = entryDeltaPercent > getPositionSyncEntryTolerancePct();
         const existingSide = String(existingPosition?.side || "").toLowerCase();
         const existingPositionSide = getTrackedPositionSideLabel(existingPosition);
-        const canPreserveExitPlan = preserveExitPlan && existingPosition && existingSide === side && existingPositionSide === positionSide && !quantityChanged && !entryChanged;
+        const recalculateExitsOnScaleIn = currentDb.gridRecalculateExitsOnScaleIn !== false;
+        const hasScaleInLikeChange = quantityChanged || entryChanged;
+        const shouldKeepExitPlanOnScaleChange = !recalculateExitsOnScaleIn && hasScaleInLikeChange;
+        const canPreserveExitPlan = preserveExitPlan
+            && existingPosition
+            && existingSide === side
+            && existingPositionSide === positionSide
+            && (!hasScaleInLikeChange || shouldKeepExitPlanOnScaleChange);
         const preservedTargetPrice = canPreserveExitPlan && Number.isFinite(existingPosition?.targetPrice) ? existingPosition.targetPrice : targetPrice;
         const preservedStopLossPrice = canPreserveExitPlan && Number.isFinite(existingPosition?.stopLossPrice) ? existingPosition.stopLossPrice : stopLossPrice;
         const fallbackTargetProfitUsdt = Math.abs(preservedTargetPrice - entryPrice) * contracts;
@@ -369,7 +376,6 @@ const createExchangePositionHelpers = ({
 };
 
 module.exports = { createExchangePositionHelpers };
-
 
 
 
