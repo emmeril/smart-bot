@@ -14,6 +14,15 @@ const createManagedOrdersHelpers = ({
     setHasLoggedTriggerOrderFetchFallback
 }) => {
     const describeError = (error) => String(error?.message || error || "Unknown error");
+    const isUnknownOrderCancelError = (error) => {
+        const message = String(error?.message || error || "").toLowerCase();
+        return message.includes("unknown order sent")
+            || message.includes("unknown order")
+            || message.includes("order does not exist")
+            || message.includes("order not found")
+            || message.includes("\"code\":-2011")
+            || message.includes("code:-2011");
+    };
 
     const getManagedOrderId = (order) => String(order?.id || order?.orderId || order?.info?.orderId || "");
 
@@ -136,6 +145,10 @@ const createManagedOrdersHelpers = ({
                 await exchange.cancelOrder(orderId, currentDb.pair, cancelOptions);
                 metrics.api.orders++;
             } catch (error) {
+                if (isUnknownOrderCancelError(error)) {
+                    console.log(`[${label}][INFO] Skip cancel ${label.toLowerCase()} order ${order.id}: order already closed/cancelled on exchange.`);
+                    continue;
+                }
                 console.warn(`[${label}][WARN] Failed to cancel ${label.toLowerCase()} order ${order.id}: ${describeError(error)}`);
             }
         }
@@ -193,6 +206,10 @@ const createManagedOrdersHelpers = ({
                     await exchange.cancelOrder(duplicateOrderId, currentDb.pair, cancelParams);
                     metrics.api.orders++;
                 } catch (error) {
+                    if (isUnknownOrderCancelError(error)) {
+                        console.log(`[${label}][INFO] Skip cancel duplicate ${label.toLowerCase()} order ${duplicateOrder.id}: order already closed/cancelled on exchange.`);
+                        continue;
+                    }
                     console.warn(`[${label}][WARN] Failed to cancel duplicate ${label.toLowerCase()} order ${duplicateOrder.id}: ${describeError(error)}`);
                 }
             }
