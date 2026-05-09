@@ -56,7 +56,10 @@ const createHelpers = ({ createOrderImpl, fetchOrderImpl, isHedgeModeEnabled = f
             positionSide,
             closePosition
         }),
-        getOrderPositionSide: (side) => side === "buy" ? "LONG" : "SHORT",
+        getOrderPositionSide: (side) => {
+            if (!isHedgeModeEnabled) return "BOTH";
+            return side === "buy" ? "LONG" : "SHORT";
+        },
         getClosePositionSide: (position) => position.positionSide || "BOTH",
         findOpenGridOrderByClientOrderId: async () => null,
         findOpenOrderByClientOrderId: async () => null,
@@ -78,6 +81,10 @@ const createHelpers = ({ createOrderImpl, fetchOrderImpl, isHedgeModeEnabled = f
         upsertActivePosition: (position) => {
             state.activePositions = state.activePositions || {};
             state.activePositions[position.positionSide] = position;
+        },
+        removeActivePositionByKey: (key) => {
+            if (!state.activePositions) return;
+            delete state.activePositions[key];
         },
         saveDB: async () => { state.saveCount = (state.saveCount || 0) + 1; },
         cancelTpOrders: async () => {},
@@ -179,12 +186,65 @@ test("placeGridEntryOrder adopts a filled spot grid order into activePosition", 
     assert.equal(adopted, true);
     assert.equal(createOrderCalls, 0);
     assert.equal(state.saveCount, 3);
-    assert.equal(state.activePositions.LONG.side, "buy");
-    assert.equal(state.activePositions.LONG.entryPrice, 0.11);
-    assert.equal(state.activePositions.LONG.quantity, 10);
-    assert.equal(state.activePositions.LONG.positionSide, "LONG");
-    assert.equal(state.activePositions.LONG.tpClientOrderId, "smarttp_old");
-    assert.equal(state.activePositions.LONG.slClientOrderId, "smartsl_old");
+    assert.equal(state.activePositions.BOTH.side, "buy");
+    assert.equal(state.activePositions.BOTH.entryPrice, 0.11);
+    assert.equal(state.activePositions.BOTH.quantity, 10);
+    assert.equal(state.activePositions.BOTH.positionSide, "BOTH");
+    assert.equal(state.activePositions.BOTH.tpClientOrderId, "smarttp_old");
+    assert.equal(state.activePositions.BOTH.slClientOrderId, "smartsl_old");
+});
+
+test("placeGridEntryOrder clears active spot position when filled SELL grid fully nets quantity", async () => {
+    const state = {
+        activePositions: {
+            BOTH: {
+                side: "buy",
+                quantity: 10,
+                entryPrice: 0.1,
+                targetPrice: 0.12,
+                stopLossPrice: 0.095,
+                positionSide: "BOTH"
+            }
+        }
+    };
+    let createOrderCalls = 0;
+    let fetchOrderCalls = 0;
+    const helpers = createHelpers({
+        state,
+        createOrderImpl: async () => {
+            createOrderCalls += 1;
+            return { id: "unexpected-new-grid-order" };
+        },
+        fetchOrderImpl: async (_id, _symbol, params = {}) => {
+            fetchOrderCalls += 1;
+            if (fetchOrderCalls === 1) throw new Error("Order does not exist.");
+            assert.equal(params.origClientOrderId, "smartgrid_sell_4_012");
+            return {
+                id: "filled-grid-sell-1",
+                status: "closed",
+                side: "sell",
+                amount: 10,
+                filled: 10,
+                average: 0.12,
+                timestamp: 12346,
+                info: { status: "FILLED", clientOrderId: "smartgrid_sell_4_012" }
+            };
+        }
+    });
+
+    const adopted = await helpers.placeGridEntryOrder({
+        side: "sell",
+        price: 0.12,
+        orderSizeUsdt: 1.2,
+        targetPrice: 0.11,
+        stopLossPrice: 0.125,
+        clientOrderId: "smartgrid_sell_4_012"
+    });
+
+    assert.equal(adopted, true);
+    assert.equal(createOrderCalls, 0);
+    assert.equal(state.saveCount, 1);
+    assert.equal(state.activePositions.BOTH, undefined);
 });
 
 test("ensureReduceOnlyTakeProfitOrder serializes concurrent OCO sync for the same spot position", async () => {

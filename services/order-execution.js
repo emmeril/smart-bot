@@ -29,6 +29,7 @@ const createOrderExecutionHelpers = ({
     fetchSpotBalances,
     getActivePositionByKey,
     upsertActivePosition,
+    removeActivePositionByKey,
     saveDB,
     cancelTpOrders,
     cancelSlOrders,
@@ -305,15 +306,39 @@ const createOrderExecutionHelpers = ({
 
     const mergeSpotGridPosition = (currentPosition, filledPosition) => {
         const db = getDb();
-        if (!currentPosition || typeof currentPosition !== "object") return { ...filledPosition };
+        const quantityTolerance = Math.max(0, toFiniteNumber(getPositionSyncQtyTolerance(), 0));
+        const toSignedQuantity = (side, quantity) => {
+            const normalizedSide = String(side || "").toLowerCase();
+            const qty = Math.max(0, toFiniteNumber(quantity, 0));
+            if (!Number.isFinite(qty) || qty <= 0) return 0;
+            return normalizedSide === "sell" ? -qty : qty;
+        };
+        const resolveSideFromSignedQuantity = (signedQuantity) => {
+            if (signedQuantity > quantityTolerance) return "buy";
+            if (signedQuantity < -quantityTolerance) return "sell";
+            return null;
+        };
+
+        if (!currentPosition || typeof currentPosition !== "object") {
+            const initialSignedQty = toSignedQuantity(filledPosition?.side, filledPosition?.quantity);
+            const initialSide = resolveSideFromSignedQuantity(initialSignedQty);
+            if (initialSide !== "buy") return null;
+            return { ...filledPosition, side: "buy", quantity: Math.abs(initialSignedQty) };
+        }
 
         const currentQty = Math.max(0, toFiniteNumber(currentPosition.quantity, 0));
         const filledQty = Math.max(0, toFiniteNumber(filledPosition.quantity, 0));
         const currentEntry = toFiniteNumber(currentPosition.entryPrice, NaN);
         const filledEntry = toFiniteNumber(filledPosition.entryPrice, NaN);
-        const mergedQty = currentQty + filledQty;
+        const currentSignedQty = toSignedQuantity(currentPosition.side, currentQty);
+        const filledSignedQty = toSignedQuantity(filledPosition.side, filledQty);
+        const mergedSignedQty = currentSignedQty + filledSignedQty;
+        const mergedSide = resolveSideFromSignedQuantity(mergedSignedQty);
+        if (!mergedSide) return null;
+        if (mergedSide === "sell") return null;
+        const mergedQty = Math.abs(mergedSignedQty);
         const mergedEntryPrice = mergedQty > 0
-            ? (((Number.isFinite(currentEntry) ? currentEntry : 0) * currentQty) + ((Number.isFinite(filledEntry) ? filledEntry : 0) * filledQty)) / mergedQty
+            ? ((((Number.isFinite(currentEntry) ? currentEntry : 0) * Math.abs(currentSignedQty)) + ((Number.isFinite(filledEntry) ? filledEntry : 0) * Math.abs(filledSignedQty))) / mergedQty)
             : filledEntry;
 
         let mergedTargetPrice = Number.isFinite(toFiniteNumber(currentPosition.targetPrice, NaN))
@@ -350,7 +375,7 @@ const createOrderExecutionHelpers = ({
 
         return {
             ...currentPosition,
-            side: filledPosition.side || currentPosition.side,
+            side: mergedSide,
             entryPrice: mergedEntryPrice,
             quantity: mergedQty,
             targetPrice: mergedTargetPrice,
@@ -436,6 +461,16 @@ const createOrderExecutionHelpers = ({
         }
 
         const position = mergeSpotGridPosition(currentPosition, filledPosition);
+        if (!position) {
+            if (currentPosition && typeof removeActivePositionByKey === "function") {
+                removeActivePositionByKey(positionKey);
+                await saveDB();
+                console.log(`[GRID][INFO] Filled grid order ${gridClientOrderId} netted active spot position to zero. Cleared ${positionKey}.`);
+                return true;
+            }
+            return false;
+        }
+
         position.adoptedGridClientOrderIds = recordAdoptedGridClientOrderId(position, gridClientOrderId);
         if (currentPosition) {
             const previousQty = toFiniteNumber(currentPosition.quantity, 0);

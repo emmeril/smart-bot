@@ -554,6 +554,7 @@ const {
     },
     getActivePositionByKey: (...args) => getActivePositionByKey(...args),
     upsertActivePosition: (...args) => upsertActivePosition(...args),
+    removeActivePositionByKey: (...args) => removeActivePositionByKey(...args),
     saveDB: (...args) => saveDB(...args),
     cancelTpOrders,
     cancelSlOrders,
