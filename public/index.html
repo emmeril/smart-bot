@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Smart Bot Trading Console</title>
   <meta name="description" content="Dashboard konfigurasi untuk Smart Bot">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -31,15 +34,15 @@
   <style>
     :root {
       color-scheme: light;
-      --muted: #667085;
-      --text: #172033;
-      --line: #d9e2ee;
-      --canvas: #f4f7fb;
-      --brand: #2563eb;
-      --success: #168252;
+      --muted: #5f6f85;
+      --text: #142136;
+      --line: #d4dfed;
+      --canvas: #eef3f8;
+      --brand: #0f766e;
+      --success: #15803d;
       --danger: #c24135;
-      --warning: #a16207;
-      --shadow-panel: 0 16px 40px rgba(15, 23, 42, 0.07);
+      --warning: #b45309;
+      --shadow-panel: 0 18px 40px rgba(8, 20, 38, 0.09);
     }
 
     * { box-sizing: border-box; }
@@ -49,18 +52,37 @@
       overflow-x: hidden;
       background: var(--canvas);
       color: var(--text);
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: "Sora", "Segoe UI", sans-serif;
       -webkit-font-smoothing: antialiased;
       text-rendering: optimizeLegibility;
     }
+    h1, h2, h3, .brand-copy strong { font-family: "Space Grotesk", "Sora", sans-serif; }
     button, input, select { font: inherit; }
 
-    .app-shell { min-height: 100vh; background: linear-gradient(180deg, #f8fbff 0%, #f4f7fb 48%, #eef3f8 100%); }
+    .app-shell {
+      position: relative;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 8% 10%, rgba(15,118,110,0.12), transparent 28%),
+        radial-gradient(circle at 92% 3%, rgba(14,165,233,0.12), transparent 30%),
+        linear-gradient(180deg, #f8fbff 0%, #f2f7fb 46%, #eaf1f7 100%);
+    }
+    .app-shell::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(20, 33, 54, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(20, 33, 54, 0.02) 1px, transparent 1px);
+      background-size: 64px 64px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,0.42), transparent 90%);
+    }
     .dashboard-layout { width: 100%; max-width: 1440px; margin: 0 auto; display: grid; gap: 0; }
-    .sidebar { display: none; position: sticky; top: 0; height: 100vh; border-right: 1px solid var(--line); background: rgba(255,255,255,0.9); padding: 24px 20px; box-shadow: 0 1px 3px rgba(15,23,42,0.08); backdrop-filter: blur(10px); }
+    .sidebar { display: none; position: sticky; top: 0; height: 100vh; border-right: 1px solid var(--line); background: rgba(255,255,255,0.84); padding: 24px 20px; box-shadow: 0 8px 24px rgba(15,23,42,0.06); backdrop-filter: blur(14px); }
     .sidebar-brand { display: flex; align-items: center; gap: 12px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
     .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
-    .brand-mark { display: grid; width: 44px; height: 44px; flex-shrink: 0; place-items: center; border-radius: 12px; background: var(--text); color: #fff; font-size: 0.875rem; font-weight: 900; letter-spacing: 0.12em; }
+    .brand-mark { display: grid; width: 44px; height: 44px; flex-shrink: 0; place-items: center; border-radius: 12px; background: linear-gradient(145deg, #0f766e, #0ea5e9); color: #fff; font-size: 0.875rem; font-weight: 900; letter-spacing: 0.12em; box-shadow: 0 10px 22px rgba(14, 116, 144, 0.28); }
     .brand-copy { min-width: 0; }
     .brand-copy strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 0.875rem; font-weight: 700; }
     .brand-copy span { display: block; margin-top: 4px; color: var(--muted); font-size: 0.75rem; line-height: 1.25rem; }
@@ -72,7 +94,7 @@
     .main-area { min-width: 0; padding: 16px 12px; }
     .shell { width: 100%; max-width: 1120px; margin: 0 auto; display: grid; gap: 16px; }
 
-    .topbar { display: flex; flex-direction: column; gap: 16px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,0.95); padding: 16px; box-shadow: var(--shadow-panel); backdrop-filter: blur(10px); }
+    .topbar { display: flex; flex-direction: column; gap: 16px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,0.9); padding: 16px; box-shadow: var(--shadow-panel); backdrop-filter: blur(14px); }
     .topbar-status { display: flex; align-items: center; gap: 12px; min-width: 0; }
     .pulse-dot { width: 10px; height: 10px; flex-shrink: 0; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 6px rgba(22,130,82,0.12); }
     .topbar-meta { min-width: 0; }
@@ -80,7 +102,8 @@
     .topbar-meta span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 0.75rem; line-height: 1.25rem; }
     .topbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-    .panel { border: 1px solid var(--line); border-radius: 16px; background: #fff; box-shadow: var(--shadow-panel); }
+    .panel { border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,0.95); box-shadow: var(--shadow-panel); transition: transform 180ms ease, box-shadow 180ms ease; animation: fadeSlideIn 360ms ease both; }
+    .panel:hover { transform: translateY(-1px); box-shadow: 0 24px 44px rgba(8, 20, 38, 0.12); }
     .hero { display: grid; gap: 20px; padding: 20px; }
     .hero-copy { min-width: 0; }
     .eyebrow { margin: 0 0 8px; color: var(--muted); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
@@ -90,17 +113,17 @@
     .hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
     .hero-actions form { margin: 0; }
 
-    .btn { display: inline-flex; min-height: 40px; cursor: pointer; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; padding: 8px 16px; font-size: 0.875rem; font-weight: 600; transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease; }
+    .btn { display: inline-flex; min-height: 40px; cursor: pointer; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 10px; padding: 8px 16px; font-size: 0.875rem; font-weight: 600; transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease; }
     .btn:disabled { cursor: not-allowed; opacity: 0.6; }
-    .btn-primary { border-color: var(--text); background: var(--text); color: #fff; }
-    .btn-primary:hover { background: #1e293b; }
+    .btn-primary { border-color: var(--brand); background: linear-gradient(135deg, #0f766e, #0ea5e9); color: #fff; }
+    .btn-primary:hover { transform: translateY(-1px); filter: saturate(1.08); }
     .btn-secondary { background: #fff; color: var(--text); }
-    .btn-secondary:hover { background: #f8fafc; }
-    .btn-danger { border-color: #fecaca; background: #fef2f2; color: var(--danger); }
-    .btn-danger:hover { background: #fee2e2; }
+    .btn-secondary:hover { background: #f0f6fb; transform: translateY(-1px); }
+    .btn-danger { border-color: #fecaca; background: #fff5f5; color: var(--danger); }
+    .btn-danger:hover { background: #ffe8e8; transform: translateY(-1px); }
 
     .hero-metrics { display: grid; grid-template-columns: 1fr; gap: 12px; min-width: 0; }
-    .metric-card, .status-item, .pnl-summary-card, .live-card, .live-list, .section-card, .terminal-card { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: #f8fafc; padding: 16px; }
+    .metric-card, .status-item, .pnl-summary-card, .live-card, .live-list, .section-card, .terminal-card { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: #f7fbff; padding: 16px; }
     .metric-card .label, .status-label, .live-card .label { display: block; color: var(--muted); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
     .metric-card strong, .status-item strong, .live-card strong { display: block; margin-top: 8px; color: var(--text); font-size: 1.125rem; font-weight: 700; }
     .metric-card span, .live-card span, .live-item span, .field-hint, .field-note, .pnl-sub, .muted { color: var(--muted); font-size: 0.875rem; line-height: 1.5rem; }
@@ -143,9 +166,13 @@
     .live-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
     .live-list-head h3 { margin: 0; }
     .btn-xs { min-height: 32px; padding: 6px 10px; font-size: 0.75rem; }
-    .live-items { display: grid; gap: 8px; }
-    .live-item { min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; }
+    .live-items { display: grid; gap: 10px; }
+    .live-item { min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 12px; }
     .live-item strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 0.875rem; font-weight: 700; }
+    .live-position-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .live-position-kpis { display: grid; gap: 2px; }
+    .live-position-kpis .pnl-line { font-size: 0.84rem; font-weight: 600; color: #334155; }
+    .live-order-range { margin-bottom: 8px; font-size: 0.78rem; font-weight: 600; color: #475569; }
     .live-empty { color: var(--muted); font-size: 0.875rem; }
     .live-sparkline { display: block; width: 100%; height: 64px; margin-top: 12px; border-radius: 8px; background: #fff; }
     .live-amount.positive { color: var(--success); }
@@ -161,7 +188,9 @@
     .live-table { display: grid; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
     .live-table-head, .live-table-row { display: grid; grid-template-columns: 1.2fr 0.7fr 0.8fr 0.8fr; align-items: center; gap: 8px; min-width: 560px; }
     .live-table-head { color: var(--muted); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
-    .live-table-row { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 8px 12px; font-size: 0.875rem; }
+    .live-table-row { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 8px 12px; font-size: 0.84rem; }
+    .live-table-subrow { margin-top: 6px; border: 1px dashed #dbe4ef; border-radius: 8px; background: #f8fbff; padding: 6px 10px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; font-size: 0.76rem; color: var(--muted); min-width: 560px; }
+    .live-table-actions { margin-top: 8px; display: flex; justify-content: flex-end; }
 
     .config-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; color: var(--muted); font-size: 0.875rem; line-height: 1.5rem; }
     .field-badge { display: inline-flex; align-items: center; border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; padding: 4px 10px; color: var(--brand); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.04em; }
@@ -181,6 +210,10 @@
     .toast.success { color: var(--success); }
     .toast.error { color: var(--danger); }
     .toast.info { color: var(--brand); }
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
 
     @media (min-width: 640px) {
       .hero-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -223,18 +256,18 @@
           <div class="brand-mark">SB</div>
           <div class="brand-copy">
             <strong>Smart Bot</strong>
-            <span>Trading dashboard</span>
+            <span>Operations Console</span>
           </div>
         </div>
         <nav class="side-nav">
           <a class="active" href="#overview">Overview</a>
           <a href="#runtime">Runtime</a>
-          <a href="#positions">Live Status</a>
-          <a href="#config">Konfigurasi</a>
+          <a href="#positions">Live Monitor</a>
+          <a href="#config">Risk Settings</a>
         </nav>
         <div class="sidebar-card">
-          <p class="eyebrow">Session</p>
-          <p class="muted">Dashboard lokal untuk memantau bot dan menyimpan parameter trading.</p>
+          <p class="eyebrow">Workspace</p>
+          <p class="muted">Pusat kontrol real-time untuk memantau performa bot dan mengelola parameter risiko.</p>
         </div>
       </aside>
 
@@ -245,19 +278,19 @@
               <div class="brand-mark">SB</div>
               <div class="brand-copy">
                 <strong>Smart Bot</strong>
-                <span>Trading dashboard</span>
+                <span>Operations Console</span>
               </div>
             </div>
             <div class="topbar-status">
               <div class="pulse-dot" aria-hidden="true"></div>
               <div class="topbar-meta">
-                <strong id="topbarStatus">Connecting runtime...</strong>
-                <span id="topbarMeta">Memuat pair, mode, dan sinkronisasi bot</span>
+                <strong id="topbarStatus">Menyambungkan engine trading...</strong>
+                <span id="topbarMeta">Sinkronisasi pair, mode, dan status runtime</span>
               </div>
             </div>
             <div class="topbar-actions">
-              <button id="refreshBtn" class="btn btn-secondary" type="button">Muat ulang</button>
-              <button id="resetBtn" class="btn btn-danger" type="button">Reset default</button>
+              <button id="refreshBtn" class="btn btn-secondary" type="button">Refresh Data</button>
+              <button id="resetBtn" class="btn btn-danger" type="button">Reset ke Default</button>
               <form action="/logout" method="post" class="m-0">
                 <button class="btn btn-secondary" type="submit">Logout</button>
               </form>
@@ -266,9 +299,9 @@
 
           <header class="hero panel" id="overview">
             <div class="hero-copy">
-              <p class="eyebrow">Control Center</p>
-              <h1>Dashboard trading bot</h1>
-              <p class="lede">Pantau runtime, PnL, posisi aktif, order terbuka, dan konfigurasi risiko dalam tampilan operasional yang lebih rapi.</p>
+              <p class="eyebrow">Trading Operations</p>
+              <h1>Smart Bot Command Center</h1>
+              <p class="lede">Pantau runtime, PnL, posisi aktif, dan order terbuka dalam satu workspace modern untuk keputusan lebih cepat.</p>
               <div class="hero-badges">
                 <span class="signal-chip">Strategy <strong>spot_grid</strong></span>
                 <span class="signal-chip">Exchange <strong>Binance</strong></span>
@@ -278,11 +311,11 @@
             <div class="hero-metrics" id="statusCards"></div>
           </header>
 
-          <section class="panel status-strip" aria-label="Ringkasan status">
+          <section class="panel status-strip" aria-label="Ringkasan performa bot">
             <div class="status-item"><span class="status-label">Status bot</span><strong id="botStatus">Memuat...</strong></div>
             <div class="status-item"><span class="status-label">Pair aktif</span><strong id="pairStatus">-</strong></div>
-            <div class="status-item"><span class="status-label">Mode trading</span><strong id="marginStatus">-</strong></div>
-            <div class="status-item"><span class="status-label">Terakhir update</span><strong id="updatedStatus">-</strong></div>
+            <div class="status-item"><span class="status-label">Mode eksekusi</span><strong id="marginStatus">-</strong></div>
+            <div class="status-item"><span class="status-label">Update terakhir</span><strong id="updatedStatus">-</strong></div>
           </section>
 
           <section class="panel pnl-section" id="pnlBreakdown">
@@ -305,7 +338,7 @@
 
           <section class="panel terminal-strip" id="runtime">
             <article class="terminal-card">
-              <h3>Runtime Feed</h3>
+              <h3>Runtime Activity</h3>
               <div class="terminal-log">
                 <div><span>&gt;</span> Pair aktif: <strong id="runtimePair">-</strong></div>
                 <div><span>&gt;</span> Engine status: <strong id="runtimeEngine">Memuat...</strong></div>
@@ -327,7 +360,7 @@
           <section class="panel live-panel" id="positions">
             <div class="panel-head">
               <div>
-                <p class="eyebrow">Live Status</p>
+                <p class="eyebrow">Live Monitor</p>
                 <h2>Posisi, PnL, dan order</h2>
               </div>
               <p class="muted">Diperbarui otomatis dari runtime bot.</p>
@@ -353,8 +386,8 @@
             <div class="live-lists">
               <section class="live-list">
                 <div class="live-list-head">
-                  <h3>Detail posisi</h3>
-                  <button id="clearPositionsBtn" class="btn btn-danger btn-xs" type="button">Hapus semua</button>
+                  <h3>Posisi Aktif</h3>
+                  <button id="clearPositionsBtn" class="btn btn-danger btn-xs" type="button">Tutup Semua</button>
                 </div>
                 <div id="livePositionsList" class="live-items"></div>
               </section>
@@ -370,7 +403,7 @@
           <section class="panel form-panel" id="config">
             <div class="panel-head">
               <div>
-                <p class="eyebrow">Konfigurasi</p>
+                <p class="eyebrow">Risk Settings</p>
                 <h2>Parameter trading</h2>
               </div>
               <p class="muted">Bagian General dan Risk Management tetap tersimpan melalui API konfigurasi.</p>
@@ -494,14 +527,14 @@
     async function removePosition(positionKey) {
       const key = String(positionKey || "").trim().toUpperCase();
       if (!key) return;
-      const ok = confirm("Hapus posisi " + key + "? Posisi akan ditutup oleh bot.");
+      const ok = confirm("Tutup posisi " + key + "? Bot akan mengirim perintah close.");
       if (!ok) return;
       try {
         const data = await api("/api/positions/" + encodeURIComponent(key) + "/remove", { method: "POST" });
         showToast(data.message || ("Posisi " + key + " diproses"), "success");
         await loadLiveStatus(true);
       } catch (error) {
-        showToast(error.message || "Gagal hapus posisi", "error");
+        showToast(error.message || "Gagal menutup posisi", "error");
       }
     }
 
@@ -509,20 +542,20 @@
       const cards = Array.from(livePositionsList.querySelectorAll("[data-position-key]"));
       const keys = cards.map((node) => String(node.dataset.positionKey || "").trim()).filter(Boolean);
       if (keys.length === 0) {
-        showToast("Tidak ada posisi untuk dihapus", "info");
+        showToast("Tidak ada posisi aktif untuk ditutup", "info");
         return;
       }
-      const ok = confirm("Hapus semua posisi aktif (" + keys.length + ")?");
+      const ok = confirm("Tutup semua posisi aktif (" + keys.length + ")?");
       if (!ok) return;
       for (const key of keys) {
         try {
           await api("/api/positions/" + encodeURIComponent(key) + "/remove", { method: "POST" });
         } catch (error) {
-          showToast(error.message || ("Gagal hapus posisi " + key), "error");
+          showToast(error.message || ("Gagal menutup posisi " + key), "error");
         }
       }
       await loadLiveStatus(true);
-      showToast("Permintaan hapus semua posisi sudah dikirim", "success");
+      showToast("Permintaan tutup semua posisi berhasil dikirim", "success");
     }
 
     async function cancelOrder(orderType, clientOrderId, orderId) {
@@ -538,13 +571,13 @@
         showToast(data.message || ("Order " + ref + " dibatalkan"), "success");
         await loadLiveStatus(true);
       } catch (error) {
-        showToast(error.message || "Gagal cancel order", "error");
+        showToast(error.message || "Gagal membatalkan order", "error");
       }
     }
 
     async function cancelOrderGroup(orderType) {
       const type = String(orderType || "").toLowerCase();
-      const ok = confirm("Cancel semua order " + type.toUpperCase() + "?");
+      const ok = confirm("Batalkan semua order " + type.toUpperCase() + "?");
       if (!ok) return;
       try {
         const data = await api("/api/orders/cancel-group", {
@@ -554,7 +587,7 @@
         showToast(data.message || ("Order " + type.toUpperCase() + " dibatalkan"), "success");
         await loadLiveStatus(true);
       } catch (error) {
-        showToast(error.message || "Gagal cancel grup order", "error");
+        showToast(error.message || "Gagal membatalkan grup order", "error");
       }
     }
 
@@ -798,13 +831,13 @@
       // Realized PnL
       realizedPnlValue.textContent = formatPnl(realizedPnL);
       realizedPnlValue.className = "pnl-display " + getPnlClass(realizedPnL);
-      realizedPnlMeta.textContent = `${data.dailyTrades || 0} trade(s) | source: ${String(data.dailyPnlSource || "local").toLowerCase()}`;
+      realizedPnlMeta.textContent = `${data.dailyTrades || 0} transaksi | sumber: ${String(data.dailyPnlSource || "local").toLowerCase()}`;
       
       // Unrealized PnL
       const activePosCount = Array.isArray(data.activePositions) ? data.activePositions.length : 0;
       unrealizedPnlValue.textContent = formatPnl(unrealizedPnL);
       unrealizedPnlValue.className = "pnl-display " + getPnlClass(unrealizedPnL);
-      unrealizedPnlMeta.textContent = `${activePosCount} posisi terbuka`;
+      unrealizedPnlMeta.textContent = `${activePosCount} posisi masih terbuka`;
       
       // Total PnL
       totalPnlValue.textContent = formatPnl(totalPnL);
@@ -836,7 +869,7 @@
       const needsRecoverySync = Boolean(data.needsRecoverySync);
       const exchangeLabel = !exchangeConnected
         ? "exchange offline"
-        : (needsRecoverySync ? "recovery sync" : (exchangeHealthy ? "exchange healthy" : "exchange degraded"));
+        : (needsRecoverySync ? "sinkronisasi recovery" : (exchangeHealthy ? "exchange stabil" : "exchange degradasi"));
       const recoverySuffix = data.exchangeRecoveryReason ? ` | ${data.exchangeRecoveryReason}` : "";
 
       pushPnlHistory(dailyPnl);
@@ -850,7 +883,7 @@
       livePnlValue.textContent = formatLiveCurrency(dailyPnl) + " USDT";
       livePnlValue.className = "live-amount " + (dailyPnl > 0 ? "positive" : (dailyPnl < 0 ? "negative" : "neutral"));
       const pnlSource = String(data.dailyPnlSource || "local").toLowerCase();
-      livePnlMeta.textContent = String(data.dailyTrades || 0) + " trade(s) today | source: " + pnlSource;
+      livePnlMeta.textContent = String(data.dailyTrades || 0) + " transaksi hari ini | sumber: " + pnlSource;
       liveOrdersCount.textContent = String(orderCounts.total || 0);
       const recoveryAlert = timeoutErrors >= 3 || duplicateDetected >= 8 ? " | recovery spike" : "";
       liveOrdersMeta.textContent =
@@ -866,7 +899,7 @@
       if (positions.length === 0) {
         const empty = document.createElement("div");
         empty.className = "live-empty";
-        empty.textContent = "Belum ada posisi aktif.";
+        empty.textContent = "Belum ada posisi aktif saat ini.";
         livePositionsList.appendChild(empty);
       } else {
         positions.slice(0, 4).forEach((position) => {
@@ -880,12 +913,12 @@
           const markPrice = formatPrice(position.currentPrice);
           const stopLossPrice = formatPrice(position.stopLossPrice);
           const targetPrice = formatPrice(position.targetPrice);
-          item.innerHTML = '<div class="live-list-head"><strong>' + positionKey + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
-            '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Hapus</button></div>' +
-            '<span>Qty ' + formatNumber(position.quantity) + '</span>' +
+          item.innerHTML = '<div class="live-position-head"><strong>' + positionKey + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
+            '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Tutup</button></div>' +
+            '<div class="live-position-kpis"><span>Qty ' + formatNumber(position.quantity) + '</span>' +
             '<div class="price-chip-row"><span class="price-chip entry">Entry ' + entryPrice + '</span><span class="price-chip mark">Mark ' + markPrice + '</span><span class="price-chip sl">SL ' + stopLossPrice + '</span></div>' +
-            '<span>PnL ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span>' +
-            '<span>TP ' + targetPrice + '</span>';
+            '<span class="pnl-line">PnL ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span>' +
+            '<span>TP ' + targetPrice + '</span></div>';
           livePositionsList.appendChild(item);
         });
       }
@@ -900,7 +933,7 @@
       if (!hasOrders) {
         const empty = document.createElement("div");
         empty.className = "live-empty";
-        empty.textContent = "Belum ada order terbuka.";
+        empty.textContent = "Belum ada order terbuka saat ini.";
         liveOrdersList.appendChild(empty);
       } else {
         groups.forEach((group) => {
@@ -936,12 +969,12 @@
             const orderId = order.id || "";
             const clientOrderId = order.clientOrderId || "";
             return '<div class="live-table-row"><div>' + refId + '</div><div><span class="' + badgeClass + '">' + side + '</span></div><div>' + price + '</div><div>' + amount + '</div></div>' +
-              '<div class="live-table-row" style="margin-top:6px; grid-template-columns: 1fr 1fr 1fr 1fr; font-size:0.8rem; color: var(--muted);">' +
+              '<div class="live-table-subrow">' +
               '<div>Type: ' + String(order.type || '-') + '</div><div>Pos: ' + String(order.positionSide || '-') + '</div><div>Price: ' + priceDetail + '</div><div>RO: ' + String(Boolean(order.reduceOnly)) + '</div></div>' +
-              '<div style="margin-top:6px;"><button class="btn btn-danger btn-xs js-cancel-order" type="button" data-order-type="' + groupType + '" data-client-order-id="' + String(clientOrderId) + '" data-order-id="' + String(orderId) + '">Cancel</button></div>';
+              '<div class="live-table-actions"><button class="btn btn-danger btn-xs js-cancel-order" type="button" data-order-type="' + groupType + '" data-client-order-id="' + String(clientOrderId) + '" data-order-id="' + String(orderId) + '">Batalkan</button></div>';
           }).join('');
-          wrapper.innerHTML = '<div class="live-list-head"><strong>' + group.label + ' (' + group.list.length + ')</strong><button class="btn btn-danger btn-xs js-cancel-group" type="button" data-order-type="' + groupType + '">Cancel semua</button></div>' +
-            '<span>Price range: ' + priceSummary + ' | Trigger range: ' + triggerSummary + '</span>' +
+          wrapper.innerHTML = '<div class="live-list-head"><strong>' + group.label + ' (' + group.list.length + ')</strong><button class="btn btn-danger btn-xs js-cancel-group" type="button" data-order-type="' + groupType + '">Batalkan Semua</button></div>' +
+            '<span class="live-order-range">Price range: ' + priceSummary + ' | Trigger range: ' + triggerSummary + '</span>' +
             '<div class="live-table"><div class="live-table-head"><div>Order</div><div>Side</div><div>Price</div><div>Qty</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
           liveOrdersList.appendChild(wrapper);
         });
@@ -1090,7 +1123,7 @@
           applyPayload(data);
         }
         await loadLiveStatus(true);
-        if (!silent) showToast("Konfigurasi berhasil dimuat", "success");
+        if (!silent) showToast("Konfigurasi berhasil diperbarui", "success");
       } catch (error) {
         showToast(error.message || "Gagal memuat konfigurasi", "error");
       } finally {
@@ -1104,7 +1137,7 @@
         const data = await api("/api/config", { method: "PUT", body: JSON.stringify({ config: collectConfig() }) });
         applyPayload(data);
         await loadLiveStatus(true);
-        showToast(data.message || "Konfigurasi tersimpan", "success");
+        showToast(data.message || "Perubahan konfigurasi berhasil disimpan", "success");
       } catch (error) {
         showToast(error.message || "Gagal menyimpan konfigurasi", "error");
       } finally {
@@ -1113,14 +1146,14 @@
     }
 
     async function resetDashboard() {
-      const ok = confirm("Reset konfigurasi ke default? Perubahan yang belum disimpan akan hilang.");
+      const ok = confirm("Reset ke konfigurasi default? Perubahan yang belum disimpan akan hilang.");
       if (!ok) return;
       setBusy(true);
       try {
         const data = await api("/api/config/reset", { method: "POST" });
         applyPayload(data);
         await loadDashboard(true);
-        showToast(data.message || "Konfigurasi direset", "success");
+        showToast(data.message || "Konfigurasi berhasil direset", "success");
       } catch (error) {
         showToast(error.message || "Gagal reset konfigurasi", "error");
       } finally {
