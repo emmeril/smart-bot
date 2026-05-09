@@ -116,7 +116,8 @@ let metrics = {
     windowStart: Date.now(),
     api: { ticker: 0, ohlcv: 0, balance: 0, positions: 0, orders: 0 },
     signals: { analyzed: 0, crossoverDetected: 0, longConfirmed: 0, shortConfirmed: 0 },
-    trades: { opened: 0, closed: 0, wins: 0, losses: 0 }
+    trades: { opened: 0, closed: 0, wins: 0, losses: 0 },
+    orderRecovery: { duplicateDetected: 0, duplicateResolved: 0, timeoutErrors: 0, replacementAttempts: 0, replacementSucceeded: 0 }
 };
 
 const {
@@ -910,6 +911,7 @@ const {
     getExchange: () => exchange,
     getExchangeHealth: () => exchangeHealth,
     getExchangeRecoveryReason,
+    getMetrics: () => metrics,
     getAccountPositionMode: () => accountPositionMode,
     getActivePositionsMap,
     getActivePositionEntries,
@@ -1326,6 +1328,7 @@ const {
     getIsClosingPosition: () => isClosingPosition,
     getIsSyncingPosition: () => isSyncingPosition,
     getIsPlacingOrder: () => isPlacingOrder,
+    getIsSyncingGridOrders: () => isSyncingGridOrders,
     getPrice: (...args) => getPrice(...args),
     fetchManagedOpenOrdersSnapshot: (...args) => fetchManagedOpenOrdersSnapshot(...args),
     getActivePositionEntries: (...args) => getActivePositionEntries(...args),

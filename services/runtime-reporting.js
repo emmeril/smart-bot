@@ -24,6 +24,13 @@ const createRuntimeReportingHelpers = ({
         metrics.trades.closed = 0;
         metrics.trades.wins = 0;
         metrics.trades.losses = 0;
+        if (metrics.orderRecovery && typeof metrics.orderRecovery === "object") {
+            metrics.orderRecovery.duplicateDetected = 0;
+            metrics.orderRecovery.duplicateResolved = 0;
+            metrics.orderRecovery.timeoutErrors = 0;
+            metrics.orderRecovery.replacementAttempts = 0;
+            metrics.orderRecovery.replacementSucceeded = 0;
+        }
     };
 
     const printStartupBanner = (totalUSDT) => {

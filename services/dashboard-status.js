@@ -5,6 +5,7 @@ const createDashboardStatusHelpers = ({
     getExchange,
     getExchangeHealth,
     getExchangeRecoveryReason,
+    getMetrics,
     getAccountPositionMode,
     getActivePositionsMap,
     getActivePositionEntries,
@@ -23,6 +24,14 @@ const createDashboardStatusHelpers = ({
         const db = getDb();
         const exchangeHealth = getExchangeHealth();
         const activePositionsMap = getActivePositionsMap(db?.activePosition);
+        const recovery = getMetrics?.()?.orderRecovery || {};
+        const orderRecovery = {
+            duplicateDetected: Math.max(0, Math.trunc(toFiniteNumber(recovery.duplicateDetected, 0))),
+            duplicateResolved: Math.max(0, Math.trunc(toFiniteNumber(recovery.duplicateResolved, 0))),
+            timeoutErrors: Math.max(0, Math.trunc(toFiniteNumber(recovery.timeoutErrors, 0))),
+            replacementAttempts: Math.max(0, Math.trunc(toFiniteNumber(recovery.replacementAttempts, 0))),
+            replacementSucceeded: Math.max(0, Math.trunc(toFiniteNumber(recovery.replacementSucceeded, 0)))
+        };
         return {
             botRunning: !getIsShuttingDown(),
             exchangeConnected: Boolean(getExchange()),
@@ -40,7 +49,8 @@ const createDashboardStatusHelpers = ({
             lastDailyReset: toFiniteNumber(db?.lastDailyReset, 0),
             pair: db?.pair || defaultConfig.pair,
             strategy: db?.strategy || defaultConfig.strategy,
-            marginMode: db?.marginMode || defaultConfig.marginMode
+            marginMode: db?.marginMode || defaultConfig.marginMode,
+            orderRecovery
         };
     };
 
@@ -163,6 +173,16 @@ const createDashboardStatusHelpers = ({
                 sl: openOrders.sl.length,
                 total: openOrders.grid.length + openOrders.tp.length + openOrders.sl.length
             },
+            orderRecovery: (() => {
+                const recovery = getMetrics?.()?.orderRecovery || {};
+                return {
+                    duplicateDetected: Math.max(0, Math.trunc(toFiniteNumber(recovery.duplicateDetected, 0))),
+                    duplicateResolved: Math.max(0, Math.trunc(toFiniteNumber(recovery.duplicateResolved, 0))),
+                    timeoutErrors: Math.max(0, Math.trunc(toFiniteNumber(recovery.timeoutErrors, 0))),
+                    replacementAttempts: Math.max(0, Math.trunc(toFiniteNumber(recovery.replacementAttempts, 0))),
+                    replacementSucceeded: Math.max(0, Math.trunc(toFiniteNumber(recovery.replacementSucceeded, 0)))
+                };
+            })(),
             triggerOrdersFetchFailed: Boolean(managedOrders.triggerOrdersFetchFailed)
         };
     };

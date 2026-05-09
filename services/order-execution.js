@@ -36,6 +36,20 @@ const createOrderExecutionHelpers = ({
     notifyTradeUpdate
 }) => {
     const managedOrderSyncChains = new Map();
+    const ORDER_REQUEST_TIMEOUT_MS = 12000;
+    const DUPLICATE_LOOKUP_ATTEMPTS = 3;
+    const DUPLICATE_LOOKUP_DELAY_MS = 150;
+    const RECOVERY_METRIC_LOG_TTL_MS = 30000;
+    const RECOVERY_ALERT_WINDOW_MS = 10 * 60 * 1000;
+    const RECOVERY_ALERT_DUPLICATE_THRESHOLD = 8;
+    const RECOVERY_ALERT_TIMEOUT_THRESHOLD = 3;
+    const RECOVERY_ALERT_COOLDOWN_MS = 60 * 1000;
+    let lastRecoveryMetricLogAt = 0;
+    let lastRecoveryAlertAt = 0;
+    const recoveryEventTimestamps = {
+        duplicateDetected: [],
+        timeoutErrors: []
+    };
 
     const runManagedOrderSync = async (key, operation) => {
         const chainKey = String(key || "");
@@ -57,6 +71,102 @@ const createOrderExecutionHelpers = ({
     };
 
     const describeError = (error) => String(error?.message || error || "Unknown error");
+    const getRecoveryMetrics = () => {
+        const metrics = getMetrics();
+        if (!metrics || typeof metrics !== "object") return null;
+        metrics.orderRecovery = metrics.orderRecovery && typeof metrics.orderRecovery === "object"
+            ? metrics.orderRecovery
+            : {
+                duplicateDetected: 0,
+                duplicateResolved: 0,
+                timeoutErrors: 0,
+                replacementAttempts: 0,
+                replacementSucceeded: 0
+            };
+        return metrics.orderRecovery;
+    };
+    const bumpRecoveryMetric = (key) => {
+        const recoveryMetrics = getRecoveryMetrics();
+        if (!recoveryMetrics || !key) return;
+        recoveryMetrics[key] = Math.max(0, Number(recoveryMetrics[key] || 0) + 1);
+    };
+    const registerRecoveryEvent = (key) => {
+        if (!Object.prototype.hasOwnProperty.call(recoveryEventTimestamps, key)) return;
+        const now = Date.now();
+        const minTimestamp = now - RECOVERY_ALERT_WINDOW_MS;
+        recoveryEventTimestamps[key].push(now);
+        recoveryEventTimestamps[key] = recoveryEventTimestamps[key].filter((timestamp) => timestamp >= minTimestamp);
+    };
+    const maybeLogRecoveryAlert = () => {
+        const now = Date.now();
+        if (now - lastRecoveryAlertAt < RECOVERY_ALERT_COOLDOWN_MS) return;
+        const duplicateBurst = recoveryEventTimestamps.duplicateDetected.length >= RECOVERY_ALERT_DUPLICATE_THRESHOLD;
+        const timeoutBurst = recoveryEventTimestamps.timeoutErrors.length >= RECOVERY_ALERT_TIMEOUT_THRESHOLD;
+        if (!duplicateBurst && !timeoutBurst) return;
+        console.warn(
+            `[ORDERS][ALERT] Recovery spike detected over last ${Math.round(RECOVERY_ALERT_WINDOW_MS / 60000)}m `
+            + `| duplicateDetected=${recoveryEventTimestamps.duplicateDetected.length} `
+            + `| timeoutErrors=${recoveryEventTimestamps.timeoutErrors.length}`
+        );
+        lastRecoveryAlertAt = now;
+    };
+    const maybeLogRecoveryMetrics = () => {
+        const now = Date.now();
+        if (now - lastRecoveryMetricLogAt < RECOVERY_METRIC_LOG_TTL_MS) return;
+        const recoveryMetrics = getRecoveryMetrics();
+        if (!recoveryMetrics) return;
+        const totalEvents = Number(recoveryMetrics.duplicateDetected || 0)
+            + Number(recoveryMetrics.timeoutErrors || 0)
+            + Number(recoveryMetrics.replacementAttempts || 0);
+        if (totalEvents <= 0) return;
+        console.log(
+            `[ORDERS][METRIC] duplicateDetected=${recoveryMetrics.duplicateDetected} `
+            + `duplicateResolved=${recoveryMetrics.duplicateResolved} `
+            + `timeoutErrors=${recoveryMetrics.timeoutErrors} `
+            + `replacementAttempts=${recoveryMetrics.replacementAttempts} `
+            + `replacementSucceeded=${recoveryMetrics.replacementSucceeded}`
+        );
+        lastRecoveryMetricLogAt = now;
+    };
+    const sleep = async (ms) => await new Promise((resolve) => setTimeout(resolve, ms));
+    const withTimeout = async (promiseFactory, timeoutMs, label) => {
+        let timeoutId = null;
+        try {
+            return await Promise.race([
+                promiseFactory(),
+                new Promise((_, reject) => {
+                    timeoutId = setTimeout(() => {
+                        bumpRecoveryMetric("timeoutErrors");
+                        registerRecoveryEvent("timeoutErrors");
+                        maybeLogRecoveryMetrics();
+                        maybeLogRecoveryAlert();
+                        reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+                    }, timeoutMs);
+                })
+            ]);
+        } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+        }
+    };
+
+    const waitForExistingOrderByClientOrderId = async ({
+        clientOrderId,
+        symbol,
+        lookupFn,
+        label
+    }) => {
+        for (let attempt = 0; attempt < DUPLICATE_LOOKUP_ATTEMPTS; attempt += 1) {
+            const existingOrder = await lookupFn(clientOrderId, symbol);
+            if (existingOrder) return existingOrder;
+            if (attempt < DUPLICATE_LOOKUP_ATTEMPTS - 1) {
+                await sleep(DUPLICATE_LOOKUP_DELAY_MS);
+            }
+        }
+        if (label) {
+            console.log(`[${label}][INFO] No exchange order found yet for ${clientOrderId} after lookup retries.`);
+        }
+        return null;
+    };
     const attachClientOrderIdFallback = (order, clientOrderId) => {
         if (!order || !clientOrderId) return order;
         const nextOrder = typeof order === "object" ? order : { value: order };
@@ -455,6 +565,8 @@ const createOrderExecutionHelpers = ({
     };
 
     const placeGridEntryOrder = async (gridOrder) => {
+        const clientOrderId = String(gridOrder?.clientOrderId || "");
+        return await runManagedOrderSync(`GRID:${clientOrderId || "UNKNOWN"}`, async () => {
         const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
@@ -499,22 +611,36 @@ const createOrderExecutionHelpers = ({
         if (await adoptFilledGridEntryOrder(gridOrder)) return true;
 
         try {
-            await exchange.createOrder(
-                spotPair,
-                "limit",
-                gridOrder.side,
-                quantity,
-                gridOrder.price,
-                params
+            await withTimeout(
+                async () => await exchange.createOrder(
+                    spotPair,
+                    "limit",
+                    gridOrder.side,
+                    quantity,
+                    gridOrder.price,
+                    params
+                ),
+                ORDER_REQUEST_TIMEOUT_MS,
+                "GRID createOrder"
             );
             metrics.api.orders++;
             console.log(`[GRID][INFO] Placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price} size ${orderSizeUsdt.toFixed(4)} USDT -> TP ${gridOrder.targetPrice} | SL ${gridOrder.stopLossPrice}`);
             return true;
         } catch (error) {
             if (isDuplicateClientOrderIdError(error)) {
+                bumpRecoveryMetric("duplicateDetected");
+                registerRecoveryEvent("duplicateDetected");
                 console.warn(`[GRID][WARN] Duplicate clientOrderId ${gridOrder.clientOrderId}. Attempting to cancel existing order and retry.`);
-                const existingDuplicate = await findOpenGridOrderByClientOrderId(gridOrder.clientOrderId);
+                maybeLogRecoveryAlert();
+                const existingDuplicate = await waitForExistingOrderByClientOrderId({
+                    clientOrderId: gridOrder.clientOrderId,
+                    symbol: db.pair,
+                    lookupFn: findOpenGridOrderByClientOrderId,
+                    label: "GRID"
+                });
                 if (existingDuplicate) {
+                    bumpRecoveryMetric("duplicateResolved");
+                    maybeLogRecoveryMetrics();
                     console.log(`[GRID][INFO] Duplicate order already active for ${gridOrder.clientOrderId}. Treating as placed.`);
                     return true;
                 }
@@ -522,21 +648,32 @@ const createOrderExecutionHelpers = ({
                 const cancelled = await cancelOrderByClientOrderId(gridOrder.clientOrderId, db.pair);
                 if (cancelled) {
                     try {
-                        await exchange.createOrder(
-                            spotPair,
-                            "limit",
-                            gridOrder.side,
-                            quantity,
-                            gridOrder.price,
-                            params
+                        await withTimeout(
+                            async () => await exchange.createOrder(
+                                spotPair,
+                                "limit",
+                                gridOrder.side,
+                                quantity,
+                                gridOrder.price,
+                                params
+                            ),
+                            ORDER_REQUEST_TIMEOUT_MS,
+                            "GRID retry createOrder"
                         );
                         metrics.api.orders++;
                         console.log(`[GRID][INFO] Retry succeeded: placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price}`);
                         return true;
                     } catch (retryError) {
                         console.error(`[GRID][ERROR] Retry failed for ${gridOrder.clientOrderId}: ${describeError(retryError)}`);
-                        const retryExistingOrder = await findOpenGridOrderByClientOrderId(gridOrder.clientOrderId);
+                        const retryExistingOrder = await waitForExistingOrderByClientOrderId({
+                            clientOrderId: gridOrder.clientOrderId,
+                            symbol: db.pair,
+                            lookupFn: findOpenGridOrderByClientOrderId,
+                            label: "GRID"
+                        });
                         if (retryExistingOrder) {
+                            bumpRecoveryMetric("duplicateResolved");
+                            maybeLogRecoveryMetrics();
                             console.log(`[GRID][INFO] Retry duplicate resolved by existing exchange order for ${gridOrder.clientOrderId}.`);
                             return true;
                         }
@@ -553,6 +690,7 @@ const createOrderExecutionHelpers = ({
             console.error(`[GRID][ERROR] Failed to place ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price}: ${describeError(error)}`);
             return false;
         }
+        });
     };
 
     const placeReduceOnlyTakeProfitOrder = async (position) => {
@@ -593,35 +731,53 @@ const createOrderExecutionHelpers = ({
         }
 
         try {
-            const order = await exchange.createOrder(
-                spotPair,
-                "limit",
-                closeSide,
-                quantity,
-                position.targetPrice,
-                params
+            const order = await withTimeout(
+                async () => await exchange.createOrder(
+                    spotPair,
+                    "limit",
+                    closeSide,
+                    quantity,
+                    position.targetPrice,
+                    params
+                ),
+                ORDER_REQUEST_TIMEOUT_MS,
+                "TP createOrder"
             );
             metrics.api.orders++;
             console.log(`[TP][INFO] Placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
             return attachClientOrderIdFallback(order, clientOrderId);
         } catch (error) {
             if (isDuplicateClientOrderIdError(error)) {
+                bumpRecoveryMetric("duplicateDetected");
+                registerRecoveryEvent("duplicateDetected");
                 console.warn(`[TP][WARN] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
-                const duplicateOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
+                maybeLogRecoveryAlert();
+                const duplicateOrder = await waitForExistingOrderByClientOrderId({
+                    clientOrderId,
+                    symbol: db.pair,
+                    lookupFn: findOpenOrderByClientOrderId,
+                    label: "TP"
+                });
                 if (duplicateOrder) {
+                    bumpRecoveryMetric("duplicateResolved");
+                    maybeLogRecoveryMetrics();
                     console.log(`[TP][INFO] Duplicate resolved by existing exchange TP ${clientOrderId}.`);
                     return attachClientOrderIdFallback(duplicateOrder, clientOrderId);
                 }
                 const cancelled = await cancelOrderByClientOrderId(clientOrderId, db.pair);
                 if (cancelled) {
                     try {
-                        const retryOrder = await exchange.createOrder(
-                            spotPair,
-                            "limit",
-                            closeSide,
-                            quantity,
-                            position.targetPrice,
-                            params
+                        const retryOrder = await withTimeout(
+                            async () => await exchange.createOrder(
+                                spotPair,
+                                "limit",
+                                closeSide,
+                                quantity,
+                                position.targetPrice,
+                                params
+                            ),
+                            ORDER_REQUEST_TIMEOUT_MS,
+                            "TP retry createOrder"
                         );
                         metrics.api.orders++;
                         console.log(`[TP][INFO] Retry succeeded: placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
@@ -634,17 +790,24 @@ const createOrderExecutionHelpers = ({
                 }
 
                 const replacementClientOrderId = buildReplacementClientOrderId(clientOrderId);
+                bumpRecoveryMetric("replacementAttempts");
                 console.warn(`[TP][WARN] Existing clientOrderId ${clientOrderId} is unusable. Retrying with replacement ${replacementClientOrderId}.`);
                 try {
-                    const retryOrder = await exchange.createOrder(
-                        spotPair,
-                        "limit",
-                        closeSide,
-                        quantity,
-                        position.targetPrice,
-                        { ...params, newClientOrderId: replacementClientOrderId }
+                    const retryOrder = await withTimeout(
+                        async () => await exchange.createOrder(
+                            spotPair,
+                            "limit",
+                            closeSide,
+                            quantity,
+                            position.targetPrice,
+                            { ...params, newClientOrderId: replacementClientOrderId }
+                        ),
+                        ORDER_REQUEST_TIMEOUT_MS,
+                        "TP replacement createOrder"
                     );
                     metrics.api.orders++;
+                    bumpRecoveryMetric("replacementSucceeded");
+                    maybeLogRecoveryMetrics();
                     console.log(`[TP][INFO] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
                     return attachClientOrderIdFallback(retryOrder, replacementClientOrderId);
                 } catch (replacementError) {
@@ -695,35 +858,53 @@ const createOrderExecutionHelpers = ({
         }
 
         try {
-            const order = await exchange.createOrder(
-                spotPair,
-                "STOP_LOSS_LIMIT",
-                closeSide,
-                quantity,
-                limitPrice,
-                params
+            const order = await withTimeout(
+                async () => await exchange.createOrder(
+                    spotPair,
+                    "STOP_LOSS_LIMIT",
+                    closeSide,
+                    quantity,
+                    limitPrice,
+                    params
+                ),
+                ORDER_REQUEST_TIMEOUT_MS,
+                "SL createOrder"
             );
             metrics.api.orders++;
             console.log(`[SL][INFO] Placed STOP_LOSS_LIMIT ${closeSide.toUpperCase()} @ stop ${params.stopPrice} limit ${limitPrice} qty ${quantity}`);
             return attachClientOrderIdFallback(order, clientOrderId);
         } catch (error) {
             if (isDuplicateClientOrderIdError(error)) {
+                bumpRecoveryMetric("duplicateDetected");
+                registerRecoveryEvent("duplicateDetected");
                 console.warn(`[SL][WARN] Duplicate clientOrderId ${clientOrderId}. Attempting to cancel existing order and retry.`);
-                const duplicateOrder = await findOpenOrderByClientOrderId(clientOrderId, db.pair);
+                maybeLogRecoveryAlert();
+                const duplicateOrder = await waitForExistingOrderByClientOrderId({
+                    clientOrderId,
+                    symbol: db.pair,
+                    lookupFn: findOpenOrderByClientOrderId,
+                    label: "SL"
+                });
                 if (duplicateOrder) {
+                    bumpRecoveryMetric("duplicateResolved");
+                    maybeLogRecoveryMetrics();
                     console.log(`[SL][INFO] Duplicate resolved by existing exchange SL ${clientOrderId}.`);
                     return attachClientOrderIdFallback(duplicateOrder, clientOrderId);
                 }
                 const cancelled = await cancelOrderByClientOrderId(clientOrderId, db.pair);
                 if (cancelled) {
                     try {
-                        const retryOrder = await exchange.createOrder(
-                            spotPair,
-                            "STOP_LOSS_LIMIT",
-                            closeSide,
-                            quantity,
-                            limitPrice,
-                            params
+                        const retryOrder = await withTimeout(
+                            async () => await exchange.createOrder(
+                                spotPair,
+                                "STOP_LOSS_LIMIT",
+                                closeSide,
+                                quantity,
+                                limitPrice,
+                                params
+                            ),
+                            ORDER_REQUEST_TIMEOUT_MS,
+                            "SL retry createOrder"
                         );
                         metrics.api.orders++;
                         console.log(`[SL][INFO] Retry succeeded: placed STOP_LOSS_LIMIT ${closeSide.toUpperCase()} @ stop ${params.stopPrice} limit ${limitPrice}`);
@@ -736,17 +917,24 @@ const createOrderExecutionHelpers = ({
                 }
 
                 const replacementClientOrderId = buildReplacementClientOrderId(clientOrderId);
+                bumpRecoveryMetric("replacementAttempts");
                 console.warn(`[SL][WARN] Existing clientOrderId ${clientOrderId} is unusable. Retrying with replacement ${replacementClientOrderId}.`);
                 try {
-                    const retryOrder = await exchange.createOrder(
-                        spotPair,
-                        "STOP_LOSS_LIMIT",
-                        closeSide,
-                        quantity,
-                        limitPrice,
-                        { ...params, newClientOrderId: replacementClientOrderId }
+                    const retryOrder = await withTimeout(
+                        async () => await exchange.createOrder(
+                            spotPair,
+                            "STOP_LOSS_LIMIT",
+                            closeSide,
+                            quantity,
+                            limitPrice,
+                            { ...params, newClientOrderId: replacementClientOrderId }
+                        ),
+                        ORDER_REQUEST_TIMEOUT_MS,
+                        "SL replacement createOrder"
                     );
                     metrics.api.orders++;
+                    bumpRecoveryMetric("replacementSucceeded");
+                    maybeLogRecoveryMetrics();
                     console.log(`[SL][INFO] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
                     return attachClientOrderIdFallback(retryOrder, replacementClientOrderId);
                 } catch (replacementError) {

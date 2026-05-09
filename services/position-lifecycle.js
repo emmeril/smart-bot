@@ -277,7 +277,7 @@ const createPositionLifecycleHelpers = ({
         try {
             if (!db || !hasAnyActivePosition() || getIsClosingPosition()) return;
             setIsClosingPosition(true);
-            const trackedPosition = getActivePositionByKey(positionKey);
+            const trackedPosition = getActivePositionByKey(closeLockKey);
             if (!trackedPosition) return;
             const position = { ...trackedPosition };
             const { side, quantity } = position;
@@ -288,7 +288,7 @@ const createPositionLifecycleHelpers = ({
                     if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "INVALID_POSITION_QTY");
                 }
                 await cancelManagedOrdersForPosition(position, "INVALID_POSITION_QTY");
-                removeActivePositionByKey(positionKey);
+                removeActivePositionByKey(closeLockKey);
                 await saveDB();
                 return;
             }
@@ -299,7 +299,7 @@ const createPositionLifecycleHelpers = ({
                 const currentPos = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
                 if (!currentPos) {
                     console.log("[POSITION][INFO] No matching open position on exchange. Removing local active position.");
-                    await clearMissingPositionState(position, "POSITION_MISSING", positionKey);
+                    await clearMissingPositionState(position, "POSITION_MISSING", closeLockKey);
                     return;
                 }
                 const actualQuantity = Math.abs(getExchangePositionContracts(currentPos));
@@ -339,7 +339,7 @@ const createPositionLifecycleHelpers = ({
             const reasonLooksExchangeFilled = reason === "PROFIT_TARGET" || reason === "STOP_LOSS";
             if (isSpotRuntime && reasonLooksExchangeFilled && hasAttachedSpotExit && matchingTpOrders.length === 0 && matchingSlOrders.length === 0) {
                 console.log("[POSITION][INFO] Spot OCO exit is no longer open. Removing local active position using estimated fill state.");
-                await clearMissingPositionState(position, `SPOT_OCO_${reason}`, positionKey);
+                await clearMissingPositionState(position, `SPOT_OCO_${reason}`, closeLockKey);
                 return;
             }
             if (matchingTpOrders.length > 0) await cancelTpOrders(matchingTpOrders, "MANUAL_CLOSE");
@@ -365,7 +365,7 @@ const createPositionLifecycleHelpers = ({
                     const openPosition = findOpenExchangePosition(await fetchOpenExchangePositions(), db.pair, position);
                     if (!openPosition) {
                         console.log("[POSITION][INFO] No matching open position on exchange. Removing local active position.");
-                        await clearMissingPositionState(position, "POSITION_MISSING", positionKey);
+                        await clearMissingPositionState(position, "POSITION_MISSING", closeLockKey);
                         return;
                     }
 
@@ -378,8 +378,8 @@ const createPositionLifecycleHelpers = ({
                     await cancelManagedOrdersForPosition(position, "POSITION_RESYNC");
                     upsertActivePosition(syncedPosition);
                     await saveDB();
-                    await ensureReduceOnlyTakeProfitOrder(positionKey, syncedPosition);
-                    await ensureReduceOnlyStopLossOrder(positionKey, syncedPosition);
+                    await ensureReduceOnlyTakeProfitOrder(closeLockKey, syncedPosition);
+                    await ensureReduceOnlyStopLossOrder(closeLockKey, syncedPosition);
                     console.log("[POSITION][INFO] Updated active position from exchange data. Will retry close on next cycle.");
                     return;
                 }
@@ -418,8 +418,8 @@ const createPositionLifecycleHelpers = ({
                     syncedRemainingPosition.stopLossUSDT = recalculatedRemainingPlan.stopLossUSDT;
                     upsertActivePosition(syncedRemainingPosition);
                     await saveDB();
-                    await ensureReduceOnlyTakeProfitOrder(positionKey, syncedRemainingPosition);
-                    await ensureReduceOnlyStopLossOrder(positionKey, syncedRemainingPosition);
+                    await ensureReduceOnlyTakeProfitOrder(closeLockKey, syncedRemainingPosition);
+                    await ensureReduceOnlyStopLossOrder(closeLockKey, syncedRemainingPosition);
                     console.warn(`[POSITION][WARN] Close order partially filled. Remaining quantity on exchange: ${remainingContracts}`);
                     return;
                 }
@@ -431,7 +431,7 @@ const createPositionLifecycleHelpers = ({
                 realizedPnL.profitPercent,
                 reason,
                 closeFillSnapshot.price,
-                positionKey,
+                closeLockKey,
                 {
                     closedAt,
                     order: closeOrder,

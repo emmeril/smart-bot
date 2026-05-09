@@ -12,6 +12,7 @@ const createRuntimeMonitoringHelpers = ({
     getIsClosingPosition,
     getIsSyncingPosition,
     getIsPlacingOrder,
+    getIsSyncingGridOrders,
     getPrice,
     fetchManagedOpenOrdersSnapshot,
     getActivePositionEntries,
@@ -124,9 +125,37 @@ const createRuntimeMonitoringHelpers = ({
         if (getIsShuttingDown()) return;
         setIsShuttingDown(true);
 
-        if (getIsPlacingOrderState() || getIsClosingPositionState()) {
-            console.log("[SHUTDOWN][INFO] Waiting for active transaction to complete...");
-            await sleep(2000);
+        const waitForActiveRuntimeMutation = async () => {
+            const maxWaitMs = 15000;
+            const pollIntervalMs = 250;
+            const deadline = Date.now() + maxWaitMs;
+            let hasLoggedWait = false;
+
+            const hasActiveRuntimeWork = () => (
+                getIsPlacingOrderState() ||
+                getIsClosingPositionState() ||
+                getIsMonitoringPnL() ||
+                getIsSyncingPosition() ||
+                (typeof getIsSyncingGridOrders === "function" && getIsSyncingGridOrders())
+            );
+
+            while (hasActiveRuntimeWork()) {
+                if (!hasLoggedWait) {
+                    console.log("[SHUTDOWN][INFO] Waiting for active runtime task to complete...");
+                    hasLoggedWait = true;
+                }
+                if (Date.now() >= deadline) {
+                    console.warn("[SHUTDOWN][WARN] Active runtime task still running after timeout. Continuing shutdown.");
+                    break;
+                }
+                await sleep(pollIntervalMs);
+            }
+        };
+
+        try {
+            await waitForActiveRuntimeMutation();
+        } catch (waitError) {
+            console.error("[SHUTDOWN][ERROR] Failed while waiting active transaction:", waitError.message);
         }
 
         console.log(`[SHUTDOWN][INFO] Received ${signal}. Stopping bot...`);
