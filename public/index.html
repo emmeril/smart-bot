@@ -62,10 +62,7 @@
     .app-shell {
       position: relative;
       min-height: 100vh;
-      background:
-        radial-gradient(circle at 8% 10%, rgba(15,118,110,0.12), transparent 28%),
-        radial-gradient(circle at 92% 3%, rgba(14,165,233,0.12), transparent 30%),
-        linear-gradient(180deg, #f8fbff 0%, #f2f7fb 46%, #eaf1f7 100%);
+      background: linear-gradient(180deg, #f7fafe 0%, #edf3f9 100%);
     }
     .app-shell::before {
       content: "";
@@ -78,7 +75,7 @@
       background-size: 64px 64px;
       mask-image: linear-gradient(180deg, rgba(0,0,0,0.42), transparent 90%);
     }
-    .dashboard-layout { width: 100%; max-width: 1440px; margin: 0 auto; display: grid; gap: 0; }
+    .dashboard-layout { width: 100%; max-width: 1280px; margin: 0 auto; display: block; }
     .sidebar { display: none; position: sticky; top: 0; height: 100vh; border-right: 1px solid var(--line); background: rgba(255,255,255,0.84); padding: 24px 20px; box-shadow: 0 8px 24px rgba(15,23,42,0.06); backdrop-filter: blur(14px); }
     .sidebar-brand { display: flex; align-items: center; gap: 12px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
     .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -91,10 +88,10 @@
     .side-nav a.active { background: #eff6ff; color: var(--brand); }
     .side-nav a:hover { background: #f8fafc; color: var(--text); }
     .sidebar-card { margin-top: auto; border: 1px solid var(--line); border-radius: 12px; background: #f8fafc; padding: 16px; }
-    .main-area { min-width: 0; padding: 16px 12px; }
-    .shell { width: 100%; max-width: 1120px; margin: 0 auto; display: grid; gap: 16px; }
+    .main-area { min-width: 0; padding: 12px 10px; }
+    .shell { width: 100%; max-width: 1080px; margin: 0 auto; display: grid; gap: 12px; }
 
-    .topbar { display: flex; flex-direction: column; gap: 16px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,0.9); padding: 16px; box-shadow: var(--shadow-panel); backdrop-filter: blur(14px); }
+    .topbar { display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,0.9); padding: 12px; box-shadow: var(--shadow-panel); backdrop-filter: blur(14px); }
     .topbar-status { display: flex; align-items: center; gap: 12px; min-width: 0; }
     .pulse-dot { width: 10px; height: 10px; flex-shrink: 0; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 6px rgba(22,130,82,0.12); }
     .topbar-meta { min-width: 0; }
@@ -102,18 +99,18 @@
     .topbar-meta span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 0.75rem; line-height: 1.25rem; }
     .topbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-    .panel { border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,0.95); box-shadow: var(--shadow-panel); transition: transform 180ms ease, box-shadow 180ms ease; animation: fadeSlideIn 360ms ease both; }
-    .panel:hover { transform: translateY(-1px); box-shadow: 0 24px 44px rgba(8, 20, 38, 0.12); }
-    .hero { display: grid; gap: 20px; padding: 20px; }
+    .panel { border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,0.95); box-shadow: var(--shadow-panel); transition: box-shadow 180ms ease; animation: fadeSlideIn 360ms ease both; }
+    .panel:hover { box-shadow: 0 20px 36px rgba(8, 20, 38, 0.11); }
+    .hero { display: grid; gap: 12px; padding: 14px; }
     .hero-copy { min-width: 0; }
     .eyebrow { margin: 0 0 8px; color: var(--muted); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
     .hero-copy h1, .panel-head h2 { margin: 0; color: var(--text); font-size: 1.5rem; font-weight: 700; line-height: 1.2; letter-spacing: 0; }
     .lede { max-width: 42rem; margin: 12px 0 0; color: var(--muted); font-size: 0.875rem; line-height: 1.5rem; }
-    .hero-badges, .terminal-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    .hero-badges, .terminal-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
     .hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
     .hero-actions form { margin: 0; }
 
-    .btn { display: inline-flex; min-height: 40px; cursor: pointer; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 10px; padding: 8px 16px; font-size: 0.875rem; font-weight: 600; transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease; }
+    .btn { display: inline-flex; min-height: 36px; cursor: pointer; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 9px; padding: 6px 12px; font-size: 0.8125rem; font-weight: 600; transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease; }
     .btn:disabled { cursor: not-allowed; opacity: 0.6; }
     .btn-primary { border-color: var(--brand); background: linear-gradient(135deg, #0f766e, #0ea5e9); color: #fff; }
     .btn-primary:hover { transform: translateY(-1px); filter: saturate(1.08); }
@@ -122,11 +119,11 @@
     .btn-danger { border-color: #fecaca; background: #fff5f5; color: var(--danger); }
     .btn-danger:hover { background: #ffe8e8; transform: translateY(-1px); }
 
-    .hero-metrics { display: grid; grid-template-columns: 1fr; gap: 12px; min-width: 0; }
-    .metric-card, .status-item, .pnl-summary-card, .live-card, .live-list, .section-card, .terminal-card { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: #f7fbff; padding: 16px; }
+    .hero-metrics { display: grid; grid-template-columns: 1fr; gap: 8px; min-width: 0; }
+    .metric-card, .status-item, .pnl-summary-card, .live-card, .live-list, .section-card, .terminal-card { min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: #f7fbff; padding: 12px; }
     .metric-card .label, .status-label, .live-card .label { display: block; color: var(--muted); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
     .metric-card strong, .status-item strong, .live-card strong { display: block; margin-top: 8px; color: var(--text); font-size: 1.125rem; font-weight: 700; }
-    .metric-card span, .live-card span, .live-item span, .field-hint, .field-note, .pnl-sub, .muted { color: var(--muted); font-size: 0.875rem; line-height: 1.5rem; }
+    .metric-card span, .live-card span, .live-item span, .pnl-sub, .muted { color: var(--muted); font-size: 0.875rem; line-height: 1.5rem; }
     .metric-card.recovery-stable { border-color: #a7f3d0; background: #ecfdf5; }
     .metric-card.recovery-observed { border-color: #fde68a; background: #fffbeb; }
     .metric-card.recovery-watch { border-color: #fecaca; background: #fef2f2; }
@@ -143,6 +140,7 @@
     .pnl-summary-card.total { border-left: 4px solid var(--text); }
     .pnl-summary-card h3 { margin: 0; color: var(--muted); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
     .pnl-display { margin-top: 8px; color: var(--text); font-size: 1.5rem; font-weight: 800; line-height: 1.15; }
+    .pnl-sub:empty, .muted:empty, .eyebrow:empty { display: none; }
     .pnl-positive { color: var(--success); }
     .pnl-negative { color: var(--danger); }
     .pnl-neutral { color: var(--text); }
@@ -159,10 +157,11 @@
     .pill.info { border-color: #bfdbfe; background: #eff6ff; color: var(--brand); }
     .side-badge.flat { background: #f1f5f9; color: #475569; }
 
-    .live-panel, .form-panel, .footer-panel { padding: 16px; }
-    .panel-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
-    .live-grid { display: grid; gap: 12px; }
-    .live-lists { display: grid; gap: 12px; margin-top: 16px; }
+    .live-panel, .form-panel, .footer-panel { padding: 12px; }
+    .status-strip, .pnl-section, .terminal-strip { display: none; }
+    .panel-head { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+    .live-grid { display: grid; gap: 8px; }
+    .live-lists { display: grid; gap: 8px; margin-top: 10px; }
     .live-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
     .live-list-head h3 { margin: 0; }
     .btn-xs { min-height: 32px; padding: 6px 10px; font-size: 0.75rem; }
@@ -195,12 +194,12 @@
     .config-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; color: var(--muted); font-size: 0.875rem; line-height: 1.5rem; }
     .field-badge { display: inline-flex; align-items: center; border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; padding: 4px 10px; color: var(--brand); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.04em; }
     .field-badge.toggle { border-color: #fde68a; background: #fffbeb; color: var(--warning); }
-    .config-grid { display: grid; gap: 16px; }
-    .field-list { display: grid; gap: 12px; }
-    .field { display: grid; gap: 8px; }
+    .config-grid { display: grid; gap: 10px; }
+    .field-list { display: grid; gap: 8px; }
+    .field { display: grid; gap: 6px; }
     .field-label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .field-label label { color: var(--text); font-size: 0.875rem; font-weight: 600; }
-    .field-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; }
+    .field-row { display: flex; align-items: center; justify-content: flex-end; gap: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; }
     .field-row input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--brand); }
     .field-control { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px 12px; color: var(--text); font-size: 0.875rem; outline: none; transition: border-color 140ms ease, box-shadow 140ms ease; }
     .field-control:focus { border-color: #93c5fd; box-shadow: 0 0 0 4px #dbeafe; }
@@ -221,7 +220,7 @@
       .topbar-meta span { font-size: 0.875rem; }
       .hero-copy h1, .panel-head h2 { font-size: 1.875rem; }
       .lede { font-size: 1rem; }
-      .main-area { padding-left: 20px; padding-right: 20px; }
+      .main-area { padding-left: 16px; padding-right: 16px; }
     }
 
     @media (min-width: 768px) {
@@ -234,17 +233,18 @@
     }
 
     @media (min-width: 1024px) {
-      .dashboard-layout { grid-template-columns: 272px minmax(0, 1fr); }
-      .sidebar { display: flex; flex-direction: column; }
-      .main-area { padding: 24px 28px; }
-      .shell { gap: 20px; }
-      .topbar .brand { display: none; }
-      .hero { grid-template-columns: minmax(0, 1fr) minmax(360px, 0.78fr); padding: 24px; }
+      .dashboard-layout { display: block; }
+      .sidebar { display: none; }
+      .main-area { padding: 18px 20px; }
+      .shell { gap: 14px; }
+      .topbar .brand { display: flex; }
+      .hero-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .hero { grid-template-columns: minmax(0, 1fr) minmax(320px, 0.78fr); padding: 16px; }
       .status-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
       .terminal-strip { grid-template-columns: 1.1fr 0.9fr; }
       .live-lists { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .config-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .live-panel, .form-panel, .footer-panel { padding: 24px; }
+      .live-panel, .form-panel, .footer-panel { padding: 16px; }
     }
   </style>
 </head>
@@ -267,7 +267,6 @@
         </nav>
         <div class="sidebar-card">
           <p class="eyebrow">Ruang Kerja</p>
-          <p class="muted">Pusat kontrol real-time untuk memantau performa bot dan mengelola parameter risiko.</p>
         </div>
       </aside>
 
@@ -301,7 +300,6 @@
             <div class="hero-copy">
               <p class="eyebrow">Operasional Trading</p>
               <h1>Pusat Kendali Smart Bot</h1>
-              <p class="lede">Pantau runtime, PnL, posisi aktif, dan order terbuka dalam satu workspace modern untuk keputusan lebih cepat.</p>
               <div class="hero-badges">
                 <span class="signal-chip">Strategi <strong>spot_grid</strong></span>
                 <span class="signal-chip">Bursa <strong>Binance</strong></span>
@@ -322,17 +320,17 @@
             <article class="pnl-summary-card realized">
               <h3>PnL Terealisasi</h3>
               <div class="pnl-display" id="realizedPnlValue">-</div>
-              <div class="pnl-sub" id="realizedPnlMeta">Dari posisi yang sudah ditutup</div>
+              <div class="pnl-sub" id="realizedPnlMeta"></div>
             </article>
             <article class="pnl-summary-card unrealized">
               <h3>Unrealized PnL</h3>
               <div class="pnl-display" id="unrealizedPnlValue">-</div>
-              <div class="pnl-sub" id="unrealizedPnlMeta">Dari posisi yang masih terbuka</div>
+              <div class="pnl-sub" id="unrealizedPnlMeta"></div>
             </article>
             <article class="pnl-summary-card total">
               <h3>Total PnL</h3>
               <div class="pnl-display" id="totalPnlValue">-</div>
-              <div class="pnl-sub" id="totalPnlMeta">Gabungan realized + unrealized</div>
+              <div class="pnl-sub" id="totalPnlMeta"></div>
             </article>
           </section>
 
@@ -363,7 +361,6 @@
                 <p class="eyebrow">Monitor Langsung</p>
                 <h2>Posisi, PnL, dan order</h2>
               </div>
-              <p class="muted">Diperbarui otomatis dari runtime bot.</p>
             </div>
             <div class="live-grid">
               <article class="live-card">
@@ -406,7 +403,6 @@
                 <p class="eyebrow">Pengaturan Risiko</p>
                 <h2>Parameter trading</h2>
               </div>
-              <p class="muted">Bagian General dan Risk Management tetap tersimpan melalui API konfigurasi.</p>
             </div>
             <div class="config-legend">
               <span class="field-badge">AUTO 0</span>
@@ -421,10 +417,7 @@
           </section>
 
           <section class="panel footer-panel">
-            <div>
-              <p class="eyebrow">Catatan</p>
-              <p class="muted">Status live dibaca dari runtime bot, sedangkan perubahan parameter disimpan lewat endpoint konfigurasi.</p>
-            </div>
+            <div></div>
             <div id="toast" class="toast" aria-live="polite"></div>
           </section>
         </div>
@@ -499,13 +492,6 @@
 	      autoStopLossEnabled: { label: "AUTO TOGGLE", hint: "Aktif = stop loss memakai mode ATR otomatis.", className: "toggle" }
 	    };
 	
-	    function getFieldHint(field) {
-	      const base = field.description || "";
-	      const autoHint = AUTO_MODE_META[field.key] ? AUTO_MODE_META[field.key].hint : "";
-	      if (base && autoHint) return `${base} ${autoHint}`;
-	      return autoHint || base;
-	    }
-
 	    function setBusy(busy) {
 	      saveBtn.disabled = busy;
       refreshBtn.disabled = busy;
@@ -689,20 +675,15 @@
       const exchangeLabel = !exchangeConnected
         ? "Offline"
         : (needsRecoverySync ? "Recovery sync" : (exchangeHealthy ? "Healthy" : "Degraded"));
-      const recoveryStatus = timeoutErrors > 0 ? "Watch" : (duplicateDetected > 0 ? "Observed" : "Stable");
-      const recoveryClass = recoveryStatus === "Watch" ? "recovery-watch" : (recoveryStatus === "Observed" ? "recovery-observed" : "recovery-stable");
       const cards = [
-        { label: "Bot", value: runtimeStatus.label, note: runtimeStatus.description, cardClass: "", badgeClass: "" },
-        { label: "Posisi", value: String(status.activePositions), note: status.activeGridState ? "Status grid aktif" : "Tidak ada status grid lokal", cardClass: "", badgeClass: "" },
-        { label: "PnL Terealisasi", value: `${formatNumber(status.dailyPnL)} USDT`, note: `${status.dailyTrades} transaksi hari ini | ${String(status.dailyPnlSource || "local").toLowerCase()}`, cardClass: "", badgeClass: "" },
-        { label: "Mode Trading", value: tradeModeValue, note: positionModeValue, cardClass: "", badgeClass: "" },
-        { label: "Pemulihan Order", value: recoveryStatus, note: `dup ${duplicateDetected}/${duplicateResolved} | timeout ${timeoutErrors} | repl ${replacementSucceeded}/${replacementAttempts}`, cardClass: recoveryClass, badgeClass: recoveryClass }
+        { label: "Bot", value: runtimeStatus.label, cardClass: "", badgeClass: "" },
+        { label: "Posisi", value: String(status.activePositions), cardClass: "", badgeClass: "" },
+        { label: "PnL Terealisasi", value: `${formatNumber(status.dailyPnL)} USDT`, cardClass: "", badgeClass: "" }
       ];
       statusCards.innerHTML = cards.map((card) => `
         <article class="metric-card ${card.cardClass || ""}">
           <span class="label">${card.label}</span>
           <strong class="${card.badgeClass ? `metric-value-badge ${card.badgeClass}` : ""}">${card.value}</strong>
-          <span>${card.note}</span>
         </article>
       `).join("");
       botStatus.textContent = runtimeStatus.label;
@@ -1014,15 +995,11 @@
 	      if (field.type === "boolean") {
 	        const row = document.createElement("div");
 	        row.className = "field-row";
-	        const hint = document.createElement("span");
-	        hint.className = "field-hint";
-	        hint.textContent = getFieldHint(field);
 	        const toggle = document.createElement("input");
 	        toggle.type = "checkbox";
 	        toggle.id = field.key;
         toggle.name = field.key;
         toggle.checked = Boolean(value);
-        row.appendChild(hint);
         row.appendChild(toggle);
         wrapper.appendChild(row);
         return wrapper;
@@ -1053,11 +1030,7 @@
       if (field.type === "number") {
         input.inputMode = Number(field.step) === 1 ? "numeric" : "decimal";
 	      }
-	      const note = document.createElement("div");
-	      note.className = "field-note";
-	      note.textContent = getFieldHint(field);
 	      wrapper.appendChild(input);
-	      wrapper.appendChild(note);
 	      return wrapper;
 	    }
 
