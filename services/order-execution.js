@@ -665,7 +665,7 @@ const createOrderExecutionHelpers = ({
                 "GRID createOrder"
             );
             metrics.api.orders++;
-            console.log(`[GRID][INFO] Placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price} size ${orderSizeUsdt.toFixed(4)} USDT -> TP ${gridOrder.targetPrice} | SL ${gridOrder.stopLossPrice}`);
+            console.log(`[GRID][INFO] Placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price} size ${orderSizeUsdt.toFixed(4)} USDT | OCO exit plan TP ${gridOrder.targetPrice} | SL ${gridOrder.stopLossPrice}`);
             return true;
         } catch (error) {
             if (isDuplicateClientOrderIdError(error)) {
