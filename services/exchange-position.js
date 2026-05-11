@@ -1,5 +1,4 @@
 const createExchangePositionHelpers = ({
-    isHedgeModeEnabled,
     toFiniteNumber,
     normalizeSymbol,
     formatPriceToMarketPrecision,
@@ -12,38 +11,20 @@ const createExchangePositionHelpers = ({
     getPositionSyncQtyTolerance,
     getPositionSyncEntryTolerancePct
 }) => {
-    const getTrackedPositionSideLabel = (position) => {
-        const rawPositionSide = String(position?.positionSide || position?.info?.positionSide || "").toUpperCase();
-        if (rawPositionSide === "LONG" || rawPositionSide === "SHORT" || rawPositionSide === "BOTH") return rawPositionSide;
-        const side = String(position?.side || "").toLowerCase();
-        if (side === "buy") return isHedgeModeEnabled() ? "LONG" : "BOTH";
-        if (side === "sell") return isHedgeModeEnabled() ? "SHORT" : "BOTH";
-        return isHedgeModeEnabled() ? null : "BOTH";
-    };
+    const getTrackedPositionSideLabel = () => "BOTH";
 
-    const getOrderPositionSide = (side) => {
-        if (!isHedgeModeEnabled()) return "BOTH";
-        return String(side || "").toLowerCase() === "buy" ? "LONG" : "SHORT";
-    };
+    const getOrderPositionSide = () => "BOTH";
 
-    const getClosePositionSide = (position) => {
-        if (!isHedgeModeEnabled()) return "BOTH";
-        const tracked = getTrackedPositionSideLabel(position);
-        if (tracked === "LONG" || tracked === "SHORT") return tracked;
-        return String(position?.side || "").toLowerCase() === "buy" ? "LONG" : "SHORT";
-    };
+    const getClosePositionSide = () => "BOTH";
 
     const matchesOrderToTrackedPosition = (order, position) => {
         const positionSide = String(position?.side || "").toLowerCase();
-        const trackedSide = getTrackedPositionSideLabel(position);
-        const expectedCloseSide = positionSide === "buy" || trackedSide === "LONG"
+        const expectedCloseSide = positionSide === "buy"
             ? "sell"
-            : (positionSide === "sell" || trackedSide === "SHORT" ? "buy" : null);
+            : (positionSide === "sell" ? "buy" : null);
         if (!expectedCloseSide) return false;
         if (String(order?.side || "").toLowerCase() !== expectedCloseSide) return false;
-        if (!isHedgeModeEnabled()) return true;
-        const orderPositionSide = String(order?.info?.positionSide || order?.positionSide || "").toUpperCase();
-        return !orderPositionSide || orderPositionSide === getClosePositionSide(position);
+        return true;
     };
 
     const getOrderQuantity = (order) => {
@@ -105,15 +86,7 @@ const createExchangePositionHelpers = ({
         return null;
     };
 
-    const getExchangePositionModeSide = (position) => {
-        if (!isHedgeModeEnabled()) return "BOTH";
-        const rawPositionSide = String(position?.positionSide || position?.info?.positionSide || "").toUpperCase();
-        if (rawPositionSide === "LONG" || rawPositionSide === "SHORT" || rawPositionSide === "BOTH") return rawPositionSide;
-        const side = String(position?.side || "").toLowerCase();
-        if (side === "long") return "LONG";
-        if (side === "short") return "SHORT";
-        return getExchangePositionSide(position) === "buy" ? "LONG" : (getExchangePositionSide(position) === "sell" ? "SHORT" : "BOTH");
-    };
+    const getExchangePositionModeSide = () => "BOTH";
 
     const getExchangePositionEntryPrice = (position, fallbackPrice = 0) => {
         const directEntry = toFiniteNumber(position?.entryPrice, NaN);
@@ -158,13 +131,7 @@ const createExchangePositionHelpers = ({
         };
     };
 
-    const matchesTrackedPositionSide = (position, trackedPosition) => {
-        if (!isHedgeModeEnabled()) return true;
-        const targetSide = getTrackedPositionSideLabel(trackedPosition);
-        const candidateSide = getTrackedPositionSideLabel(position);
-        if (!targetSide || targetSide === "BOTH") return true;
-        return candidateSide === targetSide;
-    };
+    const matchesTrackedPositionSide = () => true;
 
     const findOpenExchangePosition = (positions, pair, trackedPosition = null) => {
         const normalizedPair = normalizeSymbol(pair);
@@ -174,9 +141,6 @@ const createExchangePositionHelpers = ({
         ));
         if (openPositions.length === 0) return null;
         if (trackedPosition) return openPositions.find((position) => matchesTrackedPositionSide(position, trackedPosition)) || null;
-        if (isHedgeModeEnabled() && openPositions.length > 1) {
-            console.warn("[POSITION][WARN] Multiple hedge positions detected on the same symbol. Bot will track the first open side only.");
-        }
         return openPositions[0];
     };
 

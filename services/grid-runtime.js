@@ -14,7 +14,6 @@ const createGridRuntimeHelpers = ({
     validateOrderSize,
     isDirectionalOrderPlanValid,
     getClosePositionSide,
-    isHedgeModeEnabled,
     getActivePositionsList,
     getExchangePositionSide,
     gridClientOrderPrefix,
@@ -571,7 +570,7 @@ const createGridRuntimeHelpers = ({
     const filterGridOrdersForActiveExposure = (orders, openPositions = [], trackedPositions = getActivePositionsList()) => {
         if (!Array.isArray(orders) || orders.length === 0) return [];
         const exposureSides = getActiveGridExposureSides(openPositions, trackedPositions);
-        if (exposureSides.size === 0 || isHedgeModeEnabled()) return orders;
+        if (exposureSides.size === 0) return orders;
         return orders.filter((order) => exposureSides.has(String(order?.side || "").toLowerCase()));
     };
 

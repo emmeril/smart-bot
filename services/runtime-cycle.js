@@ -17,7 +17,6 @@ const createRuntimeCycleHelpers = ({
     fetchOpenGridOrders,
     cancelGridOrders,
     syncGridOrders,
-    isHedgeModeEnabled,
     hasAnyActivePosition,
     getLastTradeTimestampFromLog,
     analyzeSignal,
@@ -127,11 +126,11 @@ const createRuntimeCycleHelpers = ({
             return;
         }
 
-        const coolingBlocked = isCoolingDown() && (!isHedgeModeEnabled() || !hasAnyActivePosition());
-        if ((!isHedgeModeEnabled() && hasAnyActivePosition()) || coolingBlocked) return;
+        const coolingBlocked = isCoolingDown() && !hasAnyActivePosition();
+        if (hasAnyActivePosition() || coolingBlocked) return;
 
         const signal = await analyzeSignal();
-        if (signal.canLong && !getActivePositionByKey(isHedgeModeEnabled() ? "LONG" : "BOTH")) await placeOrder("buy", signal);
+        if (signal.canLong && !getActivePositionByKey("BOTH")) await placeOrder("buy", signal);
     };
 
     const startMetricsReporting = (currentTimer, setMetricsTimer) => {

@@ -79,7 +79,7 @@ let lastGridSizingSkipReason = "";
 let hasLoggedTriggerOrderFetchFallback = false;
 const gridSizingStateLogCache = new Map();
 let isShuttingDown = false;
-let accountPositionMode = { hedged: false, label: "ONE_WAY" };
+let accountPositionMode = { hedged: false, label: "SPOT" };
 let runtimeCommandsRegistered = false;
 let webServer = null;
 let configReloadTimer = null;
@@ -199,7 +199,6 @@ const { getDefaultConfig } = createRuntimeConfigHelpers({
 });
 
 const normalizeSymbol = (symbol) => String(symbol || "").toUpperCase().trim();
-const isHedgeModeEnabled = () => accountPositionMode.hedged === true;
 
 const {
     safeParseJSON,
@@ -293,7 +292,6 @@ const {
     validateOrderSize: (...args) => validateOrderSize(...args),
     isDirectionalOrderPlanValid: (...args) => isDirectionalOrderPlanValid(...args),
     getClosePositionSide: (...args) => getClosePositionSide(...args),
-    isHedgeModeEnabled,
     getActivePositionsList: (...args) => getActivePositionsList(...args),
     getExchangePositionSide: (...args) => getExchangePositionSide(...args),
     gridClientOrderPrefix: GRID_CLIENT_ORDER_PREFIX,
@@ -523,7 +521,6 @@ const {
     getExchange: () => exchange,
     getMetrics: () => metrics,
     getDb: () => db,
-    isHedgeModeEnabled: () => isHedgeModeEnabled(),
     toFiniteNumber,
     formatAmountToMarketPrecision,
     formatPriceToMarketPrecision,
@@ -565,11 +562,7 @@ const {
 
 const isLegacySinglePosition = (value) => value && typeof value === "object" && !Array.isArray(value) && ("entryPrice" in value || "quantity" in value || "side" in value);
 
-const toPositionMapKey = (positionSide) => {
-    const normalized = String(positionSide || "").toUpperCase();
-    if (normalized === "LONG" || normalized === "SHORT" || normalized === "BOTH") return normalized;
-    return normalized || "BOTH";
-};
+const toPositionMapKey = () => "BOTH";
 
 const {
     getTrackedPositionSideLabel,
@@ -591,7 +584,6 @@ const {
     shouldRefreshSyncedPosition,
     isSameTrackedPosition
 } = createExchangePositionHelpers({
-    isHedgeModeEnabled,
     toFiniteNumber,
     normalizeSymbol,
     formatPriceToMarketPrecision,
@@ -641,10 +633,7 @@ const {
     getDb: () => db,
     getExchange: () => exchange,
     getMetrics: () => metrics,
-    isHedgeModeEnabled: () => isHedgeModeEnabled(),
-    getOrderPositionSide: (...args) => getOrderPositionSide(...args),
     normalizeSymbol,
-    getExchangePositionContracts: (...args) => getExchangePositionContracts(...args),
     toFiniteNumber,
     saveDB: (...args) => saveDB(...args),
     getLastPositionRuntimePersistAt: () => lastPositionRuntimePersistAt,
@@ -671,13 +660,11 @@ const {
 const {
     clearMissingPositionState,
     finalizeClosedPosition,
-    recordPartialClose,
     closePosition
 } = createPositionLifecycleHelpers({
     getDb: () => db,
     getExchange: () => exchange,
     getMetrics: () => metrics,
-    isHedgeModeEnabled: () => isHedgeModeEnabled(),
     getClosingPositionKeys: () => closingPositionKeys,
     getIsClosingPosition: () => isClosingPosition,
     setIsClosingPosition: (value) => { isClosingPosition = value; },
@@ -693,13 +680,7 @@ const {
     getTrackedPositionSideLabel,
     getPrice: (...args) => getPrice(...args),
     calculatePositionPnL,
-    fetchOpenExchangePositions: (...args) => fetchOpenExchangePositions(...args),
-    findOpenExchangePosition,
     fetchOpenGridOrders,
-    getExchangePositionContracts,
-    getExchangePositionEntryPrice,
-    buildOrderPlan,
-    upsertActivePosition,
     fetchOpenTpOrders,
     fetchOpenSlOrders,
     matchesOrderToTrackedPosition: (...args) => matchesOrderToTrackedPosition(...args),
@@ -707,11 +688,6 @@ const {
     cancelTpOrders,
     cancelSlOrders,
     buildExchangeOrderParams,
-    getClosePositionSide,
-    buildSyncedActivePosition,
-    ensureReduceOnlyTakeProfitOrder,
-    ensureReduceOnlyStopLossOrder,
-    getPositionSyncQtyTolerance: () => POSITION_SYNC_QTY_TOLERANCE,
     getOrderFillSnapshot,
     notifyPositionClosed: (...args) => notifyPositionClosed(...args),
     notifyTradeUpdate: (...args) => notifyTradeUpdate(...args)
@@ -891,7 +867,6 @@ const {
     fetchOpenGridOrders: (...args) => fetchOpenGridOrders(...args),
     cancelGridOrders: (...args) => cancelGridOrders(...args),
     syncGridOrders: (...args) => syncGridOrders(...args),
-    isHedgeModeEnabled: () => isHedgeModeEnabled(),
     hasAnyActivePosition: () => hasAnyActivePosition(),
     getLastTradeTimestampFromLog: (...args) => getLastTradeTimestampFromLog(...args),
     analyzeSignal: (...args) => analyzeSignal(...args),
@@ -1268,7 +1243,6 @@ const {
     filterGridOrdersForActiveExposure: (...args) => filterGridOrdersForActiveExposure(...args),
     getExchangeClientOrderId,
     placeGridEntryOrder: (...args) => placeGridEntryOrder(...args),
-    isHedgeModeEnabled: () => isHedgeModeEnabled(),
     hasAnyActivePosition: () => hasAnyActivePosition(),
     getActivePositionByKey: (...args) => getActivePositionByKey(...args),
     placeOrder: (...args) => placeOrder(...args)
@@ -1278,7 +1252,6 @@ const { placeOrder } = createTradeEntryHelpers({
     getDb: () => db,
     getExchange: () => exchange,
     getMetrics: () => metrics,
-    isHedgeModeEnabled: () => isHedgeModeEnabled(),
     getIsPlacingOrder: () => isPlacingOrder,
     setIsPlacingOrder: (value) => { isPlacingOrder = value; },
     getIsClosingPosition: () => isClosingPosition,
@@ -1286,7 +1259,6 @@ const { placeOrder } = createTradeEntryHelpers({
     getActivePositionByKey,
     setMarginMode: (...args) => setMarginMode(...args),
     fetchOpenExchangePositions: (...args) => fetchOpenExchangePositions(...args),
-    matchesTrackedPositionSide,
     fetchManagedOpenOrdersSnapshot,
     fetchSpotBalances: async () => {
         if (!exchange || typeof exchange.fetchBalance !== "function") return null;

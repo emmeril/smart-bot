@@ -59,7 +59,7 @@ test("filterGridOrdersForActiveExposure keeps only the active side in one-way mo
     assert.deepEqual(filtered, [orders[0]]);
 });
 
-test("filterGridOrdersForActiveExposure keeps both sides in hedge mode", () => {
+test("filterGridOrdersForActiveExposure keeps only active side in spot-only runtime", () => {
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({
             pair: "DOGE/USDT:USDT",
@@ -96,7 +96,6 @@ test("filterGridOrdersForActiveExposure keeps both sides in hedge mode", () => {
         validateOrderSize: () => ({ valid: true }),
         isDirectionalOrderPlanValid: () => true,
         getClosePositionSide: () => "BOTH",
-        isHedgeModeEnabled: () => true,
         getActivePositionsList: () => [{ side: "buy" }],
         getExchangePositionSide: (position) => position.side,
         getOrderTriggerPrice: () => NaN,
@@ -112,7 +111,7 @@ test("filterGridOrdersForActiveExposure keeps both sides in hedge mode", () => {
 
     const filtered = helpers.filterGridOrdersForActiveExposure(orders, [], [{ side: "buy" }]);
 
-    assert.deepEqual(filtered, orders);
+    assert.deepEqual(filtered, [orders[0]]);
 });
 
 test("resolveEffectiveGridLevels keeps manual values and derives sane automatic levels", () => {

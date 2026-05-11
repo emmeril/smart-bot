@@ -55,7 +55,6 @@ const createRuntimeSignalGridHelpers = ({
     filterGridOrdersForActiveExposure,
     getExchangeClientOrderId,
     placeGridEntryOrder,
-    isHedgeModeEnabled,
     hasAnyActivePosition,
     getActivePositionByKey,
     placeOrder

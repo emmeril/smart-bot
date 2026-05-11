@@ -2,7 +2,6 @@ const createOrderExecutionHelpers = ({
     getExchange,
     getMetrics,
     getDb,
-    isHedgeModeEnabled,
     toFiniteNumber,
     formatAmountToMarketPrecision,
     formatPriceToMarketPrecision,

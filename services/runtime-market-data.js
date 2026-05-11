@@ -127,7 +127,7 @@ const createRuntimeMarketDataHelpers = ({
             const timestamp = new Date().toISOString();
             const parsedTime = Date.parse(timestamp);
             setLastTradeAt(Number.isFinite(parsedTime) ? parsedTime : Date.now());
-            const tradeMode = (db.marginMode || "spot").toUpperCase();
+            const tradeMode = "SPOT";
             const strategy = strategyOverride || getPrimaryActivePosition()?.strategy || `SPOT_GRID_${String(db.gridTimeframe || "5m").toUpperCase()}`;
             const line = [
                 timestamp,

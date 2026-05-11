@@ -22,10 +22,7 @@ const createConfigModelHelpers = ({
         const parsed = safeParseJSON(activePosition, null);
         if (!parsed || typeof parsed !== "object") return null;
         if (isLegacySinglePosition(parsed)) {
-            const legacyPositionSide = String(parsed.positionSide || "").toUpperCase();
-            const legacySideValue = String(parsed.side || "").toLowerCase();
-            const legacySide = legacyPositionSide || (legacySideValue === "buy" ? "LONG" : (legacySideValue === "sell" ? "SHORT" : "BOTH"));
-            const legacyKey = toPositionMapKey(legacySide);
+            const legacyKey = toPositionMapKey("BOTH");
             return { [legacyKey]: parsed };
         }
 

@@ -2,10 +2,7 @@ const createRuntimePositionUtils = ({
     getDb,
     getExchange,
     getMetrics,
-    isHedgeModeEnabled,
-    getOrderPositionSide,
     normalizeSymbol,
-    getExchangePositionContracts,
     toFiniteNumber,
     saveDB,
     getLastPositionRuntimePersistAt,
@@ -33,20 +30,8 @@ const createRuntimePositionUtils = ({
     });
 
     const fetchOpenExchangePositions = async () => {
-        const exchange = getExchange();
-        const db = getDb();
-        const metrics = getMetrics();
-        const marginMode = String(db?.marginMode || "spot").toLowerCase();
-        const defaultType = String(exchange?.options?.defaultType || "spot").toLowerCase();
-        if (marginMode === "spot" || defaultType === "spot") return [];
-        if (typeof exchange?.fetchPositions !== "function") return [];
-        metrics.api.positions++;
-        const pair = String(db?.pair || "").split(":")[0];
-        const positions = await exchange.fetchPositions([pair]);
-        return positions.filter((position) => (
-            normalizeSymbol(position.symbol) === normalizeSymbol(pair) &&
-            Math.abs(getExchangePositionContracts(position)) > 0
-        ));
+        // Spot-only runtime: no futures position sync.
+        return [];
     };
 
     const snapshotPositionRuntimeState = (position) => ({

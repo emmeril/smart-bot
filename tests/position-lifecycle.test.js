@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 
 const { createPositionLifecycleHelpers } = require("../services/position-lifecycle");
 
-test("closePosition keeps remaining position active after a partial close and reapplies exits", async () => {
+test("closePosition finalizes a spot close without futures partial-position resync", async () => {
     const db = {
         pair: "DOGE/USDT:USDT",
         dailyPnL: 0,
@@ -18,8 +18,7 @@ test("closePosition keeps remaining position active after a partial close and re
         isClosing: false,
         upserts: [],
         saveCalls: 0,
-        tpEnsures: 0,
-        slEnsures: 0,
+        removeCalls: 0,
         tradeLogs: []
     };
 
@@ -38,7 +37,6 @@ test("closePosition keeps remaining position active after a partial close and re
         strategy: "SPOT_GRID"
     };
 
-    let fetchPositionsCall = 0;
     const exchange = {
         createOrder: async () => ({ id: "close-order" })
     };
@@ -56,9 +54,7 @@ test("closePosition keeps remaining position active after a partial close and re
         getActivePositionEntries: () => [["BOTH", trackedPosition]],
         getActivePositionByKey: () => trackedPosition,
         cancelManagedOrdersForPosition: async () => {},
-        removeActivePositionByKey: () => {
-            throw new Error("removeActivePositionByKey should not be called for partial close");
-        },
+        removeActivePositionByKey: () => { state.removeCalls += 1; },
         saveDB: async () => { state.saveCalls += 1; },
         logTrade: (...args) => { state.tradeLogs.push(args); },
         getTrackedPositionSideLabel: () => "BOTH",
@@ -68,13 +64,7 @@ test("closePosition keeps remaining position active after a partial close and re
             netProfitUSDT: (exitPrice - 100) * (quantityOverride ?? 2),
             profitPercent: 10
         }),
-        fetchOpenExchangePositions: async () => {
-            fetchPositionsCall += 1;
-            if (fetchPositionsCall === 1) {
-                return [{ symbol: db.pair, contracts: 2, entryPrice: 100 }];
-            }
-            return [{ symbol: db.pair, contracts: 1, entryPrice: 100 }];
-        },
+        fetchOpenExchangePositions: async () => [],
         findOpenExchangePosition: (positions) => positions[0] || null,
         getExchangePositionContracts: (position) => Number(position.contracts),
         getExchangePositionEntryPrice: (position, fallback) => Number(position.entryPrice ?? fallback),
@@ -103,25 +93,19 @@ test("closePosition keeps remaining position active after a partial close and re
             targetProfitUSDT: 999,
             stopLossUSDT: -999
         }),
-        ensureReduceOnlyTakeProfitOrder: async () => { state.tpEnsures += 1; },
-        ensureReduceOnlyStopLossOrder: async () => { state.slEnsures += 1; },
+        ensureReduceOnlyTakeProfitOrder: async () => {},
+        ensureReduceOnlyStopLossOrder: async () => {},
         getPositionSyncQtyTolerance: () => 0.001,
         getOrderFillSnapshot: () => ({ price: 110, quantity: 2 })
     });
 
     await helpers.closePosition("BOTH", "MANUAL_CLOSE");
 
-    assert.equal(state.upserts.length, 1);
-    assert.equal(state.upserts[0].quantity, 1);
-    assert.equal(state.upserts[0].targetPrice, 105);
-    assert.equal(state.upserts[0].stopLossPrice, 98);
-    assert.equal(state.upserts[0].targetProfitUSDT, 5);
-    assert.equal(state.upserts[0].stopLossUSDT, -2);
-    assert.equal(db.dailyPnL, 10);
-    assert.equal(state.tpEnsures, 1);
-    assert.equal(state.slEnsures, 1);
+    assert.equal(state.upserts.length, 0);
+    assert.equal(state.removeCalls, 1);
+    assert.equal(db.dailyPnL, 20);
     assert.equal(state.tradeLogs.length, 1);
-    assert.equal(state.tradeLogs[0][3], "PARTIAL_CLOSE:MANUAL_CLOSE");
+    assert.equal(state.tradeLogs[0][3], "CLOSE:MANUAL_CLOSE");
     assert.equal(state.isClosing, false);
 });
 

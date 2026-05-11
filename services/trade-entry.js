@@ -9,8 +9,6 @@ const createTradeEntryHelpers = ({
     getActivePositionByKey,
     setMarginMode,
     fetchOpenExchangePositions,
-    isHedgeModeEnabled,
-    matchesTrackedPositionSide,
     fetchManagedOpenOrdersSnapshot,
     fetchSpotBalances,
     getPrice,
@@ -43,9 +41,7 @@ const createTradeEntryHelpers = ({
             console.log(`[ORDER][INFO] Attempting to place ${side.toUpperCase()} order...`);
             await setMarginMode();
             const openExchangePositions = await fetchOpenExchangePositions();
-            const conflictingExchangePosition = isHedgeModeEnabled()
-                ? openExchangePositions.find((position) => matchesTrackedPositionSide(position, { positionSide: targetPositionKey, side }))
-                : openExchangePositions[0] || null;
+            const conflictingExchangePosition = openExchangePositions[0] || null;
             if (conflictingExchangePosition) {
                 console.warn(`[ORDER][WARN] Skipping ${side.toUpperCase()} order because an exchange position is already open for the same side.`);
                 return;

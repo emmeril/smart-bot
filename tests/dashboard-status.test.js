@@ -51,8 +51,8 @@ test("buildLiveStatusPayload maps managed order fallbacks from order.info", asyn
     const order = payload.openOrders.sl[0];
 
     assert.equal(order.clientOrderId, "smartsl_test");
-    assert.equal(order.positionSide, "LONG");
-    assert.equal(order.reduceOnly, true);
+    assert.equal(order.positionSide, "SPOT");
+    assert.equal(order.reduceOnly, false);
     assert.equal(order.triggerPrice, 0.19);
     assert.equal(order.amount, 10);
     assert.equal(payload.orderRecovery.duplicateDetected, 0);

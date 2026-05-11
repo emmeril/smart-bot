@@ -2,10 +2,7 @@ const createPositionStateHelpers = ({ getDb, isLegacySinglePosition, toPositionM
     const getActivePositionsMap = (rawActivePosition = getDb()?.activePosition) => {
         if (!rawActivePosition || typeof rawActivePosition !== "object") return {};
         if (isLegacySinglePosition(rawActivePosition)) {
-            const rawPositionSide = String(rawActivePosition.positionSide || "").toUpperCase();
-            const rawSide = String(rawActivePosition.side || "").toLowerCase();
-            const fallbackSide = rawPositionSide || (rawSide === "buy" ? "LONG" : (rawSide === "sell" ? "SHORT" : "BOTH"));
-            const key = toPositionMapKey(fallbackSide);
+            const key = toPositionMapKey("BOTH");
             return { [key]: rawActivePosition };
         }
         const map = {};
@@ -80,4 +77,3 @@ const createPositionStateHelpers = ({ getDb, isLegacySinglePosition, toPositionM
 };
 
 module.exports = { createPositionStateHelpers };
-
