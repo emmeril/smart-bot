@@ -115,8 +115,8 @@ const createRuntimeSignalGridHelpers = ({
             ? snapshot.hourUTC >= db.sessionStartUTC && snapshot.hourUTC <= db.sessionEndUTC
             : snapshot.hourUTC >= db.sessionStartUTC || snapshot.hourUTC <= db.sessionEndUTC;
         const insideRange = snapshot.currentPrice >= lowerBound && snapshot.currentPrice <= upperBound;
-        const meanReversionLong = db.allowLong && insideRange && distanceFromMidSteps <= -1 && snapshot.currentPrice <= currentLevelLow + buffer;
-        const meanReversionShort = db.allowShort && insideRange && distanceFromMidSteps >= 1 && snapshot.currentPrice >= currentLevelHigh - buffer;
+        const meanReversionLong = insideRange && distanceFromMidSteps <= -1 && snapshot.currentPrice <= currentLevelLow + buffer;
+        const meanReversionShort = false;
         const momentumLongOk = !Number.isFinite(snapshot.macdHistogram) || snapshot.macdHistogram >= 0;
         const momentumShortOk = !Number.isFinite(snapshot.macdHistogram) || snapshot.macdHistogram <= 0;
         const canLong = meanReversionLong && volumeOk && sessionOk && adxOk && rsiLongOk && bbLongOk && momentumLongOk;

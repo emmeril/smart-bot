@@ -271,8 +271,6 @@ const createConfigModelHelpers = ({
         await addColumnIfMissing({ column: "entryBbStdDev", sql: "ALTER TABLE Configs ADD COLUMN entryBbStdDev FLOAT DEFAULT 2;" });
         await addColumnIfMissing({ column: "entryBbLongThreshold", sql: "ALTER TABLE Configs ADD COLUMN entryBbLongThreshold FLOAT DEFAULT 0.2;" });
         await addColumnIfMissing({ column: "entryBbShortThreshold", sql: "ALTER TABLE Configs ADD COLUMN entryBbShortThreshold FLOAT DEFAULT 0.8;" });
-        await addColumnIfMissing({ column: "allowLong", sql: "ALTER TABLE Configs ADD COLUMN allowLong BOOLEAN DEFAULT 1;" });
-        await addColumnIfMissing({ column: "allowShort", sql: "ALTER TABLE Configs ADD COLUMN allowShort BOOLEAN DEFAULT 1;" });
 
         for (const obsoleteColumn of obsoleteConfigColumns) {
             if (!columnNames.has(obsoleteColumn)) continue;

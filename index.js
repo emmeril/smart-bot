@@ -1084,9 +1084,7 @@ const AUTO_PAIR_GRID_PRESETS = {
         entryBbPeriod: 20,
         entryBbStdDev: 2,
         entryBbLongThreshold: 0.18,
-        entryBbShortThreshold: 0.82,
-        allowLong: true,
-        allowShort: false
+        entryBbShortThreshold: 0.82
     }
 };
 

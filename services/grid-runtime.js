@@ -278,6 +278,15 @@ const createGridRuntimeHelpers = ({
         return configured <= 0 ? Math.max(1, safeGridLevels - 1) : Math.max(1, configured);
     };
 
+    const resolveActiveGridSideCount = () => {
+        const allowBuyGrid = true;
+        const allowSellGrid = false;
+        let activeSides = 0;
+        if (allowBuyGrid) activeSides += 1;
+        if (allowSellGrid) activeSides += 1;
+        return activeSides;
+    };
+
     const getMinimumGridOrderSizeUsdt = (market, referencePrice) => {
         const safeReferencePrice = toFiniteNumber(referencePrice, NaN);
         if (!Number.isFinite(safeReferencePrice) || safeReferencePrice <= 0) return 0;
@@ -333,7 +342,9 @@ const createGridRuntimeHelpers = ({
         const minOrderSizeUsdt = getMinimumValidatedGridOrderSizeUsdt(market, referencePrice);
         const configuredSize = toFiniteNumber(configuredOrderSizeUsdt, 0);
         const isFullAutoSize = configuredSize <= 0;
-        const derivedAutoSize = maxConfiguredOrders > 0 ? usableUsdt / Math.max(maxConfiguredOrders * 2, 1) : 0;
+        const activeSideCount = resolveActiveGridSideCount();
+        const budgetDivisor = Math.max(1, activeSideCount);
+        const derivedAutoSize = maxConfiguredOrders > 0 ? usableUsdt / Math.max(maxConfiguredOrders * budgetDivisor, 1) : 0;
         const orderSizeUsdt = isFullAutoSize ? Math.max(derivedAutoSize, minOrderSizeUsdt) : configuredSize;
         return {
             orderSizeUsdt: Math.max(0, orderSizeUsdt),
@@ -362,6 +373,10 @@ const createGridRuntimeHelpers = ({
         const safeAvailableUsdt = toFiniteNumber(availableUsdt, 0);
         const safePerOrderMargin = Math.max(0, toFiniteNumber(perOrderMargin, db.gridOrderSizeUsdt));
         const safeReferencePrice = toFiniteNumber(referencePrice, NaN);
+        const activeSideCount = resolveActiveGridSideCount();
+        if (activeSideCount <= 0) {
+            return { count: 0, maxConfigured, mode: configuredOrdersPerSide <= 0 ? "FULL_AUTO" : "CAPPED", reason: "NO_ACTIVE_SIDE" };
+        }
         if (maxConfigured <= 0 || safePerOrderMargin <= 0 || safeAvailableUsdt <= 0 || !Number.isFinite(safeReferencePrice) || safeReferencePrice <= 0) {
             return { count: 0, maxConfigured, mode: configuredOrdersPerSide <= 0 ? "FULL_AUTO" : "CAPPED", reason: "INVALID_INPUT" };
         }
@@ -374,7 +389,7 @@ const createGridRuntimeHelpers = ({
         }
 
         const usableUsdt = safeAvailableUsdt * 0.9;
-        const affordablePerSide = Math.floor(usableUsdt / Math.max(safePerOrderMargin * 2, 1e-8));
+        const affordablePerSide = Math.floor(usableUsdt / Math.max(safePerOrderMargin * activeSideCount, 1e-8));
         return {
             count: clamp(affordablePerSide, 0, maxConfigured),
             maxConfigured,
@@ -504,8 +519,8 @@ const createGridRuntimeHelpers = ({
         const maxSellPrice = snapshot.currentPrice * (1 + (params.gridEntryBufferPercent / 100));
         const buyOrders = [];
         const sellOrders = [];
-        const allowBuyGrid = db?.allowLong !== false;
-        const allowSellGrid = db?.allowShort !== false;
+        const allowBuyGrid = true;
+        const allowSellGrid = false;
 
         for (let i = levels.length - 2; allowBuyGrid && i >= 0; i--) {
             const price = formatPriceToMarketPrecision(db.pair, levels[i]);

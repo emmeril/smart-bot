@@ -60,14 +60,12 @@ const Config = sequelize.define("Config", {
     entryBbStdDev: { type: DataTypes.FLOAT, defaultValue: 2 },
     entryBbLongThreshold: { type: DataTypes.FLOAT, defaultValue: 0.18 },
     entryBbShortThreshold: { type: DataTypes.FLOAT, defaultValue: 0.82 },
-    allowLong: { type: DataTypes.BOOLEAN, defaultValue: true },
-    allowShort: { type: DataTypes.BOOLEAN, defaultValue: false },
 
     lastDailyReset: { type: DataTypes.BIGINT, defaultValue: () => Date.now() },
     lastUpdated: { type: DataTypes.BIGINT, defaultValue: () => Date.now() }
 }, { timestamps: false });
 
-const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "allowLong", "allowShort", "autoTargetProfitEnabled", "autoStopLossEnabled", "gridRecalculateExitsOnScaleIn"];
+const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "autoTargetProfitEnabled", "autoStopLossEnabled", "gridRecalculateExitsOnScaleIn"];
 const VALID_MARGIN_MODES = ["spot"];
 const DEFAULT_CONFIG = {
     strategy: "spot_grid",
@@ -119,9 +117,7 @@ const DEFAULT_CONFIG = {
     entryBbPeriod: 20,
     entryBbStdDev: 2,
     entryBbLongThreshold: 0.18,
-    entryBbShortThreshold: 0.82,
-    allowLong: true,
-    allowShort: false
+    entryBbShortThreshold: 0.82
 };
 
 const DASHBOARD_EDITABLE_FIELDS = [
@@ -167,9 +163,7 @@ const DASHBOARD_EDITABLE_FIELDS = [
     { key: "entryBbPeriod", label: "BB Period", section: "Entry Filters", type: "number", min: 5, step: 1, description: "Bollinger Band period used for entry normalization." },
     { key: "entryBbStdDev", label: "BB Std Dev", section: "Entry Filters", type: "number", min: 1, step: 0.1, description: "Bollinger Band standard deviation width." },
     { key: "entryBbLongThreshold", label: "BB Long %B Max", section: "Entry Filters", type: "number", min: 0, max: 0.5, step: 0.05, description: "Maximum Bollinger %B allowed for long entries." },
-    { key: "entryBbShortThreshold", label: "BB Short %B Min", section: "Entry Filters", type: "number", min: 0.5, max: 1, step: 0.05, description: "Minimum Bollinger %B required for short entries." },
-    { key: "allowLong", label: "Allow Buy Grid", section: "Direction", type: "boolean", description: "Allow buy ladder orders below the current spot price." },
-    { key: "allowShort", label: "Allow Sell Grid", section: "Direction", type: "boolean", description: "Allow sell ladder orders above the current spot price using only owned base asset balance." }
+    { key: "entryBbShortThreshold", label: "BB Short %B Min", section: "Entry Filters", type: "number", min: 0.5, max: 1, step: 0.05, description: "Minimum Bollinger %B required for short entries." }
 ];
 
 const DASHBOARD_EDITABLE_KEYS = new Set(DASHBOARD_EDITABLE_FIELDS.map((field) => field.key));
