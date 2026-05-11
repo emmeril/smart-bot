@@ -516,11 +516,8 @@ const createGridRuntimeHelpers = ({
         if (!Number.isFinite(step) || step <= 0) return [];
         const market = exchange?.markets?.[db?.pair];
         const minBuyPrice = snapshot.currentPrice * (1 - (params.gridEntryBufferPercent / 100));
-        const maxSellPrice = snapshot.currentPrice * (1 + (params.gridEntryBufferPercent / 100));
         const buyOrders = [];
-        const sellOrders = [];
         const allowBuyGrid = true;
-        const allowSellGrid = false;
 
         for (let i = levels.length - 2; allowBuyGrid && i >= 0; i--) {
             const price = formatPriceToMarketPrecision(db.pair, levels[i]);
@@ -538,27 +535,11 @@ const createGridRuntimeHelpers = ({
             }
         }
 
-        for (let i = 1; allowSellGrid && i < levels.length; i++) {
-            const price = formatPriceToMarketPrecision(db.pair, levels[i]);
-            const exitPlan = buildGridExitPlan({ side: "sell", entryIndex: i, levels, step, params, gridState: resolvedGridState, atr: snapshot?.currentATR });
-            const targetPrice = exitPlan.targetPrice;
-            const stopLossPrice = exitPlan.stopLossPrice;
-            const orderSizeUsdt = resolveGridOrderSizeForPrice(params.gridOrderSizeUsdt, price, market);
-            const orderPlan = { targetPrice, stopLossPrice };
-            if (Number.isFinite(price) && price > 0 && price > maxSellPrice) {
-                if (!isDirectionalOrderPlanValid("sell", price, orderPlan)) {
-                    console.warn(`[GRID][WARN] Skipping SELL level ${i} @ ${price} because TP/SL would be invalid after precision rounding.`);
-                    continue;
-                }
-                sellOrders.push({ side: "sell", price, orderSizeUsdt, targetPrice, stopLossPrice, levelIndex: i, clientOrderId: getGridClientOrderId("sell", i, price) });
-            }
-        }
-
         const seen = new Set();
         const deduped = [];
         let duplicateCount = 0;
         const effectiveOrdersPerSide = Math.max(0, Math.trunc(toFiniteNumber(params.gridOrdersPerSide, 0)));
-        const selectedOrders = [...buyOrders.slice(0, effectiveOrdersPerSide), ...sellOrders.slice(0, effectiveOrdersPerSide)];
+        const selectedOrders = buyOrders.slice(0, effectiveOrdersPerSide);
         for (const order of selectedOrders) {
             const key = `${order.side}:${order.price}`;
             if (seen.has(key)) {

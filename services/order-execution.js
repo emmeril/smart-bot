@@ -337,9 +337,13 @@ const createOrderExecutionHelpers = ({
         if (!mergedSide) return null;
         if (mergedSide === "sell") return null;
         const mergedQty = Math.abs(mergedSignedQty);
-        const mergedEntryPrice = mergedQty > 0
-            ? ((((Number.isFinite(currentEntry) ? currentEntry : 0) * Math.abs(currentSignedQty)) + ((Number.isFinite(filledEntry) ? filledEntry : 0) * Math.abs(filledSignedQty))) / mergedQty)
-            : filledEntry;
+        const sameDirectionScaleIn = Math.sign(currentSignedQty) === Math.sign(filledSignedQty);
+        let mergedEntryPrice = Number.isFinite(currentEntry) ? currentEntry : filledEntry;
+        if (sameDirectionScaleIn) {
+            mergedEntryPrice = mergedQty > 0
+                ? ((((Number.isFinite(currentEntry) ? currentEntry : 0) * Math.abs(currentSignedQty)) + ((Number.isFinite(filledEntry) ? filledEntry : 0) * Math.abs(filledSignedQty))) / mergedQty)
+                : filledEntry;
+        }
 
         let mergedTargetPrice = Number.isFinite(toFiniteNumber(currentPosition.targetPrice, NaN))
             ? toFiniteNumber(currentPosition.targetPrice, NaN)
