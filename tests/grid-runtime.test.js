@@ -355,6 +355,142 @@ test("buildGridEntryOrders honors buy and sell grid toggles", () => {
     assert.ok(orders.every((order) => order.side === "buy"));
 });
 
+test("resolveEffectiveGridStopLossBufferPercent keeps auto SL buffer in a sane range", () => {
+    const helpers = createGridRuntimeHelpers({
+        getDb: () => ({
+            pair: "DOGE/USDT:USDT",
+            gridLevels: 0,
+            gridOrdersPerSide: 4,
+            gridOrderSizeUsdt: 5,
+            gridRangePercent: 5.2,
+            gridEntryBufferPercent: 0,
+            gridLookbackCandles: 200,
+            gridTimeframe: "5m"
+        }),
+        getExchange: () => ({ markets: {} }),
+        getBalanceCache: () => ({ totalUSDT: 100, availableUSDT: 100 }),
+        getTickerCache: () => ({ price: 100 }),
+        getSaveDB: () => async () => {},
+        defaultConfig: {
+            volumePeriod: 20,
+            atrPeriod: 14,
+            gridLookbackCandles: 120,
+            gridLevels: 8,
+            gridTakeProfitLevels: 0,
+            gridOrdersPerSide: 2,
+            gridOrderSizeUsdt: 5,
+            gridRangePercent: 3.5,
+            gridEntryBufferPercent: 0.15,
+            gridStopLossLevels: 0,
+            gridTimeframe: "5m"
+        },
+        validMarginModes: ["isolated", "cross"],
+        normalizeConfig: (config) => config,
+        normalizeSymbol: (symbol) => String(symbol || "").toUpperCase(),
+        toFiniteNumber: (value, fallback) => {
+            const numericValue = Number(value);
+            return Number.isFinite(numericValue) ? numericValue : fallback;
+        },
+        clamp: (value, min, max) => Math.min(Math.max(value, min), max),
+        formatPriceToMarketPrecision: (_pair, price) => Number(Number(price).toFixed(4)),
+        formatAmountToMarketPrecision: (_pair, amount) => Number(Number(amount).toFixed(8)),
+        validateOrderSize: () => ({ valid: true }),
+        isDirectionalOrderPlanValid: () => true,
+        getClosePositionSide: () => "BOTH",
+        isHedgeModeEnabled: () => false,
+        getActivePositionsList: () => [],
+        getExchangePositionSide: (position) => position.side,
+        getOrderTriggerPrice: () => NaN,
+        gridClientOrderPrefix: "smartgrid",
+        tpClientOrderPrefix: "smarttp",
+        slClientOrderPrefix: "smartsl"
+    });
+
+    const stopBuffer = helpers.resolveEffectiveGridStopLossBufferPercent({
+        pair: "DOGE/USDT:USDT",
+        gridTimeframe: "5m",
+        gridRangePercent: 5.2
+    });
+
+    assert.equal(stopBuffer, 0.693);
+});
+
+test("buildGridExitPlan places auto SL below the lowest active buy ladder with buffer", () => {
+    const helpers = createGridRuntimeHelpers({
+        getDb: () => ({
+            pair: "DOGE/USDT:USDT",
+            gridLevels: 13,
+            gridOrdersPerSide: 4,
+            gridOrderSizeUsdt: 6,
+            gridRangePercent: 5.2,
+            gridEntryBufferPercent: 0.08,
+            gridLookbackCandles: 200,
+            gridTimeframe: "5m"
+        }),
+        getExchange: () => ({ markets: {} }),
+        getBalanceCache: () => ({ totalUSDT: 100, availableUSDT: 100 }),
+        getTickerCache: () => ({ price: 0.11 }),
+        getSaveDB: () => async () => {},
+        defaultConfig: {
+            volumePeriod: 20,
+            atrPeriod: 14,
+            gridLookbackCandles: 120,
+            gridLevels: 8,
+            gridTakeProfitLevels: 0,
+            gridOrdersPerSide: 2,
+            gridOrderSizeUsdt: 5,
+            gridRangePercent: 3.5,
+            gridEntryBufferPercent: 0.15,
+            gridStopLossLevels: 0,
+            gridTimeframe: "5m"
+        },
+        validMarginModes: ["isolated", "cross"],
+        normalizeConfig: (config) => config,
+        normalizeSymbol: (symbol) => String(symbol || "").toUpperCase(),
+        toFiniteNumber: (value, fallback) => {
+            const numericValue = Number(value);
+            return Number.isFinite(numericValue) ? numericValue : fallback;
+        },
+        clamp: (value, min, max) => Math.min(Math.max(value, min), max),
+        formatPriceToMarketPrecision: (_pair, price) => Number(Number(price).toFixed(5)),
+        formatAmountToMarketPrecision: (_pair, amount) => Number(Number(amount).toFixed(8)),
+        validateOrderSize: () => ({ valid: true }),
+        isDirectionalOrderPlanValid: () => true,
+        getClosePositionSide: () => "BOTH",
+        isHedgeModeEnabled: () => false,
+        getActivePositionsList: () => [],
+        getExchangePositionSide: (position) => position.side,
+        getOrderTriggerPrice: () => NaN,
+        gridClientOrderPrefix: "smartgrid",
+        tpClientOrderPrefix: "smarttp",
+        slClientOrderPrefix: "smartsl"
+    });
+
+    const levels = [0.1044, 0.10578, 0.1068, 0.10782, 0.10883, 0.1096, 0.11036, 0.1111];
+    const exitPlan = helpers.buildGridExitPlan({
+        side: "buy",
+        entryIndex: 6,
+        levels,
+        step: 0.00076,
+        params: {
+            gridTakeProfitLevels: 1,
+            gridStopLossLevels: 0,
+            gridOrdersPerSide: 4,
+            gridRangePercent: 5.2
+        },
+        gridState: {
+            lowerBound: 0.1044,
+            upperBound: 0.1111,
+            levels,
+            step: 0.00076
+        }
+    });
+
+    assert.equal(exitPlan.targetPrice, 0.1111);
+    assert.equal(exitPlan.stopLossPrice, 0.10606);
+    assert.ok(exitPlan.stopLossPrice < 0.1068);
+});
+
 test("applyAutoPairGridPreset clears stale activeGridState when fingerprint only matches by substring", () => {
     const helpers = createGridRuntimeHelpers({
         getDb: () => ({

@@ -56,6 +56,17 @@ const createGridRuntimeHelpers = ({
         "1d": 1.25
     };
     const GRID_BUFFER_BASELINE = 0.14;
+    const GRID_STOP_BUFFER_TIMEFRAME_FACTORS = {
+        "1m": 0.92,
+        "3m": 0.96,
+        "5m": 1.0,
+        "15m": 1.05,
+        "30m": 1.1,
+        "1h": 1.15,
+        "4h": 1.24,
+        "1d": 1.35
+    };
+    const GRID_STOP_BUFFER_BASELINE = 0.6;
     const LEGACY_AUTO_PRESET_VALUES = {
         gridTargetProfitUsdt: [0.5, 0.4, 0.35, 0.25],
         targetProfitAtrMultiplier: [0.75, 0.8, 0.7, 0.6],
@@ -129,6 +140,23 @@ const createGridRuntimeHelpers = ({
         const rangeComponent = safeRangePercent / 0.72;
         const derivedLevels = Math.round((lookbackComponent + rangeComponent) * GRID_LEVELS_BASE_FACTOR * timeframeFactor);
         return clamp(derivedLevels, AUTO_GRID_LEVELS_MIN, AUTO_GRID_LEVELS_MAX);
+    };
+
+    const resolveEffectiveGridStopLossBufferPercent = ({
+        pair,
+        gridTimeframe,
+        gridRangePercent,
+        atr = null
+    } = {}) => {
+        const normalizedTimeframe = String(gridTimeframe || getDb()?.gridTimeframe || defaultConfig.gridTimeframe).trim();
+        const safeRangePercent = Math.max(0.5, toFiniteNumber(gridRangePercent, defaultConfig.gridRangePercent));
+        const timeframeFactor = GRID_STOP_BUFFER_TIMEFRAME_FACTORS[normalizedTimeframe] || 1.0;
+        const rangeFactor = clamp(safeRangePercent / 4.5, 0.9, 1.2);
+        const atrFactor = Number.isFinite(atr) && atr > 0 && Number.isFinite(safeRangePercent)
+            ? clamp(1 + ((atr / Math.max(safeRangePercent, 0.0001)) * 0.05), 1, 1.1)
+            : 1;
+        const derivedBuffer = GRID_STOP_BUFFER_BASELINE * timeframeFactor * rangeFactor * atrFactor;
+        return Number(clamp(derivedBuffer, 0.5, 0.9).toFixed(3));
     };
 
     const getSignalParameters = () => {
@@ -235,6 +263,7 @@ const createGridRuntimeHelpers = ({
 
         const takeProfitLevels = resolveEffectiveGridTakeProfitLevels(params?.gridTakeProfitLevels);
         const stopLossSteps = resolveEffectiveGridStopLossSteps(params?.gridStopLossLevels, safeStep, atr);
+        const effectiveOrdersPerSide = Math.max(1, Math.trunc(toFiniteNumber(params?.gridOrdersPerSide, 1)));
         const safeEntryIndex = clamp(Math.trunc(toFiniteNumber(entryIndex, 0)), 0, safeLevels.length - 1);
         const lowerBound = toFiniteNumber(gridState?.lowerBound, safeLevels[0]);
         const upperBound = toFiniteNumber(gridState?.upperBound, safeLevels[safeLevels.length - 1]);
@@ -251,7 +280,17 @@ const createGridRuntimeHelpers = ({
         if (normalizedSide === "buy") {
             const targetIndex = clamp(safeEntryIndex + takeProfitLevels, 1, safeLevels.length - 1);
             const rawStop = autoStopMode
-                ? lowerBound - (safeStep * stopLossSteps)
+                ? (() => {
+                    const lowestLadderIndex = Math.max(0, safeEntryIndex - effectiveOrdersPerSide);
+                    const lowestLadderPrice = toFiniteNumber(safeLevels[lowestLadderIndex], lowerBound);
+                    const stopBufferPercent = resolveEffectiveGridStopLossBufferPercent({
+                        pair: db.pair,
+                        gridTimeframe: getDb()?.gridTimeframe,
+                        gridRangePercent: params?.gridRangePercent,
+                        atr
+                    });
+                    return lowestLadderPrice * (1 - (stopBufferPercent / 100));
+                })()
                 : toFiniteNumber(safeLevels[safeEntryIndex], lowerBound) - (safeStep * stopLossSteps);
             return buildExitResult(safeLevels[targetIndex], rawStop);
         }
@@ -750,6 +789,7 @@ const createGridRuntimeHelpers = ({
         resolveEffectiveGridLevels,
         resolveEffectiveGridRangePercent,
         resolveEffectiveGridEntryBufferPercent,
+        resolveEffectiveGridStopLossBufferPercent,
         resolveGridOrdersPerSideCap,
         getMinimumGridOrderSizeUsdt,
         getMinimumValidatedGridOrderSizeUsdt,
