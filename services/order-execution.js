@@ -7,10 +7,6 @@ const createOrderExecutionHelpers = ({
     formatPriceToMarketPrecision,
     validateOrderSize,
     buildOrderPlan,
-    getSignalParameters,
-    sanitizeGridState,
-    findNearestGridLevelIndex,
-    buildGridExitPlan,
     buildExchangeOrderParams,
     getOrderPositionSide,
     getClosePositionSide,
@@ -296,33 +292,6 @@ const createOrderExecutionHelpers = ({
         return fallbackPrice;
     };
 
-    const resolveScaledGridExitPlan = (mergedSide, mergedEntryPrice, currentPosition) => {
-        if (typeof getSignalParameters !== "function" || typeof sanitizeGridState !== "function" || typeof findNearestGridLevelIndex !== "function" || typeof buildGridExitPlan !== "function") {
-            return null;
-        }
-        const db = getDb();
-        const signalParams = getSignalParameters();
-        const gridState = sanitizeGridState(db?.activeGridState, signalParams);
-        const levels = Array.isArray(gridState?.levels) ? gridState.levels : [];
-        const step = toFiniteNumber(gridState?.step, NaN);
-        if ((mergedSide !== "buy" && mergedSide !== "sell") || !Number.isFinite(mergedEntryPrice) || mergedEntryPrice <= 0 || levels.length < 2 || !Number.isFinite(step) || step <= 0) {
-            return null;
-        }
-        const derivedGridIndex = findNearestGridLevelIndex(levels, mergedEntryPrice);
-        const atrAtEntry = toFiniteNumber(currentPosition?.atrAtEntry, NaN);
-        const exitPlan = buildGridExitPlan({
-            side: mergedSide,
-            entryIndex: derivedGridIndex,
-            levels,
-            step,
-            params: signalParams,
-            gridState,
-            atr: atrAtEntry
-        });
-        if (!Number.isFinite(exitPlan?.targetPrice) || !Number.isFinite(exitPlan?.stopLossPrice)) return null;
-        return exitPlan;
-    };
-
     const buildSpotGridPositionFromFilledOrder = (gridOrder, filledOrder) => {
         const db = getDb();
         const quantity = getOrderQuantity(filledOrder);
@@ -411,21 +380,18 @@ const createOrderExecutionHelpers = ({
             ? toFiniteNumber(currentPosition.stopLossPrice, NaN)
             : toFiniteNumber(filledPosition.stopLossPrice, NaN);
 
-        if (db.gridRecalculateExitsOnScaleIn !== false) {
-            const gridRecalculatedPlan = resolveScaledGridExitPlan(mergedSide, mergedEntryPrice, currentPosition);
-            const recalculatedPlan = gridRecalculatedPlan || (typeof buildOrderPlan === "function"
-                ? buildOrderPlan(
-                    filledPosition.side || currentPosition.side,
-                    mergedEntryPrice,
-                    mergedQty,
-                    toFiniteNumber(currentPosition.atrAtEntry, NaN),
-                    {
-                        trailingActivateATR: toFiniteNumber(currentPosition.trailingActivateATR, db.trailingActivateATR),
-                        trailingOffsetATR: toFiniteNumber(currentPosition.trailingOffsetATR, db.trailingOffsetATR)
-                    },
-                    {}
-                )
-                : null);
+        if (db.gridRecalculateExitsOnScaleIn !== false && typeof buildOrderPlan === "function") {
+            const recalculatedPlan = buildOrderPlan(
+                filledPosition.side || currentPosition.side,
+                mergedEntryPrice,
+                mergedQty,
+                toFiniteNumber(currentPosition.atrAtEntry, NaN),
+                {
+                    trailingActivateATR: toFiniteNumber(currentPosition.trailingActivateATR, db.trailingActivateATR),
+                    trailingOffsetATR: toFiniteNumber(currentPosition.trailingOffsetATR, db.trailingOffsetATR)
+                },
+                {}
+            );
             if (Number.isFinite(recalculatedPlan?.targetPrice) && Number.isFinite(recalculatedPlan?.stopLossPrice)) {
                 mergedTargetPrice = recalculatedPlan.targetPrice;
                 mergedStopLossPrice = recalculatedPlan.stopLossPrice;

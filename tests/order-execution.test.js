@@ -41,7 +41,7 @@ const createHelpers = ({ createOrderImpl, fetchOrderImpl, isHedgeModeEnabled = f
     return createOrderExecutionHelpers({
         getExchange: () => exchange,
         getMetrics: () => ({ api: { orders: 0 } }),
-        getDb: () => ({ pair: "DOGE/USDT:USDT", marginMode: "spot", ...(state.db || {}) }),
+        getDb: () => ({ pair: "DOGE/USDT:USDT" }),
         isHedgeModeEnabled: () => isHedgeModeEnabled,
         toFiniteNumber: (value, fallback = NaN) => {
             const numeric = Number(value);
@@ -50,24 +50,6 @@ const createHelpers = ({ createOrderImpl, fetchOrderImpl, isHedgeModeEnabled = f
         formatAmountToMarketPrecision: (_pair, amount) => amount,
         formatPriceToMarketPrecision: (_pair, price) => price,
         validateOrderSize: () => ({ valid: true }),
-        getSignalParameters: () => state.signalParameters || ({
-            gridLevels: 8,
-            gridTakeProfitLevels: 1,
-            gridStopLossLevels: 0,
-            gridOrdersPerSide: 4,
-            gridRangePercent: 5.2
-        }),
-        sanitizeGridState: (gridState) => gridState || null,
-        findNearestGridLevelIndex: (_levels, entryPrice) => {
-            if (typeof state.nearestGridIndex === "number") return state.nearestGridIndex;
-            return entryPrice >= 0.1096 ? 6 : 5;
-        },
-        buildGridExitPlan: ({ entryIndex }) => {
-            if (typeof state.buildGridExitPlan === "function") return state.buildGridExitPlan({ entryIndex });
-            return entryIndex >= 6
-                ? { targetPrice: 0.1111, stopLossPrice: 0.10606 }
-                : { targetPrice: 0.11036, stopLossPrice: 0.10578 };
-        },
         buildExchangeOrderParams: ({ side, reduceOnly = false, positionSide, closePosition = false } = {}) => ({
             side,
             reduceOnly,
@@ -263,67 +245,6 @@ test("placeGridEntryOrder clears active spot position when filled SELL grid full
     assert.equal(createOrderCalls, 0);
     assert.equal(state.saveCount, 1);
     assert.equal(state.activePositions.BOTH, undefined);
-});
-
-test("placeGridEntryOrder recalculates scaled-in spot grid exits from active grid plan", async () => {
-    const state = {
-        db: {
-            gridRecalculateExitsOnScaleIn: true,
-            activeGridState: {
-                lowerBound: 0.1044,
-                upperBound: 0.1111,
-                levels: [0.1044, 0.10578, 0.1068, 0.10782, 0.10883, 0.1096, 0.11036, 0.1111],
-                step: 0.00076
-            }
-        },
-        activePositions: {
-            BOTH: {
-                side: "buy",
-                quantity: 24,
-                entryPrice: 0.11036,
-                targetPrice: 0.11661,
-                stopLossPrice: 0.10771,
-                stopLossUSDT: -0.0636,
-                positionSide: "BOTH",
-                trailingActivateATR: 1.2,
-                trailingOffsetATR: 0.6
-            }
-        }
-    };
-    let fetchOrderCalls = 0;
-    const helpers = createHelpers({
-        state,
-        createOrderImpl: async () => ({ id: "unexpected-new-grid-order" }),
-        fetchOrderImpl: async (_id, _symbol, params = {}) => {
-            fetchOrderCalls += 1;
-            if (fetchOrderCalls === 1) throw new Error("Order does not exist.");
-            assert.equal(params.origClientOrderId, "smartgrid_buy_5_01096");
-            return {
-                id: "filled-grid-2",
-                status: "closed",
-                side: "buy",
-                amount: 10,
-                filled: 10,
-                average: 0.1096,
-                timestamp: 12346,
-                info: { status: "FILLED", clientOrderId: "smartgrid_buy_5_01096" }
-            };
-        }
-    });
-
-    const adopted = await helpers.placeGridEntryOrder({
-        side: "buy",
-        price: 0.1096,
-        orderSizeUsdt: 1.096,
-        targetPrice: 0.11036,
-        stopLossPrice: 0.10578,
-        clientOrderId: "smartgrid_buy_5_01096"
-    });
-
-    assert.equal(adopted, true);
-    assert.equal(state.activePositions.BOTH.targetPrice, 0.1111);
-    assert.equal(state.activePositions.BOTH.stopLossPrice, 0.10606);
-    assert.ok(state.activePositions.BOTH.stopLossPrice < 0.10771);
 });
 
 test("ensureReduceOnlyTakeProfitOrder serializes concurrent OCO sync for the same spot position", async () => {
