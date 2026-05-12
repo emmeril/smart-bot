@@ -169,8 +169,7 @@
     .live-item { min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 12px; }
     .live-item strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 0.875rem; font-weight: 700; }
     .live-position-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-    .live-position-kpis { display: grid; gap: 2px; }
-    .live-position-kpis .pnl-line { font-size: 0.84rem; font-weight: 600; color: #334155; }
+    .live-position-kpis { display: grid; gap: 6px; }
     .live-order-range { margin-bottom: 8px; font-size: 0.78rem; font-weight: 600; color: #475569; }
     .live-empty { color: var(--muted); font-size: 0.875rem; }
     .live-sparkline { display: block; width: 100%; height: 64px; margin-top: 12px; border-radius: 8px; background: #fff; }
@@ -181,9 +180,14 @@
     .live-item.negative { border-color: #fecaca; }
     .price-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
     .price-chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; line-height: 1.35; }
+    .price-chip.qty { background: #e2e8f0; color: #334155; }
     .price-chip.entry { background: #dbeafe; color: #1d4ed8; }
     .price-chip.mark { background: #dcfce7; color: #166534; }
     .price-chip.sl { background: #fee2e2; color: #b91c1c; }
+    .price-chip.target { background: #ede9fe; color: #6d28d9; }
+    .price-chip.pnl { background: #e2e8f0; color: #334155; }
+    .price-chip.pnl.positive { background: #dcfce7; color: #166534; }
+    .price-chip.pnl.negative { background: #fee2e2; color: #b91c1c; }
     .live-table { display: grid; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
     .live-table-head, .live-table-row { display: grid; grid-template-columns: 1.2fr 0.7fr 0.8fr 0.8fr; align-items: center; gap: 8px; min-width: 560px; }
     .live-table-head { color: var(--muted); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -893,12 +897,11 @@
           const markPrice = formatPrice(position.currentPrice);
           const stopLossPrice = formatPrice(position.stopLossPrice);
           const targetPrice = formatPrice(position.targetPrice);
+          const pnlChipClass = pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral");
           item.innerHTML = '<div class="live-position-head"><strong>' + positionKey + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
             '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Tutup</button></div>' +
-            '<div class="live-position-kpis"><span>Kuantitas: ' + formatNumber(position.quantity) + '</span>' +
-            '<div class="price-chip-row"><span class="price-chip entry">Harga Masuk: ' + entryPrice + '</span><span class="price-chip mark">Harga Saat Ini: ' + markPrice + '</span><span class="price-chip sl">Stop Loss: ' + stopLossPrice + '</span></div>' +
-            '<span class="pnl-line">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span>' +
-            '<span>Target: ' + targetPrice + '</span></div>';
+            '<div class="live-position-kpis"><div class="price-chip-row"><span class="price-chip qty">Kuantitas: ' + formatNumber(position.quantity) + '</span><span class="price-chip entry">Harga Masuk: ' + entryPrice + '</span><span class="price-chip mark">Harga Saat Ini: ' + markPrice + '</span><span class="price-chip sl">Stop Loss: ' + stopLossPrice + '</span><span class="price-chip target">Target: ' + targetPrice + '</span></div>' +
+            '<div class="price-chip-row"><span class="price-chip pnl ' + pnlChipClass + '">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span></div></div>';
           livePositionsList.appendChild(item);
         });
       }
