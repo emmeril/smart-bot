@@ -812,7 +812,7 @@
       // Realized PnL
       realizedPnlValue.textContent = formatPnl(realizedPnL);
       realizedPnlValue.className = "pnl-display " + getPnlClass(realizedPnL);
-      realizedPnlMeta.textContent = `${data.dailyTrades || 0} transaksi | sumber: ${String(data.dailyPnlSource || "local").toLowerCase()}`;
+      realizedPnlMeta.textContent = `${data.dailyTrades || 0} transaksi | sumber: bot`;
       
       // Unrealized PnL
       const activePosCount = Array.isArray(data.activePositions) ? data.activePositions.length : 0;
@@ -863,8 +863,7 @@
       livePositionsMeta.textContent = data.exchangePositionsCount + " posisi bursa | " + String(data.positionMode || "-").toUpperCase() + " | " + exchangeLabel + recoverySuffix;
       livePnlValue.textContent = formatLiveCurrency(dailyPnl) + " USDT";
       livePnlValue.className = "live-amount " + (dailyPnl > 0 ? "positive" : (dailyPnl < 0 ? "negative" : "neutral"));
-      const pnlSource = String(data.dailyPnlSource || "local").toLowerCase();
-      livePnlMeta.textContent = String(data.dailyTrades || 0) + " transaksi hari ini | sumber: " + pnlSource;
+      livePnlMeta.textContent = String(data.dailyTrades || 0) + " transaksi hari ini | sumber: bot";
       liveOrdersCount.textContent = String(orderCounts.total || 0);
       const recoveryAlert = timeoutErrors >= 3 || duplicateDetected >= 8 ? " | recovery spike" : "";
       liveOrdersMeta.textContent =

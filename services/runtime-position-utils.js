@@ -92,25 +92,6 @@ const createRuntimePositionUtils = ({
     const calculatePositionPnL = (position, currentPrice, quantityOverride = null) => {
         const quantity = Number.isFinite(quantityOverride) ? quantityOverride : position.quantity;
         const exchangePnlSnapshot = !Number.isFinite(quantityOverride) ? position?.exchangePnlSnapshot : null;
-        const hasFreshExchangePnl = exchangePnlSnapshot &&
-            exchangePnlSnapshot.source === "exchange" &&
-            Number.isFinite(exchangePnlSnapshot.timestamp) &&
-            (Date.now() - exchangePnlSnapshot.timestamp) <= 10000 &&
-            Number.isFinite(exchangePnlSnapshot.grossProfitUSDT) &&
-            Number.isFinite(exchangePnlSnapshot.netProfitUSDT) &&
-            Number.isFinite(exchangePnlSnapshot.profitPercent);
-        if (hasFreshExchangePnl) {
-            return {
-                grossProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
-                netProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
-                realizedProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
-                profitPercent: exchangePnlSnapshot.profitPercent,
-                displayProfitUSDT: exchangePnlSnapshot.grossProfitUSDT,
-                displayProfitPercent: exchangePnlSnapshot.profitPercent,
-                currentPrice: Number.isFinite(exchangePnlSnapshot.currentPrice) ? exchangePnlSnapshot.currentPrice : currentPrice,
-                source: "exchange"
-            };
-        }
 
         const entryValue = Math.max(1e-8, position.entryPrice * quantity);
         const snapshotMarkPrice = toFiniteNumber(exchangePnlSnapshot?.markPrice, NaN);

@@ -124,54 +124,10 @@ const createPnlTrackerHelpers = ({
         return allTrades;
     };
 
-    const syncDailyPnlWithExchange = async ({ force = false } = {}) => {
-        const db = getDb();
-        if (!db) return buildDailyPnlSnapshot();
-        // If syncExchangePnl is disabled (false, 0, undefined, null), return current snapshot without overwriting from exchange
-        if (!db.syncExchangePnl) {
-            return buildDailyPnlSnapshot(db);
-        }
-        if (!supportsExchangeTradeSync()) {
-            lastExchangePnlSyncAt = Date.now();
-            return buildDailyPnlSnapshot(db);
-        }
-
-        const now = Date.now();
-        if (!force && (now - lastExchangePnlSyncAt) < EXCHANGE_PNL_SYNC_TTL_MS) {
-            return buildDailyPnlSnapshot(db);
-        }
-        if (exchangePnlSyncPromise) return await exchangePnlSyncPromise;
-
-        exchangePnlSyncPromise = (async () => {
-            try {
-                const since = Math.max(0, toFiniteNumber(db.lastDailyReset, 0));
-                const trades = await fetchDailyTradesFromExchange(db.pair, since);
-                let reconciledPnl = 0;
-
-                trades.forEach((trade) => {
-                    const tradeTimestamp = toFiniteNumber(trade?.timestamp, 0);
-                    if (tradeTimestamp < since) return;
-                    const tradeNetPnl = getTradeNetPnl(trade);
-                    if (!tradeNetPnl) return;
-                    reconciledPnl += tradeNetPnl.netPnl;
-                });
-
-                lastExchangePnlSyncAt = now;
-                return await updateDailyPnlState({
-                    pnl: reconciledPnl,
-                    tradeDelta: 0,
-                    source: "exchange",
-                    syncedAt: now
-                });
-            } catch (error) {
-                console.warn(`[PNL][WARN] Failed to reconcile daily PnL with exchange trades: ${error.message}`);
-                return buildDailyPnlSnapshot(db);
-            } finally {
-                exchangePnlSyncPromise = null;
-            }
-        })();
-
-        return await exchangePnlSyncPromise;
+    const syncDailyPnlWithExchange = async () => {
+        // Keep daily realized PnL fully bot-driven.
+        // Exchange reconciliation is intentionally disabled to prevent overwriting local realized PnL bookkeeping.
+        return buildDailyPnlSnapshot(getDb());
     };
 
     return {
