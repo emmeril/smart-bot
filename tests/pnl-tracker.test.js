@@ -10,7 +10,8 @@ test("syncDailyPnlWithExchange reconciles realized pnl and fees into the shared 
         dailyTrades: 2,
         dailyPnlSource: "local",
         dailyPnlSyncedAt: 0,
-        lastDailyReset: 1000
+        lastDailyReset: 1000,
+        syncExchangePnl: true
     };
     let saveCalls = 0;
 

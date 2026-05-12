@@ -23,6 +23,7 @@ const Config = sequelize.define("Config", {
     marginMode: { type: DataTypes.STRING, defaultValue: "spot" },
     monitoringInterval: { type: DataTypes.INTEGER, defaultValue: 500 },
     gridStopLossPercent: { type: DataTypes.FLOAT, defaultValue: 2.4 },
+    syncExchangePnl: { type: DataTypes.BOOLEAN, defaultValue: false },
 
     gridLevels: { type: DataTypes.INTEGER, defaultValue: 0 },
     gridLookbackCandles: { type: DataTypes.INTEGER, defaultValue: 200 },
@@ -65,7 +66,7 @@ const Config = sequelize.define("Config", {
     lastUpdated: { type: DataTypes.BIGINT, defaultValue: () => Date.now() }
 }, { timestamps: false });
 
-const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "autoTargetProfitEnabled", "autoStopLossEnabled", "gridRecalculateExitsOnScaleIn"];
+const BOOLEAN_CONFIG_KEYS = ["trailingEnabled", "autoTargetProfitEnabled", "autoStopLossEnabled", "gridRecalculateExitsOnScaleIn", "syncExchangePnl"];
 const VALID_MARGIN_MODES = ["spot"];
 const DEFAULT_CONFIG = {
     strategy: "spot_grid",
@@ -83,6 +84,7 @@ const DEFAULT_CONFIG = {
     marginMode: "spot",
     monitoringInterval: 500,
     gridStopLossPercent: 2.4,
+    syncExchangePnl: false,
     autoStopLossEnabled: true,
     stopLossAtrMultiplier: 1.4,
     stopLossMinPercent: 1.2,

@@ -127,6 +127,10 @@ const createPnlTrackerHelpers = ({
     const syncDailyPnlWithExchange = async ({ force = false } = {}) => {
         const db = getDb();
         if (!db) return buildDailyPnlSnapshot();
+        // If syncExchangePnl is disabled (false, 0, undefined, null), return current snapshot without overwriting from exchange
+        if (!db.syncExchangePnl) {
+            return buildDailyPnlSnapshot(db);
+        }
         if (!supportsExchangeTradeSync()) {
             lastExchangePnlSyncAt = Date.now();
             return buildDailyPnlSnapshot(db);
