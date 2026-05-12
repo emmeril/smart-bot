@@ -170,6 +170,7 @@
     .live-item strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 0.875rem; font-weight: 700; }
     .live-position-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
     .live-position-kpis { display: grid; gap: 6px; }
+    .live-position-kpis .kpi-line { display: block; }
     .live-order-range { margin-bottom: 8px; font-size: 0.78rem; font-weight: 600; color: #475569; }
     .live-empty { color: var(--muted); font-size: 0.875rem; }
     .live-sparkline { display: block; width: 100%; height: 64px; margin-top: 12px; border-radius: 8px; background: #fff; }
@@ -900,8 +901,14 @@
           const pnlChipClass = pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral");
           item.innerHTML = '<div class="live-position-head"><strong>' + positionKey + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
             '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Tutup</button></div>' +
-            '<div class="live-position-kpis"><div class="price-chip-row"><span class="price-chip qty">Kuantitas: ' + formatNumber(position.quantity) + '</span><span class="price-chip entry">Harga Masuk: ' + entryPrice + '</span><span class="price-chip mark">Harga Saat Ini: ' + markPrice + '</span><span class="price-chip sl">Stop Loss: ' + stopLossPrice + '</span><span class="price-chip target">Target: ' + targetPrice + '</span></div>' +
-            '<div class="price-chip-row"><span class="price-chip pnl ' + pnlChipClass + '">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span></div></div>';
+            '<div class="live-position-kpis">' +
+            '<div class="kpi-line"><span class="price-chip qty">Kuantitas: ' + formatNumber(position.quantity) + '</span></div>' +
+            '<div class="kpi-line"><span class="price-chip entry">Harga Masuk: ' + entryPrice + '</span></div>' +
+            '<div class="kpi-line"><span class="price-chip mark">Harga Saat Ini: ' + markPrice + '</span></div>' +
+            '<div class="kpi-line"><span class="price-chip sl">Stop Loss: ' + stopLossPrice + '</span></div>' +
+            '<div class="kpi-line"><span class="price-chip target">Target: ' + targetPrice + '</span></div>' +
+            '<div class="kpi-line"><span class="price-chip pnl ' + pnlChipClass + '">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span></div>' +
+            '</div>';
           livePositionsList.appendChild(item);
         });
       }
