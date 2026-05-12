@@ -479,7 +479,14 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
         if (await shouldAutoClearSpotDustPosition(currentPosition)) {
             const minQty = resolveMarketMinQty(db?.pair);
             console.warn(`[SYNC][WARN] Auto-cleared dust spot position ${positionKey}: qty ${currentPosition.quantity} below minimum ${minQty}.`);
-            removeActivePositionByKey(positionKey);
+            const didClearPosition = await clearMissingPositionState(
+                currentPosition,
+                "SPOT_DUST_AUTO_CLEAR",
+                positionKey
+            );
+            if (!didClearPosition) {
+                removeActivePositionByKey(positionKey);
+            }
             didClearDustPosition = true;
             continue;
         }

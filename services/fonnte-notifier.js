@@ -59,6 +59,9 @@ const createFonnteNotifierHelpers = ({
         if (normalized.includes("PROFIT_TARGET") || normalized === "TP" || normalized.includes("_TP")) return { code: "TP", label: "Take Profit" };
         if (normalized.includes("STOP_LOSS") || normalized === "SL" || normalized.includes("_SL")) return { code: "SL", label: "Stop Loss" };
         if (normalized.includes("MANUAL")) return { code: "MANUAL", label: "Manual Close" };
+        if (normalized.includes("SPOT_OCO_")) return { code: "SPOT_OCO", label: "Spot OCO Filled (detected by sync)" };
+        if (normalized.includes("EXCHANGE_FILLED_")) return { code: "EXCHANGE_FILLED", label: "Exchange Exit Filled (detected by recovery)" };
+        if (normalized.includes("DUST")) return { code: "DUST", label: "Auto Dust Cleanup (Qty di bawah minimum exchange)" };
         if (normalized.includes("MISSING") || normalized.includes("SYNC_REMOVED")) return { code: "SYNC", label: "Position Missing from Sync" };
         return { code: "CLOSE", label: normalized || "Close" };
     };
@@ -86,12 +89,29 @@ const createFonnteNotifierHelpers = ({
             ? `${closeReason.code} TERPENUHI`
             : closeReason.code === "MANUAL"
                 ? "CLOSE MANUAL"
+                : closeReason.code === "SPOT_OCO"
+                    ? "SPOT OCO TERDETEKSI FILLED"
+                    : closeReason.code === "EXCHANGE_FILLED"
+                        ? "EXIT EXCHANGE TERDETEKSI FILLED"
+                : closeReason.code === "DUST"
+                    ? "AUTO DUST CLEANUP"
                 : closeReason.code === "SYNC"
                     ? "POSISI HILANG DARI SYNC"
                     : "POSISI DITUTUP";
-        const executionLabel = closeReason.code === "SYNC" ? "Harga eksekusi estimasi" : "Harga eksekusi";
+        const executionLabel = closeReason.code === "SYNC"
+            || closeReason.code === "DUST"
+            || closeReason.code === "SPOT_OCO"
+            || closeReason.code === "EXCHANGE_FILLED"
+            ? "Harga eksekusi estimasi"
+            : "Harga eksekusi";
         const detailLabel = closeReason.code === "SYNC"
             ? "Posisi tidak ditemukan saat sinkronisasi"
+            : closeReason.code === "DUST"
+                ? "Posisi dibersihkan otomatis karena qty di bawah minimum lot exchange"
+                : closeReason.code === "SPOT_OCO"
+                    ? "Order OCO spot tidak lagi terbuka dan posisi dianggap sudah tertutup di exchange"
+                    : closeReason.code === "EXCHANGE_FILLED"
+                        ? "Close order ditolak karena posisi sudah tertutup di exchange, lalu diselaraskan lokal"
             : closeReason.label;
 
         const entryPrice = Number(position?.entryPrice);
