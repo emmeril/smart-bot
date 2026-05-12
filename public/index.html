@@ -524,6 +524,18 @@
       }
     }
 
+    async function refreshPositionProtection(positionKey) {
+      const key = String(positionKey || "").trim().toUpperCase();
+      if (!key) return;
+      try {
+        const data = await api("/api/positions/" + encodeURIComponent(key) + "/refresh-protection", { method: "POST" });
+        showToast(data.message || ("Protection " + key + " berhasil diperbarui"), "success");
+        await loadLiveStatus(true);
+      } catch (error) {
+        showToast(error.message || "Gagal refresh protection posisi", "error");
+      }
+    }
+
     async function removeAllPositions() {
       const cards = Array.from(livePositionsList.querySelectorAll("[data-position-key]"));
       const keys = cards.map((node) => String(node.dataset.positionKey || "").trim()).filter(Boolean);
@@ -894,7 +906,7 @@
           const stopLossPrice = formatPrice(position.stopLossPrice);
           const targetPrice = formatPrice(position.targetPrice);
           item.innerHTML = '<div class="live-position-head"><strong>' + positionKey + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
-            '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Tutup</button></div>' +
+            '<div class="live-table-actions"><button class="btn btn-secondary btn-xs js-refresh-protection" type="button" data-position-key="' + positionKey + '">Refresh TP/SL</button><button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Tutup</button></div></div>' +
             '<div class="live-position-kpis"><span>Qty ' + formatNumber(position.quantity) + '</span>' +
             '<div class="price-chip-row"><span class="price-chip entry">Entry ' + entryPrice + '</span><span class="price-chip mark">Mark ' + markPrice + '</span><span class="price-chip sl">SL ' + stopLossPrice + '</span></div>' +
             '<span class="pnl-line">PnL ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span>' +
@@ -1175,6 +1187,12 @@
     resetBtn.addEventListener("click", resetDashboard);
     clearPositionsBtn.addEventListener("click", removeAllPositions);
     livePositionsList.addEventListener("click", async (event) => {
+      const refreshTarget = event.target.closest(".js-refresh-protection");
+      if (refreshTarget) {
+        const key = refreshTarget.dataset.positionKey || "";
+        await refreshPositionProtection(key);
+        return;
+      }
       const target = event.target.closest(".js-remove-position");
       if (!target) return;
       const key = target.dataset.positionKey || "";

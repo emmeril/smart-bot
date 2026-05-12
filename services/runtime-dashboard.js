@@ -18,6 +18,7 @@ const createRuntimeDashboardHelpers = ({
     applyDashboardConfigUpdate,
     resetDashboardConfig,
     removeDashboardPosition,
+    refreshDashboardPositionProtection,
     cancelDashboardOrder,
     cancelDashboardOrderGroup
 }) => {
@@ -265,6 +266,28 @@ const createRuntimeDashboardHelpers = ({
                     return;
                 }
                 res.json({ ok: true, message: result.message || `Posisi ${positionKey} diproses untuk ditutup` });
+            } catch (error) {
+                res.status(500).json({ ok: false, error: error.message });
+            }
+        });
+
+        app.post("/api/positions/:positionKey/refresh-protection", requireSameOriginForStateChange, async (req, res) => {
+            try {
+                const positionKey = String(req.params?.positionKey || "").trim().toUpperCase();
+                if (!positionKey) {
+                    res.status(400).json({ ok: false, error: "Position key is required" });
+                    return;
+                }
+                if (typeof refreshDashboardPositionProtection !== "function") {
+                    res.status(503).json({ ok: false, error: "Refresh protection is unavailable" });
+                    return;
+                }
+                const result = await refreshDashboardPositionProtection(positionKey);
+                if (!result?.ok) {
+                    res.status(400).json({ ok: false, error: result?.error || "Failed to refresh protection" });
+                    return;
+                }
+                res.json({ ok: true, message: result.message || `Protection posisi ${positionKey} berhasil diperbarui` });
             } catch (error) {
                 res.status(500).json({ ok: false, error: error.message });
             }

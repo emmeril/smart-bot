@@ -526,6 +526,10 @@ const {
     formatPriceToMarketPrecision,
     validateOrderSize,
     buildOrderPlan,
+    getSignalParameters: (...args) => getSignalParameters(...args),
+    sanitizeGridState: (...args) => sanitizeGridState(...args),
+    findNearestGridLevelIndex: (...args) => findNearestGridLevelIndex(...args),
+    buildGridExitPlan: (...args) => buildGridExitPlan(...args),
     buildExchangeOrderParams: (...args) => buildExchangeOrderParams(...args),
     getOrderPositionSide: (...args) => getOrderPositionSide(...args),
     getClosePositionSide: (...args) => getClosePositionSide(...args),
@@ -948,6 +952,63 @@ const removeDashboardPosition = async (positionKey) => {
     return { ok: true, message: `Permintaan hapus posisi ${normalizedKey} sudah dikirim.` };
 };
 
+const refreshDashboardPositionProtection = async (positionKey) => {
+    const normalizedKey = toPositionMapKey(positionKey);
+    const trackedPosition = getActivePositionByKey(normalizedKey);
+    if (!trackedPosition) return { ok: false, error: `Posisi ${normalizedKey} tidak ditemukan.` };
+
+    const signalParams = getSignalParameters();
+    const gridState = sanitizeGridState(db?.activeGridState, signalParams);
+    const levels = Array.isArray(gridState?.levels) ? gridState.levels : [];
+    const step = toFiniteNumber(gridState?.step, NaN);
+    if (levels.length < 2 || !Number.isFinite(step) || step <= 0) {
+        return { ok: false, error: "Grid aktif belum siap. Tidak bisa menghitung ulang protection." };
+    }
+
+    const nextPosition = { ...trackedPosition };
+    const entryPrice = toFiniteNumber(nextPosition.entryPrice, NaN);
+    const quantity = Math.abs(toFiniteNumber(nextPosition.quantity, NaN));
+    if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
+        return { ok: false, error: "Data posisi aktif tidak valid untuk refresh protection." };
+    }
+
+    const side = String(nextPosition.side || "").toLowerCase();
+    const derivedGridIndex = findNearestGridLevelIndex(levels, entryPrice);
+    const gridExitPlan = buildGridExitPlan({
+        side,
+        entryIndex: derivedGridIndex,
+        levels,
+        step,
+        params: signalParams,
+        gridState,
+        atr: toFiniteNumber(nextPosition.atrAtEntry, NaN)
+    });
+    if (!Number.isFinite(gridExitPlan?.targetPrice) || !Number.isFinite(gridExitPlan?.stopLossPrice)) {
+        return { ok: false, error: "TP/SL grid baru tidak valid." };
+    }
+
+    nextPosition.targetPrice = gridExitPlan.targetPrice;
+    nextPosition.stopLossPrice = gridExitPlan.stopLossPrice;
+    nextPosition.targetProfitUSDT = Math.abs(nextPosition.targetPrice - entryPrice) * quantity;
+    nextPosition.stopLossUSDT = -Math.abs(nextPosition.stopLossPrice - entryPrice) * quantity;
+    nextPosition.tpOrderId = null;
+    nextPosition.tpClientOrderId = null;
+    nextPosition.slOrderId = null;
+    nextPosition.slClientOrderId = null;
+    nextPosition.ocoBlockedReason = null;
+    nextPosition.ocoBlockedFingerprint = null;
+
+    upsertActivePosition(nextPosition);
+    await saveDB();
+    await ensureReduceOnlyTakeProfitOrder(normalizedKey, nextPosition);
+    await ensureReduceOnlyStopLossOrder(normalizedKey, nextPosition);
+
+    return {
+        ok: true,
+        message: `Protection ${normalizedKey} diperbarui. TP ${nextPosition.targetPrice} | SL ${nextPosition.stopLossPrice}`
+    };
+};
+
 const cancelDashboardOrder = async ({ orderType, clientOrderId, orderId }) => {
     const normalizedType = String(orderType || "").toLowerCase();
     if (!["grid", "tp", "sl"].includes(normalizedType)) {
@@ -1018,6 +1079,7 @@ const { startWebDashboard } = createRuntimeDashboardHelpers({
     applyDashboardConfigUpdate,
     resetDashboardConfig,
     removeDashboardPosition,
+    refreshDashboardPositionProtection,
     cancelDashboardOrder,
     cancelDashboardOrderGroup
 });
