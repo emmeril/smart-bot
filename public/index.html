@@ -902,11 +902,11 @@
           item.innerHTML = '<div class="live-position-head"><strong>' + positionKey + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
             '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Tutup</button></div>' +
             '<div class="live-position-kpis">' +
-            '<div class="kpi-line"><span class="price-chip qty">Kuantitas: ' + formatNumber(position.quantity) + '</span></div>' +
-            '<div class="kpi-line"><span class="price-chip entry">Harga Masuk: ' + entryPrice + '</span></div>' +
-            '<div class="kpi-line"><span class="price-chip mark">Harga Saat Ini: ' + markPrice + '</span></div>' +
-            '<div class="kpi-line"><span class="price-chip sl">Stop Loss: ' + stopLossPrice + '</span></div>' +
-            '<div class="kpi-line"><span class="price-chip target">Target: ' + targetPrice + '</span></div>' +
+            '<div class="kpi-line">Kuantitas: ' + formatNumber(position.quantity) + '</div>' +
+            '<div class="kpi-line">Harga Masuk: ' + entryPrice + '</div>' +
+            '<div class="kpi-line">Harga Saat Ini: ' + markPrice + '</div>' +
+            '<div class="kpi-line">Stop Loss: ' + stopLossPrice + '</div>' +
+            '<div class="kpi-line">Target: ' + targetPrice + '</div>' +
             '<div class="kpi-line"><span class="price-chip pnl ' + pnlChipClass + '">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span></div>' +
             '</div>';
           livePositionsList.appendChild(item);
