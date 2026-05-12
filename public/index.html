@@ -895,10 +895,10 @@
           const targetPrice = formatPrice(position.targetPrice);
           item.innerHTML = '<div class="live-position-head"><strong>' + positionKey + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
             '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Tutup</button></div>' +
-            '<div class="live-position-kpis"><span>Qty ' + formatNumber(position.quantity) + '</span>' +
-            '<div class="price-chip-row"><span class="price-chip entry">Entry ' + entryPrice + '</span><span class="price-chip mark">Mark ' + markPrice + '</span><span class="price-chip sl">SL ' + stopLossPrice + '</span></div>' +
-            '<span class="pnl-line">PnL ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span>' +
-            '<span>TP ' + targetPrice + '</span></div>';
+            '<div class="live-position-kpis"><span>Kuantitas: ' + formatNumber(position.quantity) + '</span>' +
+            '<div class="price-chip-row"><span class="price-chip entry">Harga Masuk: ' + entryPrice + '</span><span class="price-chip mark">Harga Saat Ini: ' + markPrice + '</span><span class="price-chip sl">Stop Loss: ' + stopLossPrice + '</span></div>' +
+            '<span class="pnl-line">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span>' +
+            '<span>Target: ' + targetPrice + '</span></div>';
           livePositionsList.appendChild(item);
         });
       }
