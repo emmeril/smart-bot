@@ -318,7 +318,7 @@
 
           <section class="panel pnl-section" id="pnlBreakdown">
             <article class="pnl-summary-card realized">
-              <h3>PnL Terealisasi</h3>
+              <h3>PnL Terealisasi (Akumulatif)</h3>
               <div class="pnl-display" id="realizedPnlValue">-</div>
               <div class="pnl-sub" id="realizedPnlMeta"></div>
             </article>
@@ -369,7 +369,7 @@
                 <span id="livePositionsMeta">Memuat data posisi...</span>
               </article>
               <article class="live-card">
-                <span class="label">PnL Terealisasi</span>
+                <span class="label">PnL Terealisasi Akumulatif</span>
                 <strong id="livePnlValue">-</strong>
                 <span id="livePnlMeta">-</span>
                 <canvas id="livePnlTrend" class="live-sparkline" width="320" height="72" aria-label="Grafik mini tren PnL terealisasi"></canvas>
@@ -678,7 +678,7 @@
       const cards = [
         { label: "Bot", value: runtimeStatus.label, cardClass: "", badgeClass: "" },
         { label: "Posisi", value: String(status.activePositions), cardClass: "", badgeClass: "" },
-        { label: "PnL Terealisasi", value: `${formatNumber(status.dailyPnL)} USDT`, cardClass: "", badgeClass: "" }
+        { label: "PnL Terealisasi (Akumulatif)", value: `${formatNumber(status.dailyPnL)} USDT`, cardClass: "", badgeClass: "" }
       ];
       statusCards.innerHTML = cards.map((card) => `
         <article class="metric-card ${card.cardClass || ""}">
@@ -812,7 +812,7 @@
       // Realized PnL
       realizedPnlValue.textContent = formatPnl(realizedPnL);
       realizedPnlValue.className = "pnl-display " + getPnlClass(realizedPnL);
-      realizedPnlMeta.textContent = `${data.dailyTrades || 0} transaksi | sumber: bot`;
+      realizedPnlMeta.textContent = `Akumulasi realized PnL | ${data.dailyTrades || 0} transaksi hari ini | sumber: bot`;
       
       // Unrealized PnL
       const activePosCount = Array.isArray(data.activePositions) ? data.activePositions.length : 0;
@@ -863,7 +863,7 @@
       livePositionsMeta.textContent = data.exchangePositionsCount + " posisi bursa | " + String(data.positionMode || "-").toUpperCase() + " | " + exchangeLabel + recoverySuffix;
       livePnlValue.textContent = formatLiveCurrency(dailyPnl) + " USDT";
       livePnlValue.className = "live-amount " + (dailyPnl > 0 ? "positive" : (dailyPnl < 0 ? "negative" : "neutral"));
-      livePnlMeta.textContent = String(data.dailyTrades || 0) + " transaksi hari ini | sumber: bot";
+      livePnlMeta.textContent = "Akumulatif | " + String(data.dailyTrades || 0) + " transaksi hari ini | sumber: bot";
       liveOrdersCount.textContent = String(orderCounts.total || 0);
       const recoveryAlert = timeoutErrors >= 3 || duplicateDetected >= 8 ? " | recovery spike" : "";
       liveOrdersMeta.textContent =

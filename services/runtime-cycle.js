@@ -45,7 +45,7 @@ const createRuntimeCycleHelpers = ({
         resetDailyTradeMetrics();
         if (typeof resetDailyPnlState === "function") await resetDailyPnlState(now);
         else {
-            db.dailyPnL = 0;
+            // Keep realized PnL cumulative across days; only reset daily trade counters.
             db.dailyTrades = 0;
             db.lastDailyReset = toFiniteNumber(now, Date.now());
             await saveDB();

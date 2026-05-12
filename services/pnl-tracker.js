@@ -60,10 +60,10 @@ const createPnlTrackerHelpers = ({
     const resetDailyPnlState = async (timestamp = Date.now()) => {
         const db = getDb();
         if (!db) return buildDailyPnlSnapshot();
-        db.dailyPnL = 0;
+        // Keep realized PnL cumulative across days; only reset daily trade counters.
         db.dailyTrades = 0;
         db.lastDailyReset = toFiniteNumber(timestamp, Date.now());
-        db.dailyPnlSource = "reset";
+        db.dailyPnlSource = String(db.dailyPnlSource || "local").toLowerCase();
         db.dailyPnlSyncedAt = toFiniteNumber(timestamp, Date.now());
         lastExchangePnlSyncAt = 0;
         await saveDB();

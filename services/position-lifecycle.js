@@ -182,7 +182,7 @@ const createPositionLifecycleHelpers = ({
 
         console.log(`[POSITION][INFO] Closed position: ${reason}`);
         console.log(`   Realized P&L: ${netProfitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%)`);
-        console.log(`   Daily Total Realized P&L: ${db.dailyPnL.toFixed(4)} USDT / ${db.dailyTrades} trades`);
+        console.log(`   Total Realized P&L (Cumulative): ${db.dailyPnL.toFixed(4)} USDT | Daily trades: ${db.dailyTrades}`);
 
         removeActivePositionByKey(trackedKey);
         await saveDB();
