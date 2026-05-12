@@ -37,6 +37,8 @@ const createOrderExecutionHelpers = ({
     isProtectionUpdateNotificationEnabled
 }) => {
     const managedOrderSyncChains = new Map();
+    const protectionUpdateStateByKey = new Map();
+    const PROTECTION_UPDATE_SUPPRESS_MS = 90 * 1000;
     const ORDER_REQUEST_TIMEOUT_MS = 12000;
     const DUPLICATE_LOOKUP_ATTEMPTS = 3;
     const DUPLICATE_LOOKUP_DELAY_MS = 150;
@@ -189,6 +191,33 @@ const createOrderExecutionHelpers = ({
     }) => {
         if (typeof isProtectionUpdateNotificationEnabled === "function" && !isProtectionUpdateNotificationEnabled()) return;
         if (typeof notifyTradeUpdate !== "function") return;
+        const normalizedPositionKey = String(positionKey || position?.positionSide || "BOTH").toUpperCase();
+        const normalizedReason = String(reason || "").toUpperCase();
+        const normalizedTp = Number.isFinite(tpPrice) ? tpPrice : Number(position?.targetPrice);
+        const normalizedSl = Number.isFinite(slPrice) ? slPrice : Number(position?.stopLossPrice);
+        const normalizedQty = Number(position?.quantity);
+        const fingerprint = [
+            normalizedPositionKey,
+            Number.isFinite(normalizedQty) ? normalizedQty : "N/A",
+            Number.isFinite(normalizedTp) ? normalizedTp : "N/A",
+            Number.isFinite(normalizedSl) ? normalizedSl : "N/A"
+        ].join("|");
+        const now = Date.now();
+        const previousState = protectionUpdateStateByKey.get(normalizedPositionKey);
+        if (previousState && (now - previousState.at) <= PROTECTION_UPDATE_SUPPRESS_MS) {
+            const isDuplicateReason = previousState.reason === normalizedReason && previousState.fingerprint === fingerprint;
+            const isImmediateSyncedAfterReplace = normalizedReason === "OCO_SYNCED"
+                && previousState.reason === "OCO_REPLACED"
+                && previousState.fingerprint === fingerprint;
+            if (isDuplicateReason || isImmediateSyncedAfterReplace) {
+                return;
+            }
+        }
+        protectionUpdateStateByKey.set(normalizedPositionKey, {
+            at: now,
+            reason: normalizedReason,
+            fingerprint
+        });
         const db = getDb();
         await notifyTradeUpdate({
             event: "TP_SL_UPDATED",

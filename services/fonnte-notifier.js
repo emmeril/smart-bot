@@ -56,8 +56,8 @@ const createFonnteNotifierHelpers = ({
 
     const resolveCloseReason = (reason) => {
         const normalized = String(reason || "").toUpperCase();
-        if (normalized.includes("PROFIT_TARGET")) return { code: "TP", label: "Take Profit" };
-        if (normalized.includes("STOP_LOSS")) return { code: "SL", label: "Stop Loss" };
+        if (normalized.includes("PROFIT_TARGET") || normalized === "TP" || normalized.includes("_TP")) return { code: "TP", label: "Take Profit" };
+        if (normalized.includes("STOP_LOSS") || normalized === "SL" || normalized.includes("_SL")) return { code: "SL", label: "Stop Loss" };
         if (normalized.includes("MANUAL")) return { code: "MANUAL", label: "Manual Close" };
         if (normalized.includes("MISSING") || normalized.includes("SYNC_REMOVED")) return { code: "SYNC", label: "Position Missing from Sync" };
         return { code: "CLOSE", label: normalized || "Close" };

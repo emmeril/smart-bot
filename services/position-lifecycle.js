@@ -268,7 +268,10 @@ const createPositionLifecycleHelpers = ({
                 const errorMessage = String(error?.message || "");
                 if (error.code === -2022 || errorMessage.includes("ReduceOnly Order is rejected")) {
                     console.warn("[POSITION][WARN] Close order rejected; clearing stale local state if exchange exposure is already gone.");
-                    await clearMissingPositionState(position, "POSITION_MISSING", closeLockKey);
+                    const fallbackReason = reasonLooksExchangeFilled
+                        ? `EXCHANGE_FILLED_${reason}`
+                        : "POSITION_MISSING";
+                    await clearMissingPositionState(position, fallbackReason, closeLockKey);
                     return;
                 }
                 throw error;
