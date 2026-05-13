@@ -24,7 +24,7 @@ test("buildCloseNotificationMessage formats TP alerts with trading details", () 
         closedAt: 1700000000000
     });
 
-    assert.ok(message.includes("TP TERPENUHI"));
+    assert.ok(message.includes("TP FULL TERPENUHI"));
     assert.ok(message.includes("Pasangan: DOGE/USDT:USDT"));
     assert.ok(message.includes("Harga eksekusi: 110.0000"));
     assert.ok(message.includes("P/L: Profit +20.0000 USDT (+10.00%)"));
@@ -72,6 +72,36 @@ test("buildCloseNotificationMessage formats manual and sync-close alerts", () =>
     assert.ok(syncMessage.includes("Harga eksekusi estimasi"));
 });
 
+test("buildCloseNotificationMessage prioritizes SPOT_OCO reason and uses close fill quantity", () => {
+    const helpers = createFonnteNotifierHelpers({
+        token: "token-123",
+        target: "6281234567890"
+    });
+
+    const ocoMessage = helpers.buildCloseNotificationMessage({
+        position: {
+            side: "buy",
+            entryPrice: 0.1099,
+            quantity: 51,
+            strategy: "SPOT_GRID",
+            symbol: "DOGE/USDT"
+        },
+        reason: "SPOT_OCO_PROFIT_TARGET",
+        exitPrice: 0.1128,
+        netProfitUSDT: 0.0234,
+        profitPercent: 2.67,
+        closedAt: 1700000000000,
+        closeFillSnapshot: {
+            quantity: 8
+        }
+    });
+
+    assert.ok(ocoMessage.includes("SPOT OCO TERDETEKSI FILLED"));
+    assert.ok(!ocoMessage.includes("TP TERPENUHI"));
+    assert.ok(ocoMessage.includes("Qty: 8.000000"));
+    assert.ok(ocoMessage.includes("Alasan: Order OCO spot tidak lagi terbuka dan posisi dianggap sudah tertutup di exchange"));
+});
+
 test("buildTradeUpdateMessage formats OPEN and PARTIAL_CLOSE updates", () => {
     const helpers = createFonnteNotifierHelpers({
         token: "token-123",
@@ -111,7 +141,7 @@ test("buildTradeUpdateMessage formats OPEN and PARTIAL_CLOSE updates", () => {
     assert.ok(openMessage.includes("Qty: 2.000000"));
     assert.ok(openMessage.includes("Alasan: Signal BUY"));
 
-    assert.ok(partialMessage.includes("UPDATE TRADE: PARTIAL CLOSE"));
+    assert.ok(partialMessage.includes("UPDATE TRADE: TP PARSIAL"));
     assert.ok(partialMessage.includes("Harga eksekusi: 100.0000"));
     assert.ok(partialMessage.includes("Realized P/L: Profit +2.5000 USDT (+4.20%)"));
 });

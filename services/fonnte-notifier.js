@@ -56,11 +56,11 @@ const createFonnteNotifierHelpers = ({
 
     const resolveCloseReason = (reason) => {
         const normalized = String(reason || "").toUpperCase();
+        if (normalized.includes("SPOT_OCO_")) return { code: "SPOT_OCO", label: "Spot OCO Filled (detected by sync)" };
+        if (normalized.includes("EXCHANGE_FILLED_")) return { code: "EXCHANGE_FILLED", label: "Exchange Exit Filled (detected by recovery)" };
         if (normalized.includes("PROFIT_TARGET") || normalized === "TP" || normalized.includes("_TP")) return { code: "TP", label: "Take Profit" };
         if (normalized.includes("STOP_LOSS") || normalized === "SL" || normalized.includes("_SL")) return { code: "SL", label: "Stop Loss" };
         if (normalized.includes("MANUAL")) return { code: "MANUAL", label: "Manual Close" };
-        if (normalized.includes("SPOT_OCO_")) return { code: "SPOT_OCO", label: "Spot OCO Filled (detected by sync)" };
-        if (normalized.includes("EXCHANGE_FILLED_")) return { code: "EXCHANGE_FILLED", label: "Exchange Exit Filled (detected by recovery)" };
         if (normalized.includes("DUST")) return { code: "DUST", label: "Auto Dust Cleanup (Qty di bawah minimum exchange)" };
         if (normalized.includes("MISSING") || normalized.includes("SYNC_REMOVED")) return { code: "SYNC", label: "Position Missing from Sync" };
         return { code: "CLOSE", label: normalized || "Close" };
@@ -76,17 +76,26 @@ const createFonnteNotifierHelpers = ({
         return { code: normalized || "UPDATE", label: normalized || "Update" };
     };
 
+    const resolvePartialCloseLabel = (reason) => {
+        const normalized = String(reason || "").toUpperCase();
+        if (normalized.includes("TP") || normalized.includes("PROFIT")) return "TP PARSIAL";
+        if (normalized.includes("SL") || normalized.includes("STOP_LOSS")) return "SL PARSIAL";
+        return "PARTIAL CLOSE";
+    };
+
     const buildCloseNotificationMessage = ({
         position,
         reason,
         exitPrice,
         netProfitUSDT,
         profitPercent,
-        closedAt
+        closedAt,
+        closeFillSnapshot,
+        order
     }) => {
         const closeReason = resolveCloseReason(reason);
         const closeLabel = closeReason.code === "TP" || closeReason.code === "SL"
-            ? `${closeReason.code} TERPENUHI`
+            ? `${closeReason.code} FULL TERPENUHI`
             : closeReason.code === "MANUAL"
                 ? "CLOSE MANUAL"
                 : closeReason.code === "SPOT_OCO"
@@ -115,7 +124,12 @@ const createFonnteNotifierHelpers = ({
             : closeReason.label;
 
         const entryPrice = Number(position?.entryPrice);
-        const quantity = Number(position?.quantity);
+        const positionQty = Number(position?.quantity);
+        const closeQtyFromSnapshot = Number(closeFillSnapshot?.quantity);
+        const closeQtyFromOrder = Number(order?.filled ?? order?.amount ?? order?.info?.executedQty ?? order?.info?.origQty);
+        const closeQuantity = Number.isFinite(closeQtyFromSnapshot) && closeQtyFromSnapshot > 0
+            ? closeQtyFromSnapshot
+            : (Number.isFinite(closeQtyFromOrder) && closeQtyFromOrder > 0 ? closeQtyFromOrder : positionQty);
         const symbol = String(position?.symbol || position?.pair || process.env.TRADING_PAIR || "").trim();
         const strategy = String(position?.strategy || "N/A").trim();
         const side = getSideLabel(position);
@@ -129,7 +143,7 @@ const createFonnteNotifierHelpers = ({
             `Strategi: ${strategy}`,
             `Harga entry: ${formatNumber(entryPrice)}`,
             `${executionLabel}: ${formatNumber(exitPrice)}`,
-            `Qty: ${formatNumber(quantity, 6)}`,
+            `Qty: ${formatNumber(closeQuantity, 6)}`,
             `P/L: ${pnlLabel} ${formatSignedNumber(netProfitUSDT)} USDT (${formatSignedNumber(profitPercent, 2)}%)`,
             `Waktu: ${formatTime(closedAt)}`,
             `Alasan: ${detailLabel}`
@@ -157,7 +171,7 @@ const createFonnteNotifierHelpers = ({
         const pnlLabel = hasRealizedPnl && pnlValue >= 0 ? "Profit" : "Loss";
 
         const lines = [
-            `*UPDATE TRADE: ${tradeEvent.label.toUpperCase()}*`,
+            `*UPDATE TRADE: ${(tradeEvent.code === "PARTIAL_CLOSE" ? resolvePartialCloseLabel(reason) : tradeEvent.label).toUpperCase()}*`,
             `Pasangan: ${symbol || "N/A"}`,
             `Sisi: ${side}`,
             `Strategi: ${strategy}`,
@@ -272,7 +286,9 @@ const createFonnteNotifierHelpers = ({
         exitPrice,
         netProfitUSDT,
         profitPercent,
-        closedAt
+        closedAt,
+        closeFillSnapshot,
+        order
     }) => {
         const message = buildCloseNotificationMessage({
             position,
@@ -280,7 +296,9 @@ const createFonnteNotifierHelpers = ({
             exitPrice,
             netProfitUSDT,
             profitPercent,
-            closedAt
+            closedAt,
+            closeFillSnapshot,
+            order
         });
 
         try {
