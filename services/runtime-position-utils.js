@@ -97,10 +97,18 @@ const createRuntimePositionUtils = ({
         return normalizedClampedPrice;
     };
 
-    const applyTrailingStopUpdate = (position) => {
+    const hasRelevantGridOrdersForPosition = (position, managedOrdersSnapshot = null) => {
+        const gridOrders = Array.isArray(managedOrdersSnapshot?.grid) ? managedOrdersSnapshot.grid : [];
+        if (gridOrders.length === 0) return false;
+        const expectedGridSide = String(position?.side || "").toLowerCase();
+        return gridOrders.some((order) => String(order?.side || "").toLowerCase() === expectedGridSide);
+    };
+
+    const applyTrailingStopUpdate = (position, managedOrdersSnapshot = null) => {
         const db = getDb();
         const trailingEnabled = position?.trailingEnabled ?? db.trailingEnabled;
         if (!trailingEnabled || !Number.isFinite(position.atrAtEntry) || position.atrAtEntry <= 0) return;
+        const allowGridClamp = hasRelevantGridOrdersForPosition(position, managedOrdersSnapshot);
         const effectiveTrailingActivateATR = toFiniteNumber(position.trailingActivateATR, db.trailingActivateATR);
         const effectiveTrailingOffsetATR = toFiniteNumber(position.trailingOffsetATR, db.trailingOffsetATR);
         const trailActivationMove = effectiveTrailingActivateATR * position.atrAtEntry;
@@ -109,7 +117,8 @@ const createRuntimePositionUtils = ({
         if (position.side === "buy") {
             const activated = position.highestSinceEntry >= position.entryPrice + trailActivationMove;
             if (!activated) return;
-            const trailedStop = applyNoSlZoneClamp(position, position.highestSinceEntry - trailOffsetMove);
+            const rawTrailedStop = position.highestSinceEntry - trailOffsetMove;
+            const trailedStop = allowGridClamp ? applyNoSlZoneClamp(position, rawTrailedStop) : rawTrailedStop;
             if (!Number.isFinite(position.stopLossPrice) || trailedStop > position.stopLossPrice) {
                 position.stopLossPrice = trailedStop;
                 position.stopLossUSDT = -Math.abs(position.stopLossPrice - position.entryPrice) * position.quantity;
@@ -119,7 +128,8 @@ const createRuntimePositionUtils = ({
 
         const activated = position.lowestSinceEntry <= position.entryPrice - trailActivationMove;
         if (!activated) return;
-        const trailedStop = applyNoSlZoneClamp(position, position.lowestSinceEntry + trailOffsetMove);
+        const rawTrailedStop = position.lowestSinceEntry + trailOffsetMove;
+        const trailedStop = allowGridClamp ? applyNoSlZoneClamp(position, rawTrailedStop) : rawTrailedStop;
         if (!Number.isFinite(position.stopLossPrice) || trailedStop < position.stopLossPrice) {
             position.stopLossPrice = trailedStop;
             position.stopLossUSDT = -Math.abs(position.stopLossPrice - position.entryPrice) * position.quantity;

@@ -70,7 +70,7 @@ const createRuntimeMonitoringHelpers = ({
 
                     const previousRuntimeState = snapshotPositionRuntimeState(position);
                     updateActivePositionExtremes(position, currentPrice);
-                    applyTrailingStopUpdate(position);
+                    applyTrailingStopUpdate(position, managedOrdersSnapshot);
                     if (didPositionRuntimeStateChange(previousRuntimeState, position)) {
                         upsertActivePosition(position);
                         await maybePersistActivePositionRuntimeState();

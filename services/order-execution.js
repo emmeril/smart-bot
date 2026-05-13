@@ -18,6 +18,7 @@ const createOrderExecutionHelpers = ({
     getExchangeClientOrderId,
     getTpClientOrderId,
     getSlClientOrderId,
+    fetchOpenGridOrders,
     fetchOpenTpOrders,
     fetchOpenSlOrders,
     matchesOrderToTrackedPosition,
@@ -1229,8 +1230,17 @@ const createOrderExecutionHelpers = ({
         return { minPrice, maxPrice, buffer };
     };
 
-    const clampStopLossOutsideGridZone = (position) => {
+    const hasRelevantOpenGridOrdersForPosition = async (position) => {
+        const openGridOrders = await fetchOpenGridOrders();
+        if (!Array.isArray(openGridOrders) || openGridOrders.length === 0) return false;
+        const expectedGridSide = String(position?.side || "").toLowerCase();
+        return openGridOrders.some((order) => String(order?.side || "").toLowerCase() === expectedGridSide);
+    };
+
+    const clampStopLossOutsideGridZone = async (position) => {
         if (!position || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return false;
+        const hasRelevantGridOrders = await hasRelevantOpenGridOrdersForPosition(position);
+        if (!hasRelevantGridOrders) return false;
         const zone = resolveGridNoSlZone();
         if (!zone) return false;
         const currentStop = Number(position.stopLossPrice);
@@ -1258,7 +1268,7 @@ const createOrderExecutionHelpers = ({
             const position = { ...sourcePosition };
             if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
             if (!Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
-            const didClampStopLoss = clampStopLossOutsideGridZone(position);
+            const didClampStopLoss = await clampStopLossOutsideGridZone(position);
             if (didClampStopLoss) {
                 upsertActivePosition(position);
                 await saveDB();
@@ -1404,7 +1414,7 @@ const createOrderExecutionHelpers = ({
         return await runManagedOrderSync(`SL:${positionKey}`, async () => {
             const position = { ...sourcePosition };
             if (!position || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
-            const didClampStopLoss = clampStopLossOutsideGridZone(position);
+            const didClampStopLoss = await clampStopLossOutsideGridZone(position);
             if (didClampStopLoss) {
                 upsertActivePosition(position);
                 await saveDB();

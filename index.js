@@ -544,6 +544,7 @@ const {
     getExchangeClientOrderId,
     getTpClientOrderId,
     getSlClientOrderId,
+    fetchOpenGridOrders,
     fetchOpenTpOrders,
     fetchOpenSlOrders,
     matchesOrderToTrackedPosition: (...args) => matchesOrderToTrackedPosition(...args),
