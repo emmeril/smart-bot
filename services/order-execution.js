@@ -1213,11 +1213,56 @@ const createOrderExecutionHelpers = ({
 
     const isSpotMarginMode = () => String(getDb()?.marginMode || "spot").toLowerCase() === "spot";
 
+    const resolveGridNoSlZone = () => {
+        const db = getDb();
+        if (String(db?.strategy || "").toLowerCase() !== "spot_grid") return null;
+        const levels = Array.isArray(db?.activeGridState?.levels)
+            ? db.activeGridState.levels.map((level) => toFiniteNumber(level, NaN)).filter((level) => Number.isFinite(level) && level > 0)
+            : [];
+        if (levels.length < 2) return null;
+        const minPrice = Math.min(...levels);
+        const maxPrice = Math.max(...levels);
+        const step = Math.abs(toFiniteNumber(db?.activeGridState?.step, NaN));
+        const fallbackStep = (maxPrice - minPrice) / Math.max(levels.length - 1, 1);
+        const buffer = Math.max(1e-8, Number.isFinite(step) && step > 0 ? step : fallbackStep);
+        if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice) || minPrice <= 0 || maxPrice <= 0 || maxPrice <= minPrice) return null;
+        return { minPrice, maxPrice, buffer };
+    };
+
+    const clampStopLossOutsideGridZone = (position) => {
+        if (!position || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return false;
+        const zone = resolveGridNoSlZone();
+        if (!zone) return false;
+        const currentStop = Number(position.stopLossPrice);
+        if (currentStop < zone.minPrice || currentStop > zone.maxPrice) return false;
+        const db = getDb();
+        const clampedRaw = position.side === "buy"
+            ? (zone.minPrice - zone.buffer)
+            : (zone.maxPrice + zone.buffer);
+        const clampedStop = formatPriceToMarketPrecision(db?.pair, clampedRaw);
+        if (!Number.isFinite(clampedStop) || clampedStop <= 0 || clampedStop === currentStop) return false;
+        position.stopLossPrice = clampedStop;
+        position.stopLossUSDT = Number.isFinite(position.entryPrice) && Number.isFinite(position.quantity)
+            ? -Math.abs(position.stopLossPrice - position.entryPrice) * position.quantity
+            : position.stopLossUSDT;
+        console.log(
+            `[SL][CLAMP] side=${String(position?.side || "").toUpperCase()} ` +
+            `rawSL=${currentStop} -> clampedSL=${clampedStop} ` +
+            `zone=[${zone.minPrice}, ${zone.maxPrice}] buffer=${zone.buffer} source=ORDER_SYNC`
+        );
+        return true;
+    };
+
     const syncOcoExitOrder = async (positionKey, sourcePosition) => {
         return await runManagedOrderSync(`OCO:${positionKey}`, async () => {
             const position = { ...sourcePosition };
             if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
             if (!Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
+            const didClampStopLoss = clampStopLossOutsideGridZone(position);
+            if (didClampStopLoss) {
+                upsertActivePosition(position);
+                await saveDB();
+            }
             const protectionFingerprint = [
                 formatAmountToMarketPrecision(getDb().pair, Number(position.quantity || 0)),
                 formatPriceToMarketPrecision(getDb().pair, Number(position.targetPrice || 0)),
@@ -1359,6 +1404,11 @@ const createOrderExecutionHelpers = ({
         return await runManagedOrderSync(`SL:${positionKey}`, async () => {
             const position = { ...sourcePosition };
             if (!position || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
+            const didClampStopLoss = clampStopLossOutsideGridZone(position);
+            if (didClampStopLoss) {
+                upsertActivePosition(position);
+                await saveDB();
+            }
             const matchingSlOrders = (await fetchOpenSlOrders()).filter((order) => matchesOrderToTrackedPosition(order, position));
             const adoptableOrder = matchingSlOrders.find((order) => {
                 const orderAmount = getOrderQuantity(order);
