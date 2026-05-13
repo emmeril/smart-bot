@@ -4,6 +4,7 @@ const createRuntimePositionUtils = ({
     getMetrics,
     normalizeSymbol,
     toFiniteNumber,
+    formatPriceToMarketPrecision,
     saveDB,
     getLastPositionRuntimePersistAt,
     setLastPositionRuntimePersistAt,
@@ -60,6 +61,42 @@ const createRuntimePositionUtils = ({
         position.lowestSinceEntry = Math.min(position.lowestSinceEntry ?? position.entryPrice, currentPrice);
     };
 
+    const resolveGridNoSlZone = () => {
+        const db = getDb();
+        const levels = Array.isArray(db?.activeGridState?.levels)
+            ? db.activeGridState.levels.map((level) => toFiniteNumber(level, NaN)).filter((level) => Number.isFinite(level) && level > 0)
+            : [];
+        if (levels.length < 2) return null;
+        const minPrice = Math.min(...levels);
+        const maxPrice = Math.max(...levels);
+        const step = Math.abs(toFiniteNumber(db?.activeGridState?.step, NaN));
+        const fallbackStep = (maxPrice - minPrice) / Math.max(levels.length - 1, 1);
+        const buffer = Math.max(1e-8, Number.isFinite(step) && step > 0 ? step : fallbackStep);
+        if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice) || minPrice <= 0 || maxPrice <= 0 || maxPrice <= minPrice) return null;
+        return { minPrice, maxPrice, buffer };
+    };
+
+    const applyNoSlZoneClamp = (position, stopPrice) => {
+        const db = getDb();
+        if (String(db?.strategy || "").toLowerCase() !== "spot_grid") return stopPrice;
+        if (!Number.isFinite(stopPrice) || stopPrice <= 0) return stopPrice;
+        const zone = resolveGridNoSlZone();
+        if (!zone) return stopPrice;
+        if (stopPrice < zone.minPrice || stopPrice > zone.maxPrice) return stopPrice;
+        const clampedPrice = position.side === "buy"
+            ? (zone.minPrice - zone.buffer)
+            : (zone.maxPrice + zone.buffer);
+        const normalizedClampedPrice = formatPriceToMarketPrecision(db?.pair, clampedPrice);
+        if (Number.isFinite(normalizedClampedPrice) && normalizedClampedPrice !== stopPrice) {
+            console.log(
+                `[SL][CLAMP] side=${String(position?.side || "").toUpperCase()} ` +
+                `rawSL=${stopPrice} -> clampedSL=${normalizedClampedPrice} ` +
+                `zone=[${zone.minPrice}, ${zone.maxPrice}] buffer=${zone.buffer}`
+            );
+        }
+        return normalizedClampedPrice;
+    };
+
     const applyTrailingStopUpdate = (position) => {
         const db = getDb();
         const trailingEnabled = position?.trailingEnabled ?? db.trailingEnabled;
@@ -72,7 +109,7 @@ const createRuntimePositionUtils = ({
         if (position.side === "buy") {
             const activated = position.highestSinceEntry >= position.entryPrice + trailActivationMove;
             if (!activated) return;
-            const trailedStop = position.highestSinceEntry - trailOffsetMove;
+            const trailedStop = applyNoSlZoneClamp(position, position.highestSinceEntry - trailOffsetMove);
             if (!Number.isFinite(position.stopLossPrice) || trailedStop > position.stopLossPrice) {
                 position.stopLossPrice = trailedStop;
                 position.stopLossUSDT = -Math.abs(position.stopLossPrice - position.entryPrice) * position.quantity;
@@ -82,7 +119,7 @@ const createRuntimePositionUtils = ({
 
         const activated = position.lowestSinceEntry <= position.entryPrice - trailActivationMove;
         if (!activated) return;
-        const trailedStop = position.lowestSinceEntry + trailOffsetMove;
+        const trailedStop = applyNoSlZoneClamp(position, position.lowestSinceEntry + trailOffsetMove);
         if (!Number.isFinite(position.stopLossPrice) || trailedStop < position.stopLossPrice) {
             position.stopLossPrice = trailedStop;
             position.stopLossUSDT = -Math.abs(position.stopLossPrice - position.entryPrice) * position.quantity;

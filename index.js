@@ -642,6 +642,7 @@ const {
     getMetrics: () => metrics,
     normalizeSymbol,
     toFiniteNumber,
+    formatPriceToMarketPrecision,
     saveDB: (...args) => saveDB(...args),
     getLastPositionRuntimePersistAt: () => lastPositionRuntimePersistAt,
     setLastPositionRuntimePersistAt: (value) => { lastPositionRuntimePersistAt = value; },
