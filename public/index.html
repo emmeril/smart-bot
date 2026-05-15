@@ -875,7 +875,8 @@
       const cards = [
         { label: "Bot", value: runtimeStatus.label, cardClass: "", badgeClass: "" },
         { label: "Posisi", value: String(status.activePositions), cardClass: "", badgeClass: "" },
-        { label: "PnL Terealisasi (Akumulatif)", value: `${formatNumber(status.dailyPnL)} USDT`, cardClass: "", badgeClass: "" }
+        { label: "PnL Terealisasi Net (Confirmed)", value: `${formatNumber(status.dailyPnL)} USDT`, cardClass: "", badgeClass: "" },
+        { label: "PnL Estimasi (Fallback)", value: `${formatNumber(status.estimatedPnL)} USDT`, cardClass: "", badgeClass: "" }
       ];
       statusCards.innerHTML = cards.map((card) => `
         <article class="metric-card ${card.cardClass || ""}">
@@ -996,6 +997,7 @@
       if (!data || data.ok === false) return;
       
       const realizedPnL = Number(data.dailyPnL || 0);
+      const estimatedPnL = Number(data.estimatedPnL || 0);
       const unrealizedPnL = Number(data.unrealizedPnL || 0);
       const totalPnL = Number(data.totalPnL || realizedPnL + unrealizedPnL);
       
@@ -1009,7 +1011,7 @@
       // Realized PnL
       realizedPnlValue.textContent = formatPnl(realizedPnL);
       realizedPnlValue.className = "pnl-display " + getPnlClass(realizedPnL);
-      realizedPnlMeta.textContent = `Akumulasi realized PnL | ${data.dailyTrades || 0} transaksi hari ini | sumber: bot`;
+      realizedPnlMeta.textContent = `Akumulasi realized net (confirmed) | ${data.dailyTrades || 0} transaksi confirmed | estimasi terpisah: ${formatPnl(estimatedPnL)} (${data.estimatedTrades || 0}x)`;
       
       // Unrealized PnL
       const activePosCount = Array.isArray(data.activePositions) ? data.activePositions.length : 0;
@@ -1060,7 +1062,7 @@
       livePositionsMeta.textContent = data.exchangePositionsCount + " posisi bursa | " + String(data.positionMode || "-").toUpperCase() + " | " + exchangeLabel + recoverySuffix;
       livePnlValue.textContent = formatLiveCurrency(dailyPnl) + " USDT";
       livePnlValue.className = "live-amount " + (dailyPnl > 0 ? "positive" : (dailyPnl < 0 ? "negative" : "neutral"));
-      livePnlMeta.textContent = "Akumulatif | " + String(data.dailyTrades || 0) + " transaksi hari ini | sumber: bot";
+      livePnlMeta.textContent = "Confirmed net | " + String(data.dailyTrades || 0) + " transaksi confirmed | estimated " + formatLiveCurrency(Number(data.estimatedPnL || 0)) + " USDT (" + String(data.estimatedTrades || 0) + "x)";
       liveOrdersCount.textContent = String(orderCounts.total || 0);
       const recoveryAlert = timeoutErrors >= 3 || duplicateDetected >= 8 ? " | recovery spike" : "";
       liveOrdersMeta.textContent =
