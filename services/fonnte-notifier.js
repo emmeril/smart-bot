@@ -56,24 +56,29 @@ const createFonnteNotifierHelpers = ({
 
     const resolveCloseReason = (reason) => {
         const normalized = String(reason || "").toUpperCase();
-        if (normalized.includes("SPOT_OCO_")) return { code: "SPOT_OCO", label: "Spot OCO Filled (detected by sync)" };
-        if (normalized.includes("EXCHANGE_FILLED_")) return { code: "EXCHANGE_FILLED", label: "Exchange Exit Filled (detected by recovery)" };
-        if (normalized.includes("PROFIT_TARGET") || normalized === "TP" || normalized.includes("_TP")) return { code: "TP", label: "Take Profit" };
-        if (normalized.includes("STOP_LOSS") || normalized === "SL" || normalized.includes("_SL")) return { code: "SL", label: "Stop Loss" };
-        if (normalized.includes("MANUAL")) return { code: "MANUAL", label: "Manual Close" };
-        if (normalized.includes("DUST")) return { code: "DUST", label: "Auto Dust Cleanup (Qty di bawah minimum exchange)" };
-        if (normalized.includes("MISSING") || normalized.includes("SYNC_REMOVED")) return { code: "SYNC", label: "Position Missing from Sync" };
-        return { code: "CLOSE", label: normalized || "Close" };
+        if (normalized.includes("SPOT_OCO_")) return { code: "SPOT_OCO", label: "Posisi terdeteksi sudah tertutup oleh OCO spot (sinkronisasi)." };
+        if (normalized.includes("EXCHANGE_FILLED_")) return { code: "EXCHANGE_FILLED", label: "Posisi terdeteksi sudah tertutup di exchange (recovery)." };
+        if (normalized.includes("PROFIT_TARGET") || normalized === "TP" || normalized.includes("_TP")) return { code: "TP", label: "Take Profit tercapai." };
+        if (normalized.includes("STOP_LOSS") || normalized === "SL" || normalized.includes("_SL")) return { code: "SL", label: "Stop Loss terkena." };
+        if (normalized.includes("MANUAL")) return { code: "MANUAL", label: "Posisi ditutup manual." };
+        if (normalized.includes("DUST")) return { code: "DUST", label: "Posisi kecil dibersihkan otomatis (di bawah minimum lot)." };
+        if (normalized.includes("MISSING") || normalized.includes("SYNC_REMOVED")) return { code: "SYNC", label: "Posisi lokal hilang saat sinkronisasi." };
+        return { code: "CLOSE", label: normalized ? `Posisi ditutup (${normalized}).` : "Posisi ditutup." };
     };
 
-    const getSideLabel = (position) => (String(position?.side || "").toLowerCase() === "buy" ? "LONG" : "SHORT");
+    const getSideLabel = (position) => {
+        const side = String(position?.side || "").toLowerCase().trim();
+        if (side === "buy" || side === "long") return "LONG";
+        if (side === "sell" || side === "short") return "SHORT";
+        return "N/A";
+    };
 
     const resolveTradeEvent = (event) => {
         const normalized = String(event || "").toUpperCase().trim();
         if (normalized === "OPEN") return { code: "OPEN", label: "Posisi Dibuka" };
-        if (normalized === "PARTIAL_CLOSE") return { code: "PARTIAL_CLOSE", label: "Partial Close" };
-        if (normalized === "TP_SL_UPDATED") return { code: "TP_SL_UPDATED", label: "TP/SL Diperbarui" };
-        return { code: normalized || "UPDATE", label: normalized || "Update" };
+        if (normalized === "PARTIAL_CLOSE") return { code: "PARTIAL_CLOSE", label: "Posisi Ditutup Sebagian" };
+        if (normalized === "TP_SL_UPDATED") return { code: "TP_SL_UPDATED", label: "Proteksi TP/SL Diperbarui" };
+        return { code: normalized || "UPDATE", label: "Update Posisi" };
     };
 
     const resolvePartialCloseLabel = (reason) => {
@@ -81,6 +86,22 @@ const createFonnteNotifierHelpers = ({
         if (normalized.includes("TP") || normalized.includes("PROFIT")) return "TP PARSIAL";
         if (normalized.includes("SL") || normalized.includes("STOP_LOSS")) return "SL PARSIAL";
         return "PARTIAL CLOSE";
+    };
+
+    const resolveProtectionUpdateReasonLabel = (reason) => {
+        const raw = String(reason || "").trim();
+        const normalized = raw.toUpperCase();
+        if (!normalized) return null;
+        if (normalized.includes("OCO_SYNCED")) return "Order OCO sudah sinkron dengan data exchange.";
+        if (normalized.includes("OCO_REPLACED")) return "Order OCO diganti agar sesuai target TP/SL terbaru.";
+        if (normalized.includes("OCO_ADOPTED")) return "Order OCO existing diadopsi sebagai proteksi aktif.";
+        if (normalized.includes("TP_SYNCED")) return "Order TP sudah sinkron dengan data exchange.";
+        if (normalized.includes("TP_REPLACED")) return "Order TP diganti agar sesuai target terbaru.";
+        if (normalized.includes("TP_ADOPTED")) return "Order TP existing diadopsi sebagai proteksi aktif.";
+        if (normalized.includes("SL_SYNCED")) return "Order SL sudah sinkron dengan data exchange.";
+        if (normalized.includes("SL_REPLACED")) return "Order SL diganti agar sesuai target terbaru.";
+        if (normalized.includes("SL_ADOPTED")) return "Order SL existing diadopsi sebagai proteksi aktif.";
+        return raw;
     };
 
     const buildCloseNotificationMessage = ({
@@ -170,8 +191,11 @@ const createFonnteNotifierHelpers = ({
         const pnlValue = Number(realizedPnlUSDT);
         const pnlLabel = hasRealizedPnl && pnlValue >= 0 ? "Profit" : "Loss";
 
+        const resolvedEventTitle = tradeEvent.code === "PARTIAL_CLOSE"
+            ? resolvePartialCloseLabel(reason)
+            : tradeEvent.label;
         const lines = [
-            `*UPDATE TRADE: ${(tradeEvent.code === "PARTIAL_CLOSE" ? resolvePartialCloseLabel(reason) : tradeEvent.label).toUpperCase()}*`,
+            `*UPDATE TRADE: ${resolvedEventTitle.toUpperCase()}*`,
             `Pasangan: ${symbol || "N/A"}`,
             `Sisi: ${side}`,
             `Strategi: ${strategy}`,
@@ -190,8 +214,12 @@ const createFonnteNotifierHelpers = ({
             lines.push(`Realized P/L: ${pnlLabel} ${formatSignedNumber(realizedPnlUSDT)} USDT (${formatSignedNumber(realizedPnlPercent, 2)}%)`);
         }
 
-        if (String(reason || "").trim()) {
-            lines.push(`Alasan: ${String(reason).trim()}`);
+        const rawReason = String(reason || "").trim();
+        if (rawReason) {
+            const reasonLabel = tradeEvent.code === "TP_SL_UPDATED"
+                ? (resolveProtectionUpdateReasonLabel(rawReason) || rawReason)
+                : rawReason;
+            lines.push(`Alasan: ${reasonLabel}`);
         }
 
         lines.push(`Waktu: ${formatTime(eventTime)}`);
