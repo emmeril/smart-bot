@@ -1268,6 +1268,8 @@ const { placeOrder } = createTradeEntryHelpers({
     getActivePositionByKey,
     setMarginMode: (...args) => setMarginMode(...args),
     fetchOpenExchangePositions: (...args) => fetchOpenExchangePositions(...args),
+    fetchOpenTpOrders: (...args) => fetchOpenTpOrders(...args),
+    fetchOpenSlOrders: (...args) => fetchOpenSlOrders(...args),
     fetchManagedOpenOrdersSnapshot,
     fetchSpotBalances: async () => {
         if (!exchange || typeof exchange.fetchBalance !== "function") return null;
@@ -1288,6 +1290,7 @@ const { placeOrder } = createTradeEntryHelpers({
     saveDB: (...args) => saveDB(...args),
     ensureReduceOnlyTakeProfitOrder,
     ensureReduceOnlyStopLossOrder,
+    clearMissingPositionState: (...args) => clearMissingPositionState(...args),
     logTrade: (...args) => logTrade(...args),
     syncPositionWithExchange: (...args) => syncPositionWithExchange(...args),
     notifyTradeUpdate: (...args) => notifyTradeUpdate(...args)

@@ -9,6 +9,8 @@ const createTradeEntryHelpers = ({
     getActivePositionByKey,
     setMarginMode,
     fetchOpenExchangePositions,
+    fetchOpenTpOrders,
+    fetchOpenSlOrders,
     fetchManagedOpenOrdersSnapshot,
     fetchSpotBalances,
     getPrice,
@@ -25,6 +27,7 @@ const createTradeEntryHelpers = ({
     saveDB,
     ensureReduceOnlyTakeProfitOrder,
     ensureReduceOnlyStopLossOrder,
+    clearMissingPositionState,
     logTrade,
     syncPositionWithExchange,
     notifyTradeUpdate
@@ -36,7 +39,51 @@ const createTradeEntryHelpers = ({
         try {
             if (!db || getIsPlacingOrder() || getIsClosingPosition()) return;
             const targetPositionKey = getOrderPositionSide(side);
-            if (getActivePositionByKey(targetPositionKey)) return;
+            const existingLocalPosition = getActivePositionByKey(targetPositionKey);
+            if (existingLocalPosition) {
+                await syncPositionWithExchange();
+                const refreshedLocalPosition = getActivePositionByKey(targetPositionKey);
+                if (refreshedLocalPosition) {
+                    const isSpotRuntime = String(db?.marginMode || "spot").toLowerCase() === "spot";
+                    const isBuyTrackedPosition = String(refreshedLocalPosition?.side || "").toLowerCase() === "buy";
+                    if (isSpotRuntime && isBuyTrackedPosition && typeof clearMissingPositionState === "function") {
+                        const balances = typeof fetchSpotBalances === "function" ? await fetchSpotBalances() : null;
+                        const [baseAssetRaw = ""] = String(db.pair || "").split("/");
+                        const baseAsset = baseAssetRaw.trim();
+                        const baseBalanceRaw = balances?.[baseAsset];
+                        const baseBalance = toFiniteNumber(baseBalanceRaw?.total ?? baseBalanceRaw?.free ?? baseBalanceRaw, NaN);
+                        const trackedQty = toFiniteNumber(refreshedLocalPosition?.quantity, NaN);
+                        const fetchedTpOrders = typeof fetchOpenTpOrders === "function" ? await fetchOpenTpOrders() : [];
+                        const fetchedSlOrders = typeof fetchOpenSlOrders === "function" ? await fetchOpenSlOrders() : [];
+                        const openTpOrders = Array.isArray(fetchedTpOrders) ? fetchedTpOrders : [];
+                        const openSlOrders = Array.isArray(fetchedSlOrders) ? fetchedSlOrders : [];
+                        const hasAnyAttachedExitOrder = openTpOrders.length > 0 || openSlOrders.length > 0;
+                        const spotPair = String(db.pair || "").split(":")[0];
+                        const exchangeInstance = getExchange();
+                        const market = exchangeInstance?.markets?.[spotPair] || exchangeInstance?.markets?.[db.pair];
+                        const marketFilters = Array.isArray(market?.info?.filters) ? market.info.filters : [];
+                        const lotSizeFilter = marketFilters.find((filter) => String(filter?.filterType || "").toUpperCase() === "LOT_SIZE");
+                        const minQty = toFiniteNumber(
+                            lotSizeFilter?.minQty,
+                            toFiniteNumber(market?.limits?.amount?.min, NaN)
+                        );
+                        if (
+                            Number.isFinite(baseBalance)
+                            && Number.isFinite(minQty)
+                            && minQty > 0
+                            && baseBalance < minQty
+                            && !hasAnyAttachedExitOrder
+                        ) {
+                            console.warn(`[ORDER][WARN] Local BUY position ${targetPositionKey} cannot be sold (base balance ${baseBalance} < minQty ${minQty}) and has no TP/SL orders. Clearing local state.`);
+                            await clearMissingPositionState(refreshedLocalPosition, "ENTRY_GUARD_STALE_POSITION", targetPositionKey);
+                        }
+                    }
+                    if (getActivePositionByKey(targetPositionKey)) {
+                        console.warn(`[ORDER][WARN] Skipping ${side.toUpperCase()} order because local active position ${targetPositionKey} still exists.`);
+                        return;
+                    }
+                }
+            }
             setIsPlacingOrder(true);
             console.log(`[ORDER][INFO] Attempting to place ${side.toUpperCase()} order...`);
             await setMarginMode();
