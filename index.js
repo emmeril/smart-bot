@@ -336,8 +336,6 @@ const {
     enabled: process.env.FONNTE_NOTIFICATIONS_ENABLED
 });
 
-const isProtectionUpdateNotificationEnabled = () => String(process.env.FONNTE_NOTIFY_PROTECTION_UPDATES || "").toLowerCase() === "true";
-
 const {
     fetchOpenGridOrders,
     findOpenGridOrderByClientOrderId,
@@ -564,8 +562,7 @@ const {
     cancelTpOrders,
     cancelSlOrders,
     buildReplacementClientOrderId,
-    notifyTradeUpdate: (...args) => notifyTradeUpdate(...args),
-    isProtectionUpdateNotificationEnabled
+    notifyTradeUpdate: (...args) => notifyTradeUpdate(...args)
 });
 
 const isLegacySinglePosition = (value) => value && typeof value === "object" && !Array.isArray(value) && ("entryPrice" in value || "quantity" in value || "side" in value);

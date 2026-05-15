@@ -34,8 +34,7 @@ const createOrderExecutionHelpers = ({
     cancelTpOrders,
     cancelSlOrders,
     buildReplacementClientOrderId,
-    notifyTradeUpdate,
-    isProtectionUpdateNotificationEnabled
+    notifyTradeUpdate
 }) => {
     const managedOrderSyncChains = new Map();
     const protectionUpdateStateByKey = new Map();
@@ -190,7 +189,6 @@ const createOrderExecutionHelpers = ({
         tpPrice,
         slPrice
     }) => {
-        if (typeof isProtectionUpdateNotificationEnabled === "function" && !isProtectionUpdateNotificationEnabled()) return;
         if (typeof notifyTradeUpdate !== "function") return;
         const normalizedPositionKey = String(positionKey || position?.positionSide || "BOTH").toUpperCase();
         const normalizedReason = String(reason || "").toUpperCase();
