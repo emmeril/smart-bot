@@ -674,6 +674,7 @@ const {
     getDb: () => db,
     getExchange: () => exchange,
     getMetrics: () => metrics,
+    toFiniteNumber,
     getClosingPositionKeys: () => closingPositionKeys,
     getIsClosingPosition: () => isClosingPosition,
     setIsClosingPosition: (value) => { isClosingPosition = value; },
@@ -735,6 +736,8 @@ const mergeRuntimeConfig = (nextConfig) => {
         nextConfig.lastDailyReset = currentLastDailyReset;
         nextConfig.dailyPnL = toFiniteNumber(db.dailyPnL, 0);
         nextConfig.dailyTrades = currentDailyTrades;
+        nextConfig.estimatedPnL = toFiniteNumber(db.estimatedPnL, 0);
+        nextConfig.estimatedTrades = Math.max(0, Math.trunc(toFiniteNumber(db.estimatedTrades, 0)));
         nextConfig.dailyPnlSource = String(db.dailyPnlSource || "local").toLowerCase();
         nextConfig.dailyPnlSyncedAt = toFiniteNumber(db.dailyPnlSyncedAt, 0);
     }

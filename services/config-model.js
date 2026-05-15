@@ -133,6 +133,8 @@ const createConfigModelHelpers = ({
         booleanConfigKeys.forEach(normalizeBoolean);
         normalized.dailyPnL = toFiniteNumber(normalized.dailyPnL, defaults.dailyPnL);
         normalized.dailyTrades = Math.max(0, Math.trunc(toFiniteNumber(normalized.dailyTrades, defaults.dailyTrades)));
+        normalized.estimatedPnL = toFiniteNumber(normalized.estimatedPnL, defaults.estimatedPnL);
+        normalized.estimatedTrades = Math.max(0, Math.trunc(toFiniteNumber(normalized.estimatedTrades, defaults.estimatedTrades)));
         normalized.dailyPnlSource = typeof normalized.dailyPnlSource === "string" && normalized.dailyPnlSource.trim()
             ? normalized.dailyPnlSource.trim().toLowerCase()
             : defaults.dailyPnlSource;
@@ -248,6 +250,8 @@ const createConfigModelHelpers = ({
                 : null
         });
         await addColumnIfMissing({ column: "activeGridState", sql: "ALTER TABLE Configs ADD COLUMN activeGridState TEXT DEFAULT NULL;" });
+        await addColumnIfMissing({ column: "estimatedPnL", sql: "ALTER TABLE Configs ADD COLUMN estimatedPnL FLOAT DEFAULT 0;" });
+        await addColumnIfMissing({ column: "estimatedTrades", sql: "ALTER TABLE Configs ADD COLUMN estimatedTrades INTEGER DEFAULT 0;" });
         await addColumnIfMissing({ column: "dailyPnlSource", sql: "ALTER TABLE Configs ADD COLUMN dailyPnlSource VARCHAR(255) DEFAULT 'local';" });
         await addColumnIfMissing({ column: "dailyPnlSyncedAt", sql: "ALTER TABLE Configs ADD COLUMN dailyPnlSyncedAt BIGINT DEFAULT 0;" });
         await addColumnIfMissing({ column: "strategy", sql: "ALTER TABLE Configs ADD COLUMN strategy VARCHAR(255) DEFAULT 'spot_grid';" });

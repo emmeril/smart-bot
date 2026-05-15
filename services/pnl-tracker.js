@@ -16,22 +16,35 @@ const createPnlTrackerHelpers = ({
         return {
             dailyPnL: toFiniteNumber(state.dailyPnL, 0),
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(state.dailyTrades, 0))),
+            estimatedPnL: toFiniteNumber(state.estimatedPnL, 0),
+            estimatedTrades: Math.max(0, Math.trunc(toFiniteNumber(state.estimatedTrades, 0))),
             lastDailyReset: toFiniteNumber(state.lastDailyReset, 0),
             dailyPnlSource: String(state.dailyPnlSource || "local").toLowerCase(),
             dailyPnlSyncedAt: toFiniteNumber(state.dailyPnlSyncedAt, 0)
         };
     };
 
-    const updateDailyPnlState = async ({ pnl = null, tradeDelta = 0, source = "local", syncedAt = Date.now() } = {}) => {
+    const updateDailyPnlState = async ({
+        pnl = null,
+        tradeDelta = 0,
+        estimatedPnl = null,
+        estimatedTradeDelta = 0,
+        source = "local",
+        syncedAt = Date.now()
+    } = {}) => {
         const db = getDb();
         if (!db) return buildDailyPnlSnapshot();
         const current = buildDailyPnlSnapshot(db);
         const nextPnl = Number.isFinite(pnl) ? pnl : current.dailyPnL;
         const nextTrades = Math.max(0, current.dailyTrades + Math.trunc(toFiniteNumber(tradeDelta, 0)));
+        const nextEstimatedPnl = Number.isFinite(estimatedPnl) ? estimatedPnl : current.estimatedPnL;
+        const nextEstimatedTrades = Math.max(0, current.estimatedTrades + Math.trunc(toFiniteNumber(estimatedTradeDelta, 0)));
         const nextSource = String(source || current.dailyPnlSource || "local").toLowerCase();
         const nextSyncedAt = toFiniteNumber(syncedAt, current.dailyPnlSyncedAt);
         const changed = nextPnl !== current.dailyPnL ||
             nextTrades !== current.dailyTrades ||
+            nextEstimatedPnl !== current.estimatedPnL ||
+            nextEstimatedTrades !== current.estimatedTrades ||
             nextSource !== current.dailyPnlSource ||
             nextSyncedAt !== current.dailyPnlSyncedAt;
 
@@ -39,6 +52,8 @@ const createPnlTrackerHelpers = ({
 
         db.dailyPnL = nextPnl;
         db.dailyTrades = nextTrades;
+        db.estimatedPnL = nextEstimatedPnl;
+        db.estimatedTrades = nextEstimatedTrades;
         db.dailyPnlSource = nextSource;
         db.dailyPnlSyncedAt = nextSyncedAt;
         await saveDB();
@@ -48,11 +63,21 @@ const createPnlTrackerHelpers = ({
     const applyDailyPnlDelta = async ({ pnlDelta = 0, tradeDelta = 0, source = "local", syncedAt = Date.now() } = {}) => {
         const db = getDb();
         const current = buildDailyPnlSnapshot(db);
+        const normalizedSource = String(source || "local").toLowerCase();
+        if (normalizedSource === "estimated") {
+            const nextEstimatedPnl = current.estimatedPnL + toFiniteNumber(pnlDelta, 0);
+            return await updateDailyPnlState({
+                estimatedPnl: nextEstimatedPnl,
+                estimatedTradeDelta: Math.max(0, Math.trunc(toFiniteNumber(tradeDelta, 0))),
+                source: normalizedSource,
+                syncedAt
+            });
+        }
         const nextPnl = current.dailyPnL + toFiniteNumber(pnlDelta, 0);
         return await updateDailyPnlState({
             pnl: nextPnl,
             tradeDelta,
-            source,
+            source: normalizedSource,
             syncedAt
         });
     };

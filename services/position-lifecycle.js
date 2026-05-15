@@ -2,6 +2,7 @@ const createPositionLifecycleHelpers = ({
     getDb,
     getExchange,
     getMetrics,
+    toFiniteNumber,
     getClosingPositionKeys,
     getIsClosingPosition,
     setIsClosingPosition,
@@ -29,6 +30,22 @@ const createPositionLifecycleHelpers = ({
     notifyPositionClosed,
     notifyTradeUpdate
 }) => {
+    const getOrderFeeCost = (order) => {
+        const feeCost = toFiniteNumber(order?.fee?.cost, NaN);
+        if (Number.isFinite(feeCost)) return Math.abs(feeCost);
+        const infoCommission = toFiniteNumber(order?.info?.commission, NaN);
+        if (Number.isFinite(infoCommission)) return Math.abs(infoCommission);
+        return 0;
+    };
+
+    const getOrderRealizedPnl = (order) => toFiniteNumber(
+        order?.realizedPnl,
+        toFiniteNumber(
+            order?.info?.realizedPnl,
+            toFiniteNumber(order?.info?.realizedProfit, NaN)
+        )
+    );
+
     const getLifecyclePositionKey = (positionKey = null, position = null) => (
         toPositionMapKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position))
     );
@@ -82,8 +99,8 @@ const createPositionLifecycleHelpers = ({
                 source: "estimated"
             });
             else {
-                db.dailyPnL += estimatedPnL.realizedProfitUSDT;
-                db.dailyTrades++;
+                db.estimatedPnL = toFiniteNumber(db.estimatedPnL, 0) + estimatedPnL.realizedProfitUSDT;
+                db.estimatedTrades = Math.max(0, Math.trunc(toFiniteNumber(db.estimatedTrades, 0))) + 1;
             }
             metrics.trades.closed++;
             if (estimatedPnL.realizedProfitUSDT > 0) metrics.trades.wins++;
@@ -284,9 +301,14 @@ const createPositionLifecycleHelpers = ({
                     ? Number(closeOrder.lastTradeTimestamp)
                     : Date.now();
             const realizedPnL = calculatePositionPnL(position, closeFillSnapshot.price);
+            const exchangeRealizedPnl = getOrderRealizedPnl(closeOrder);
+            const closeFeeCost = getOrderFeeCost(closeOrder);
+            const netRealizedPnl = Number.isFinite(exchangeRealizedPnl)
+                ? exchangeRealizedPnl - closeFeeCost
+                : realizedPnL.netProfitUSDT - closeFeeCost;
             await finalizeClosedPosition(
                 position,
-                realizedPnL.netProfitUSDT,
+                netRealizedPnl,
                 realizedPnL.profitPercent,
                 reason,
                 closeFillSnapshot.price,
