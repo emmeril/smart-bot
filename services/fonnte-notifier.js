@@ -10,7 +10,7 @@ const createFonnteNotifierHelpers = ({
 } = {}) => {
     let sendQueue = Promise.resolve();
     const recentMessageMap = new Map();
-    const DEDUPE_WINDOW_MS = 15000;
+    const DEDUPE_WINDOW_MS = 120000;
 
     const normalizeTargetList = (value) => (
         String(value || "")
@@ -276,9 +276,17 @@ const createFonnteNotifierHelpers = ({
         return await postMessage(formData);
     };
 
-    const shouldSkipDuplicateMessage = ({ target: messageTarget = normalizedTarget, message }) => {
+    const normalizeMessageForDedupe = (message) => (
+        String(message || "")
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) => line && !line.toLowerCase().startsWith("waktu:"))
+            .join("\n")
+    );
+
+    const shouldSkipDuplicateMessage = ({ target: messageTarget = normalizedTarget, message, dedupeKey }) => {
         const normalizedMessageTarget = normalizeTargetList(messageTarget);
-        const normalizedMessage = String(message || "").trim();
+        const normalizedMessage = normalizeMessageForDedupe(message);
         if (!normalizedMessageTarget || !normalizedMessage) return false;
 
         const now = Date.now();
@@ -286,13 +294,13 @@ const createFonnteNotifierHelpers = ({
             if (now - timestamp > DEDUPE_WINDOW_MS) recentMessageMap.delete(key);
         }
 
-        const dedupeKey = `${normalizedMessageTarget}::${normalizedMessage}`;
-        const lastSentAt = recentMessageMap.get(dedupeKey);
+        const resolvedDedupeKey = `${normalizedMessageTarget}::${String(dedupeKey || normalizedMessage)}`;
+        const lastSentAt = recentMessageMap.get(resolvedDedupeKey);
         if (Number.isFinite(lastSentAt) && now - lastSentAt <= DEDUPE_WINDOW_MS) {
             return true;
         }
 
-        recentMessageMap.set(dedupeKey, now);
+        recentMessageMap.set(resolvedDedupeKey, now);
         return false;
     };
 
@@ -330,7 +338,18 @@ const createFonnteNotifierHelpers = ({
         });
 
         try {
-            const result = await sendQueuedMessage({ message });
+            const dedupeKey = [
+                "CLOSE",
+                String(position?.symbol || position?.pair || "").trim().toUpperCase(),
+                getSideLabel(position),
+                String(reason || "").trim().toUpperCase(),
+                formatNumber(position?.entryPrice),
+                formatNumber(exitPrice),
+                formatNumber(position?.quantity, 6),
+                formatSignedNumber(netProfitUSDT),
+                formatSignedNumber(profitPercent, 2)
+            ].join("|");
+            const result = await sendQueuedMessage({ message, dedupeKey });
             return { ok: true, result };
         } catch (error) {
             console.warn(`[FONNTE][WARN] Failed to send WhatsApp notification: ${error.message}`);
@@ -362,7 +381,19 @@ const createFonnteNotifierHelpers = ({
         });
 
         try {
-            const result = await sendQueuedMessage({ message });
+            const dedupeKey = [
+                "TRADE_UPDATE",
+                String(event || "").trim().toUpperCase(),
+                String(position?.symbol || position?.pair || "").trim().toUpperCase(),
+                getSideLabel(position),
+                formatNumber(entryPrice),
+                formatNumber(exitPrice),
+                formatNumber(quantity, 6),
+                formatSignedNumber(realizedPnlUSDT),
+                formatSignedNumber(realizedPnlPercent, 2),
+                String(reason || "").trim().toUpperCase()
+            ].join("|");
+            const result = await sendQueuedMessage({ message, dedupeKey });
             return { ok: true, result };
         } catch (error) {
             console.warn(`[FONNTE][WARN] Failed to send trade update notification: ${error.message}`);
