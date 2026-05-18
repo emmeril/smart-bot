@@ -448,6 +448,20 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
         return toFiniteNumber(lotSizeFilter?.minQty, toFiniteNumber(market?.limits?.amount?.min, NaN));
     };
 
+    const resolveSpotAssetTotalBalance = (balancesSnapshot, asset) => {
+        if (!balancesSnapshot || !asset) return NaN;
+        const total = toFiniteNumber(balancesSnapshot?.total?.[asset], NaN);
+        if (Number.isFinite(total)) return total;
+
+        const free = toFiniteNumber(balancesSnapshot?.free?.[asset], NaN);
+        const used = toFiniteNumber(balancesSnapshot?.used?.[asset], NaN);
+        if (Number.isFinite(free) && Number.isFinite(used)) return free + used;
+        if (Number.isFinite(free)) return free;
+
+        const flat = toFiniteNumber(balancesSnapshot?.[asset], NaN);
+        return Number.isFinite(flat) ? flat : NaN;
+    };
+
     const syncSpotAggregatePositionQuantity = async (positionKey, position) => {
         if (!isSpotRuntime || !position) return null;
         if (String(position?.side || "").toLowerCase() !== "buy") return null;
@@ -456,7 +470,7 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
         if (!spotBalances) {
             try {
                 const balanceSnapshot = await exchange.fetchBalance();
-                spotBalances = balanceSnapshot?.free || balanceSnapshot || {};
+                spotBalances = balanceSnapshot || {};
             } catch (balanceError) {
                 console.warn(`[SYNC][WARN] Failed to fetch spot balance for aggregate quantity sync: ${balanceError.message}`);
                 return null;
@@ -465,10 +479,10 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
 
         const [baseAssetRaw = ""] = String(db?.pair || "").split("/");
         const baseAsset = baseAssetRaw.trim();
-        const baseFree = toFiniteNumber(spotBalances?.[baseAsset], NaN);
-        if (!Number.isFinite(baseFree)) return null;
+        const baseTotal = resolveSpotAssetTotalBalance(spotBalances, baseAsset);
+        if (!Number.isFinite(baseTotal)) return null;
 
-        const formattedQty = formatAmountToMarketPrecision(db?.pair, baseFree);
+        const formattedQty = formatAmountToMarketPrecision(db?.pair, baseTotal);
         if (!Number.isFinite(formattedQty)) return null;
 
         const trackedQty = toFiniteNumber(position?.quantity, NaN);
