@@ -1030,13 +1030,6 @@
       const replacementAttempts = Number(orderRecovery.replacementAttempts || 0);
       const replacementSucceeded = Number(orderRecovery.replacementSucceeded || 0);
       const dailyPnl = Number(data.dailyPnL || 0);
-      const exchangeConnected = Boolean(data.exchangeConnected);
-      const exchangeHealthy = Boolean(data.exchangeHealthy);
-      const needsRecoverySync = Boolean(data.needsRecoverySync);
-      const exchangeLabel = !exchangeConnected
-        ? "bursa offline"
-        : (needsRecoverySync ? "sinkronisasi pemulihan" : (exchangeHealthy ? "exchange stabil" : "exchange degradasi"));
-      const recoverySuffix = data.exchangeRecoveryReason ? ` | ${data.exchangeRecoveryReason}` : "";
 
       pushPnlHistory(dailyPnl);
       renderPnlSparkline();
@@ -1045,7 +1038,7 @@
       renderPnLBreakdown(data);
 
       livePositionsCount.textContent = String(positions.length);
-      livePositionsMeta.textContent = data.exchangePositionsCount + " posisi bursa | " + String(data.positionMode || "-").toUpperCase() + " | " + exchangeLabel + recoverySuffix;
+      livePositionsMeta.textContent = "";
       livePnlValue.textContent = formatLiveCurrency(dailyPnl) + " USDT";
       livePnlValue.className = "live-amount " + (dailyPnl > 0 ? "positive" : (dailyPnl < 0 ? "negative" : "neutral"));
       livePnlMeta.textContent = "";
@@ -1132,15 +1125,9 @@
             const price = order.price === null || order.price === undefined ? '-' : formatPrice(order.price);
             const amount = order.amount === null || order.amount === undefined ? '-' : formatNumber(order.amount);
             const refId = order.clientOrderId || order.id || 'order';
-            const trigger = order.triggerPrice === null || order.triggerPrice === undefined ? '-' : formatPrice(order.triggerPrice);
-            const priceDetail = groupType === "sl"
-              ? ('Trigger ' + trigger + ' | Batas ' + price)
-              : ('Batas ' + price + ' | Trigger ' + trigger);
             const orderId = order.id || "";
             const clientOrderId = order.clientOrderId || "";
             return '<div class="live-table-row"><div>' + refId + '</div><div><span class="' + badgeClass + '">' + side + '</span></div><div>' + price + '</div><div>' + amount + '</div></div>' +
-              '<div class="live-table-subrow">' +
-              '<div>Tipe: ' + String(order.type || '-') + '</div><div>Posisi: ' + String(order.positionSide || '-') + '</div><div>Harga: ' + priceDetail + '</div><div>Reduce-only: ' + String(Boolean(order.reduceOnly)) + '</div></div>' +
               '<div class="live-table-actions"><button class="btn btn-danger btn-xs js-cancel-order" type="button" data-order-type="' + groupType + '" data-client-order-id="' + String(clientOrderId) + '" data-order-id="' + String(orderId) + '">Batalkan</button></div>';
           }).join('');
           wrapper.innerHTML = '<div class="live-list-head"><strong>' + group.label + ' (' + group.list.length + ')</strong><button class="btn btn-danger btn-xs js-cancel-group" type="button" data-order-type="' + groupType + '">Batalkan Semua</button></div>' +
