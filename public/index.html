@@ -1055,52 +1055,47 @@
       liveOrdersMeta.className = "";
 
       livePositionsList.innerHTML = "";
-      if (positions.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "live-empty";
-        empty.textContent = "Belum ada posisi aktif saat ini.";
-        livePositionsList.appendChild(empty);
-      } else {
-        const orderedPositions = [...positions].sort((a, b) => {
-          const sideA = String(a?.side || "").toLowerCase();
-          const sideB = String(b?.side || "").toLowerCase();
-          const rank = { buy: 0, sell: 1 };
-          const rankA = Object.prototype.hasOwnProperty.call(rank, sideA) ? rank[sideA] : 2;
-          const rankB = Object.prototype.hasOwnProperty.call(rank, sideB) ? rank[sideB] : 2;
-          if (rankA !== rankB) return rankA - rankB;
-          return 0;
-        });
-        orderedPositions.slice(0, 4).forEach((position) => {
-          const item = document.createElement("div");
-          const positionSideLabel = String(position.side || "POSITION").toUpperCase();
-          const pnlValue = Number(position.pnlUSDT || 0);
-          item.className = "live-item " + (pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral"));
-          item.dataset.positionKey = String(position.key || position.side || "POSITION");
-          const pnlSign = pnlValue >= 0 ? "+" : "";
-          const entryPrice = formatPrice(position.entryPrice);
-          const markPrice = formatPrice(position.currentPrice);
-          const stopLossPrice = formatPrice(position.stopLossPrice);
-          const targetPrice = formatPrice(position.targetPrice);
-          const pnlChipClass = pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral");
-          item.innerHTML = '<div class="live-position-head"><strong>' + positionSideLabel + '</strong>' +
-            '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + String(position.key || position.side || "POSITION") + '">Tutup</button></div>' +
-            '<div class="live-position-kpis">' +
-            '<div class="live-position-cards">' +
-            '<div class="live-position-card">' +
-            '<div class="kpi-line">Harga Saat Ini: ' + markPrice + '</div>' +
-            '<div class="kpi-line">Harga Masuk: ' + entryPrice + '</div>' +
-            '<div class="kpi-line">Kuantitas: ' + formatNumber(position.quantity) + '</div>' +
-            '</div>' +
-            '<div class="live-position-card">' +
-            '<div class="kpi-line">Target: ' + targetPrice + '</div>' +
-            '<div class="kpi-line">Stop Loss: ' + stopLossPrice + '</div>' +
-            '<div class="live-position-pnl"><span class="price-chip pnl ' + pnlChipClass + '">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span></div>' +
-            '</div>' +
-            '</div>' +
-            '</div>';
-          livePositionsList.appendChild(item);
-        });
-      }
+      const buyPosition = positions.find((position) => String(position?.side || "").toLowerCase() === "buy") || null;
+      const sellPosition = positions.find((position) => String(position?.side || "").toLowerCase() === "sell") || null;
+      const sideCards = [
+        { label: "BUY", position: buyPosition },
+        { label: "SELL", position: sellPosition }
+      ];
+      sideCards.forEach(({ label, position }) => {
+        const item = document.createElement("div");
+        const pnlValue = Number(position?.pnlUSDT || 0);
+        item.className = "live-item " + (position ? (pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral")) : "neutral");
+        item.dataset.positionKey = String(position?.key || label);
+        const pnlSign = pnlValue >= 0 ? "+" : "";
+        const entryPrice = formatPrice(position?.entryPrice);
+        const markPrice = formatPrice(position?.currentPrice);
+        const stopLossPrice = formatPrice(position?.stopLossPrice);
+        const targetPrice = formatPrice(position?.targetPrice);
+        const quantityText = position ? formatNumber(position.quantity) : "-";
+        const pnlChipClass = pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral");
+        const actionButton = position
+          ? '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + String(position.key || position.side || label) + '">Tutup</button>'
+          : "";
+        const pnlChip = position
+          ? '<div class="live-position-pnl"><span class="price-chip pnl ' + pnlChipClass + '">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span></div>'
+          : '<div class="live-position-pnl"><span class="price-chip pnl neutral">PnL: -</span></div>';
+        item.innerHTML = '<div class="live-position-head"><strong>' + label + '</strong>' + actionButton + '</div>' +
+          '<div class="live-position-kpis">' +
+          '<div class="live-position-cards">' +
+          '<div class="live-position-card">' +
+          '<div class="kpi-line">Harga Saat Ini: ' + markPrice + '</div>' +
+          '<div class="kpi-line">Harga Masuk: ' + entryPrice + '</div>' +
+          '<div class="kpi-line">Kuantitas: ' + quantityText + '</div>' +
+          '</div>' +
+          '<div class="live-position-card">' +
+          '<div class="kpi-line">Target: ' + targetPrice + '</div>' +
+          '<div class="kpi-line">Stop Loss: ' + stopLossPrice + '</div>' +
+          pnlChip +
+          '</div>' +
+          '</div>' +
+          '</div>';
+        livePositionsList.appendChild(item);
+      });
 
       liveOrdersList.innerHTML = "";
       const groups = [
