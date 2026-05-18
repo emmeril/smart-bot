@@ -457,7 +457,7 @@
           </div>
         </div>
         <nav class="side-nav">
-          <a class="active" href="#overview">Ringkasan</a>
+          <a class="active" href="#positions">Ringkasan</a>
           <a href="#runtime">Status Runtime</a>
           <a href="#positions">Monitor Langsung</a>
           <a href="#config">Pengaturan Risiko</a>
@@ -492,19 +492,6 @@
               </form>
             </div>
           </section>
-
-          <header class="hero panel" id="overview">
-            <div class="hero-copy">
-              <p class="eyebrow">Operasional Trading</p>
-              <h1>Pusat Kendali Smart Bot</h1>
-              <div class="hero-badges">
-                <span class="signal-chip">Strategi <strong>spot_grid</strong></span>
-                <span class="signal-chip">Bursa <strong>Binance</strong></span>
-                <span class="signal-chip">Mode <strong id="heroMode">Menyinkronkan...</strong></span>
-              </div>
-            </div>
-            <div class="hero-metrics" id="statusCards"></div>
-          </header>
 
           <section class="panel status-strip" aria-label="Ringkasan performa bot">
             <div class="status-item"><span class="status-label">Status bot</span><strong id="botStatus">Memuat...</strong></div>
@@ -878,12 +865,14 @@
         { label: "PnL Terealisasi (PnL Berjalan Saat Close)", value: `${formatNumber(status.dailyPnL)} USDT`, cardClass: "", badgeClass: "" },
         { label: "PnL Estimasi (Fallback)", value: `${formatNumber(status.estimatedPnL)} USDT`, cardClass: "", badgeClass: "" }
       ];
-      statusCards.innerHTML = cards.map((card) => `
-        <article class="metric-card ${card.cardClass || ""}">
-          <span class="label">${card.label}</span>
-          <strong class="${card.badgeClass ? `metric-value-badge ${card.badgeClass}` : ""}">${card.value}</strong>
-        </article>
-      `).join("");
+      if (statusCards) {
+        statusCards.innerHTML = cards.map((card) => `
+          <article class="metric-card ${card.cardClass || ""}">
+            <span class="label">${card.label}</span>
+            <strong class="${card.badgeClass ? `metric-value-badge ${card.badgeClass}` : ""}">${card.value}</strong>
+          </article>
+        `).join("");
+      }
       botStatus.textContent = runtimeStatus.label;
       botStatus.className = formatPill(runtimeStatus.label);
       pairStatus.textContent = status.pair || "-";
@@ -891,7 +880,7 @@
       updatedStatus.textContent = formatDateTime(status.lastUpdated);
       topbarStatus.textContent = runtimeStatus.label === "Berjalan" ? "Runtime bot aktif" : runtimeStatus.label;
       topbarMeta.textContent = `${status.pair || "-"} | ${tradeModeValue} | ${exchangeLabel}${status.exchangeRecoveryReason ? ` | ${status.exchangeRecoveryReason}` : ""}`;
-      heroMode.textContent = `${tradeModeValue} / ${positionModeValue}`;
+      if (heroMode) heroMode.textContent = `${tradeModeValue} / ${positionModeValue}`;
       runtimePair.textContent = status.pair || "-";
       runtimeEngine.textContent = runtimeStatus.label;
       runtimeEngine.className = formatPill(runtimeStatus.label);
