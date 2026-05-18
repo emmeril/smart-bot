@@ -267,24 +267,26 @@
     }
     .live-item strong { display: block; margin-bottom: 4px; font-size: 0.85rem; }
     .live-position-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-    .live-position-kpis { display: grid; gap: 6px; }
-    .live-position-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .live-position-kpis { display: grid; gap: 10px; }
+    .live-position-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: stretch; }
     .live-position-card {
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
-      padding: 8px 10px;
+      padding: 10px 12px;
       display: grid;
-      gap: 4px;
+      gap: 6px;
       font-size: 0.8rem;
+      min-height: 116px;
     }
     .live-position-card h4 {
-      margin: 0 0 2px;
+      margin: 0 0 4px;
       font-size: 0.76rem;
       letter-spacing: 0.08em;
       color: var(--muted);
     }
-    .live-position-pnl { margin-top: 8px; }
+    .kpi-line { line-height: 1.45; }
+    .live-position-pnl { margin-top: 2px; }
     .live-order-range { margin-bottom: 8px; font-size: 0.76rem; font-weight: 600; color: #475569; }
     .live-empty { color: var(--muted); font-size: 0.84rem; }
     .live-sparkline { display: block; width: 100%; height: 64px; margin-top: 12px; border-radius: 8px; background: #fff; }
@@ -564,7 +566,7 @@
             </div>
             <div class="live-grid">
               <article class="live-card">
-                <span class="label">Posisi aktif</span>
+                <span class="label">Posisi</span>
                 <strong id="livePositionsCount">-</strong>
                 <span id="livePositionsMeta">Memuat data posisi...</span>
               </article>
