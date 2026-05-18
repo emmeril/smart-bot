@@ -278,6 +278,12 @@
       gap: 4px;
       font-size: 0.8rem;
     }
+    .live-position-card h4 {
+      margin: 0 0 2px;
+      font-size: 0.76rem;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
     .live-position-pnl { margin-top: 8px; }
     .live-order-range { margin-bottom: 8px; font-size: 0.76rem; font-weight: 600; color: #475569; }
     .live-empty { color: var(--muted); font-size: 0.84rem; }
@@ -1055,47 +1061,42 @@
       liveOrdersMeta.className = "";
 
       livePositionsList.innerHTML = "";
-      const buyPosition = positions.find((position) => String(position?.side || "").toLowerCase() === "buy") || null;
-      const sellPosition = positions.find((position) => String(position?.side || "").toLowerCase() === "sell") || null;
-      const sideCards = [
-        { label: "BUY", position: buyPosition },
-        { label: "SELL", position: sellPosition }
-      ];
-      sideCards.forEach(({ label, position }) => {
-        const item = document.createElement("div");
-        const pnlValue = Number(position?.pnlUSDT || 0);
-        item.className = "live-item " + (position ? (pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral")) : "neutral");
-        item.dataset.positionKey = String(position?.key || label);
-        const pnlSign = pnlValue >= 0 ? "+" : "";
-        const entryPrice = formatPrice(position?.entryPrice);
-        const markPrice = formatPrice(position?.currentPrice);
-        const stopLossPrice = formatPrice(position?.stopLossPrice);
-        const targetPrice = formatPrice(position?.targetPrice);
-        const quantityText = position ? formatNumber(position.quantity) : "-";
-        const pnlChipClass = pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral");
-        const actionButton = position
-          ? '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + String(position.key || position.side || label) + '">Tutup</button>'
-          : "";
-        const pnlChip = position
-          ? '<div class="live-position-pnl"><span class="price-chip pnl ' + pnlChipClass + '">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span></div>'
-          : '<div class="live-position-pnl"><span class="price-chip pnl neutral">PnL: -</span></div>';
-        item.innerHTML = '<div class="live-position-head"><strong>' + label + '</strong>' + actionButton + '</div>' +
-          '<div class="live-position-kpis">' +
-          '<div class="live-position-cards">' +
-          '<div class="live-position-card">' +
-          '<div class="kpi-line">Harga Saat Ini: ' + markPrice + '</div>' +
-          '<div class="kpi-line">Harga Masuk: ' + entryPrice + '</div>' +
-          '<div class="kpi-line">Kuantitas: ' + quantityText + '</div>' +
-          '</div>' +
-          '<div class="live-position-card">' +
-          '<div class="kpi-line">Target: ' + targetPrice + '</div>' +
-          '<div class="kpi-line">Stop Loss: ' + stopLossPrice + '</div>' +
-          pnlChip +
-          '</div>' +
-          '</div>' +
-          '</div>';
-        livePositionsList.appendChild(item);
-      });
+      const position = positions[0] || null;
+      const item = document.createElement("div");
+      const pnlValue = Number(position?.pnlUSDT || 0);
+      item.className = "live-item " + (position ? (pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral")) : "neutral");
+      item.dataset.positionKey = String(position?.key || "POSITION");
+      const pnlSign = pnlValue >= 0 ? "+" : "";
+      const entryPrice = formatPrice(position?.entryPrice);
+      const markPrice = formatPrice(position?.currentPrice);
+      const stopLossPrice = formatPrice(position?.stopLossPrice);
+      const targetPrice = formatPrice(position?.targetPrice);
+      const quantityText = position ? formatNumber(position.quantity) : "-";
+      const pnlChipClass = pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral");
+      const actionButton = position
+        ? '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + String(position.key || position.side || "POSITION") + '">Tutup</button>'
+        : "";
+      const pnlChip = position
+        ? '<div class="live-position-pnl"><span class="price-chip pnl ' + pnlChipClass + '">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span></div>'
+        : '<div class="live-position-pnl"><span class="price-chip pnl neutral">PnL: -</span></div>';
+      item.innerHTML = '<div class="live-position-head"><strong>POSISI AKTIF</strong>' + actionButton + '</div>' +
+        '<div class="live-position-kpis">' +
+        '<div class="live-position-cards">' +
+        '<div class="live-position-card">' +
+        '<h4>BUY</h4>' +
+        '<div class="kpi-line">Harga Saat Ini: ' + markPrice + '</div>' +
+        '<div class="kpi-line">Harga Masuk: ' + entryPrice + '</div>' +
+        '<div class="kpi-line">Kuantitas: ' + quantityText + '</div>' +
+        '</div>' +
+        '<div class="live-position-card">' +
+        '<h4>SELL</h4>' +
+        '<div class="kpi-line">Target: ' + targetPrice + '</div>' +
+        '<div class="kpi-line">Stop Loss: ' + stopLossPrice + '</div>' +
+        '</div>' +
+        '</div>' +
+        pnlChip +
+        '</div>';
+      livePositionsList.appendChild(item);
 
       liveOrdersList.innerHTML = "";
       const groups = [
