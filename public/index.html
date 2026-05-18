@@ -608,6 +608,10 @@
                 <p class="eyebrow">Pengaturan Risiko</p>
                 <h2>Parameter trading</h2>
               </div>
+              <div class="topbar-actions">
+                <button id="simpleModeBtn" class="btn btn-primary btn-xs" type="button">Simple Mode</button>
+                <button id="advancedModeBtn" class="btn btn-secondary btn-xs" type="button">Advanced Mode</button>
+              </div>
             </div>
             <form id="configForm" class="config-grid"></form>
             <div class="config-actions">
@@ -623,7 +627,16 @@
   <script>
     const SECTION_ORDER = ["General", "Risk", "Grid", "Session", "Trailing", "Entry Filters"];
     const VISIBLE_SECTION_SET = new Set(SECTION_ORDER);
-    const state = { config: null, defaults: null, schema: [], status: null, serverTime: 0 };
+    const SIMPLE_KEYS = new Set([
+      "pair",
+      "gridOrderSizeUsdt",
+      "gridLevels",
+      "gridAutoOrdersCap",
+      "gridTargetProfitUsdt",
+      "gridStopLossPercent",
+      "maxTradesPerDay"
+    ]);
+    const state = { config: null, defaults: null, schema: [], status: null, serverTime: 0, formMode: "simple" };
     let formDirty = false;
     let autoRefreshTimer = null;
     let liveRefreshTimer = null;
@@ -634,6 +647,8 @@
     const saveBtn = document.getElementById("saveBtn");
     const refreshBtn = document.getElementById("refreshBtn");
     const resetBtn = document.getElementById("resetBtn");
+    const simpleModeBtn = document.getElementById("simpleModeBtn");
+    const advancedModeBtn = document.getElementById("advancedModeBtn");
     const statusCards = document.getElementById("statusCards");
     const botStatus = document.getElementById("botStatus");
     const pairStatus = document.getElementById("pairStatus");
@@ -1159,6 +1174,7 @@
     function sectionList(schema) {
       const map = new Map();
       for (const field of schema) {
+        if (state.formMode === "simple" && !SIMPLE_KEYS.has(field.key)) continue;
         const section = field.section || "General";
         if (!VISIBLE_SECTION_SET.has(section)) continue;
         if (!map.has(section)) map.set(section, []);
@@ -1167,6 +1183,12 @@
       const ordered = [];
       for (const section of SECTION_ORDER) if (map.has(section)) ordered.push([section, map.get(section)]);
       return ordered;
+    }
+
+    function updateModeButtons() {
+      const simpleActive = state.formMode === "simple";
+      simpleModeBtn.className = `btn btn-xs ${simpleActive ? "btn-primary" : "btn-secondary"}`;
+      advancedModeBtn.className = `btn btn-xs ${simpleActive ? "btn-secondary" : "btn-primary"}`;
     }
 
 	    function createField(field, value) {
@@ -1230,6 +1252,7 @@
 
     function renderForm(config, schema) {
       form.innerHTML = "";
+      updateModeButtons();
       const sections = sectionList(schema);
       for (const [sectionName, fields] of sections) {
         const card = document.createElement("section");
@@ -1368,6 +1391,14 @@
     saveBtn.addEventListener("click", saveDashboard);
     refreshBtn.addEventListener("click", () => loadDashboard(false));
     resetBtn.addEventListener("click", resetDashboard);
+    simpleModeBtn.addEventListener("click", () => {
+      state.formMode = "simple";
+      renderForm(state.config || {}, state.schema || []);
+    });
+    advancedModeBtn.addEventListener("click", () => {
+      state.formMode = "advanced";
+      renderForm(state.config || {}, state.schema || []);
+    });
     clearPositionsBtn.addEventListener("click", removeAllPositions);
     livePositionsList.addEventListener("click", async (event) => {
       const target = event.target.closest(".js-remove-position");
