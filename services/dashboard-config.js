@@ -72,8 +72,6 @@ const createDashboardConfigHelpers = ({
         }
 
         const { config: nextConfig } = applyAutoPresetToConfig(merged);
-        nextConfig.autoTargetProfitEnabled = true;
-        nextConfig.autoStopLossEnabled = true;
         if (protectedRuntimeValues.size > 0) {
             for (const [key, value] of protectedRuntimeValues.entries()) {
                 nextConfig[key] = value;
@@ -97,8 +95,6 @@ const createDashboardConfigHelpers = ({
 
         const current = { ...currentDb };
         const { config: nextConfig } = applyAutoPresetToConfig(getDefaultConfig());
-        nextConfig.autoTargetProfitEnabled = true;
-        nextConfig.autoStopLossEnabled = true;
         applyDashboardRuntimeState(nextConfig, currentDb);
         Object.keys(currentDb).forEach((key) => { delete currentDb[key]; });
         Object.assign(currentDb, nextConfig);
