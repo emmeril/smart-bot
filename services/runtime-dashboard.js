@@ -75,6 +75,14 @@ const createRuntimeDashboardHelpers = ({
         }
     };
 
+    const resolveRequestProtocol = (req) => {
+        const forwardedProto = String(req?.headers?.["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+        if (forwardedProto === "https" || forwardedProto === "http") return forwardedProto;
+        const protocol = String(req?.protocol || "").trim().toLowerCase();
+        if (protocol === "https" || protocol === "http") return protocol;
+        return req?.socket?.encrypted ? "https" : "http";
+    };
+
     const isSameOriginRequest = (req) => {
         const hostHeader = req?.headers?.host;
         const sourceHeader = req?.headers?.origin || req?.headers?.referer;
@@ -82,9 +90,11 @@ const createRuntimeDashboardHelpers = ({
         const requestHostPort = parseHostAndPort(hostHeader);
         const sourceHostPort = parseOriginHostPort(sourceHeader);
         if (!sourceHostPort) return false;
+        const requestProtocol = resolveRequestProtocol(req);
+        const requestPort = String(requestHostPort.port || (requestProtocol === "https" ? "443" : "80"));
         return (
             normalizeHostAlias(requestHostPort.host) === sourceHostPort.host &&
-            String(requestHostPort.port || "80") === String(sourceHostPort.port || "80")
+            requestPort === String(sourceHostPort.port || "80")
         );
     };
 
