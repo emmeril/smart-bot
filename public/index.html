@@ -587,12 +587,6 @@
                 <h2>Parameter trading</h2>
               </div>
             </div>
-            <div class="config-legend">
-              <span class="field-badge">AUTO 0</span>
-              <span>Isi 0 untuk mode otomatis.</span>
-              <span class="field-badge toggle">AUTO TOGGLE</span>
-              <span>Aktifkan switch untuk mode otomatis.</span>
-            </div>
             <form id="configForm" class="config-grid"></form>
             <div class="config-actions">
               <button id="saveBtn" class="btn btn-primary" type="button">Simpan konfigurasi</button>
@@ -1127,7 +1121,7 @@
               '<div class="live-table-actions"><button class="btn btn-danger btn-xs js-cancel-order" type="button" data-order-type="' + groupType + '" data-client-order-id="' + String(clientOrderId) + '" data-order-id="' + String(orderId) + '">Batalkan</button></div>';
           }).join('');
           wrapper.innerHTML = '<div class="live-list-head"><strong>' + group.label + ' (' + group.list.length + ')</strong><button class="btn btn-danger btn-xs js-cancel-group" type="button" data-order-type="' + groupType + '">Batalkan Semua</button></div>' +
-            '<span class="live-order-range">Rentang harga: ' + priceSummary + ' | Rentang trigger: ' + triggerSummary + '</span>' +
+            '<span class="live-order-range">Rentang harga: ' + priceSummary + '</span>' +
             '<div class="live-table"><div class="live-table-head"><div>Order</div><div>Sisi</div><div>Harga</div><div>Kuantitas</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
           liveOrdersList.appendChild(wrapper);
         });
