@@ -438,7 +438,7 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
     const isSpotRuntime = String(db?.marginMode || "spot").toLowerCase() === "spot"
         || String(exchange?.options?.defaultType || "spot").toLowerCase() === "spot";
     let spotBalances = null;
-    let didClearDustPosition = false;
+    let didSyncAggregateQuantity = false;
 
     const resolveMarketMinQty = (pair) => {
         const market = exchange?.markets?.[pair];
@@ -448,51 +448,73 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
         return toFiniteNumber(lotSizeFilter?.minQty, toFiniteNumber(market?.limits?.amount?.min, NaN));
     };
 
-    const shouldAutoClearSpotDustPosition = async (position) => {
-        if (!isSpotRuntime || !position) return false;
-        if (!String(position?.ocoBlockedReason || "").includes("LOT_SIZE")) return false;
-        const minQty = resolveMarketMinQty(db?.pair);
-        if (!Number.isFinite(minQty) || minQty <= 0) return false;
-        const trackedQty = toFiniteNumber(position?.quantity, NaN);
-        if (!Number.isFinite(trackedQty) || trackedQty <= 0 || trackedQty >= minQty) return false;
+    const syncSpotAggregatePositionQuantity = async (positionKey, position) => {
+        if (!isSpotRuntime || !position) return null;
+        if (String(position?.side || "").toLowerCase() !== "buy") return null;
+        if (String(position?.settlementMode || "spot").toLowerCase() !== "spot") return null;
 
         if (!spotBalances) {
             try {
                 const balanceSnapshot = await exchange.fetchBalance();
                 spotBalances = balanceSnapshot?.free || balanceSnapshot || {};
             } catch (balanceError) {
-                console.warn(`[SYNC][WARN] Failed to fetch spot balance for dust cleanup: ${balanceError.message}`);
-                return false;
+                console.warn(`[SYNC][WARN] Failed to fetch spot balance for aggregate quantity sync: ${balanceError.message}`);
+                return null;
             }
         }
 
         const [baseAssetRaw = ""] = String(db?.pair || "").split("/");
         const baseAsset = baseAssetRaw.trim();
         const baseFree = toFiniteNumber(spotBalances?.[baseAsset], NaN);
-        if (!Number.isFinite(baseFree) || baseFree <= 0) return true;
-        return baseFree < minQty;
+        if (!Number.isFinite(baseFree)) return null;
+
+        const formattedQty = formatAmountToMarketPrecision(db?.pair, baseFree);
+        if (!Number.isFinite(formattedQty)) return null;
+
+        const trackedQty = toFiniteNumber(position?.quantity, NaN);
+        if (!Number.isFinite(trackedQty)) return null;
+        if (Math.abs(formattedQty - trackedQty) <= POSITION_SYNC_QTY_TOLERANCE) return { type: "unchanged" };
+        if (formattedQty <= 0) return { type: "unchanged" };
+
+        return {
+            type: "update",
+            nextPosition: {
+                ...position,
+                quantity: formattedQty
+            }
+        };
     };
 
     for (const [positionKey, currentPosition] of Object.entries(positionsMap)) {
-        if (await shouldAutoClearSpotDustPosition(currentPosition)) {
-            const minQty = resolveMarketMinQty(db?.pair);
-            console.warn(`[SYNC][WARN] Auto-cleared dust spot position ${positionKey}: qty ${currentPosition.quantity} below minimum ${minQty}.`);
+        const aggregateSyncResult = await syncSpotAggregatePositionQuantity(positionKey, currentPosition);
+        if (aggregateSyncResult?.type === "update") {
+            positionsMap[positionKey] = aggregateSyncResult.nextPosition;
+            upsertActivePosition(aggregateSyncResult.nextPosition);
+            didSyncAggregateQuantity = true;
+            console.log(`[SYNC][INFO] Aggregate wallet sync updated ${positionKey} qty ${currentPosition.quantity} -> ${aggregateSyncResult.nextPosition.quantity}`);
+        }
+
+        const positionAfterAggregateSync = positionsMap[positionKey] || currentPosition;
+        const minQty = resolveMarketMinQty(db?.pair);
+        const trackedQty = toFiniteNumber(positionAfterAggregateSync?.quantity, NaN);
+        if (Number.isFinite(minQty) && minQty > 0 && Number.isFinite(trackedQty) && trackedQty < minQty) {
+            console.warn(`[SYNC][WARN] Auto-clearing ${positionKey}: qty ${trackedQty} is below minimum tradable qty ${minQty}.`);
             const didClearPosition = await clearMissingPositionState(
-                currentPosition,
-                "SPOT_DUST_AUTO_CLEAR",
+                positionAfterAggregateSync,
+                "SPOT_MIN_QTY_UNTRADABLE",
                 positionKey
             );
             if (!didClearPosition) {
                 removeActivePositionByKey(positionKey);
             }
-            didClearDustPosition = true;
+            didSyncAggregateQuantity = true;
             continue;
         }
-        await ensureReduceOnlyTakeProfitOrder(positionKey, currentPosition);
-        await ensureReduceOnlyStopLossOrder(positionKey, currentPosition);
+        await ensureReduceOnlyTakeProfitOrder(positionKey, positionAfterAggregateSync);
+        await ensureReduceOnlyStopLossOrder(positionKey, positionAfterAggregateSync);
     }
 
-    if (didClearDustPosition) {
+    if (didSyncAggregateQuantity) {
         await saveDB();
     }
 };
