@@ -312,11 +312,13 @@ const createGridRuntimeHelpers = ({
     };
 
     const resolveGridOrdersPerSideCap = (configuredOrdersPerSide, gridLevels = getDb()?.gridLevels) => {
+        const db = getDb();
         const configured = Math.trunc(toFiniteNumber(configuredOrdersPerSide, 0));
         if (configured > 0) return Math.max(1, configured);
         // In FULL_AUTO mode, order count should follow available balance + exchange minimums,
         // not be hard-capped by the currently-derived grid level count.
-        return Math.max(1, AUTO_GRID_ORDERS_CAP);
+        const configuredAutoCap = Math.trunc(toFiniteNumber(db?.gridAutoOrdersCap, AUTO_GRID_ORDERS_CAP));
+        return Math.max(1, configuredAutoCap);
     };
 
     const resolveActiveGridSideCount = () => {

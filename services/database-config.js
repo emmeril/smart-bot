@@ -33,6 +33,7 @@ const Config = sequelize.define("Config", {
     gridEntryBufferPercent: { type: DataTypes.FLOAT, defaultValue: 0 },
     gridTakeProfitLevels: { type: DataTypes.INTEGER, defaultValue: 0 },
     gridOrdersPerSide: { type: DataTypes.INTEGER, defaultValue: 0 },
+    gridAutoOrdersCap: { type: DataTypes.INTEGER, defaultValue: 200 },
     gridStopLossLevels: { type: DataTypes.FLOAT, defaultValue: 0 },
 
     gridTimeframe: { type: DataTypes.STRING, defaultValue: "5m" },
@@ -104,6 +105,7 @@ const DEFAULT_CONFIG = {
     gridEntryBufferPercent: 0,
     gridTakeProfitLevels: 0,
     gridOrdersPerSide: 0,
+    gridAutoOrdersCap: 200,
     gridStopLossLevels: 0,
     gridTimeframe: "5m",
     sessionStartUTC: 0,
@@ -152,6 +154,7 @@ const DASHBOARD_EDITABLE_FIELDS = [
     { key: "gridEntryBufferPercent", label: "Entry Buffer (%)", section: "Grid", type: "number", min: 0, step: 0.01, description: "Buffer around grid levels for entries. Set 0 for automatic mode." },
     { key: "gridTakeProfitLevels", label: "Take Profit Levels", section: "Grid", type: "number", min: 0, step: 1, description: "TP level offset from the entry level. Set 0 for automatic TP mode." },
     { key: "gridOrdersPerSide", label: "Orders Per Side", section: "Grid", type: "number", min: 0, step: 1, description: "Number of ladder orders per side. Set 0 for automatic order count." },
+    { key: "gridAutoOrdersCap", label: "Auto Orders Cap", section: "Grid", type: "number", min: 1, step: 1, description: "Maximum ladder orders per side when Orders Per Side is set to 0 (AUTO)." },
     { key: "gridStopLossLevels", label: "Stop Loss Levels", section: "Grid", type: "number", min: 0, step: 0.1, description: "Stop loss offset in grid steps. Set 0 for automatic SL mode." },
     { key: "gridTimeframe", label: "Grid Timeframe", section: "Grid", type: "select", options: ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"], description: "Timeframe used to build the grid." },
     { key: "sessionStartUTC", label: "Session Start UTC", section: "Session", type: "number", min: 0, max: 23, step: 1, description: "Trading session start hour in UTC." },

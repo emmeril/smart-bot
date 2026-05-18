@@ -1088,6 +1088,7 @@ const AUTO_PAIR_GRID_PRESETS = {
         gridOrderSizeUsdt: 0,
         gridTakeProfitLevels: 0,
         gridOrdersPerSide: 0,
+        gridAutoOrdersCap: 200,
         gridStopLossLevels: 0,
         gridTimeframe: "5m",
         minVolumeRatio: 1.05,

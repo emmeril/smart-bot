@@ -52,6 +52,7 @@ const createConfigModelHelpers = ({
             gridLookbackCandles: { min: 20, allowZero: false, integer: true }, gridRangePercent: { min: 0, allowZero: true },
             gridEntryBufferPercent: { min: 0, allowZero: true }, gridTakeProfitLevels: { min: 0, allowZero: true, integer: true },
             gridOrdersPerSide: { min: 0, allowZero: true, integer: true },
+            gridAutoOrdersCap: { min: 1, allowZero: false, integer: true },
             gridStopLossLevels: { min: 0, allowZero: true }, sessionStartUTC: { min: 0, allowZero: true, integer: true },
             sessionEndUTC: { min: 0, allowZero: true, integer: true }, volumePeriod: { min: 2, allowZero: false, integer: true },
             minVolumeRatio: { min: 1, allowZero: false },
@@ -212,6 +213,10 @@ const createConfigModelHelpers = ({
             legacyCopySql: columnNames.has("targetProfitUSDT")
                 ? "UPDATE Configs SET gridTargetProfitUsdt = COALESCE(targetProfitUSDT, 0.5) WHERE gridTargetProfitUsdt IS NULL OR gridTargetProfitUsdt = '';"
                 : null
+        });
+        await addColumnIfMissing({
+            column: "gridAutoOrdersCap",
+            sql: "ALTER TABLE Configs ADD COLUMN gridAutoOrdersCap INTEGER DEFAULT 200;"
         });
         await addColumnIfMissing({
             column: "gridStopLossPercent",
