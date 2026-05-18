@@ -1241,18 +1241,36 @@ const createOrderExecutionHelpers = ({
         return { minPrice, maxPrice, buffer };
     };
 
-    const hasRelevantOpenGridOrdersForPosition = async (position) => {
+    const getRelevantOpenGridOrdersForPosition = async (position) => {
         const openGridOrders = await fetchOpenGridOrders();
-        if (!Array.isArray(openGridOrders) || openGridOrders.length === 0) return false;
+        if (!Array.isArray(openGridOrders) || openGridOrders.length === 0) return [];
         const expectedGridSide = String(position?.side || "").toLowerCase();
-        return openGridOrders.some((order) => String(order?.side || "").toLowerCase() === expectedGridSide);
+        return openGridOrders.filter((order) => String(order?.side || "").toLowerCase() === expectedGridSide);
+    };
+
+    const resolveGridNoSlZoneFromOpenOrders = (openGridOrders) => {
+        if (!Array.isArray(openGridOrders) || openGridOrders.length === 0) return null;
+        const prices = openGridOrders
+            .map((order) => toFiniteNumber(order?.price, NaN))
+            .filter((price) => Number.isFinite(price) && price > 0)
+            .sort((a, b) => a - b);
+        if (prices.length === 0) return null;
+        const minPrice = prices[0];
+        const maxPrice = prices[prices.length - 1];
+        const inferredStep = prices.length >= 2
+            ? Math.abs(prices[1] - prices[0])
+            : NaN;
+        const fallbackStep = Math.max(1e-8, (maxPrice - minPrice) || (minPrice * 0.001));
+        const buffer = Math.max(1e-8, Number.isFinite(inferredStep) && inferredStep > 0 ? inferredStep : fallbackStep);
+        if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice) || minPrice <= 0 || maxPrice <= 0) return null;
+        return { minPrice, maxPrice, buffer };
     };
 
     const clampStopLossOutsideGridZone = async (position) => {
         if (!position || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return false;
-        const hasRelevantGridOrders = await hasRelevantOpenGridOrdersForPosition(position);
-        if (!hasRelevantGridOrders) return false;
-        const zone = resolveGridNoSlZone();
+        const relevantOpenGridOrders = await getRelevantOpenGridOrdersForPosition(position);
+        if (relevantOpenGridOrders.length === 0) return false;
+        const zone = resolveGridNoSlZoneFromOpenOrders(relevantOpenGridOrders) || resolveGridNoSlZone();
         if (!zone) return false;
         const currentStop = Number(position.stopLossPrice);
         if (currentStop < zone.minPrice || currentStop > zone.maxPrice) return false;
