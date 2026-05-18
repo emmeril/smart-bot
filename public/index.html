@@ -1061,20 +1061,29 @@
         empty.textContent = "Belum ada posisi aktif saat ini.";
         livePositionsList.appendChild(empty);
       } else {
-        positions.slice(0, 4).forEach((position) => {
+        const orderedPositions = [...positions].sort((a, b) => {
+          const sideA = String(a?.side || "").toLowerCase();
+          const sideB = String(b?.side || "").toLowerCase();
+          const rank = { buy: 0, sell: 1 };
+          const rankA = Object.prototype.hasOwnProperty.call(rank, sideA) ? rank[sideA] : 2;
+          const rankB = Object.prototype.hasOwnProperty.call(rank, sideB) ? rank[sideB] : 2;
+          if (rankA !== rankB) return rankA - rankB;
+          return 0;
+        });
+        orderedPositions.slice(0, 4).forEach((position) => {
           const item = document.createElement("div");
-          const positionKey = String(position.key || position.side || "POSITION");
+          const positionSideLabel = String(position.side || "POSITION").toUpperCase();
           const pnlValue = Number(position.pnlUSDT || 0);
           item.className = "live-item " + (pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral"));
-          item.dataset.positionKey = positionKey;
+          item.dataset.positionKey = String(position.key || position.side || "POSITION");
           const pnlSign = pnlValue >= 0 ? "+" : "";
           const entryPrice = formatPrice(position.entryPrice);
           const markPrice = formatPrice(position.currentPrice);
           const stopLossPrice = formatPrice(position.stopLossPrice);
           const targetPrice = formatPrice(position.targetPrice);
           const pnlChipClass = pnlValue > 0 ? "positive" : (pnlValue < 0 ? "negative" : "neutral");
-          item.innerHTML = '<div class="live-position-head"><strong>' + positionKey + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
-            '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Tutup</button></div>' +
+          item.innerHTML = '<div class="live-position-head"><strong>' + positionSideLabel + '</strong>' +
+            '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + String(position.key || position.side || "POSITION") + '">Tutup</button></div>' +
             '<div class="live-position-kpis">' +
             '<div class="live-position-cards">' +
             '<div class="live-position-card">' +
