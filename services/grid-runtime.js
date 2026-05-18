@@ -313,7 +313,9 @@ const createGridRuntimeHelpers = ({
     const resolveGridOrdersPerSideCap = (configuredOrdersPerSide, gridLevels = getDb()?.gridLevels) => {
         const safeGridLevels = Math.max(2, Math.trunc(toFiniteNumber(gridLevels, 2)));
         const configured = Math.trunc(toFiniteNumber(configuredOrdersPerSide, 0));
-        return configured <= 0 ? Math.max(1, safeGridLevels - 1) : Math.max(1, configured);
+        // Grid entries are generated across `gridLevels` slots (not `gridLevels - 1`),
+        // so auto cap should allow the full slot count.
+        return configured <= 0 ? Math.max(1, safeGridLevels) : Math.max(1, configured);
     };
 
     const resolveActiveGridSideCount = () => {
