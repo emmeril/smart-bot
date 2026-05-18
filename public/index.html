@@ -1046,15 +1046,8 @@
         String(orderCounts.grid || 0) + " Grid<br>" +
         String(orderCounts.tp || 0) + " TP<br>" +
         String(orderCounts.sl || 0) + " SL";
-      const recoveryAlert = timeoutErrors >= 3 || duplicateDetected >= 8 ? " | recovery spike" : "";
-      liveOrdersMeta.textContent =
-        (orderCounts.grid || 0) + " grid | " + (orderCounts.tp || 0) + " TP | " + (orderCounts.sl || 0) + " SL"
-        + ` | dup ${duplicateDetected}/${duplicateResolved}`
-        + ` | timeout ${timeoutErrors}`
-        + ` | repl ${replacementSucceeded}/${replacementAttempts}`
-        + recoveryAlert
-        + (data.triggerOrdersFetchFailed ? " | cadangan snapshot trigger" : "");
-      liveOrdersMeta.className = recoveryAlert ? "live-meta-watch" : "";
+      liveOrdersMeta.textContent = "";
+      liveOrdersMeta.className = "";
 
       livePositionsList.innerHTML = "";
       if (positions.length === 0) {
