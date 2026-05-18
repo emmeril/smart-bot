@@ -268,6 +268,17 @@
     .live-item strong { display: block; margin-bottom: 4px; font-size: 0.85rem; }
     .live-position-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
     .live-position-kpis { display: grid; gap: 6px; }
+    .live-position-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .live-position-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 8px 10px;
+      display: grid;
+      gap: 4px;
+      font-size: 0.8rem;
+    }
+    .live-position-pnl { margin-top: 8px; }
     .live-order-range { margin-bottom: 8px; font-size: 0.76rem; font-weight: 600; color: #475569; }
     .live-empty { color: var(--muted); font-size: 0.84rem; }
     .live-sparkline { display: block; width: 100%; height: 64px; margin-top: 12px; border-radius: 8px; background: #fff; }
@@ -1065,12 +1076,18 @@
           item.innerHTML = '<div class="live-position-head"><strong>' + positionKey + ' | ' + String(position.side || "-").toUpperCase() + '</strong>' +
             '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + positionKey + '">Tutup</button></div>' +
             '<div class="live-position-kpis">' +
-            '<div class="kpi-line">Kuantitas: ' + formatNumber(position.quantity) + '</div>' +
-            '<div class="kpi-line">Harga Masuk: ' + entryPrice + '</div>' +
+            '<div class="live-position-cards">' +
+            '<div class="live-position-card">' +
             '<div class="kpi-line">Harga Saat Ini: ' + markPrice + '</div>' +
-            '<div class="kpi-line">Stop Loss: ' + stopLossPrice + '</div>' +
+            '<div class="kpi-line">Harga Masuk: ' + entryPrice + '</div>' +
+            '<div class="kpi-line">Kuantitas: ' + formatNumber(position.quantity) + '</div>' +
+            '</div>' +
+            '<div class="live-position-card">' +
             '<div class="kpi-line">Target: ' + targetPrice + '</div>' +
-            '<div class="kpi-line"><span class="price-chip pnl ' + pnlChipClass + '">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span></div>' +
+            '<div class="kpi-line">Stop Loss: ' + stopLossPrice + '</div>' +
+            '<div class="live-position-pnl"><span class="price-chip pnl ' + pnlChipClass + '">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span></div>' +
+            '</div>' +
+            '</div>' +
             '</div>';
           livePositionsList.appendChild(item);
         });
