@@ -22,6 +22,7 @@ const createGridRuntimeHelpers = ({
 }) => {
     const AUTO_GRID_LEVELS_MIN = 6;
     const AUTO_GRID_LEVELS_MAX = 18;
+    const AUTO_GRID_ORDERS_CAP = 200;
     const UNIVERSAL_PROFILE_NAME = "universal";
     const GRID_LEVELS_TIMEFRAME_FACTORS = {
         "1m": 1.2,
@@ -311,11 +312,11 @@ const createGridRuntimeHelpers = ({
     };
 
     const resolveGridOrdersPerSideCap = (configuredOrdersPerSide, gridLevels = getDb()?.gridLevels) => {
-        const safeGridLevels = Math.max(2, Math.trunc(toFiniteNumber(gridLevels, 2)));
         const configured = Math.trunc(toFiniteNumber(configuredOrdersPerSide, 0));
-        // Grid entries are generated across `gridLevels` slots (not `gridLevels - 1`),
-        // so auto cap should allow the full slot count.
-        return configured <= 0 ? Math.max(1, safeGridLevels) : Math.max(1, configured);
+        if (configured > 0) return Math.max(1, configured);
+        // In FULL_AUTO mode, order count should follow available balance + exchange minimums,
+        // not be hard-capped by the currently-derived grid level count.
+        return Math.max(1, AUTO_GRID_ORDERS_CAP);
     };
 
     const resolveActiveGridSideCount = () => {

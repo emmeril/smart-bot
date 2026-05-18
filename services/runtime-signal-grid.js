@@ -417,14 +417,25 @@ const createRuntimeSignalGridHelpers = ({
                 market: exchange?.markets?.[db?.pair],
                 gridLevels: params.gridLevels
             });
-            params.gridOrdersPerSide = effectiveOrdersMeta.count;
+            if (toFiniteNumber(params.configuredGridLevels, 0) <= 0 && effectiveOrdersMeta.count > params.gridLevels) {
+                params.gridLevels = Math.max(2, Math.trunc(effectiveOrdersMeta.count));
+            }
+            const adjustedOrdersMeta = resolveEffectiveGridOrdersPerSide({
+                availableUsdt,
+                configuredOrdersPerSide: params.gridOrdersPerSide,
+                perOrderMargin: params.gridOrderSizeUsdt,
+                referencePrice: snapshot.currentPrice,
+                market: exchange?.markets?.[db?.pair],
+                gridLevels: params.gridLevels
+            });
+            params.gridOrdersPerSide = adjustedOrdersMeta.count;
             let openGridOrders = await fetchOpenGridOrders();
             openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
 
-            if (effectiveSizeMeta.orderSizeUsdt <= 0 || effectiveOrdersMeta.count <= 0) {
+            if (effectiveSizeMeta.orderSizeUsdt <= 0 || adjustedOrdersMeta.count <= 0) {
                 if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "INSUFFICIENT_BALANCE");
-                const reasonText = effectiveOrdersMeta.reason ? ` Reason: ${effectiveOrdersMeta.reason}` : "";
-                const skipMessage = `[GRID] Auto sizing skipped ladder | size ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT | side orders ${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured} | available ${availableUsdt.toFixed(2)} USDT.${reasonText}`;
+                const reasonText = adjustedOrdersMeta.reason ? ` Reason: ${adjustedOrdersMeta.reason}` : "";
+                const skipMessage = `[GRID] Auto sizing skipped ladder | size ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT | side orders ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} | available ${availableUsdt.toFixed(2)} USDT.${reasonText}`;
                 const now = Date.now();
                 if (skipMessage !== getLastGridSizingSkipReason() || now - getLastGridSizingSkipLogAt() >= gridSizingSkipLogTtl) {
                     console.log(skipMessage);
@@ -449,17 +460,17 @@ const createRuntimeSignalGridHelpers = ({
                         `SIZE:${effectiveSizeMeta.orderSizeUsdt.toFixed(4)}:${availableUsdt.toFixed(2)}`
                     );
             }
-            if (effectiveOrdersMeta.count < effectiveOrdersMeta.maxConfigured) {
+            if (adjustedOrdersMeta.count < adjustedOrdersMeta.maxConfigured) {
                 maybeLogGridSizingStateExternal
                     ? maybeLogGridSizingStateExternal(
                         "COUNT",
-                        `[GRID] Auto-adjusted side orders: ${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured} per side | mode ${effectiveOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
-                        `COUNT:${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured}:${effectiveOrdersMeta.mode}:${availableUsdt.toFixed(2)}`
+                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
+                        `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}`
                     )
                     : maybeLogGridSizingState(
                         "COUNT",
-                        `[GRID] Auto-adjusted side orders: ${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured} per side | mode ${effectiveOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
-                        `COUNT:${effectiveOrdersMeta.count}/${effectiveOrdersMeta.maxConfigured}:${effectiveOrdersMeta.mode}:${availableUsdt.toFixed(2)}`
+                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
+                        `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}`
                     );
             }
 
