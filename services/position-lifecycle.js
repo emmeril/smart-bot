@@ -240,6 +240,10 @@ const createPositionLifecycleHelpers = ({
             const trackedPosition = getActivePositionByKey(closeLockKey);
             if (!trackedPosition) return;
             const position = { ...trackedPosition };
+            const runningPnlPrice = await getPrice(true);
+            const runningPnlState = Number.isFinite(runningPnlPrice) && runningPnlPrice > 0
+                ? calculatePositionPnL(position, runningPnlPrice)
+                : null;
             const { side, quantity } = position;
             if (!Number.isFinite(quantity) || quantity <= 0) {
                 console.error("[POSITION][ERROR] Invalid position quantity. Removing local active position.");
@@ -303,9 +307,12 @@ const createPositionLifecycleHelpers = ({
             const realizedPnL = calculatePositionPnL(position, closeFillSnapshot.price);
             const exchangeRealizedPnl = getOrderRealizedPnl(closeOrder);
             const closeFeeCost = getOrderFeeCost(closeOrder);
-            const netRealizedPnl = Number.isFinite(exchangeRealizedPnl)
-                ? exchangeRealizedPnl - closeFeeCost
-                : realizedPnL.netProfitUSDT - closeFeeCost;
+            const runningNetPnl = toFiniteNumber(runningPnlState?.netProfitUSDT, NaN);
+            const netRealizedPnl = Number.isFinite(runningNetPnl)
+                ? runningNetPnl
+                : Number.isFinite(exchangeRealizedPnl)
+                    ? exchangeRealizedPnl - closeFeeCost
+                    : realizedPnL.netProfitUSDT - closeFeeCost;
             await finalizeClosedPosition(
                 position,
                 netRealizedPnl,
