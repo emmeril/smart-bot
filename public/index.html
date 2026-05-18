@@ -1150,12 +1150,6 @@
 	      label.textContent = field.label || field.key;
 	      label.htmlFor = field.key;
 	      labelRow.appendChild(label);
-	      if (AUTO_MODE_META[field.key]) {
-	        const badge = document.createElement("span");
-	        badge.className = `field-badge${AUTO_MODE_META[field.key].className ? ` ${AUTO_MODE_META[field.key].className}` : ""}`;
-	        badge.textContent = AUTO_MODE_META[field.key].label;
-	        labelRow.appendChild(badge);
-	      }
 	      wrapper.appendChild(labelRow);
 
 	      if (field.type === "boolean") {
@@ -1189,14 +1183,20 @@
         if (field.placeholder) input.placeholder = field.placeholder;
       }
 
-      input.className = "field-control";
-      input.id = field.key;
-      input.name = field.key;
-      input.value = value === null || value === undefined ? "" : String(value);
+	      input.className = "field-control";
+	      input.id = field.key;
+	      input.name = field.key;
+	      input.value = value === null || value === undefined ? "" : String(value);
       if (field.type === "number") {
         input.inputMode = Number(field.step) === 1 ? "numeric" : "decimal";
 	      }
 	      wrapper.appendChild(input);
+	      if (field.key === "gridOrderSizeUsdt") {
+	        const hint = document.createElement("div");
+	        hint.className = "muted";
+	        hint.textContent = "Set 0 untuk Auto";
+	        wrapper.appendChild(hint);
+	      }
 	      return wrapper;
 	    }
 
