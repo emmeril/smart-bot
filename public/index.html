@@ -453,7 +453,6 @@
           <div class="brand-mark">SB</div>
           <div class="brand-copy">
             <strong>Smart Bot</strong>
-            <span>Konsol Operasional</span>
           </div>
         </div>
         <nav class="side-nav">
@@ -481,7 +480,7 @@
               <div class="pulse-dot" aria-hidden="true"></div>
               <div class="topbar-meta">
                 <strong id="topbarStatus">Menyambungkan engine trading...</strong>
-                <span id="topbarMeta">Sinkronisasi pair, mode, dan status runtime</span>
+                <span id="topbarMeta"></span>
               </div>
             </div>
             <div class="topbar-actions">
@@ -876,7 +875,7 @@
       marginStatus.textContent = `${tradeModeValue} / ${positionModeValue}`;
       updatedStatus.textContent = formatDateTime(status.lastUpdated);
       topbarStatus.textContent = runtimeStatus.label === "Berjalan" ? "Runtime bot aktif" : runtimeStatus.label;
-      topbarMeta.textContent = `${status.pair || "-"} | ${tradeModeValue} | ${exchangeLabel}${status.exchangeRecoveryReason ? ` | ${status.exchangeRecoveryReason}` : ""}`;
+      topbarMeta.textContent = "";
       if (heroMode) heroMode.textContent = `${tradeModeValue} / ${positionModeValue}`;
       runtimePair.textContent = status.pair || "-";
       runtimeEngine.textContent = runtimeStatus.label;
@@ -1037,12 +1036,16 @@
       // Render PnL breakdown (Realized, Unrealized, Total)
       renderPnLBreakdown(data);
 
-      livePositionsCount.textContent = String(positions.length);
+      const activePair = String(data.pair || "-");
+      livePositionsCount.textContent = `${positions.length} ${activePair}`;
       livePositionsMeta.textContent = "";
       livePnlValue.textContent = formatLiveCurrency(dailyPnl) + " USDT";
       livePnlValue.className = "live-amount " + (dailyPnl > 0 ? "positive" : (dailyPnl < 0 ? "negative" : "neutral"));
       livePnlMeta.textContent = "";
-      liveOrdersCount.textContent = String(orderCounts.total || 0);
+      liveOrdersCount.innerHTML =
+        String(orderCounts.grid || 0) + " Grid<br>" +
+        String(orderCounts.tp || 0) + " TP<br>" +
+        String(orderCounts.sl || 0) + " SL";
       const recoveryAlert = timeoutErrors >= 3 || duplicateDetected >= 8 ? " | recovery spike" : "";
       liveOrdersMeta.textContent =
         (orderCounts.grid || 0) + " grid | " + (orderCounts.tp || 0) + " TP | " + (orderCounts.sl || 0) + " SL"
