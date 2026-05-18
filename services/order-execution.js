@@ -521,6 +521,19 @@ const createOrderExecutionHelpers = ({
         await saveDB();
         await ensureReduceOnlyTakeProfitOrder(positionKey, position);
         await ensureReduceOnlyStopLossOrder(positionKey, position);
+        if (typeof notifyTradeUpdate === "function") {
+            await notifyTradeUpdate({
+                event: "GRID_FILLED",
+                position: {
+                    ...position,
+                    symbol: db.pair
+                },
+                entryPrice: position.entryPrice,
+                quantity: position.quantity,
+                reason: `GRID_FILLED:${gridClientOrderId}`,
+                occurredAt: Date.now()
+            });
+        }
         console.log(`[GRID][INFO] Adopted filled ${position.side.toUpperCase()} grid order ${gridClientOrderId} into active spot position @ ${position.entryPrice} qty ${position.quantity}`);
         return true;
     };

@@ -123,6 +123,7 @@ const createPositionLifecycleHelpers = ({
                     exitPrice: estimatedExitPrice,
                     netProfitUSDT: estimatedPnL.realizedProfitUSDT,
                     profitPercent: estimatedPnL.profitPercent,
+                    totalAccumulatedPnlUSDT: db.dailyPnL,
                     closedAt: Date.now(),
                     estimatedExitPrice: true,
                     positionKey: trackedKey
@@ -151,6 +152,7 @@ const createPositionLifecycleHelpers = ({
                 exitPrice: null,
                 netProfitUSDT: 0,
                 profitPercent: 0,
+                totalAccumulatedPnlUSDT: db.dailyPnL,
                 closedAt: Date.now(),
                 estimatedExitPrice: true,
                 positionKey: trackedKey
@@ -217,6 +219,7 @@ const createPositionLifecycleHelpers = ({
                 exitPrice: Number.isFinite(exitPrice) ? exitPrice : null,
                 netProfitUSDT,
                 profitPercent,
+                totalAccumulatedPnlUSDT: db.dailyPnL,
                 closedAt: Number.isFinite(exitMeta.closedAt) ? exitMeta.closedAt : Date.now(),
                 order: exitMeta.order || null,
                 closeFillSnapshot: exitMeta.closeFillSnapshot || null,

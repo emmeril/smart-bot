@@ -75,6 +75,7 @@ const createFonnteNotifierHelpers = ({
 
     const resolveTradeEvent = (event) => {
         const normalized = String(event || "").toUpperCase().trim();
+        if (normalized === "GRID_FILLED") return { code: "GRID_FILLED", label: "Order Grid Tereksekusi" };
         if (normalized === "OPEN") return { code: "OPEN", label: "Posisi Dibuka" };
         if (normalized === "PARTIAL_CLOSE") return { code: "PARTIAL_CLOSE", label: "Posisi Ditutup Sebagian" };
         if (normalized === "TP_SL_UPDATED") return { code: "TP_SL_UPDATED", label: "Proteksi TP/SL Diperbarui" };
@@ -111,39 +112,10 @@ const createFonnteNotifierHelpers = ({
         netProfitUSDT,
         profitPercent,
         closedAt,
+        totalAccumulatedPnlUSDT,
         closeFillSnapshot,
         order
     }) => {
-        const closeReason = resolveCloseReason(reason);
-        const closeLabel = closeReason.code === "TP" || closeReason.code === "SL"
-            ? `${closeReason.code} FULL TERPENUHI`
-            : closeReason.code === "MANUAL"
-                ? "CLOSE MANUAL"
-                : closeReason.code === "SPOT_OCO"
-                    ? "SPOT OCO TERDETEKSI FILLED"
-                    : closeReason.code === "EXCHANGE_FILLED"
-                        ? "EXIT EXCHANGE TERDETEKSI FILLED"
-                : closeReason.code === "DUST"
-                    ? "AUTO DUST CLEANUP"
-                : closeReason.code === "SYNC"
-                    ? "POSISI HILANG DARI SYNC"
-                    : "POSISI DITUTUP";
-        const executionLabel = closeReason.code === "SYNC"
-            || closeReason.code === "DUST"
-            || closeReason.code === "SPOT_OCO"
-            || closeReason.code === "EXCHANGE_FILLED"
-            ? "Harga eksekusi estimasi"
-            : "Harga eksekusi";
-        const detailLabel = closeReason.code === "SYNC"
-            ? "Posisi tidak ditemukan saat sinkronisasi"
-            : closeReason.code === "DUST"
-                ? "Posisi dibersihkan otomatis karena qty di bawah minimum lot exchange"
-                : closeReason.code === "SPOT_OCO"
-                    ? "Order OCO spot tidak lagi terbuka dan posisi dianggap sudah tertutup di exchange"
-                    : closeReason.code === "EXCHANGE_FILLED"
-                        ? "Close order ditolak karena posisi sudah tertutup di exchange, lalu diselaraskan lokal"
-            : closeReason.label;
-
         const entryPrice = Number(position?.entryPrice);
         const positionQty = Number(position?.quantity);
         const closeQtyFromSnapshot = Number(closeFillSnapshot?.quantity);
@@ -152,22 +124,15 @@ const createFonnteNotifierHelpers = ({
             ? closeQtyFromSnapshot
             : (Number.isFinite(closeQtyFromOrder) && closeQtyFromOrder > 0 ? closeQtyFromOrder : positionQty);
         const symbol = String(position?.symbol || position?.pair || process.env.TRADING_PAIR || "").trim();
-        const strategy = String(position?.strategy || "N/A").trim();
-        const side = getSideLabel(position);
-        const pnlValue = Number(netProfitUSDT);
-        const pnlLabel = Number.isFinite(pnlValue) && pnlValue >= 0 ? "Profit" : "Loss";
 
         return [
-            `*${closeLabel}*`,
+            "*POSISI CLOSED*",
             `Pasangan: ${symbol || "N/A"}`,
-            `Sisi: ${side}`,
-            `Strategi: ${strategy}`,
             `Harga entry: ${formatNumber(entryPrice)}`,
-            `${executionLabel}: ${formatNumber(exitPrice)}`,
             `Qty: ${formatNumber(closeQuantity, 6)}`,
-            `P/L: ${pnlLabel} ${formatSignedNumber(netProfitUSDT)} USDT (${formatSignedNumber(profitPercent, 2)}%)`,
-            `Waktu: ${formatTime(closedAt)}`,
-            `Alasan: ${detailLabel}`
+            `P/L: ${formatSignedNumber(netProfitUSDT)} USDT (${formatSignedNumber(profitPercent, 2)}%)`,
+            `Total akumulasi P/L: ${formatSignedNumber(totalAccumulatedPnlUSDT)} USDT`,
+            `Waktu: ${formatTime(closedAt)}`
         ].join("\n");
     };
 
@@ -182,46 +147,21 @@ const createFonnteNotifierHelpers = ({
         reason,
         occurredAt
     }) => {
-        const tradeEvent = resolveTradeEvent(event);
-        const side = getSideLabel(position || { side: String(position?.side || "").toLowerCase() });
         const symbol = String(position?.symbol || position?.pair || process.env.TRADING_PAIR || "").trim();
-        const strategy = String(position?.strategy || "N/A").trim();
         const eventTime = Number.isFinite(Number(occurredAt)) ? Number(occurredAt) : Date.now();
-        const hasRealizedPnl = Number.isFinite(Number(realizedPnlUSDT));
-        const pnlValue = Number(realizedPnlUSDT);
-        const pnlLabel = hasRealizedPnl && pnlValue >= 0 ? "Profit" : "Loss";
 
-        const resolvedEventTitle = tradeEvent.code === "PARTIAL_CLOSE"
-            ? resolvePartialCloseLabel(reason)
-            : tradeEvent.label;
         const lines = [
-            `*UPDATE TRADE: ${resolvedEventTitle.toUpperCase()}*`,
+            "*UPDATE TRADE:*",
             `Pasangan: ${symbol || "N/A"}`,
-            `Sisi: ${side}`,
-            `Strategi: ${strategy}`,
             `Harga entry: ${formatNumber(entryPrice)}`
         ];
-
-        if (Number.isFinite(Number(exitPrice))) {
-            lines.push(`Harga eksekusi: ${formatNumber(exitPrice)}`);
-        }
 
         if (Number.isFinite(Number(quantity))) {
             lines.push(`Qty: ${formatNumber(quantity, 6)}`);
         }
 
-        if (hasRealizedPnl) {
-            lines.push(`Realized P/L: ${pnlLabel} ${formatSignedNumber(realizedPnlUSDT)} USDT (${formatSignedNumber(realizedPnlPercent, 2)}%)`);
-        }
-
-        const rawReason = String(reason || "").trim();
-        if (rawReason) {
-            const reasonLabel = tradeEvent.code === "TP_SL_UPDATED"
-                ? (resolveProtectionUpdateReasonLabel(rawReason) || rawReason)
-                : rawReason;
-            lines.push(`Alasan: ${reasonLabel}`);
-        }
-
+        lines.push(`TP: ${formatNumber(position?.targetPrice)}`);
+        lines.push(`SL: ${formatNumber(position?.stopLossPrice)}`);
         lines.push(`Waktu: ${formatTime(eventTime)}`);
         return lines.join("\n");
     };
@@ -323,6 +263,7 @@ const createFonnteNotifierHelpers = ({
         netProfitUSDT,
         profitPercent,
         closedAt,
+        totalAccumulatedPnlUSDT,
         closeFillSnapshot,
         order
     }) => {
@@ -333,6 +274,7 @@ const createFonnteNotifierHelpers = ({
             netProfitUSDT,
             profitPercent,
             closedAt,
+            totalAccumulatedPnlUSDT,
             closeFillSnapshot,
             order
         });
@@ -368,6 +310,9 @@ const createFonnteNotifierHelpers = ({
         reason,
         occurredAt
     }) => {
+        if (String(event || "").toUpperCase().trim() !== "GRID_FILLED") {
+            return { ok: true, skipped: true, reason: "Trade update disabled except GRID_FILLED event" };
+        }
         const message = buildTradeUpdateMessage({
             event,
             position,
