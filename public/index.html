@@ -874,7 +874,7 @@
       const cards = [
         { label: "Bot", value: runtimeStatus.label, cardClass: "", badgeClass: "" },
         { label: "Posisi", value: String(status.activePositions), cardClass: "", badgeClass: "" },
-        { label: "PnL Terealisasi (PnL Berjalan Saat Close)", value: `${formatNumber(status.dailyPnL)} USDT`, cardClass: "", badgeClass: "" },
+        { label: "PnL Terealisasi (Akumulasi Realized + Estimasi)", value: `${formatNumber(Number(status.accumulatedRealizedPnL ?? (Number(status.dailyPnL || 0) + Number(status.estimatedPnL || 0))))} USDT`, cardClass: "", badgeClass: "" },
         { label: "PnL Estimasi (Fallback)", value: `${formatNumber(status.estimatedPnL)} USDT`, cardClass: "", badgeClass: "" }
       ];
       if (statusCards) {
@@ -997,7 +997,7 @@
     function renderPnLBreakdown(data) {
       if (!data || data.ok === false) return;
       
-      const realizedPnL = Number(data.dailyPnL || 0);
+      const realizedPnL = Number(data.accumulatedRealizedPnL ?? (Number(data.dailyPnL || 0) + Number(data.estimatedPnL || 0)));
       const estimatedPnL = Number(data.estimatedPnL || 0);
       const unrealizedPnL = Number(data.unrealizedPnL || 0);
       const totalPnL = Number(data.totalPnL || realizedPnL + unrealizedPnL);
@@ -1044,7 +1044,7 @@
       const timeoutErrors = Number(orderRecovery.timeoutErrors || 0);
       const replacementAttempts = Number(orderRecovery.replacementAttempts || 0);
       const replacementSucceeded = Number(orderRecovery.replacementSucceeded || 0);
-      const dailyPnl = Number(data.dailyPnL || 0);
+      const dailyPnl = Number(data.accumulatedRealizedPnL ?? (Number(data.dailyPnL || 0) + Number(data.estimatedPnL || 0)));
 
       pushPnlHistory(dailyPnl);
       renderPnlSparkline();

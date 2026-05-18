@@ -20,6 +20,10 @@ const createDashboardStatusHelpers = ({
     buildDailyPnlSnapshot,
     syncDailyPnlWithExchange
 }) => {
+    const getAccumulatedRealizedPnl = (snapshot) => (
+        toFiniteNumber(snapshot?.dailyPnL, 0) + toFiniteNumber(snapshot?.estimatedPnL, 0)
+    );
+
     const buildDashboardStatus = () => {
         const db = getDb();
         const exchangeHealth = getExchangeHealth();
@@ -32,6 +36,7 @@ const createDashboardStatusHelpers = ({
             replacementAttempts: Math.max(0, Math.trunc(toFiniteNumber(recovery.replacementAttempts, 0))),
             replacementSucceeded: Math.max(0, Math.trunc(toFiniteNumber(recovery.replacementSucceeded, 0)))
         };
+        const accumulatedRealizedPnL = getAccumulatedRealizedPnl(db);
         return {
             botRunning: !getIsShuttingDown(),
             exchangeConnected: Boolean(getExchange()),
@@ -45,6 +50,7 @@ const createDashboardStatusHelpers = ({
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(db?.dailyTrades, 0))),
             estimatedPnL: toFiniteNumber(db?.estimatedPnL, 0),
             estimatedTrades: Math.max(0, Math.trunc(toFiniteNumber(db?.estimatedTrades, 0))),
+            accumulatedRealizedPnL,
             dailyPnlSource: String(db?.dailyPnlSource || "local").toLowerCase(),
             dailyPnlSyncedAt: toFiniteNumber(db?.dailyPnlSyncedAt, 0),
             lastUpdated: toFiniteNumber(db?.lastUpdated, 0),
@@ -149,6 +155,7 @@ const createDashboardStatusHelpers = ({
             sl: managedOrders.sl.map(mapManagedOrder)
         };
 
+        const accumulatedRealizedPnL = getAccumulatedRealizedPnl(dailyPnlSnapshot);
         return {
             ok: true,
             serverTime: Date.now(),
@@ -166,8 +173,9 @@ const createDashboardStatusHelpers = ({
             estimatedTrades: Math.max(0, Math.trunc(toFiniteNumber(dailyPnlSnapshot.estimatedTrades, 0))),
             dailyPnlSource: String(dailyPnlSnapshot.dailyPnlSource || "local").toLowerCase(),
             dailyPnlSyncedAt: toFiniteNumber(dailyPnlSnapshot.dailyPnlSyncedAt, 0),
+            accumulatedRealizedPnL,
             unrealizedPnL,
-            totalPnL: toFiniteNumber(dailyPnlSnapshot.dailyPnL, 0) + unrealizedPnL,
+            totalPnL: accumulatedRealizedPnL + unrealizedPnL,
             activePositions,
             exchangePositionsCount: exchangePositions.length,
             openOrders,

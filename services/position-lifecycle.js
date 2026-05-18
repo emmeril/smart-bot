@@ -71,6 +71,9 @@ const createPositionLifecycleHelpers = ({
     };
 
     const shouldCancelGridOrdersForPositionCleanup = () => true;
+    const getAccumulatedPnlForNotification = (state) => (
+        toFiniteNumber(state?.dailyPnL, 0) + toFiniteNumber(state?.estimatedPnL, 0)
+    );
 
     const clearMissingPositionState = async (position, reason, positionKey = null) => {
         const db = getDb();
@@ -123,7 +126,7 @@ const createPositionLifecycleHelpers = ({
                     exitPrice: estimatedExitPrice,
                     netProfitUSDT: estimatedPnL.realizedProfitUSDT,
                     profitPercent: estimatedPnL.profitPercent,
-                    totalAccumulatedPnlUSDT: db.dailyPnL,
+                    totalAccumulatedPnlUSDT: getAccumulatedPnlForNotification(db),
                     closedAt: Date.now(),
                     estimatedExitPrice: true,
                     positionKey: trackedKey
@@ -152,7 +155,7 @@ const createPositionLifecycleHelpers = ({
                 exitPrice: null,
                 netProfitUSDT: 0,
                 profitPercent: 0,
-                totalAccumulatedPnlUSDT: db.dailyPnL,
+                totalAccumulatedPnlUSDT: getAccumulatedPnlForNotification(db),
                 closedAt: Date.now(),
                 estimatedExitPrice: true,
                 positionKey: trackedKey
@@ -219,7 +222,7 @@ const createPositionLifecycleHelpers = ({
                 exitPrice: Number.isFinite(exitPrice) ? exitPrice : null,
                 netProfitUSDT,
                 profitPercent,
-                totalAccumulatedPnlUSDT: db.dailyPnL,
+                totalAccumulatedPnlUSDT: getAccumulatedPnlForNotification(db),
                 closedAt: Number.isFinite(exitMeta.closedAt) ? exitMeta.closedAt : Date.now(),
                 order: exitMeta.order || null,
                 closeFillSnapshot: exitMeta.closeFillSnapshot || null,
