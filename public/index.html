@@ -287,6 +287,9 @@
     }
     .kpi-line { line-height: 1.45; }
     .live-position-pnl { margin-top: 2px; }
+    .pnl-text.positive { color: var(--success); font-weight: 700; }
+    .pnl-text.negative { color: var(--danger); font-weight: 700; }
+    .pnl-text.neutral { color: var(--text); font-weight: 700; }
     .live-order-range { margin-bottom: 8px; font-size: 0.76rem; font-weight: 600; color: #475569; }
     .live-empty { color: var(--muted); font-size: 0.84rem; }
     .live-sparkline { display: block; width: 100%; height: 64px; margin-top: 12px; border-radius: 8px; background: #fff; }
@@ -1079,8 +1082,8 @@
         ? '<button class="btn btn-danger btn-xs js-remove-position" type="button" data-position-key="' + String(position.key || position.side || "POSITION") + '">Tutup</button>'
         : "";
       const pnlChip = position
-        ? '<div class="live-position-pnl"><span class="price-chip pnl ' + pnlChipClass + '">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</span></div>'
-        : '<div class="live-position-pnl"><span class="price-chip pnl neutral">PnL: -</span></div>';
+        ? '<div class="live-position-pnl"><div class="kpi-line pnl-text ' + pnlChipClass + '">PnL: ' + pnlSign + formatNumber(position.pnlUSDT) + ' USDT (' + formatNumber(position.pnlPercent) + '%)</div></div>'
+        : '<div class="live-position-pnl"><div class="kpi-line pnl-text neutral">PnL: -</div></div>';
       item.innerHTML = '<div class="live-position-head"><strong>POSISI AKTIF</strong>' + actionButton + '</div>' +
         '<div class="live-position-kpis">' +
         '<div class="live-position-cards">' +
