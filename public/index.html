@@ -313,7 +313,7 @@
     .pill.warn { border-color: #f8e5ad; background: #fffcf0; color: var(--warning); }
     .pill.info { border-color: #c9dcf7; background: #f2f7ff; color: #0b5cad; }
     .side-badge.flat { background: #f2f6fb; color: #475569; }
-    .live-table { display: grid; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+    .live-table { display: grid; gap: 8px; overflow-x: auto; overflow-y: auto; max-height: 260px; padding-bottom: 4px; }
     .live-table-head, .live-table-row {
       display: grid;
       grid-template-columns: 1.2fr 0.7fr 0.8fr 0.8fr;
@@ -640,6 +640,7 @@
     let formDirty = false;
     let autoRefreshTimer = null;
     let liveRefreshTimer = null;
+    const orderScrollState = Object.create(null);
     const pnlHistory = [];
     const MAX_PNL_HISTORY = 24;
     const form = document.getElementById("configForm");
@@ -1119,6 +1120,13 @@
         '</div>';
       livePositionsList.appendChild(item);
 
+      const previousTables = liveOrdersList.querySelectorAll(".live-table[data-order-group]");
+      previousTables.forEach((tableNode) => {
+        const groupKey = String(tableNode.dataset.orderGroup || "").toLowerCase();
+        if (!groupKey) return;
+        orderScrollState[groupKey] = Number(tableNode.scrollTop || 0);
+      });
+
       liveOrdersList.innerHTML = "";
       const groups = [
         { label: 'Grid', list: openOrders.grid || [] },
@@ -1152,7 +1160,7 @@
           const triggerSummary = groupTriggers.length > 0
             ? (formatPrice(minTrigger) + " - " + formatPrice(maxTrigger))
             : "-";
-          const rows = group.list.slice(0, 4).map((order) => {
+          const rows = group.list.map((order) => {
             const side = String(order.side || order.positionSide || '-').toUpperCase();
             const badgeClass = sideBadgeClass(order.side || order.positionSide);
             const price = order.price === null || order.price === undefined ? '-' : formatPrice(order.price);
@@ -1165,8 +1173,12 @@
           }).join('');
           wrapper.innerHTML = '<div class="live-list-head"><strong>' + group.label + ' (' + group.list.length + ')</strong><button class="btn btn-danger btn-xs js-cancel-group" type="button" data-order-type="' + groupType + '">Batalkan Semua</button></div>' +
             '<span class="live-order-range">Rentang harga: ' + priceSummary + '</span>' +
-            '<div class="live-table"><div class="live-table-head"><div>Order</div><div>Sisi</div><div>Harga</div><div>Kuantitas</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
+            '<div class="live-table" data-order-group="' + groupType + '"><div class="live-table-head"><div>Order</div><div>Sisi</div><div>Harga</div><div>Kuantitas</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
           liveOrdersList.appendChild(wrapper);
+          const tableNode = wrapper.querySelector('.live-table[data-order-group="' + groupType + '"]');
+          if (tableNode && Number.isFinite(orderScrollState[groupType])) {
+            tableNode.scrollTop = orderScrollState[groupType];
+          }
         });
       }
     }
