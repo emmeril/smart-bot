@@ -410,7 +410,7 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      justify-content: flex-end;
+      justify-content: space-between;
       margin-top: 18px;
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -424,6 +424,8 @@
       font-size: 0.82rem;
       font-weight: 650;
       color: var(--muted);
+      margin-right: auto;
+      text-align: left;
     }
     .config-save-status.success { color: var(--success); }
     .config-save-status.error { color: var(--danger); }
@@ -734,15 +736,7 @@
     }
 
     function showToast(message, type = "info") {
-      toast.className = `toast ${type}`;
-      toast.textContent = message;
-      if (showToast.timer) clearTimeout(showToast.timer);
-      showToast.timer = setTimeout(() => {
-        if (toast.textContent === message) {
-          toast.className = "toast";
-          toast.textContent = "";
-        }
-      }, 4200);
+      showConfigSaveStatus(message, type);
     }
 
     function showConfigSaveStatus(message, type = "info") {
