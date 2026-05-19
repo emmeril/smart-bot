@@ -704,6 +704,15 @@
 	      autoTargetProfitEnabled: { label: "AUTO TOGGLE", hint: "Aktif = target profit memakai mode ATR otomatis.", className: "toggle" },
 	      autoStopLossEnabled: { label: "AUTO TOGGLE", hint: "Aktif = stop loss memakai mode ATR otomatis.", className: "toggle" }
 	    };
+      const ZERO_AUTO_HINT_KEYS = new Set([
+        "gridOrderSizeUsdt",
+        "gridLevels",
+        "gridRangePercent",
+        "gridEntryBufferPercent",
+        "gridTakeProfitLevels",
+        "gridOrdersPerSide",
+        "gridStopLossLevels"
+      ]);
 	
 	    function setBusy(busy) {
 	      saveBtn.disabled = busy;
@@ -1258,7 +1267,7 @@
         input.inputMode = Number(field.step) === 1 ? "numeric" : "decimal";
 	      }
 	      wrapper.appendChild(input);
-	      if (field.key === "gridOrderSizeUsdt") {
+	      if (field.type === "number" && ZERO_AUTO_HINT_KEYS.has(field.key)) {
 	        const hint = document.createElement("div");
 	        hint.className = "muted";
 	        hint.textContent = "Set 0 untuk Auto";
