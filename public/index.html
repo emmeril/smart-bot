@@ -1327,11 +1327,18 @@
       formDirty = false;
     }
 
+    function isUserInteractingWithForm() {
+      const activeElement = document.activeElement;
+      if (!activeElement || !form.contains(activeElement)) return false;
+      const tagName = String(activeElement.tagName || "").toLowerCase();
+      return tagName === "select" || tagName === "input" || tagName === "textarea";
+    }
+
     async function loadDashboard(silent = false, preserveEdits = false) {
       if (!silent) setBusy(true);
       try {
         const data = await api("/api/config");
-        if (preserveEdits && formDirty) {
+        if (preserveEdits && (formDirty || isUserInteractingWithForm())) {
           state.status = data.status || state.status;
           state.serverTime = data.serverTime || Date.now();
           renderMetrics(state.status || {});
