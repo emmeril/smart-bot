@@ -1354,7 +1354,7 @@
       return tagName === "select" || tagName === "input" || tagName === "textarea";
     }
 
-    async function loadDashboard(silent = false, preserveEdits = false) {
+    async function loadDashboard(silent = false, preserveEdits = false, showSuccessMessage = false) {
       if (!silent) setBusy(true);
       try {
         const data = await api("/api/config");
@@ -1366,7 +1366,7 @@
           applyPayload(data);
         }
         await loadLiveStatus(true);
-        if (!silent) showToast("Konfigurasi berhasil diperbarui", "success");
+        if (!silent && showSuccessMessage) showToast("Konfigurasi berhasil diperbarui", "success");
       } catch (error) {
         showToast(error.message || "Gagal memuat konfigurasi", "error");
       } finally {
@@ -1442,7 +1442,7 @@
     });
 
     saveBtn.addEventListener("click", saveDashboard);
-    refreshBtn.addEventListener("click", () => loadDashboard(false));
+    refreshBtn.addEventListener("click", () => loadDashboard(false, false, true));
     resetBtn.addEventListener("click", resetDashboard);
     simpleModeBtn.addEventListener("click", () => {
       state.formMode = "simple";
