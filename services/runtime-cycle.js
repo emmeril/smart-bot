@@ -136,11 +136,16 @@ const createRuntimeCycleHelpers = ({
     const startMetricsReporting = (currentTimer, setMetricsTimer) => {
         if (currentTimer()) return;
         const timer = setInterval(() => {
+            const db = getDb();
             const metrics = getMetrics();
+            const strategy = String(db?.strategy || "spot_grid").toLowerCase();
             const elapsedSec = Math.max(1, Math.round((Date.now() - metrics.windowStart) / 1000));
             const apiTotal = metrics.api.ticker + metrics.api.ohlcv + metrics.api.balance + metrics.api.positions + metrics.api.orders;
             const winRate = metrics.trades.closed > 0 ? ((metrics.trades.wins / metrics.trades.closed) * 100).toFixed(1) : "0.0";
-            console.log(`[METRICS][INFO] ${elapsedSec}s | API=${apiTotal} (ticker:${metrics.api.ticker}, ohlcv:${metrics.api.ohlcv}, bal:${metrics.api.balance}, pos:${metrics.api.positions}, order:${metrics.api.orders}) | Signals=${metrics.signals.analyzed} (setups:${metrics.signals.crossoverDetected}, long:${metrics.signals.longConfirmed}, short:${metrics.signals.shortConfirmed}) | Trades today O/C/W/L=${metrics.trades.opened}/${metrics.trades.closed}/${metrics.trades.wins}/${metrics.trades.losses} (WR ${winRate}%)`);
+            const strategyMetricsLabel = strategy === "spot_grid"
+                ? "Grid=active (signal scan bypassed in spot_grid mode)"
+                : `Signals=${metrics.signals.analyzed} (setups:${metrics.signals.crossoverDetected}, long:${metrics.signals.longConfirmed}, short:${metrics.signals.shortConfirmed})`;
+            console.log(`[METRICS][INFO] ${elapsedSec}s | API=${apiTotal} (ticker:${metrics.api.ticker}, ohlcv:${metrics.api.ohlcv}, bal:${metrics.api.balance}, pos:${metrics.api.positions}, order:${metrics.api.orders}) | ${strategyMetricsLabel} | Trades today O/C/W/L=${metrics.trades.opened}/${metrics.trades.closed}/${metrics.trades.wins}/${metrics.trades.losses} (WR ${winRate}%)`);
             resetMetricWindow();
         }, metricsLogInterval);
         setMetricsTimer(timer);
