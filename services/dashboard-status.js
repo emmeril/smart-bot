@@ -20,6 +20,38 @@ const createDashboardStatusHelpers = ({
     buildDailyPnlSnapshot,
     syncDailyPnlWithExchange
 }) => {
+    const resolveSpotPairOptions = () => {
+        const exchange = getExchange();
+        const markets = exchange?.markets;
+        if (!markets || typeof markets !== "object") return [];
+
+        const spotSymbols = Object.values(markets)
+            .filter((market) => market && market.active !== false && market.spot === true)
+            .map((market) => String(market.symbol || "").trim())
+            .filter((symbol) => symbol.includes("/"))
+            .sort((a, b) => a.localeCompare(b));
+
+        return Array.from(new Set(spotSymbols));
+    };
+
+    const buildDashboardSchema = (config) => {
+        const pairOptions = resolveSpotPairOptions();
+        return dashboardEditableFields.map((field) => {
+            if (field?.key !== "pair") return field;
+
+            const currentPair = String(config?.pair || defaultConfig?.pair || "").trim();
+            const options = pairOptions.length > 0
+                ? (pairOptions.includes(currentPair) ? pairOptions : [currentPair, ...pairOptions].filter(Boolean))
+                : [currentPair || defaultConfig?.pair || "DOGE/USDT"];
+
+            return {
+                ...field,
+                type: "select",
+                options
+            };
+        });
+    };
+
     const getAccumulatedRealizedPnl = (snapshot) => (
         toFiniteNumber(snapshot?.dailyPnL, 0) + toFiniteNumber(snapshot?.estimatedPnL, 0)
     );
@@ -201,10 +233,11 @@ const createDashboardStatusHelpers = ({
 
     const buildDashboardPayload = () => {
         const db = getDb();
+        const config = db ? { ...db } : getDefaultConfig();
         return {
-            config: db ? { ...db } : getDefaultConfig(),
+            config,
             defaults: getDefaultConfig(),
-            schema: dashboardEditableFields,
+            schema: buildDashboardSchema(config),
             status: buildDashboardStatus(),
             serverTime: Date.now()
         };
