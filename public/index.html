@@ -1124,7 +1124,10 @@
       previousTables.forEach((tableNode) => {
         const groupKey = String(tableNode.dataset.orderGroup || "").toLowerCase();
         if (!groupKey) return;
-        orderScrollState[groupKey] = Number(tableNode.scrollTop || 0);
+        orderScrollState[groupKey] = {
+          top: Number(tableNode.scrollTop || 0),
+          left: Number(tableNode.scrollLeft || 0)
+        };
       });
 
       liveOrdersList.innerHTML = "";
@@ -1176,8 +1179,10 @@
             '<div class="live-table" data-order-group="' + groupType + '"><div class="live-table-head"><div>Order</div><div>Sisi</div><div>Harga</div><div>Kuantitas</div></div>' + (rows || '<div class="live-empty">Tidak ada detail order.</div>') + '</div>';
           liveOrdersList.appendChild(wrapper);
           const tableNode = wrapper.querySelector('.live-table[data-order-group="' + groupType + '"]');
-          if (tableNode && Number.isFinite(orderScrollState[groupType])) {
-            tableNode.scrollTop = orderScrollState[groupType];
+          if (tableNode && orderScrollState[groupType]) {
+            const savedScroll = orderScrollState[groupType];
+            if (Number.isFinite(savedScroll.top)) tableNode.scrollTop = savedScroll.top;
+            if (Number.isFinite(savedScroll.left)) tableNode.scrollLeft = savedScroll.left;
           }
         });
       }
