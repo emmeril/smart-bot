@@ -305,6 +305,14 @@ const createPositionLifecycleHelpers = ({
             }
 
             const closeFillSnapshot = getOrderFillSnapshot(closeOrder, await getPrice(true), position.quantity);
+            const closeOrderFilledQty = toFiniteNumber(
+                closeOrder?.filled,
+                toFiniteNumber(closeOrder?.info?.executedQty, toFiniteNumber(closeOrder?.amount, NaN))
+            );
+            console.log(
+                `[POSITION][DEBUG] Close qty trace ${closeLockKey}: tracked=${toFiniteNumber(position.quantity, NaN)} `
+                + `snapshot=${toFiniteNumber(closeFillSnapshot?.quantity, NaN)} orderFilled=${closeOrderFilledQty}`
+            );
             const closedAt = Number.isFinite(Number(closeOrder?.timestamp))
                 ? Number(closeOrder.timestamp)
                 : Number.isFinite(Number(closeOrder?.lastTradeTimestamp))

@@ -1055,7 +1055,6 @@ const createOrderExecutionHelpers = ({
                 if (Number.isFinite(clampedQty) && clampedQty > 0) {
                     console.warn(`[OCO][WARN] Spot balance clamp applied for ${baseAsset}: requested qty ${quantity} > free ${baseFreeRaw}. Using qty ${clampedQty}.`);
                     quantity = clampedQty;
-                    position.quantity = clampedQty;
                 }
             }
         }
