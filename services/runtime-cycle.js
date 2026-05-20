@@ -53,12 +53,6 @@ const createRuntimeCycleHelpers = ({
         return true;
     };
 
-    const getTradingPauseReason = async () => {
-        const db = getDb();
-        if (db.dailyTrades >= db.maxTradesPerDay) return `[PAUSE] Max trades per day (${db.maxTradesPerDay}) reached.`;
-        return null;
-    };
-
     const isCoolingDown = () => {
         const db = getDb();
         if (db.dailyTrades <= 0) return false;
@@ -111,16 +105,6 @@ const createRuntimeCycleHelpers = ({
             return;
         }
 
-        const pauseReason = await getTradingPauseReason();
-        if (pauseReason) {
-            console.log(pauseReason);
-            if (strategy === "spot_grid") {
-                const openGridOrders = await fetchOpenGridOrders();
-                if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "PAUSED");
-            }
-            return;
-        }
-
         if (strategy === "spot_grid") {
             await syncGridOrders();
             return;
@@ -154,7 +138,6 @@ const createRuntimeCycleHelpers = ({
     return {
         isNewTradingDay,
         resetDailyStateIfNeeded,
-        getTradingPauseReason,
         isCoolingDown,
         handleRuntimeCommand,
         unregisterRuntimeCommands,
