@@ -349,11 +349,25 @@ const createGridRuntimeHelpers = ({
         return Math.max(amountFloorUsdt, notionalFloorUsdt, 0);
     };
 
-    const getMinimumValidatedGridOrderSizeUsdt = (market, referencePrice) => {
+    const getMinimumValidatedGridOrderSizeUsdt = (market, referencePrice, validationReferences = null) => {
         const safeReferencePrice = toFiniteNumber(referencePrice, NaN);
         const baseMinimum = getMinimumGridOrderSizeUsdt(market, safeReferencePrice);
         if (!Number.isFinite(baseMinimum) || baseMinimum <= 0 || !market || !Number.isFinite(safeReferencePrice) || safeReferencePrice <= 0) {
             return Math.max(0, baseMinimum);
+        }
+
+        const normalizedValidationReferences = (
+            Array.isArray(validationReferences) && validationReferences.length > 0
+                ? validationReferences
+                : [{ price: safeReferencePrice, orderType: "MARKET" }]
+        )
+            .map((entry) => ({
+                price: toFiniteNumber(entry?.price, NaN),
+                orderType: String(entry?.orderType || "LIMIT").toUpperCase()
+            }))
+            .filter((entry) => Number.isFinite(entry.price) && entry.price > 0);
+        if (normalizedValidationReferences.length === 0) {
+            normalizedValidationReferences.push({ price: safeReferencePrice, orderType: "MARKET" });
         }
 
         let candidate = baseMinimum;
@@ -363,8 +377,11 @@ const createGridRuntimeHelpers = ({
         for (let attempt = 0; attempt < 25; attempt++) {
             const rawQty = candidate / safeReferencePrice;
             const quantity = pair ? formatAmountToMarketPrecision(pair, rawQty) : rawQty;
-            const sizeValidation = validateOrderSize(market, quantity, safeReferencePrice);
-            if (sizeValidation.valid) return candidate;
+            const allValid = normalizedValidationReferences.every((entry) => {
+                const validation = validateOrderSize(market, quantity, entry.price, { orderType: entry.orderType });
+                return Boolean(validation?.valid);
+            });
+            if (allValid) return candidate;
             candidate += increment;
         }
 
@@ -397,9 +414,9 @@ const createGridRuntimeHelpers = ({
         };
     };
 
-    const resolveGridOrderSizeForPrice = (baseOrderSizeUsdt, price, market) => {
+    const resolveGridOrderSizeForPrice = (baseOrderSizeUsdt, price, market, validationReferences = null) => {
         const configuredBaseSize = Math.max(0, toFiniteNumber(baseOrderSizeUsdt, 0));
-        const minimumValidatedSize = getMinimumValidatedGridOrderSizeUsdt(market, price);
+        const minimumValidatedSize = getMinimumValidatedGridOrderSizeUsdt(market, price, validationReferences);
         return Math.max(configuredBaseSize, minimumValidatedSize);
     };
 
@@ -567,13 +584,22 @@ const createGridRuntimeHelpers = ({
             const exitPlan = buildGridExitPlan({ side: "buy", entryIndex: i, levels, step, params, gridState: resolvedGridState, atr: snapshot?.currentATR });
             const targetPrice = exitPlan.targetPrice;
             const stopLossPrice = exitPlan.stopLossPrice;
-            const orderSizeUsdt = resolveGridOrderSizeForPrice(params.gridOrderSizeUsdt, price, market);
             const orderPlan = { targetPrice, stopLossPrice };
             if (Number.isFinite(price) && price > 0 && price < minBuyPrice) {
                 if (!isDirectionalOrderPlanValid("buy", price, orderPlan)) {
                     console.warn(`[GRID][WARN] Skipping BUY level ${i} @ ${price} because TP/SL would be invalid after precision rounding.`);
                     continue;
                 }
+                const orderSizeUsdt = resolveGridOrderSizeForPrice(
+                    params.gridOrderSizeUsdt,
+                    price,
+                    market,
+                    [
+                        { price, orderType: "MARKET" },
+                        { price: targetPrice, orderType: "LIMIT" },
+                        { price: stopLossPrice, orderType: "STOP_LOSS_LIMIT" }
+                    ]
+                );
                 buyOrders.push({ side: "buy", price, orderSizeUsdt, targetPrice, stopLossPrice, levelIndex: i, clientOrderId: getGridClientOrderId("buy", i, price) });
             }
         }
