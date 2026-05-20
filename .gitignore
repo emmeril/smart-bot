@@ -8,3 +8,5 @@ pnpm-workspace.yaml
 .env
 database.sqlite
 trades.csv
+
+tests/
