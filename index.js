@@ -199,6 +199,8 @@ const { getDefaultConfig } = createRuntimeConfigHelpers({
 });
 
 const normalizeSymbol = (symbol) => String(symbol || "").toUpperCase().trim();
+const isSpotRuntimeMode = () => String(db?.marginMode || "spot").toLowerCase() === "spot"
+    || String(exchange?.options?.defaultType || "spot").toLowerCase() === "spot";
 
 const {
     safeParseJSON,
@@ -231,7 +233,7 @@ const {
     getDb: () => db,
     getExchange: () => exchange,
     toFiniteNumber,
-    saveDB: async (...args) => await saveDB(...args)
+    saveDB: (...args) => saveDB(...args)
 });
 
 const {
@@ -435,8 +437,7 @@ const markPositionSyncHealthy = () => {
 };
 
 const ensureManagedOrdersForPositions = async (positionsMap) => {
-    const isSpotRuntime = String(db?.marginMode || "spot").toLowerCase() === "spot"
-        || String(exchange?.options?.defaultType || "spot").toLowerCase() === "spot";
+    const isSpotRuntime = isSpotRuntimeMode();
     let spotBalances = null;
     let didSyncAggregateQuantity = false;
 
@@ -943,9 +944,9 @@ const {
     defaultConfig: DEFAULT_CONFIG,
     dashboardEditableFields: DASHBOARD_EDITABLE_FIELDS,
     getExchangeClientOrderId,
-    getPrice: async (...args) => getPrice(...args),
-    fetchOpenExchangePositions: async (...args) => fetchOpenExchangePositions(...args),
-    fetchManagedOpenOrdersSnapshot: async (...args) => fetchManagedOpenOrdersSnapshot(...args),
+    getPrice: (...args) => getPrice(...args),
+    fetchOpenExchangePositions: (...args) => fetchOpenExchangePositions(...args),
+    fetchManagedOpenOrdersSnapshot: (...args) => fetchManagedOpenOrdersSnapshot(...args),
     calculatePositionPnL,
     buildDailyPnlSnapshot: (...args) => buildDailyPnlSnapshot(...args),
     syncDailyPnlWithExchange: (...args) => syncDailyPnlWithExchange(...args)
@@ -993,18 +994,46 @@ const removeDashboardPosition = async (positionKey) => {
     return { ok: true, message: `Permintaan hapus posisi ${normalizedKey} sudah dikirim.` };
 };
 
+const DASHBOARD_ORDER_TYPES = ["grid", "tp", "sl"];
+const DASHBOARD_CANCEL_REASON_SINGLE = "DASHBOARD_CANCEL";
+const DASHBOARD_CANCEL_REASON_GROUP = "DASHBOARD_CANCEL_GROUP";
+const DASHBOARD_INVALID_ORDER_TYPE_ERROR = "Tipe order tidak valid. Gunakan grid, tp, atau sl.";
+const DASHBOARD_INVALID_ORDER_GROUP_TYPE_ERROR = "Tipe grup order tidak valid. Gunakan grid, tp, atau sl.";
+const DASHBOARD_ORDER_NOT_FOUND_ERROR = "Order tidak ditemukan atau sudah tertutup.";
+const DASHBOARD_ORDER_COLLECTION_BY_TYPE = {
+    grid: "grid",
+    tp: "tp",
+    sl: "sl"
+};
+
+const getDashboardManagedOrdersByType = (openOrders, normalizedType) => {
+    const collectionKey = DASHBOARD_ORDER_COLLECTION_BY_TYPE[normalizedType];
+    if (!collectionKey) return [];
+    return openOrders?.[collectionKey] || [];
+};
+
+const normalizeDashboardOrderType = (orderType) => String(orderType || "").toLowerCase();
+
+const DASHBOARD_CANCEL_BY_TYPE = {
+    grid: cancelGridOrders,
+    tp: cancelTpOrders,
+    sl: cancelSlOrders
+};
+
+const cancelDashboardManagedOrdersByType = async (normalizedType, orders, reason) => {
+    const cancelHandler = DASHBOARD_CANCEL_BY_TYPE[normalizedType];
+    if (!cancelHandler) return;
+    await cancelHandler(orders, reason);
+};
+
 const cancelDashboardOrder = async ({ orderType, clientOrderId, orderId }) => {
-    const normalizedType = String(orderType || "").toLowerCase();
-    if (!["grid", "tp", "sl"].includes(normalizedType)) {
-        return { ok: false, error: "Tipe order tidak valid. Gunakan grid, tp, atau sl." };
+    const normalizedType = normalizeDashboardOrderType(orderType);
+    if (!DASHBOARD_ORDER_TYPES.includes(normalizedType)) {
+        return { ok: false, error: DASHBOARD_INVALID_ORDER_TYPE_ERROR };
     }
 
     const openOrders = await fetchManagedOpenOrdersSnapshot();
-    const sourceOrders = normalizedType === "grid"
-        ? (openOrders.grid || [])
-        : normalizedType === "tp"
-            ? (openOrders.tp || [])
-            : (openOrders.sl || []);
+    const sourceOrders = getDashboardManagedOrdersByType(openOrders, normalizedType);
     const targetOrder = sourceOrders.find((order) => {
         const currentClientOrderId = String(getExchangeClientOrderId(order) || "");
         const currentOrderId = String(order?.id || "");
@@ -1012,36 +1041,28 @@ const cancelDashboardOrder = async ({ orderType, clientOrderId, orderId }) => {
     });
 
     if (!targetOrder) {
-        return { ok: false, error: "Order tidak ditemukan atau sudah tertutup." };
+        return { ok: false, error: DASHBOARD_ORDER_NOT_FOUND_ERROR };
     }
 
-    if (normalizedType === "grid") await cancelGridOrders([targetOrder], "DASHBOARD_CANCEL");
-    else if (normalizedType === "tp") await cancelTpOrders([targetOrder], "DASHBOARD_CANCEL");
-    else await cancelSlOrders([targetOrder], "DASHBOARD_CANCEL");
+    await cancelDashboardManagedOrdersByType(normalizedType, [targetOrder], DASHBOARD_CANCEL_REASON_SINGLE);
 
     const reference = getExchangeClientOrderId(targetOrder) || targetOrder.id || "order";
     return { ok: true, message: `Order ${reference} berhasil dibatalkan.` };
 };
 
 const cancelDashboardOrderGroup = async (orderType) => {
-    const normalizedType = String(orderType || "").toLowerCase();
-    if (!["grid", "tp", "sl"].includes(normalizedType)) {
-        return { ok: false, error: "Tipe grup order tidak valid. Gunakan grid, tp, atau sl." };
+    const normalizedType = normalizeDashboardOrderType(orderType);
+    if (!DASHBOARD_ORDER_TYPES.includes(normalizedType)) {
+        return { ok: false, error: DASHBOARD_INVALID_ORDER_GROUP_TYPE_ERROR };
     }
 
     const openOrders = await fetchManagedOpenOrdersSnapshot();
-    const sourceOrders = normalizedType === "grid"
-        ? (openOrders.grid || [])
-        : normalizedType === "tp"
-            ? (openOrders.tp || [])
-            : (openOrders.sl || []);
+    const sourceOrders = getDashboardManagedOrdersByType(openOrders, normalizedType);
     if (sourceOrders.length === 0) {
         return { ok: false, error: `Tidak ada order ${normalizedType.toUpperCase()} terbuka.` };
     }
 
-    if (normalizedType === "grid") await cancelGridOrders(sourceOrders, "DASHBOARD_CANCEL_GROUP");
-    else if (normalizedType === "tp") await cancelTpOrders(sourceOrders, "DASHBOARD_CANCEL_GROUP");
-    else await cancelSlOrders(sourceOrders, "DASHBOARD_CANCEL_GROUP");
+    await cancelDashboardManagedOrdersByType(normalizedType, sourceOrders, DASHBOARD_CANCEL_REASON_GROUP);
 
     return { ok: true, message: `${sourceOrders.length} order ${normalizedType.toUpperCase()} berhasil dibatalkan.` };
 };
@@ -1154,8 +1175,7 @@ const syncPositionWithExchange = async () => {
             console.log(`[SYNC][INFO] Checking positions for ${db.pair}...`);
             lastSyncLogAt = now;
         }
-        const isSpotRuntime = String(db?.marginMode || "spot").toLowerCase() === "spot"
-            || String(exchange?.options?.defaultType || "spot").toLowerCase() === "spot";
+        const isSpotRuntime = isSpotRuntimeMode();
         if (isSpotRuntime) {
             await ensureManagedOrdersForPositions(getActivePositionsMap());
             markPositionSyncHealthy();
@@ -1224,8 +1244,8 @@ const {
     sleep,
     extractExchangeErrorCode,
     isExchangeTimestampError,
-    fetchOpenExchangePositions: async (...args) => fetchOpenExchangePositions(...args),
-    fetchManagedOpenOrdersSnapshot: async (...args) => fetchManagedOpenOrdersSnapshot(...args),
+    fetchOpenExchangePositions: (...args) => fetchOpenExchangePositions(...args),
+    fetchManagedOpenOrdersSnapshot: (...args) => fetchManagedOpenOrdersSnapshot(...args),
     markExchangeUnhealthy
 });
 
