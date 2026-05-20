@@ -46,6 +46,7 @@ const { createTradeEntryHelpers } = require("./services/trade-entry");
 const { createTradeLogicHelpers } = require("./services/trade-logic");
 const { createPositionStateHelpers } = require("./services/position-state");
 const { createRuntimeSchedulerHelpers } = require("./services/runtime-scheduler");
+const { shouldRunMainLoopTick } = require("./services/main-loop-guard");
 
 let isProcessing = false;
 let isPlacingOrder = false;
@@ -1394,7 +1395,19 @@ const {
     saveDB: (...args) => saveDB(...args),
     sleep,
     clearRuntimeTimers: () => clearRuntimeTimers(),
-    closeWebServer: async () => await new Promise((resolve) => webServer.close(() => resolve())),
+    closeWebServer: async () => {
+        const server = webServer;
+        if (!server || typeof server.close !== "function") return;
+        await new Promise((resolve, reject) => {
+            server.close((error) => {
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                resolve();
+            });
+        });
+    },
     clearWebServer: () => { webServer = null; },
     closeSequelize: async () => await sequelize.close(),
     getWebServer: () => webServer,
@@ -1416,7 +1429,7 @@ const {
         lastTradeAt = getLastTradeTimestampFromLog();
 
         mainLoopTimer = setInterval(async () => {
-            if (isProcessing) return;
+            if (!shouldRunMainLoopTick({ isShuttingDown, isProcessing })) return;
             isProcessing = true;
             try { await runTradingCycle(); }
             catch (error) { console.error("[APP][ERROR] Main loop failed:", error.message); }

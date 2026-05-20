@@ -36,8 +36,16 @@ const createRuntimeSchedulerHelpers = ({ initializeExchange, detectPositionMode,
         refreshRuntimeSchedulers();
         startMetricsReporting();
         startConfigAutoReload();
-        process.once("SIGINT", () => { shutdown("SIGINT"); });
-        process.once("SIGTERM", () => { shutdown("SIGTERM"); });
+        process.once("SIGINT", () => {
+            shutdown("SIGINT").catch((error) => {
+                console.error("[SHUTDOWN][ERROR] SIGINT shutdown failed:", error?.message || error);
+            });
+        });
+        process.once("SIGTERM", () => {
+            shutdown("SIGTERM").catch((error) => {
+                console.error("[SHUTDOWN][ERROR] SIGTERM shutdown failed:", error?.message || error);
+            });
+        });
     };
 
     return {

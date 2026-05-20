@@ -46,6 +46,8 @@ const createRuntimeMonitoringHelpers = ({
     unregisterRuntimeCommands,
     exitProcess
 }) => {
+    const WEBSERVER_CLOSE_TIMEOUT_MS = 5000;
+
     const startPnLMonitoring = () => {
         const db = getDb();
         if (!db) return;
@@ -164,7 +166,12 @@ const createRuntimeMonitoringHelpers = ({
 
         if (getWebServer()) {
             try {
-                await closeWebServer();
+                await Promise.race([
+                    closeWebServer(),
+                    sleep(WEBSERVER_CLOSE_TIMEOUT_MS).then(() => {
+                        throw new Error(`Web server close timeout after ${WEBSERVER_CLOSE_TIMEOUT_MS}ms`);
+                    })
+                ]);
             } catch (error) {
                 console.error("[SHUTDOWN][ERROR] Failed to close web server:", error.message);
             }
