@@ -54,7 +54,12 @@ const createDashboardConfigHelpers = ({
         await syncExchangeRuntimeSettings();
     };
 
-    const applyDashboardConfigUpdate = async (incoming) => await runDashboardConfigOperation(async () => {
+    const replaceConfigObject = (targetConfig, nextConfig) => {
+        Object.keys(targetConfig).forEach((key) => { delete targetConfig[key]; });
+        Object.assign(targetConfig, nextConfig);
+    };
+
+    const applyDashboardConfigUpdate = (incoming) => runDashboardConfigOperation(async () => {
         const currentDb = getDb();
         if (!currentDb) throw new Error("Config is not ready yet");
 
@@ -78,14 +83,12 @@ const createDashboardConfigHelpers = ({
             }
         }
         applyDashboardRuntimeState(nextConfig, current);
-
-        Object.keys(currentDb).forEach((key) => { delete currentDb[key]; });
-        Object.assign(currentDb, nextConfig);
+        replaceConfigObject(currentDb, nextConfig);
         await persistRuntimeConfigChanges(current);
         return buildDashboardPayload();
     });
 
-    const resetDashboardConfig = async () => await runDashboardConfigOperation(async () => {
+    const resetDashboardConfig = () => runDashboardConfigOperation(async () => {
         const currentDb = getDb();
         if (!currentDb) throw new Error("Config is not ready yet");
         
@@ -96,8 +99,7 @@ const createDashboardConfigHelpers = ({
         const current = { ...currentDb };
         const { config: nextConfig } = applyAutoPresetToConfig(getDefaultConfig());
         applyDashboardRuntimeState(nextConfig, currentDb);
-        Object.keys(currentDb).forEach((key) => { delete currentDb[key]; });
-        Object.assign(currentDb, nextConfig);
+        replaceConfigObject(currentDb, nextConfig);
         await persistRuntimeConfigChanges(current);
         return buildDashboardPayload();
     });

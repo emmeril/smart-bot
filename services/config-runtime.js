@@ -78,9 +78,9 @@ const createConfigRuntimeHelpers = ({
         }
     };
 
-    const saveDB = async (options = {}) => await runConfigOperation(async () => await saveDBInternal(options));
+    const saveDB = (options = {}) => runConfigOperation(() => saveDBInternal(options));
 
-    const initializeDB = async () => await runConfigOperation(async () => {
+    const initializeDB = () => runConfigOperation(async () => {
         try {
             await ensureConfigSchema();
             console.log("[DB][INFO] Database synced");
@@ -126,9 +126,9 @@ const createConfigRuntimeHelpers = ({
         }
     };
 
-    const reloadConfig = async (previousRuntimeConfig = null) => await runConfigOperation(async () => await reloadConfigInternal(previousRuntimeConfig));
+    const reloadConfig = (previousRuntimeConfig = null) => runConfigOperation(() => reloadConfigInternal(previousRuntimeConfig));
 
-    const reloadConfigIfChanged = async () => await runConfigOperation(async () => {
+    const reloadConfigIfChanged = () => runConfigOperation(async () => {
         if (!getDb() || getIsShuttingDown()) return false;
         try {
             const persistedConfig = await loadPersistedConfig();

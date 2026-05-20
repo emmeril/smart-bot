@@ -1,17 +1,11 @@
 const ccxt = require("ccxt");
 
 const createRuntimeExchangeBootstrapHelpers = ({
-    getDb,
-    getExchange,
     setExchange,
-    getAccountPositionMode,
     setAccountPositionMode,
     toFiniteNumber,
     sleep,
-    extractExchangeErrorCode,
     isExchangeTimestampError,
-    fetchOpenExchangePositions,
-    fetchManagedOpenOrdersSnapshot,
     markExchangeUnhealthy
 }) => {
     const validateExchangeCredentials = () => {

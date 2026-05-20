@@ -1,11 +1,8 @@
 const createRuntimeSchedulerHelpers = ({ initializeExchange, detectPositionMode, setMarginMode, syncPositionWithExchange, startPnLMonitoring, startPositionSync, startMetricsReporting, startConfigAutoReload, shutdown }) => {
-    const recurringTaskState = new WeakMap();
-
     const configureRecurringTask = (currentTimer, currentInterval, desiredInterval, label, callback, assignTimer, assignInterval) => {
         if (currentTimer && currentInterval === desiredInterval) return currentTimer;
         if (currentTimer) {
             clearInterval(currentTimer);
-            recurringTaskState.delete(currentTimer);
             assignTimer(null);
         }
         assignInterval(desiredInterval);
@@ -22,7 +19,6 @@ const createRuntimeSchedulerHelpers = ({ initializeExchange, detectPositionMode,
                 runnerState.running = false;
             }
         }, desiredInterval);
-        recurringTaskState.set(nextTimer, runnerState);
         assignTimer(nextTimer);
         return nextTimer;
     };
