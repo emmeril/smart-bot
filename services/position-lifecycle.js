@@ -71,9 +71,7 @@ const createPositionLifecycleHelpers = ({
     };
 
     const shouldCancelGridOrdersForPositionCleanup = () => true;
-    const getAccumulatedPnlForNotification = (state) => (
-        toFiniteNumber(state?.dailyPnL, 0) + toFiniteNumber(state?.estimatedPnL, 0)
-    );
+    const getAccumulatedPnlForNotification = (state) => toFiniteNumber(state?.dailyPnL, 0);
 
     const clearMissingPositionState = async (position, reason, positionKey = null) => {
         const db = getDb();
@@ -326,11 +324,18 @@ const createPositionLifecycleHelpers = ({
                 ? runningNetPnl
                 : Number.isFinite(exchangeRealizedPnl)
                     ? exchangeRealizedPnl - closeFeeCost
-                    : realizedPnL.netProfitUSDT - closeFeeCost;
+                    : Number.isFinite(realizedPnL?.netProfitUSDT)
+                        ? realizedPnL.netProfitUSDT - closeFeeCost
+                        : 0;
+            const realizedProfitPercent = (() => {
+                const entryValue = Math.max(1e-8, toFiniteNumber(position?.entryPrice, 0) * toFiniteNumber(position?.quantity, 0));
+                if (!Number.isFinite(entryValue) || entryValue <= 0) return toFiniteNumber(realizedPnL?.profitPercent, 0);
+                return (netRealizedPnl / entryValue) * 100;
+            })();
             await finalizeClosedPosition(
                 position,
                 netRealizedPnl,
-                realizedPnL.profitPercent,
+                realizedProfitPercent,
                 reason,
                 closeFillSnapshot.price,
                 closeLockKey,
