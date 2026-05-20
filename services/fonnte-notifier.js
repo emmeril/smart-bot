@@ -120,9 +120,11 @@ const createFonnteNotifierHelpers = ({
         const positionQty = Number(position?.quantity);
         const closeQtyFromSnapshot = Number(closeFillSnapshot?.quantity);
         const closeQtyFromOrder = Number(order?.filled ?? order?.amount ?? order?.info?.executedQty ?? order?.info?.origQty);
-        const closeQuantity = Number.isFinite(closeQtyFromSnapshot) && closeQtyFromSnapshot > 0
-            ? closeQtyFromSnapshot
-            : (Number.isFinite(closeQtyFromOrder) && closeQtyFromOrder > 0 ? closeQtyFromOrder : positionQty);
+        const closeQuantity = Number.isFinite(positionQty) && positionQty > 0
+            ? positionQty
+            : (Number.isFinite(closeQtyFromSnapshot) && closeQtyFromSnapshot > 0
+                ? closeQtyFromSnapshot
+                : (Number.isFinite(closeQtyFromOrder) && closeQtyFromOrder > 0 ? closeQtyFromOrder : NaN));
         const symbol = String(position?.symbol || position?.pair || process.env.TRADING_PAIR || "").trim();
 
         return [

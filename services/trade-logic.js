@@ -52,10 +52,24 @@ const createTradeLogicHelpers = ({
     };
 
     const getOrderFillSnapshot = (order, fallbackPrice, fallbackQuantity) => {
-        const filledQuantity = toFiniteNumber(order?.filled, 0);
+        const resolvedOrderQuantity = (() => {
+            const directFilled = toFiniteNumber(order?.filled, NaN);
+            if (Number.isFinite(directFilled) && directFilled > 0) return Math.abs(directFilled);
+            const infoExecutedQty = toFiniteNumber(order?.info?.executedQty, NaN);
+            if (Number.isFinite(infoExecutedQty) && infoExecutedQty > 0) return Math.abs(infoExecutedQty);
+            const directAmount = toFiniteNumber(order?.amount, NaN);
+            if (Number.isFinite(directAmount) && directAmount > 0) return Math.abs(directAmount);
+            const infoOrigQty = toFiniteNumber(order?.info?.origQty, NaN);
+            if (Number.isFinite(infoOrigQty) && infoOrigQty > 0) return Math.abs(infoOrigQty);
+            return NaN;
+        })();
+        const resolvedFallbackQuantity = toFiniteNumber(fallbackQuantity, NaN);
+        const snapshotQuantity = Number.isFinite(resolvedOrderQuantity) && resolvedOrderQuantity > 0
+            ? resolvedOrderQuantity
+            : resolvedFallbackQuantity;
         return {
-            price: getResolvedOrderPrice(order, fallbackPrice, filledQuantity),
-            quantity: filledQuantity > 0 ? filledQuantity : fallbackQuantity
+            price: getResolvedOrderPrice(order, fallbackPrice, snapshotQuantity),
+            quantity: snapshotQuantity
         };
     };
 
