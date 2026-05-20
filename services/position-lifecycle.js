@@ -30,22 +30,6 @@ const createPositionLifecycleHelpers = ({
     notifyPositionClosed,
     notifyTradeUpdate
 }) => {
-    const getOrderFeeCost = (order) => {
-        const feeCost = toFiniteNumber(order?.fee?.cost, NaN);
-        if (Number.isFinite(feeCost)) return Math.abs(feeCost);
-        const infoCommission = toFiniteNumber(order?.info?.commission, NaN);
-        if (Number.isFinite(infoCommission)) return Math.abs(infoCommission);
-        return 0;
-    };
-
-    const getOrderRealizedPnl = (order) => toFiniteNumber(
-        order?.realizedPnl,
-        toFiniteNumber(
-            order?.info?.realizedPnl,
-            toFiniteNumber(order?.info?.realizedProfit, NaN)
-        )
-    );
-
     const getLifecyclePositionKey = (positionKey = null, position = null) => (
         toPositionMapKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position))
     );
@@ -317,16 +301,12 @@ const createPositionLifecycleHelpers = ({
                     ? Number(closeOrder.lastTradeTimestamp)
                     : Date.now();
             const realizedPnL = calculatePositionPnL(position, closeFillSnapshot.price);
-            const exchangeRealizedPnl = getOrderRealizedPnl(closeOrder);
-            const closeFeeCost = getOrderFeeCost(closeOrder);
             const runningNetPnl = toFiniteNumber(runningPnlState?.netProfitUSDT, NaN);
             const netRealizedPnl = Number.isFinite(runningNetPnl)
                 ? runningNetPnl
-                : Number.isFinite(exchangeRealizedPnl)
-                    ? exchangeRealizedPnl - closeFeeCost
-                    : Number.isFinite(realizedPnL?.netProfitUSDT)
-                        ? realizedPnL.netProfitUSDT - closeFeeCost
-                        : 0;
+                : Number.isFinite(realizedPnL?.netProfitUSDT)
+                    ? realizedPnL.netProfitUSDT
+                    : 0;
             const realizedProfitPercent = (() => {
                 const entryValue = Math.max(1e-8, toFiniteNumber(position?.entryPrice, 0) * toFiniteNumber(position?.quantity, 0));
                 if (!Number.isFinite(entryValue) || entryValue <= 0) return toFiniteNumber(realizedPnL?.profitPercent, 0);
