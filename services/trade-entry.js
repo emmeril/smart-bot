@@ -152,6 +152,22 @@ const createTradeEntryHelpers = ({
                 console.warn(`[ORDER][WARN] Skipping ${side.toUpperCase()} order because TP/SL plan is not directional after rounding.`);
                 return;
             }
+            const closeSide = side === "buy" ? "sell" : "buy";
+            const isSpotMode = String(db.marginMode || "spot").toLowerCase() === "spot";
+            if (isSpotMode) {
+                const preTpValidation = validateOrderSize(marketInfo, adjustedQty, orderPlan.targetPrice, { orderType: "LIMIT" });
+                const preSlValidation = validateOrderSize(marketInfo, adjustedQty, orderPlan.stopLossPrice, { orderType: "STOP_LOSS_LIMIT" });
+                if (!preTpValidation.valid || !preSlValidation.valid) {
+                    const reasons = [
+                        !preTpValidation.valid ? `TP ${preTpValidation.reason}` : null,
+                        !preSlValidation.valid ? `SL ${preSlValidation.reason}` : null
+                    ].filter(Boolean).join(" | ");
+                    console.warn(
+                        `[ORDER][WARN] Skipping ${side.toUpperCase()} order because OCO exit would be invalid for qty ${adjustedQty}. ${reasons}`
+                    );
+                    return;
+                }
+            }
 
             const order = await exchange.createOrder(
                 spotPair,
@@ -176,7 +192,6 @@ const createTradeEntryHelpers = ({
             );
             const actualPlanValid = isDirectionalOrderPlanValid(side, actualEntryPrice, actualOrderPlan);
             const fallbackPlanValid = isDirectionalOrderPlanValid(side, actualEntryPrice, orderPlan);
-            const closeSide = side === "buy" ? "sell" : "buy";
             const resolvedOrderPlan = actualPlanValid ? actualOrderPlan : (fallbackPlanValid ? orderPlan : null);
             if (!resolvedOrderPlan) {
                 console.error(`[ORDER][ERROR] Unable to derive a valid TP/SL plan after fill for ${side.toUpperCase()} order. Closing position to avoid unmanaged exposure.`);
@@ -198,6 +213,34 @@ const createTradeEntryHelpers = ({
             }
             if (!actualPlanValid) {
                 console.warn(`[ORDER][WARN] Actual fill produced an invalid directional TP/SL plan for ${side.toUpperCase()} order. Falling back to the pre-fill plan.`);
+            }
+            if (isSpotMode) {
+                const postTpValidation = validateOrderSize(marketInfo, actualQuantity, resolvedOrderPlan.targetPrice, { orderType: "LIMIT" });
+                const postSlValidation = validateOrderSize(marketInfo, actualQuantity, resolvedOrderPlan.stopLossPrice, { orderType: "STOP_LOSS_LIMIT" });
+                if (!postTpValidation.valid || !postSlValidation.valid) {
+                    const reasons = [
+                        !postTpValidation.valid ? `TP ${postTpValidation.reason}` : null,
+                        !postSlValidation.valid ? `SL ${postSlValidation.reason}` : null
+                    ].filter(Boolean).join(" | ");
+                    console.error(
+                        `[ORDER][ERROR] Filled ${side.toUpperCase()} qty ${actualQuantity} cannot be protected by OCO. ${reasons}. Closing position immediately.`
+                    );
+                    try {
+                        await exchange.createOrder(
+                            spotPair,
+                            "market",
+                            closeSide,
+                            actualQuantity,
+                            undefined,
+                            buildExchangeOrderParams({ side: closeSide })
+                        );
+                        metrics.api.orders++;
+                    } catch (closeError) {
+                        console.error(`[ORDER][ERROR] Failed to immediately close unprotected ${side.toUpperCase()} position: ${closeError.message}`);
+                    }
+                    await syncPositionWithExchange();
+                    return;
+                }
             }
 
             upsertActivePosition({
