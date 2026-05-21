@@ -55,7 +55,9 @@ const createPositionLifecycleHelpers = ({
     };
 
     const shouldCancelGridOrdersForPositionCleanup = () => true;
-    const getAccumulatedPnlForNotification = (state) => toFiniteNumber(state?.dailyPnL, 0);
+    const getAccumulatedPnlForNotification = (state) => (
+        toFiniteNumber(state?.dailyPnL, 0) + toFiniteNumber(state?.estimatedPnL, 0)
+    );
 
     const clearMissingPositionState = async (position, reason, positionKey = null) => {
         const db = getDb();
