@@ -271,6 +271,17 @@ const createRuntimeSignalGridHelpers = ({
         }
     };
 
+    const resolveOpenBuyGridReservedUsdt = (openGridOrders = []) => (openGridOrders || [])
+        .filter((order) => String(order?.side || "").toLowerCase() === "buy")
+        .reduce((sum, order) => {
+            const price = toFiniteNumber(order?.price, NaN);
+            const remaining = toFiniteNumber(order?.remaining, toFiniteNumber(order?.amount, NaN));
+            const cost = toFiniteNumber(order?.cost, NaN);
+            if (Number.isFinite(price) && price > 0 && Number.isFinite(remaining) && remaining > 0) return sum + (price * remaining);
+            if (Number.isFinite(cost) && cost > 0) return sum + cost;
+            return sum;
+        }, 0);
+
     const logSmartAutoPreflight = (channel, preflight) => {
         if (!preflight || preflight.ok) return;
         const lines = typeof formatSmartAutoPreflightLines === "function"
@@ -449,8 +460,12 @@ const createRuntimeSignalGridHelpers = ({
             }
 
             const availableUsdt = await getAvailableUSDTBalance();
+            let openGridOrders = await fetchOpenGridOrders();
+            openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
+            const reservedOpenBuyGridUsdt = resolveOpenBuyGridReservedUsdt(openGridOrders);
+            const gridSizingBudgetUsdt = availableUsdt + reservedOpenBuyGridUsdt;
             const effectiveSizeMeta = resolveEffectiveGridOrderSizeUsdt({
-                availableUsdt,
+                availableUsdt: gridSizingBudgetUsdt,
                 configuredOrderSizeUsdt: params.gridOrderSizeUsdt,
                 configuredOrdersPerSide: params.gridOrdersPerSide,
                 referencePrice: snapshot.currentPrice,
@@ -459,7 +474,7 @@ const createRuntimeSignalGridHelpers = ({
             });
             params.gridOrderSizeUsdt = effectiveSizeMeta.orderSizeUsdt;
             const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
-                availableUsdt,
+                availableUsdt: gridSizingBudgetUsdt,
                 configuredOrdersPerSide: params.gridOrdersPerSide,
                 perOrderMargin: params.gridOrderSizeUsdt,
                 referencePrice: snapshot.currentPrice,
@@ -470,7 +485,7 @@ const createRuntimeSignalGridHelpers = ({
                 params.gridLevels = Math.max(2, Math.trunc(effectiveOrdersMeta.count));
             }
             const adjustedOrdersMeta = resolveEffectiveGridOrdersPerSide({
-                availableUsdt,
+                availableUsdt: gridSizingBudgetUsdt,
                 configuredOrdersPerSide: params.gridOrdersPerSide,
                 perOrderMargin: params.gridOrderSizeUsdt,
                 referencePrice: snapshot.currentPrice,
@@ -478,14 +493,12 @@ const createRuntimeSignalGridHelpers = ({
                 gridLevels: params.gridLevels
             });
             params.gridOrdersPerSide = adjustedOrdersMeta.count;
-            let openGridOrders = await fetchOpenGridOrders();
-            openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
             const gridPreflight = typeof evaluateSmartAutoPreflight === "function"
                 ? evaluateSmartAutoPreflight({
                     db,
                     params,
                     snapshot,
-                    availableUsdt,
+                    availableUsdt: gridSizingBudgetUsdt,
                     effectiveOrderSizeUsdt: params.gridOrderSizeUsdt,
                     effectiveOrdersPerSide: adjustedOrdersMeta.count,
                     minOrderSizeUsdt: effectiveSizeMeta.minOrderSizeUsdt
@@ -500,7 +513,7 @@ const createRuntimeSignalGridHelpers = ({
             if (effectiveSizeMeta.orderSizeUsdt <= 0 || adjustedOrdersMeta.count <= 0) {
                 if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "INSUFFICIENT_BALANCE");
                 const reasonText = adjustedOrdersMeta.reason ? ` Reason: ${adjustedOrdersMeta.reason}` : "";
-                const skipMessage = `[GRID] Auto sizing skipped ladder | size ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT | side orders ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} | available ${availableUsdt.toFixed(2)} USDT.${reasonText}`;
+                const skipMessage = `[GRID] Auto sizing skipped ladder | size ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT | side orders ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} | available ${availableUsdt.toFixed(2)} USDT | reserved ${reservedOpenBuyGridUsdt.toFixed(2)} USDT.${reasonText}`;
                 const now = Date.now();
                 if (skipMessage !== getLastGridSizingSkipReason() || now - getLastGridSizingSkipLogAt() >= gridSizingSkipLogTtl) {
                     console.log(skipMessage);
