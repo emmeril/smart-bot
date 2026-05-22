@@ -492,6 +492,9 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
         if (!Number.isFinite(trackedQty)) return null;
         if (Math.abs(formattedQty - trackedQty) <= POSITION_SYNC_QTY_TOLERANCE) return { type: "unchanged" };
         if (formattedQty <= 0) return { type: "unchanged" };
+        if (formattedQty > trackedQty) {
+            return { type: "unchanged" };
+        }
 
         return {
             type: "update",
