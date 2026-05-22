@@ -94,7 +94,7 @@ const createRuntimeMarketDataHelpers = ({
             metrics.api.orderBook = (metrics.api.orderBook || 0) + 1;
             return orderBook;
         } catch (error) {
-            console.error("[MARKET][WARN] Failed to fetch order book:", error.message);
+            console.warn("[MARKET][WARN] Failed to fetch order book:", error.message);
             return null;
         }
     };
@@ -109,7 +109,7 @@ const createRuntimeMarketDataHelpers = ({
             metrics.api.trades = (metrics.api.trades || 0) + 1;
             return Array.isArray(trades) ? trades : [];
         } catch (error) {
-            console.error("[MARKET][WARN] Failed to fetch recent trades:", error.message);
+            console.warn("[MARKET][WARN] Failed to fetch recent trades:", error.message);
             return [];
         }
     };

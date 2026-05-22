@@ -416,7 +416,7 @@ const {
 });
 
 const printStatusLine = (label, value) => {
-    console.log(`[STATUS] ${label}=${value}`);
+    console.log(`[STATUS][INFO] ${label}=${value}`);
 };
 
 const printOrderSample = (orders, typeLabel) => {

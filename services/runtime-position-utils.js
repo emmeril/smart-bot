@@ -192,7 +192,7 @@ const createRuntimePositionUtils = ({
         const accountPositionMode = getAccountPositionMode();
         const exchangeHealth = getExchangeHealth();
 
-        console.log(`[STATUS] Mode=${accountPositionMode.label} | Pair=${db.pair} | Price=${Number.isFinite(currentPrice) ? currentPrice : "N/A"} | LocalActive=${activeEntries.length} | ExchangePos=${openExchangePositions.length}`);
+        console.log(`[STATUS][INFO] Mode=${accountPositionMode.label} | Pair=${db.pair} | Price=${Number.isFinite(currentPrice) ? currentPrice : "N/A"} | LocalActive=${activeEntries.length} | ExchangePos=${openExchangePositions.length}`);
         printStatusLine("Profile", `${gridSummary.presetName.toUpperCase()} | Grid=${gridSummary.gridLevelsMode === "AUTO" ? `AUTO ${gridSummary.effectiveGridLevels}` : gridSummary.effectiveGridLevels} | Range=${gridSummary.gridRangeMode === "AUTO" ? `AUTO ${gridSummary.effectiveGridRangePercent}%` : `${gridSummary.effectiveGridRangePercent}%`} | Buffer=${gridSummary.gridEntryBufferMode === "AUTO" ? `AUTO ${gridSummary.effectiveGridEntryBufferPercent}%` : `${gridSummary.effectiveGridEntryBufferPercent}%`} | Slot=${gridSummary.slotLabel} | Ladder=${gridSummary.ladderLabel}`);
         printStatusLine("Side Orders", `${gridSummary.ordersMode}=${gridSummary.effectiveOrdersPerSide}/${gridSummary.configuredOrdersPerSideCap} | Size ${gridSummary.sizeMode}=${gridSummary.effectiveOrderSizeUsdt.toFixed(4)} USDT | Min Valid=${gridSummary.minOrderSizeUsdt.toFixed(4)} USDT | Available USDT=${gridSummary.availableUsdtLabel}`);
         printStatusLine("Realized P&L (Cumulative)", `${db.dailyPnL.toFixed(2)} USDT | Daily Trades=${db.dailyTrades}`);
@@ -208,7 +208,7 @@ const createRuntimePositionUtils = ({
         printOrderSample(managedOrders.tp, "TP");
         printOrderSample(managedOrders.sl, "SL");
         if (activeEntries.length === 0) {
-            console.log("[STATUS] No active positions.");
+            console.log("[STATUS][INFO] No active positions.");
             return;
         }
         activeEntries.forEach(([positionKey, position]) => printPositionLine(positionKey, position, currentPrice));

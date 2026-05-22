@@ -84,7 +84,7 @@ const createRuntimeMonitoringHelpers = ({
                     const exitState = evaluatePositionExit(position, currentPrice, pnlState, managedOrdersSnapshot);
 
                     if (exitState.shouldClose) {
-                        console.log(`[${positionKey}] ${exitState.message.trim()}`);
+                        console.log(`[POSITION][INFO] ${positionKey}: ${exitState.message.trim()}`);
                         await closePosition(positionKey, exitState.reason);
                         continue;
                     }
@@ -102,7 +102,7 @@ const createRuntimeMonitoringHelpers = ({
             getPnLMonitorTimer(),
             getCurrentPnLMonitoringInterval(),
             desiredInterval,
-            "[MONITOR] Real-time P&L monitoring interval: ",
+            "[MONITOR][INFO] Real-time P&L monitoring interval: ",
             monitorTick,
             setPnLMonitorTimer,
             setCurrentPnLMonitoringInterval
@@ -116,7 +116,7 @@ const createRuntimeMonitoringHelpers = ({
             getPositionSyncTimer(),
             getCurrentPositionSyncInterval(),
             desiredInterval,
-            "[SYNC] Position sync interval: ",
+            "[SYNC][INFO] Position sync interval: ",
             async () => { await syncPositionWithExchange(); },
             setPositionSyncTimer,
             setCurrentPositionSyncInterval

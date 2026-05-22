@@ -499,7 +499,7 @@ const createTradeLogicHelpers = ({
         if (shouldCloseForProfitTarget(hasExchangeTpOrder, position, currentPrice, netPnlUSDT, effectiveTargetProfitUSDT)) {
             return buildExitDecision(
                 "PROFIT_TARGET",
-                `\n[PROFIT] Net Target hit (+${netPnlUSDT.toFixed(4)} USDT)! Closing...`,
+                `\n[PROFIT][INFO] Net Target hit (+${netPnlUSDT.toFixed(4)} USDT)! Closing...`,
                 effectiveTargetProfitUSDT,
                 effectiveStopLossUSDT
             );
@@ -508,7 +508,7 @@ const createTradeLogicHelpers = ({
         if (shouldCloseForStopLoss(hasExchangeSlOrder, position, currentPrice, effectiveStopLossPrice, netPnlUSDT, effectiveStopLossUSDT)) {
             return buildExitDecision(
                 "STOP_LOSS",
-                `\n[STOP] Stop loss hit (${netPnlUSDT.toFixed(4)} USDT)! Closing...`,
+                `\n[STOP][WARN] Stop loss hit (${netPnlUSDT.toFixed(4)} USDT)! Closing...`,
                 effectiveTargetProfitUSDT,
                 effectiveStopLossUSDT
             );
@@ -800,7 +800,7 @@ const createTradeLogicHelpers = ({
 
         if (now - getLastPnlLog() > pnlLogInterval) {
             const { displayProfitUSDT, displayProfitPercent } = getDisplayPnlValues(pnlState);
-            console.log(`[PNL] ${displayProfitUSDT.toFixed(4)} USDT (${displayProfitPercent.toFixed(2)}%)`);
+            console.log(`[PNL][INFO] ${displayProfitUSDT.toFixed(4)} USDT (${displayProfitPercent.toFixed(2)}%)`);
             setLastPnlLog(now);
         }
     };
