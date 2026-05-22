@@ -221,18 +221,110 @@ const createGridRuntimeHelpers = ({
         };
     };
 
+    const percentile = (values, pct) => {
+        const numericValues = (values || []).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+        if (numericValues.length === 0) return NaN;
+        const index = clamp((numericValues.length - 1) * pct, 0, numericValues.length - 1);
+        const lower = Math.floor(index);
+        const upper = Math.ceil(index);
+        if (lower === upper) return numericValues[lower];
+        return numericValues[lower] + ((numericValues[upper] - numericValues[lower]) * (index - lower));
+    };
+
+    const buildNatrSeriesFromSnapshot = (snapshot = {}) => {
+        const high = Array.isArray(snapshot.high) ? snapshot.high : [];
+        const low = Array.isArray(snapshot.low) ? snapshot.low : [];
+        const close = Array.isArray(snapshot.close) ? snapshot.close : [];
+        const period = Math.max(2, Math.trunc(toFiniteNumber(snapshot.atrPeriod, getDb()?.atrPeriod || defaultConfig.atrPeriod || 14)));
+        if (high.length <= period || low.length !== high.length || close.length !== high.length) return [];
+
+        const trueRanges = Array(high.length).fill(NaN);
+        for (let index = 1; index < high.length; index += 1) {
+            const currentHigh = toFiniteNumber(high[index], NaN);
+            const currentLow = toFiniteNumber(low[index], NaN);
+            const previousClose = toFiniteNumber(close[index - 1], NaN);
+            if (!Number.isFinite(currentHigh) || !Number.isFinite(currentLow) || !Number.isFinite(previousClose)) continue;
+            trueRanges[index] = Math.max(
+                currentHigh - currentLow,
+                Math.abs(currentHigh - previousClose),
+                Math.abs(currentLow - previousClose)
+            );
+        }
+
+        const output = [];
+        let atr = NaN;
+        for (let index = 1; index < high.length; index += 1) {
+            const tr = trueRanges[index];
+            if (!Number.isFinite(tr)) continue;
+            if (index < period) continue;
+            if (index === period) {
+                const seed = trueRanges.slice(1, period + 1).filter((value) => Number.isFinite(value));
+                if (seed.length !== period) continue;
+                atr = seed.reduce((sum, value) => sum + value, 0) / period;
+            } else {
+                atr = ((atr * (period - 1)) + tr) / period;
+            }
+            const price = toFiniteNumber(close[index], NaN);
+            if (Number.isFinite(atr) && Number.isFinite(price) && price > 0) output.push((atr / price) * 100);
+        }
+        return output;
+    };
+
+    const buildVolumeRatioSeriesFromSnapshot = (snapshot = {}, period = getDb()?.volumePeriod || defaultConfig.volumePeriod || 20) => {
+        const volume = Array.isArray(snapshot.volume) ? snapshot.volume.map((value) => toFiniteNumber(value, NaN)) : [];
+        const safePeriod = Math.max(2, Math.trunc(toFiniteNumber(period, 20)));
+        const output = [];
+        for (let index = safePeriod; index < volume.length; index += 1) {
+            const currentVolume = volume[index];
+            const recent = volume.slice(index - safePeriod, index).filter((value) => Number.isFinite(value));
+            if (!Number.isFinite(currentVolume) || recent.length === 0) continue;
+            const average = recent.reduce((sum, value) => sum + value, 0) / recent.length;
+            if (average > 0) output.push(currentVolume / average);
+        }
+        return output;
+    };
+
+    const buildSmartAutoMarketProfile = (snapshot = {}) => {
+        const natrSeries = buildNatrSeriesFromSnapshot(snapshot);
+        const volumeRatioSeries = buildVolumeRatioSeriesFromSnapshot(snapshot);
+        const currentNatr = toFiniteNumber(snapshot.currentNatrPercent, NaN);
+        const currentVolumeRatio = toFiniteNumber(snapshot.volumeRatio, NaN);
+        return {
+            natrP20: percentile(natrSeries, 0.2),
+            natrP50: percentile(natrSeries, 0.5),
+            natrP80: percentile(natrSeries, 0.8),
+            natrP95: percentile(natrSeries, 0.95),
+            volumeRatioP35: percentile(volumeRatioSeries, 0.35),
+            sampleSize: natrSeries.length,
+            volumeSampleSize: volumeRatioSeries.length,
+            currentNatr,
+            currentVolumeRatio
+        };
+    };
+
     const resolveSmartAutoRegime = (snapshot = {}) => {
+        const marketProfile = buildSmartAutoMarketProfile(snapshot);
         const natrPercent = toFiniteNumber(snapshot.currentNatrPercent, SMART_AUTO_DEFAULT_NATR_PERCENT);
+        const hasAdaptiveVolatilityProfile = marketProfile.sampleSize >= 30;
+        const normalNatr = toFiniteNumber(marketProfile.natrP50, SMART_AUTO_DEFAULT_NATR_PERCENT);
+        const hotNatr = hasAdaptiveVolatilityProfile
+            ? Math.max(normalNatr * 1.45, toFiniteNumber(marketProfile.natrP80, normalNatr * 1.45))
+            : 0.45;
+        const extremeNatr = hasAdaptiveVolatilityProfile
+            ? Math.max(hotNatr * 1.35, toFiniteNumber(marketProfile.natrP95, hotNatr * 1.35))
+            : 0.85;
         const bbWidthPercent = Number.isFinite(toFiniteNumber(snapshot.bbWidth, NaN))
             ? Math.abs(toFiniteNumber(snapshot.bbWidth, 0)) * 100
             : natrPercent * 6;
         const adx = toFiniteNumber(snapshot.currentAdx, NaN);
         const volumeRatio = toFiniteNumber(snapshot.volumeRatio, 1);
-        const volatilityLabel = natrPercent < 0.18
+        const quietThreshold = hasAdaptiveVolatilityProfile ? Math.max(0.03, normalNatr * 0.55) : 0.18;
+        const volatilityLabel = natrPercent < quietThreshold
             ? "QUIET"
-            : (natrPercent < 0.45 ? "NORMAL" : (natrPercent < 0.85 ? "HOT" : "EXTREME"));
+            : (natrPercent < hotNatr ? "NORMAL" : (natrPercent < extremeNatr ? "HOT" : "EXTREME"));
         const trendLabel = Number.isFinite(adx) && adx >= 32 ? "TRENDING" : "RANGING";
-        const liquidityLabel = volumeRatio >= 1.4 ? "ACTIVE" : (volumeRatio >= 1.05 ? "NORMAL" : "THIN");
+        const normalVolumeRatio = Math.max(1.02, toFiniteNumber(marketProfile.volumeRatioP35, 1.05));
+        const liquidityLabel = volumeRatio >= Math.max(1.4, normalVolumeRatio * 1.25) ? "ACTIVE" : (volumeRatio >= normalVolumeRatio ? "NORMAL" : "THIN");
         return {
             natrPercent,
             bbWidthPercent,
@@ -240,17 +332,25 @@ const createGridRuntimeHelpers = ({
             volumeRatio,
             volatilityLabel,
             trendLabel,
-            liquidityLabel
+            liquidityLabel,
+            marketProfile: {
+                ...marketProfile,
+                quietThreshold,
+                hotThreshold: hotNatr,
+                extremeThreshold: extremeNatr,
+                normalVolumeRatio
+            }
         };
     };
 
     const resolveSmartAutoGridPlan = (params = {}, snapshot = {}) => {
         const regime = resolveSmartAutoRegime(snapshot);
-        const volatility = Math.max(0.08, regime.natrPercent);
+        const profile = regime.marketProfile || {};
+        const volatility = Math.max(0.08, regime.natrPercent, toFiniteNumber(profile.natrP50, 0));
         const bandWidth = Math.max(0, regime.bbWidthPercent);
         const trendPenalty = Number.isFinite(regime.adx) && regime.adx >= 32 ? 0.9 : 1;
         const derivedRangePercent = clamp(
-            Math.max(2.8, (volatility * 15) + (bandWidth * 0.65)) * trendPenalty,
+            Math.max(2.8, (Math.max(volatility, toFiniteNumber(profile.natrP80, volatility)) * 13) + (bandWidth * 0.55)) * trendPenalty,
             2.8,
             10.5
         );
@@ -916,6 +1016,7 @@ const createGridRuntimeHelpers = ({
         resolveEffectiveGridRangePercent,
         resolveEffectiveGridEntryBufferPercent,
         resolveEffectiveGridStopLossBufferPercent,
+        buildSmartAutoMarketProfile,
         resolveSmartAutoRegime,
         resolveSmartAutoGridPlan,
         applySmartAutoParameters,
