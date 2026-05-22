@@ -44,6 +44,8 @@ const createRuntimeSignalGridHelpers = ({
     resolveEffectiveGridOrderSizeUsdt,
     resolveEffectiveGridOrdersPerSide,
     applySmartAutoParameters,
+    evaluateSmartAutoPreflight,
+    formatSmartAutoPreflightLines,
     fetchOpenGridOrders,
     cancelDuplicateManagedOrders,
     cancelGridOrders,
@@ -269,6 +271,18 @@ const createRuntimeSignalGridHelpers = ({
         }
     };
 
+    const logSmartAutoPreflight = (channel, preflight) => {
+        if (!preflight || preflight.ok) return;
+        const lines = typeof formatSmartAutoPreflightLines === "function"
+            ? formatSmartAutoPreflightLines(preflight)
+            : [`   Smart Auto Preflight: ${preflight.status} score=${preflight.score}/100`];
+        maybeLogGridSizingState(
+            `PREFLIGHT_${channel}`,
+            `[SMART_AUTO][${channel}] ${lines.join(" ")}`,
+            `${preflight.status}:${preflight.score}:${(preflight.reasons || []).join("|")}`
+        );
+    };
+
     const analyzeSignal = async () => {
         try {
             const db = getDb();
@@ -297,6 +311,28 @@ const createRuntimeSignalGridHelpers = ({
             }
             if (typeof applySmartAutoParameters === "function") {
                 params = applySmartAutoParameters(params, snapshot);
+            }
+            const signalPreflight = typeof evaluateSmartAutoPreflight === "function"
+                ? evaluateSmartAutoPreflight({ db, params, snapshot })
+                : null;
+            if (signalPreflight && !signalPreflight.ok) {
+                logSmartAutoPreflight("SIGNAL", signalPreflight);
+                if (Date.now() - getLastSignalDetailLogAt() >= signalDetailLogTtl) {
+                    logSignalDetails(params, snapshot, {
+                        canLong: false,
+                        canShort: false,
+                        setupDetected: false,
+                        detailTitle: "SMART AUTO PREFLIGHT",
+                        strategyName: "SPOT_GRID",
+                        longPlan: null,
+                        shortPlan: null,
+                        extraDetailLines: typeof formatSmartAutoPreflightLines === "function"
+                            ? formatSmartAutoPreflightLines(signalPreflight)
+                            : []
+                    });
+                    setLastSignalDetailLogAt(Date.now());
+                }
+                return {};
             }
 
             const [orderBook, recentTrades] = await Promise.all([
@@ -444,6 +480,22 @@ const createRuntimeSignalGridHelpers = ({
             params.gridOrdersPerSide = adjustedOrdersMeta.count;
             let openGridOrders = await fetchOpenGridOrders();
             openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
+            const gridPreflight = typeof evaluateSmartAutoPreflight === "function"
+                ? evaluateSmartAutoPreflight({
+                    db,
+                    params,
+                    snapshot,
+                    availableUsdt,
+                    effectiveOrderSizeUsdt: params.gridOrderSizeUsdt,
+                    effectiveOrdersPerSide: adjustedOrdersMeta.count,
+                    minOrderSizeUsdt: effectiveSizeMeta.minOrderSizeUsdt
+                })
+                : null;
+            if (gridPreflight && !gridPreflight.ok) {
+                logSmartAutoPreflight("GRID", gridPreflight);
+                if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "SMART_AUTO_PREFLIGHT_BLOCKED");
+                return;
+            }
 
             if (effectiveSizeMeta.orderSizeUsdt <= 0 || adjustedOrdersMeta.count <= 0) {
                 if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "INSUFFICIENT_BALANCE");

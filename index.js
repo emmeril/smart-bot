@@ -15,6 +15,7 @@ const { createRuntimeMonitoringHelpers } = require("./services/runtime-monitorin
 const { createRuntimeMarketDataHelpers } = require("./services/runtime-market-data");
 const { createRuntimePositionUtils } = require("./services/runtime-position-utils");
 const { createRuntimeSignalGridHelpers } = require("./services/runtime-signal-grid");
+const { createSmartAutoPreflightHelpers } = require("./services/smart-auto-preflight");
 const { createFonnteNotifierHelpers } = require("./services/fonnte-notifier");
 const {
     sequelize,
@@ -197,6 +198,14 @@ const clearRuntimeTimers = () => {
 
 const { getDefaultConfig } = createRuntimeConfigHelpers({
     defaultConfig: DEFAULT_CONFIG
+});
+
+const {
+    evaluateSmartAutoPreflight,
+    formatSmartAutoPreflightLines
+} = createSmartAutoPreflightHelpers({
+    toFiniteNumber,
+    clamp
 });
 
 const normalizeSymbol = (symbol) => String(symbol || "").toUpperCase().trim();
@@ -1303,6 +1312,8 @@ const {
     resolveEffectiveGridOrderSizeUsdt: (...args) => resolveEffectiveGridOrderSizeUsdt(...args),
     resolveEffectiveGridOrdersPerSide: (...args) => resolveEffectiveGridOrdersPerSide(...args),
     applySmartAutoParameters: (...args) => applySmartAutoParameters(...args),
+    evaluateSmartAutoPreflight: (...args) => evaluateSmartAutoPreflight(...args),
+    formatSmartAutoPreflightLines: (...args) => formatSmartAutoPreflightLines(...args),
     fetchOpenGridOrders: (...args) => fetchOpenGridOrders(...args),
     cancelDuplicateManagedOrders: (...args) => cancelDuplicateManagedOrders(...args),
     cancelGridOrders: (...args) => cancelGridOrders(...args),
