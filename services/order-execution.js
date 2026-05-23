@@ -74,6 +74,18 @@ const createOrderExecutionHelpers = ({
     };
 
     const describeError = (error) => String(error?.message || error || "Unknown error");
+    const resolveSpotSellFeeBufferRate = (marketInfo) => {
+        const feeCandidates = [
+            marketInfo?.taker,
+            marketInfo?.maker,
+            marketInfo?.info?.takerCommission && (Number(marketInfo.info.takerCommission) / 10000),
+            marketInfo?.info?.makerCommission && (Number(marketInfo.info.makerCommission) / 10000)
+        ]
+            .map((value) => toFiniteNumber(value, NaN))
+            .filter((value) => Number.isFinite(value) && value > 0 && value < 1);
+        const baseRate = feeCandidates.length > 0 ? Math.max(...feeCandidates) : 0.001;
+        return Math.min(0.02, Math.max(0.0005, baseRate * 1.15));
+    };
     const getRecoveryMetrics = () => {
         const metrics = getMetrics();
         if (!metrics || typeof metrics !== "object") return null;
@@ -1057,6 +1069,15 @@ const createOrderExecutionHelpers = ({
                     quantity = clampedQty;
                 }
             }
+            const feeBufferRate = resolveSpotSellFeeBufferRate(marketInfo);
+            const qtyAfterFeeBuffer = formatAmountToMarketPrecision(db.pair, Math.max(0, quantity * (1 - feeBufferRate)));
+            if (Number.isFinite(qtyAfterFeeBuffer) && qtyAfterFeeBuffer > 0 && qtyAfterFeeBuffer < quantity) {
+                console.log(
+                    `[OCO][INFO] Applying sell fee buffer ${(feeBufferRate * 100).toFixed(4)}% `
+                    + `for ${baseAsset || "base asset"}: qty ${quantity} -> ${qtyAfterFeeBuffer}`
+                );
+                quantity = qtyAfterFeeBuffer;
+            }
         }
 
         const tpValidation = validateOrderSize(marketInfo, quantity, targetPrice, { orderType: "LIMIT" });
@@ -1494,7 +1515,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
 
