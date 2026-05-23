@@ -1267,9 +1267,13 @@ const createOrderExecutionHelpers = ({
         const orderPrice = toFiniteNumber(order.price, NaN);
         const orderAmount = getOrderQuantity(order);
         const quantityTolerance = getOcoQuantityTolerance(position);
+        const expectedOcoQuantity = toFiniteNumber(position?.ocoQuantity, NaN);
+        const expectedQuantity = Number.isFinite(expectedOcoQuantity) && expectedOcoQuantity > 0
+            ? expectedOcoQuantity
+            : position.quantity;
         const quantityMatches = !Number.isFinite(orderAmount)
             ? true
-            : Math.abs(orderAmount - position.quantity) <= quantityTolerance;
+            : Math.abs(orderAmount - expectedQuantity) <= quantityTolerance;
         return isManagedOrderPriceMatch(position.targetPrice, orderPrice)
             && quantityMatches;
     };
@@ -1283,10 +1287,14 @@ const createOrderExecutionHelpers = ({
         const orderStopPrice = getOrderTriggerPrice(order);
         const orderAmount = getOrderQuantity(order);
         const closePositionOrder = isClosePositionManagedOrder(order, orderAmount);
+        const expectedOcoQuantity = toFiniteNumber(position?.ocoQuantity, NaN);
+        const expectedQuantity = Number.isFinite(expectedOcoQuantity) && expectedOcoQuantity > 0
+            ? expectedOcoQuantity
+            : position.quantity;
         if (!isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice)) return false;
         if (closePositionOrder) return true;
         if (!Number.isFinite(orderAmount)) return true;
-        return Math.abs(orderAmount - position.quantity) <= getOcoQuantityTolerance(position);
+        return Math.abs(orderAmount - expectedQuantity) <= getOcoQuantityTolerance(position);
     };
 
     const isSpotMarginMode = () => String(getDb()?.marginMode || "spot").toLowerCase() === "spot";
@@ -1401,6 +1409,7 @@ const createOrderExecutionHelpers = ({
                     position.tpClientOrderId !== nextTpClientOrderId ||
                     position.slOrderId !== nextSlOrderId ||
                     position.slClientOrderId !== nextSlClientOrderId ||
+                    position.ocoQuantity !== getOrderQuantity(matchingTpOrder) ||
                     position.targetPrice !== nextTargetPrice ||
                     position.stopLossPrice !== nextStopLossPrice
                 ) {
@@ -1409,6 +1418,7 @@ const createOrderExecutionHelpers = ({
                     position.tpClientOrderId = nextTpClientOrderId;
                     position.slOrderId = nextSlOrderId;
                     position.slClientOrderId = nextSlClientOrderId;
+                    position.ocoQuantity = getOrderQuantity(matchingTpOrder);
                     position.targetPrice = nextTargetPrice;
                     position.stopLossPrice = nextStopLossPrice;
                     upsertActivePosition(position);
@@ -1449,6 +1459,7 @@ const createOrderExecutionHelpers = ({
             position.tpClientOrderId = getExchangeClientOrderId(placedOco.tpOrder) || getTpClientOrderId(position);
             position.slOrderId = placedOco.slOrder.id || null;
             position.slClientOrderId = getExchangeClientOrderId(placedOco.slOrder) || getSlClientOrderId(position);
+            position.ocoQuantity = getOrderQuantity(placedOco.tpOrder);
             position.ocoBlockedReason = null;
             position.ocoBlockedFingerprint = null;
             upsertActivePosition(position);
@@ -1561,6 +1572,5 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
