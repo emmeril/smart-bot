@@ -1264,8 +1264,11 @@ const createOrderExecutionHelpers = ({
         const orderPrice = toFiniteNumber(order.price, NaN);
         const orderAmount = getOrderQuantity(order);
         const quantityTolerance = getOcoQuantityTolerance(position);
+        const quantityMatches = !Number.isFinite(orderAmount)
+            ? true
+            : Math.abs(orderAmount - position.quantity) <= quantityTolerance;
         return isManagedOrderPriceMatch(position.targetPrice, orderPrice)
-            && Math.abs(orderAmount - position.quantity) <= quantityTolerance;
+            && quantityMatches;
     };
 
     const isClosePositionManagedOrder = (order, orderAmount) => (
@@ -1279,6 +1282,7 @@ const createOrderExecutionHelpers = ({
         const closePositionOrder = isClosePositionManagedOrder(order, orderAmount);
         if (!isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice)) return false;
         if (closePositionOrder) return true;
+        if (!Number.isFinite(orderAmount)) return true;
         return Math.abs(orderAmount - position.quantity) <= getOcoQuantityTolerance(position);
     };
 
@@ -1554,7 +1558,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
 
