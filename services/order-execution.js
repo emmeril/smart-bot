@@ -1337,7 +1337,7 @@ const createOrderExecutionHelpers = ({
                     position.targetPrice !== nextTargetPrice ||
                     position.stopLossPrice !== nextStopLossPrice
                 ) {
-                    console.log(`[OCO][INFO] Synced existing OCO exit for ${positionKey} TP @ ${nextTargetPrice} | SL @ ${nextStopLossPrice}`);
+                    console.log(`[OCO] Synced existing OCO exit for ${positionKey} TP @ ${nextTargetPrice} | SL @ ${nextStopLossPrice}`);
                     position.tpOrderId = nextTpOrderId;
                     position.tpClientOrderId = nextTpClientOrderId;
                     position.slOrderId = nextSlOrderId;
@@ -1358,11 +1358,11 @@ const createOrderExecutionHelpers = ({
             }
 
             if (matchingTpOrders.length > 0 || matchingSlOrders.length > 0) {
-                console.log(`[OCO][INFO] Existing exit orders for ${positionKey} no longer match target. Replacing OCO...`);
+                console.log(`[OCO] Existing exit orders for ${positionKey} no longer match target. Replacing OCO...`);
                 if (matchingTpOrders.length > 0) await cancelTpOrders(matchingTpOrders, "OCO_REPLACE");
                 if (matchingSlOrders.length > 0) await cancelSlOrders(matchingSlOrders, "OCO_REPLACE");
             } else {
-                console.log(`[OCO][INFO] No exchange OCO exit found for ${positionKey}. Creating replacement...`);
+                console.log(`[OCO] No exchange OCO exit found for ${positionKey}. Creating replacement...`);
             }
 
             const placedOco = await placeOcoExitOrder(position);
@@ -1386,7 +1386,7 @@ const createOrderExecutionHelpers = ({
             position.ocoBlockedFingerprint = null;
             upsertActivePosition(position);
             await saveDB();
-            console.log(`[OCO][INFO] Attached exchange OCO exit to ${positionKey}`);
+            console.log(`[OCO] Attached exchange OCO exit to ${positionKey}`);
             await notifyProtectionUpdate({
                 position,
                 positionKey,
@@ -1429,8 +1429,8 @@ const createOrderExecutionHelpers = ({
                 buildClientOrderId: getTpClientOrderId,
                 cancelDuplicates: cancelTpOrders,
                 cancelReason: "TP_DUPLICATE",
-                syncLogPrefix: "[TP][INFO]",
-                attachLogPrefix: "[TP][INFO]"
+                syncLogPrefix: "[TP]",
+                attachLogPrefix: "[TP]"
             });
         });
     };
@@ -1477,8 +1477,8 @@ const createOrderExecutionHelpers = ({
                 buildClientOrderId: getSlClientOrderId,
                 cancelDuplicates: cancelSlOrders,
                 cancelReason: "SL_DUPLICATE",
-                syncLogPrefix: "[SL][INFO]",
-                attachLogPrefix: "[SL][INFO]"
+                syncLogPrefix: "[SL]",
+                attachLogPrefix: "[SL]"
             });
         });
     };

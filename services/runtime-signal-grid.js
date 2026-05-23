@@ -44,8 +44,6 @@ const createRuntimeSignalGridHelpers = ({
     resolveEffectiveGridOrderSizeUsdt,
     resolveEffectiveGridOrdersPerSide,
     applySmartAutoParameters,
-    evaluateSmartAutoPreflight,
-    formatSmartAutoPreflightLines,
     fetchOpenGridOrders,
     cancelDuplicateManagedOrders,
     cancelGridOrders,
@@ -271,29 +269,6 @@ const createRuntimeSignalGridHelpers = ({
         }
     };
 
-    const resolveOpenBuyGridReservedUsdt = (openGridOrders = []) => (openGridOrders || [])
-        .filter((order) => String(order?.side || "").toLowerCase() === "buy")
-        .reduce((sum, order) => {
-            const price = toFiniteNumber(order?.price, NaN);
-            const remaining = toFiniteNumber(order?.remaining, toFiniteNumber(order?.amount, NaN));
-            const cost = toFiniteNumber(order?.cost, NaN);
-            if (Number.isFinite(price) && price > 0 && Number.isFinite(remaining) && remaining > 0) return sum + (price * remaining);
-            if (Number.isFinite(cost) && cost > 0) return sum + cost;
-            return sum;
-        }, 0);
-
-    const logSmartAutoPreflight = (channel, preflight) => {
-        if (!preflight || preflight.ok) return;
-        const lines = typeof formatSmartAutoPreflightLines === "function"
-            ? formatSmartAutoPreflightLines(preflight)
-            : [`   Smart Auto Preflight: ${preflight.status} score=${preflight.score}/100`];
-        maybeLogGridSizingState(
-            `PREFLIGHT_${channel}`,
-            `[SMART_AUTO][${channel}] ${lines.join(" ")}`,
-            `${preflight.status}:${preflight.score}:${(preflight.reasons || []).join("|")}`
-        );
-    };
-
     const analyzeSignal = async () => {
         try {
             const db = getDb();
@@ -311,39 +286,17 @@ const createRuntimeSignalGridHelpers = ({
             let params = getSignalParameters();
             const ohlcv = await getOHLCV(params.neededCandles);
             if (ohlcv.length < params.neededCandles) {
-                console.warn(`[SIGNAL][WARN] Not enough OHLCV data: ${ohlcv.length} < ${params.neededCandles}`);
+                console.log(`[SIGNAL][WARN] Not enough OHLCV data: ${ohlcv.length} < ${params.neededCandles}`);
                 return {};
             }
 
             const snapshot = buildSignalSnapshot(ohlcv, params);
             if (!snapshot || snapshot.invalidAtr) {
-                console.warn("[SIGNAL][WARN] Invalid data for signal");
+                console.log("[SIGNAL][WARN] Invalid data for signal");
                 return {};
             }
             if (typeof applySmartAutoParameters === "function") {
                 params = applySmartAutoParameters(params, snapshot);
-            }
-            const signalPreflight = typeof evaluateSmartAutoPreflight === "function"
-                ? evaluateSmartAutoPreflight({ db, params, snapshot })
-                : null;
-            if (signalPreflight && !signalPreflight.ok) {
-                logSmartAutoPreflight("SIGNAL", signalPreflight);
-                if (Date.now() - getLastSignalDetailLogAt() >= signalDetailLogTtl) {
-                    logSignalDetails(params, snapshot, {
-                        canLong: false,
-                        canShort: false,
-                        setupDetected: false,
-                        detailTitle: "SMART AUTO PREFLIGHT",
-                        strategyName: "SPOT_GRID",
-                        longPlan: null,
-                        shortPlan: null,
-                        extraDetailLines: typeof formatSmartAutoPreflightLines === "function"
-                            ? formatSmartAutoPreflightLines(signalPreflight)
-                            : []
-                    });
-                    setLastSignalDetailLogAt(Date.now());
-                }
-                return {};
             }
 
             const [orderBook, recentTrades] = await Promise.all([
@@ -460,12 +413,8 @@ const createRuntimeSignalGridHelpers = ({
             }
 
             const availableUsdt = await getAvailableUSDTBalance();
-            let openGridOrders = await fetchOpenGridOrders();
-            openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
-            const reservedOpenBuyGridUsdt = resolveOpenBuyGridReservedUsdt(openGridOrders);
-            const gridSizingBudgetUsdt = availableUsdt + reservedOpenBuyGridUsdt;
             const effectiveSizeMeta = resolveEffectiveGridOrderSizeUsdt({
-                availableUsdt: gridSizingBudgetUsdt,
+                availableUsdt,
                 configuredOrderSizeUsdt: params.gridOrderSizeUsdt,
                 configuredOrdersPerSide: params.gridOrdersPerSide,
                 referencePrice: snapshot.currentPrice,
@@ -474,7 +423,7 @@ const createRuntimeSignalGridHelpers = ({
             });
             params.gridOrderSizeUsdt = effectiveSizeMeta.orderSizeUsdt;
             const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
-                availableUsdt: gridSizingBudgetUsdt,
+                availableUsdt,
                 configuredOrdersPerSide: params.gridOrdersPerSide,
                 perOrderMargin: params.gridOrderSizeUsdt,
                 referencePrice: snapshot.currentPrice,
@@ -485,7 +434,7 @@ const createRuntimeSignalGridHelpers = ({
                 params.gridLevels = Math.max(2, Math.trunc(effectiveOrdersMeta.count));
             }
             const adjustedOrdersMeta = resolveEffectiveGridOrdersPerSide({
-                availableUsdt: gridSizingBudgetUsdt,
+                availableUsdt,
                 configuredOrdersPerSide: params.gridOrdersPerSide,
                 perOrderMargin: params.gridOrderSizeUsdt,
                 referencePrice: snapshot.currentPrice,
@@ -493,27 +442,13 @@ const createRuntimeSignalGridHelpers = ({
                 gridLevels: params.gridLevels
             });
             params.gridOrdersPerSide = adjustedOrdersMeta.count;
-            const gridPreflight = typeof evaluateSmartAutoPreflight === "function"
-                ? evaluateSmartAutoPreflight({
-                    db,
-                    params,
-                    snapshot,
-                    availableUsdt: gridSizingBudgetUsdt,
-                    effectiveOrderSizeUsdt: params.gridOrderSizeUsdt,
-                    effectiveOrdersPerSide: adjustedOrdersMeta.count,
-                    minOrderSizeUsdt: effectiveSizeMeta.minOrderSizeUsdt
-                })
-                : null;
-            if (gridPreflight && !gridPreflight.ok) {
-                logSmartAutoPreflight("GRID", gridPreflight);
-                if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "SMART_AUTO_PREFLIGHT_BLOCKED");
-                return;
-            }
+            let openGridOrders = await fetchOpenGridOrders();
+            openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
 
             if (effectiveSizeMeta.orderSizeUsdt <= 0 || adjustedOrdersMeta.count <= 0) {
                 if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "INSUFFICIENT_BALANCE");
                 const reasonText = adjustedOrdersMeta.reason ? ` Reason: ${adjustedOrdersMeta.reason}` : "";
-                const skipMessage = `[GRID][INFO] Auto sizing skipped ladder | size ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT | side orders ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} | available ${availableUsdt.toFixed(2)} USDT | reserved ${reservedOpenBuyGridUsdt.toFixed(2)} USDT.${reasonText}`;
+                const skipMessage = `[GRID] Auto sizing skipped ladder | size ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT | side orders ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} | available ${availableUsdt.toFixed(2)} USDT.${reasonText}`;
                 const now = Date.now();
                 if (skipMessage !== getLastGridSizingSkipReason() || now - getLastGridSizingSkipLogAt() >= gridSizingSkipLogTtl) {
                     console.log(skipMessage);
@@ -529,12 +464,12 @@ const createRuntimeSignalGridHelpers = ({
                 maybeLogGridSizingStateExternal
                     ? maybeLogGridSizingStateExternal(
                         "SIZE",
-                        `[GRID][INFO] Auto-sized order amount: ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT per order | available ${availableUsdt.toFixed(2)} USDT`,
+                        `[GRID] Auto-sized order amount: ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT per order | available ${availableUsdt.toFixed(2)} USDT`,
                         `SIZE:${effectiveSizeMeta.orderSizeUsdt.toFixed(4)}:${availableUsdt.toFixed(2)}`
                     )
                     : maybeLogGridSizingState(
                         "SIZE",
-                        `[GRID][INFO] Auto-sized order amount: ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT per order | available ${availableUsdt.toFixed(2)} USDT`,
+                        `[GRID] Auto-sized order amount: ${effectiveSizeMeta.orderSizeUsdt.toFixed(4)} USDT per order | available ${availableUsdt.toFixed(2)} USDT`,
                         `SIZE:${effectiveSizeMeta.orderSizeUsdt.toFixed(4)}:${availableUsdt.toFixed(2)}`
                     );
             }
@@ -542,12 +477,12 @@ const createRuntimeSignalGridHelpers = ({
                 maybeLogGridSizingStateExternal
                     ? maybeLogGridSizingStateExternal(
                         "COUNT",
-                        `[GRID][INFO] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
+                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
                         `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}`
                     )
                     : maybeLogGridSizingState(
                         "COUNT",
-                        `[GRID][INFO] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
+                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
                         `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}`
                     );
             }
