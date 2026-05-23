@@ -106,7 +106,10 @@ const createOrderExecutionHelpers = ({
             return Number.isFinite(numericValue) && numericValue > 0 ? [numericValue] : [];
         };
 
-        const candidates = rawCandidates.flatMap(collectNumericValues).filter((value) => value < 1);
+        const candidates = rawCandidates
+            .flatMap(collectNumericValues)
+            .filter((value) => Number.isFinite(value) && value > 0)
+            .sort((a, b) => a - b);
         if (candidates.length === 0) return 0;
         return Math.min(...candidates);
     };
