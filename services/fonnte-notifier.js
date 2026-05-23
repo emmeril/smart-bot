@@ -112,11 +112,26 @@ const createFonnteNotifierHelpers = ({
         netProfitUSDT,
         profitPercent,
         closedAt,
-        totalAccumulatedPnlUSDT
+        totalAccumulatedPnlUSDT,
+        closeFillSnapshot,
+        order
     }) => {
         const entryPrice = Number(position?.entryPrice);
         const positionQty = Number(position?.quantity);
-        const closeQuantity = Number.isFinite(positionQty) && positionQty > 0 ? positionQty : NaN;
+        const snapshotQty = Number(closeFillSnapshot?.quantity);
+        const orderFilledQty = Number(order?.filled);
+        const orderExecutedQty = Number(order?.info?.executedQty);
+        const orderAmountQty = Number(order?.amount);
+        const closeQuantityCandidates = [
+            positionQty,
+            snapshotQty,
+            orderFilledQty,
+            orderExecutedQty,
+            orderAmountQty
+        ].filter((qty) => Number.isFinite(qty) && qty > 0);
+        const closeQuantity = closeQuantityCandidates.length > 0
+            ? Math.max(...closeQuantityCandidates)
+            : NaN;
         const symbol = String(position?.symbol || position?.pair || process.env.TRADING_PAIR || "").trim();
 
         return [
