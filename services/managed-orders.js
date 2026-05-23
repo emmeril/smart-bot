@@ -25,6 +25,11 @@ const createManagedOrdersHelpers = ({
     };
 
     const getManagedOrderId = (order) => String(order?.id || order?.orderId || order?.info?.orderId || "");
+    const isOrderOpenLike = (order) => {
+        const status = String(order?.status || order?.info?.status || "").toLowerCase();
+        if (!status) return true;
+        return status === "open" || status === "new" || status === "partially_filled";
+    };
 
     const dedupeOrdersByIdentity = (orders) => {
         const seen = new Set();
@@ -75,7 +80,8 @@ const createManagedOrdersHelpers = ({
             }
         }
 
-        const mergedOrders = dedupeOrdersByIdentity([...(fetchedRegularOrders || []), ...(fetchedTriggerOrders || [])]);
+        const mergedOrders = dedupeOrdersByIdentity([...(fetchedRegularOrders || []), ...(fetchedTriggerOrders || [])])
+            .filter(isOrderOpenLike);
         const triggerOrders = mergedOrders.filter(isConditionalOpenOrder);
         const regularOrders = mergedOrders.filter((order) => !isConditionalOpenOrder(order));
         return { regularOrders, triggerOrders, triggerOrdersFetchFailed };
