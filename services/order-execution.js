@@ -86,6 +86,30 @@ const createOrderExecutionHelpers = ({
         const baseRate = feeCandidates.length > 0 ? Math.max(...feeCandidates) : 0.001;
         return Math.min(0.02, Math.max(0.0005, baseRate * 1.15));
     };
+
+    const resolveOrderSizeStep = (marketInfo) => {
+        const rawCandidates = [
+            marketInfo?.precision?.amount,
+            marketInfo?.limits?.amount?.min,
+            marketInfo?.info?.stepSize,
+            marketInfo?.info?.qtyStep,
+            marketInfo?.info?.lotSize,
+            marketInfo?.info?.minQty,
+            marketInfo?.info?.filters,
+            marketInfo?.info?.symbols
+        ];
+
+        const collectNumericValues = (value) => {
+            if (Array.isArray(value)) return value.flatMap(collectNumericValues);
+            if (value && typeof value === "object") return Object.values(value).flatMap(collectNumericValues);
+            const numericValue = toFiniteNumber(value, NaN);
+            return Number.isFinite(numericValue) && numericValue > 0 ? [numericValue] : [];
+        };
+
+        const candidates = rawCandidates.flatMap(collectNumericValues).filter((value) => value < 1);
+        if (candidates.length === 0) return 0;
+        return Math.min(...candidates);
+    };
     const getRecoveryMetrics = () => {
         const metrics = getMetrics();
         if (!metrics || typeof metrics !== "object") return null;
@@ -1530,7 +1554,6 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
 
 
