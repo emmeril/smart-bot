@@ -1221,12 +1221,27 @@ const createOrderExecutionHelpers = ({
         });
     };
 
+    const getOcoQuantityTolerance = (position) => {
+        const baseTolerance = Math.max(0, toFiniteNumber(getPositionSyncQtyTolerance(), 0));
+        if (!isSpotMarginMode()) return baseTolerance;
+        const db = getDb();
+        const spotPair = getSpotPair(db?.pair);
+        const exchange = getExchange();
+        const marketInfo = exchange?.markets?.[spotPair] || exchange?.markets?.[db?.pair];
+        const feeBufferRate = Math.max(0, toFiniteNumber(resolveSpotSellFeeBufferRate(marketInfo), 0));
+        if (!(feeBufferRate > 0) || !Number.isFinite(position?.quantity) || position.quantity <= 0) return baseTolerance;
+        const feeBufferQty = Number(position.quantity) * feeBufferRate;
+        const precisionStep = Math.max(0, toFiniteNumber(resolveOrderSizeStep(marketInfo), 0));
+        return Math.max(baseTolerance, feeBufferQty + precisionStep);
+    };
+
     const hasMatchingTpOrder = (order, position) => {
         if (!order) return false;
         const orderPrice = toFiniteNumber(order.price, NaN);
         const orderAmount = getOrderQuantity(order);
+        const quantityTolerance = getOcoQuantityTolerance(position);
         return isManagedOrderPriceMatch(position.targetPrice, orderPrice)
-            && Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
+            && Math.abs(orderAmount - position.quantity) <= quantityTolerance;
     };
 
     const isClosePositionManagedOrder = (order, orderAmount) => (
@@ -1240,7 +1255,7 @@ const createOrderExecutionHelpers = ({
         const closePositionOrder = isClosePositionManagedOrder(order, orderAmount);
         if (!isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice)) return false;
         if (closePositionOrder) return true;
-        return Math.abs(orderAmount - position.quantity) <= getPositionSyncQtyTolerance();
+        return Math.abs(orderAmount - position.quantity) <= getOcoQuantityTolerance(position);
     };
 
     const isSpotMarginMode = () => String(getDb()?.marginMode || "spot").toLowerCase() === "spot";
