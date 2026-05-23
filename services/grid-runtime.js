@@ -68,7 +68,6 @@ const createGridRuntimeHelpers = ({
         "1d": 1.35
     };
     const GRID_STOP_BUFFER_BASELINE = 0.6;
-    const SMART_AUTO_DEFAULT_NATR_PERCENT = 0.35;
     const LEGACY_AUTO_PRESET_VALUES = {
         gridTargetProfitUsdt: [0.5, 0.4, 0.35, 0.25],
         targetProfitAtrMultiplier: [0.75, 0.8, 0.7, 0.6],
@@ -205,7 +204,6 @@ const createGridRuntimeHelpers = ({
             entryBbStdDev,
             entryBbLongThreshold: clamp(toFiniteNumber(db.entryBbLongThreshold, defaultConfig.entryBbLongThreshold || 0.2), 0, 0.49),
             entryBbShortThreshold: clamp(toFiniteNumber(db.entryBbShortThreshold, defaultConfig.entryBbShortThreshold || 0.8), 0.51, 1),
-            minVolumeRatio: Math.max(1, toFiniteNumber(db.minVolumeRatio, defaultConfig.minVolumeRatio || 1.05)),
             neededCandles,
             gridLookbackCandles,
             configuredGridLevels: Math.max(0, Math.trunc(toFiniteNumber(db.gridLevels, defaultConfig.gridLevels))),
@@ -219,99 +217,6 @@ const createGridRuntimeHelpers = ({
             gridEntryBufferPercent,
             gridStopLossLevels: Math.max(0, toFiniteNumber(db.gridStopLossLevels, defaultConfig.gridStopLossLevels))
         };
-    };
-
-    const resolveSmartAutoRegime = (snapshot = {}) => {
-        const natrPercent = toFiniteNumber(snapshot.currentNatrPercent, SMART_AUTO_DEFAULT_NATR_PERCENT);
-        const bbWidthPercent = Number.isFinite(toFiniteNumber(snapshot.bbWidth, NaN))
-            ? Math.abs(toFiniteNumber(snapshot.bbWidth, 0)) * 100
-            : natrPercent * 6;
-        const adx = toFiniteNumber(snapshot.currentAdx, NaN);
-        const volumeRatio = toFiniteNumber(snapshot.volumeRatio, 1);
-        const volatilityLabel = natrPercent < 0.18
-            ? "QUIET"
-            : (natrPercent < 0.45 ? "NORMAL" : (natrPercent < 0.85 ? "HOT" : "EXTREME"));
-        const trendLabel = Number.isFinite(adx) && adx >= 32 ? "TRENDING" : "RANGING";
-        const liquidityLabel = volumeRatio >= 1.4 ? "ACTIVE" : (volumeRatio >= 1.05 ? "NORMAL" : "THIN");
-        return {
-            natrPercent,
-            bbWidthPercent,
-            adx,
-            volumeRatio,
-            volatilityLabel,
-            trendLabel,
-            liquidityLabel
-        };
-    };
-
-    const resolveSmartAutoGridPlan = (params = {}, snapshot = {}) => {
-        const regime = resolveSmartAutoRegime(snapshot);
-        const volatility = Math.max(0.08, regime.natrPercent);
-        const bandWidth = Math.max(0, regime.bbWidthPercent);
-        const trendPenalty = Number.isFinite(regime.adx) && regime.adx >= 32 ? 0.9 : 1;
-        const derivedRangePercent = clamp(
-            Math.max(2.8, (volatility * 15) + (bandWidth * 0.65)) * trendPenalty,
-            2.8,
-            10.5
-        );
-        const targetStepPercent = clamp(volatility * 1.35, 0.32, 0.85);
-        const derivedLevels = clamp(Math.round(derivedRangePercent / targetStepPercent), 6, 18);
-        const derivedEntryBufferPercent = Number(clamp(targetStepPercent * 0.28, 0.08, 0.28).toFixed(3));
-        const derivedOrdersPerSide = (() => {
-            if (regime.trendLabel === "TRENDING") return 2;
-            if (regime.volatilityLabel === "EXTREME") return 2;
-            if (regime.volatilityLabel === "HOT") return 3;
-            return 4;
-        })();
-        const minVolumeRatio = regime.liquidityLabel === "THIN" ? 1.08 : (regime.volatilityLabel === "EXTREME" ? 1.15 : 1.03);
-        const entryAdxMax = regime.volatilityLabel === "QUIET" ? 30 : 26;
-        const entryRsiLongThreshold = regime.volatilityLabel === "EXTREME" ? 34 : (regime.volatilityLabel === "HOT" ? 36 : 38);
-        const entryBbLongThreshold = regime.volatilityLabel === "EXTREME" ? 0.14 : (regime.volatilityLabel === "HOT" ? 0.16 : 0.18);
-
-        return {
-            regime,
-            gridRangePercent: Number(derivedRangePercent.toFixed(2)),
-            gridLevels: derivedLevels,
-            gridEntryBufferPercent: derivedEntryBufferPercent,
-            gridOrdersPerSide: derivedOrdersPerSide,
-            minVolumeRatio,
-            entryAdxMax,
-            entryRsiLongThreshold,
-            entryBbLongThreshold,
-            targetProfitAtrMultiplier: regime.volatilityLabel === "QUIET" ? 1.5 : (regime.volatilityLabel === "EXTREME" ? 2.2 : 1.8),
-            riskRewardRatio: regime.trendLabel === "TRENDING" ? 1.15 : 1.35,
-            stopLossAtrMultiplier: regime.volatilityLabel === "EXTREME" ? 1.8 : (regime.volatilityLabel === "HOT" ? 1.6 : 1.4),
-            trailingActivateATR: regime.volatilityLabel === "QUIET" ? 1.4 : 1.8,
-            trailingOffsetATR: regime.volatilityLabel === "QUIET" ? 0.7 : 0.9
-        };
-    };
-
-    const applySmartAutoParameters = (params = {}, snapshot = {}) => {
-        const plan = resolveSmartAutoGridPlan(params, snapshot);
-        const nextParams = { ...params };
-        if (toFiniteNumber(params.configuredGridRangePercent, 0) <= 0) nextParams.gridRangePercent = plan.gridRangePercent;
-        if (toFiniteNumber(params.configuredGridLevels, 0) <= 0) nextParams.gridLevels = plan.gridLevels;
-        if (toFiniteNumber(params.configuredGridEntryBufferPercent, 0) <= 0) nextParams.gridEntryBufferPercent = plan.gridEntryBufferPercent;
-        if (toFiniteNumber(params.gridOrdersPerSide, 0) <= 0) nextParams.gridOrdersPerSide = plan.gridOrdersPerSide;
-        nextParams.entryAdxMax = Math.min(toFiniteNumber(params.entryAdxMax, plan.entryAdxMax), plan.entryAdxMax);
-        nextParams.entryRsiLongThreshold = Math.min(toFiniteNumber(params.entryRsiLongThreshold, plan.entryRsiLongThreshold), plan.entryRsiLongThreshold);
-        nextParams.entryBbLongThreshold = Math.min(toFiniteNumber(params.entryBbLongThreshold, plan.entryBbLongThreshold), plan.entryBbLongThreshold);
-        nextParams.minVolumeRatio = Math.max(1, plan.minVolumeRatio);
-        nextParams.smartAuto = {
-            enabled: true,
-            regime: plan.regime,
-            gridRangePercent: plan.gridRangePercent,
-            gridLevels: plan.gridLevels,
-            gridEntryBufferPercent: plan.gridEntryBufferPercent,
-            gridOrdersPerSide: plan.gridOrdersPerSide,
-            minVolumeRatio: plan.minVolumeRatio,
-            targetProfitAtrMultiplier: plan.targetProfitAtrMultiplier,
-            riskRewardRatio: plan.riskRewardRatio,
-            stopLossAtrMultiplier: plan.stopLossAtrMultiplier,
-            trailingActivateATR: plan.trailingActivateATR,
-            trailingOffsetATR: plan.trailingOffsetATR
-        };
-        return nextParams;
     };
 
     const resolveEffectiveGridTakeProfitLevels = (configuredTakeProfitLevels) => {
@@ -916,9 +821,6 @@ const createGridRuntimeHelpers = ({
         resolveEffectiveGridRangePercent,
         resolveEffectiveGridEntryBufferPercent,
         resolveEffectiveGridStopLossBufferPercent,
-        resolveSmartAutoRegime,
-        resolveSmartAutoGridPlan,
-        applySmartAutoParameters,
         resolveGridOrdersPerSideCap,
         getMinimumGridOrderSizeUsdt,
         getMinimumValidatedGridOrderSizeUsdt,

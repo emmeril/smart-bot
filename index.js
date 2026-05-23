@@ -264,7 +264,6 @@ const {
     resolveEffectiveGridOrderSizeUsdt,
     resolveGridOrderSizeForPrice,
     resolveEffectiveGridOrdersPerSide,
-    applySmartAutoParameters,
     getGridStateFingerprint,
     sanitizeGridState,
     createLockedGridState,
@@ -492,9 +491,6 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
         if (!Number.isFinite(trackedQty)) return null;
         if (Math.abs(formattedQty - trackedQty) <= POSITION_SYNC_QTY_TOLERANCE) return { type: "unchanged" };
         if (formattedQty <= 0) return { type: "unchanged" };
-        if (formattedQty > trackedQty) {
-            return { type: "unchanged" };
-        }
 
         return {
             type: "update",
@@ -1302,7 +1298,6 @@ const {
     getRecentTrades: (...args) => getRecentTrades(...args),
     resolveEffectiveGridOrderSizeUsdt: (...args) => resolveEffectiveGridOrderSizeUsdt(...args),
     resolveEffectiveGridOrdersPerSide: (...args) => resolveEffectiveGridOrdersPerSide(...args),
-    applySmartAutoParameters: (...args) => applySmartAutoParameters(...args),
     fetchOpenGridOrders: (...args) => fetchOpenGridOrders(...args),
     cancelDuplicateManagedOrders: (...args) => cancelDuplicateManagedOrders(...args),
     cancelGridOrders: (...args) => cancelGridOrders(...args),
