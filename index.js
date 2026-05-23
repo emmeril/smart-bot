@@ -57,9 +57,9 @@ let lastLogTime = Date.now();
 let lastPnlLog = Date.now();
 let lastPositionRuntimePersistAt = 0;
 let lastTradeAt = 0;
-let balanceCache = { totalUSDT: 0, availableUSDT: 0, lastUpdate: 0 };
-let tickerCache = { price: null, lastUpdate: 0 };
-let ohlcvCache = { key: "", data: null, lastUpdate: 0 };
+let balanceCache = { totalUSDT: 0, availableUSDT: 0, lastUpdate: 0, isValid: false };
+let tickerCache = { price: null, lastUpdate: 0, isValid: false };
+let ohlcvCache = { key: "", data: null, lastUpdate: 0, isValid: false };
 let pnlMonitorTimer = null;
 let currentPnLMonitoringInterval = 0;
 let isMonitoringPnL = false;
@@ -426,10 +426,10 @@ const printPositionLine = (positionKey, position, currentPrice) => {
 };
 
 const buildRiskOverrides = () => {
-    const currentDb = getDb();
+    if (!db) return { trailingActivateATR: 1.5, trailingOffsetATR: 0.75 };
     return {
-        trailingActivateATR: toFiniteNumber(currentDb?.trailingActivateATR, 1.5),
-        trailingOffsetATR: toFiniteNumber(currentDb?.trailingOffsetATR, 0.75)
+        trailingActivateATR: toFiniteNumber(db.trailingActivateATR, 1.5),
+        trailingOffsetATR: toFiniteNumber(db.trailingOffsetATR, 0.75)
     };
 };
 
@@ -605,7 +605,7 @@ const {
 
 const isLegacySinglePosition = (value) => value && typeof value === "object" && !Array.isArray(value) && ("entryPrice" in value || "quantity" in value || "side" in value);
 
-const toPositionMapKey = () => "BOTH";
+const toPositionMapKey = (positionKey) => String(positionKey || "BOTH").toUpperCase();
 
 const {
     getTrackedPositionSideLabel,
@@ -816,6 +816,8 @@ const CONFIG_KEYS_REQUIRING_POSITION_REAPPLY = new Set([
 
 const didConfigFieldChange = (previousConfig, nextConfig, key) => {
     if (!previousConfig || typeof previousConfig !== "object") return false;
+    if (!nextConfig || typeof nextConfig !== "object") return false;
+    if (!(key in nextConfig)) return false;
     return previousConfig[key] !== nextConfig[key];
 };
 
@@ -990,27 +992,43 @@ const {
 const removeDashboardPosition = async (positionKey) => {
     const normalizedKey = toPositionMapKey(positionKey);
     const trackedPosition = getActivePositionByKey(normalizedKey);
-    if (!trackedPosition) return { ok: false, error: `Posisi ${normalizedKey} tidak ditemukan.` };
+    if (!trackedPosition) {
+        return { 
+            ok: false, 
+            error: DASHBOARD_ERRORS.POSITION_NOT_FOUND(normalizedKey) 
+        };
+    }
     await closePosition(normalizedKey, "DASHBOARD_REMOVE");
-    return { ok: true, message: `Permintaan hapus posisi ${normalizedKey} sudah dikirim.` };
+    return { 
+        ok: true, 
+        message: DASHBOARD_SUCCESS_MESSAGES.POSITION_REMOVAL_REQUESTED(normalizedKey) 
+    };
 };
 
 const DASHBOARD_ORDER_TYPES = ["grid", "tp", "sl"];
 const DASHBOARD_CANCEL_REASON_SINGLE = "DASHBOARD_CANCEL";
 const DASHBOARD_CANCEL_REASON_GROUP = "DASHBOARD_CANCEL_GROUP";
-const DASHBOARD_INVALID_ORDER_TYPE_ERROR = "Tipe order tidak valid. Gunakan grid, tp, atau sl.";
-const DASHBOARD_INVALID_ORDER_GROUP_TYPE_ERROR = "Tipe grup order tidak valid. Gunakan grid, tp, atau sl.";
-const DASHBOARD_ORDER_NOT_FOUND_ERROR = "Order tidak ditemukan atau sudah tertutup.";
-const DASHBOARD_ORDER_COLLECTION_BY_TYPE = {
-    grid: "grid",
-    tp: "tp",
-    sl: "sl"
+
+const DASHBOARD_ERRORS = {
+    INVALID_ORDER_TYPE: "Tipe order tidak valid. Gunakan grid, tp, atau sl.",
+    INVALID_ORDER_GROUP_TYPE: "Tipe grup order tidak valid. Gunakan grid, tp, atau sl.",
+    ORDER_NOT_FOUND: "Order tidak ditemukan atau sudah tertutup.",
+    NO_ORDERS_FOUND: (type) => `Tidak ada order ${type.toUpperCase()} terbuka.`,
+    POSITION_NOT_FOUND: (positionKey) => `Posisi ${positionKey} tidak ditemukan.`
 };
 
+const DASHBOARD_SUCCESS_MESSAGES = {
+    ORDER_CANCELLED: (reference) => `Order ${reference} berhasil dibatalkan.`,
+    ORDERS_CANCELLED: (count, type) => `${count} order ${type.toUpperCase()} berhasil dibatalkan.`,
+    POSITION_REMOVAL_REQUESTED: (positionKey) => `Permintaan hapus posisi ${positionKey} sudah dikirim.`
+};
+
+const DASHBOARD_INVALID_ORDER_TYPE_ERROR = DASHBOARD_ERRORS.INVALID_ORDER_TYPE;
+const DASHBOARD_INVALID_ORDER_GROUP_TYPE_ERROR = DASHBOARD_ERRORS.INVALID_ORDER_GROUP_TYPE;
+const DASHBOARD_ORDER_NOT_FOUND_ERROR = DASHBOARD_ERRORS.ORDER_NOT_FOUND;
 const getDashboardManagedOrdersByType = (openOrders, normalizedType) => {
-    const collectionKey = DASHBOARD_ORDER_COLLECTION_BY_TYPE[normalizedType];
-    if (!collectionKey) return [];
-    return openOrders?.[collectionKey] || [];
+    if (!DASHBOARD_ORDER_TYPES.includes(normalizedType) || !openOrders) return [];
+    return openOrders[normalizedType] || [];
 };
 
 const normalizeDashboardOrderType = (orderType) => String(orderType || "").toLowerCase();
@@ -1023,14 +1041,21 @@ const DASHBOARD_CANCEL_BY_TYPE = {
 
 const cancelDashboardManagedOrdersByType = async (normalizedType, orders, reason) => {
     const cancelHandler = DASHBOARD_CANCEL_BY_TYPE[normalizedType];
-    if (!cancelHandler) return;
-    await cancelHandler(orders, reason);
+    if (!cancelHandler) {
+        throw new Error(`[DASHBOARD] Unknown order type: ${normalizedType}`);
+    }
+    try {
+        await cancelHandler(orders, reason);
+    } catch (error) {
+        console.error(`[DASHBOARD][ERROR] Failed to cancel ${normalizedType} orders:`, error.message);
+        throw error;
+    }
 };
 
 const cancelDashboardOrder = async ({ orderType, clientOrderId, orderId }) => {
     const normalizedType = normalizeDashboardOrderType(orderType);
     if (!DASHBOARD_ORDER_TYPES.includes(normalizedType)) {
-        return { ok: false, error: DASHBOARD_INVALID_ORDER_TYPE_ERROR };
+        return { ok: false, error: DASHBOARD_ERRORS.INVALID_ORDER_TYPE };
     }
 
     const openOrders = await fetchManagedOpenOrdersSnapshot();
@@ -1042,30 +1067,39 @@ const cancelDashboardOrder = async ({ orderType, clientOrderId, orderId }) => {
     });
 
     if (!targetOrder) {
-        return { ok: false, error: DASHBOARD_ORDER_NOT_FOUND_ERROR };
+        return { ok: false, error: DASHBOARD_ERRORS.ORDER_NOT_FOUND };
     }
 
     await cancelDashboardManagedOrdersByType(normalizedType, [targetOrder], DASHBOARD_CANCEL_REASON_SINGLE);
 
     const reference = getExchangeClientOrderId(targetOrder) || targetOrder.id || "order";
-    return { ok: true, message: `Order ${reference} berhasil dibatalkan.` };
+    return { 
+        ok: true, 
+        message: DASHBOARD_SUCCESS_MESSAGES.ORDER_CANCELLED(reference) 
+    };
 };
 
 const cancelDashboardOrderGroup = async (orderType) => {
     const normalizedType = normalizeDashboardOrderType(orderType);
     if (!DASHBOARD_ORDER_TYPES.includes(normalizedType)) {
-        return { ok: false, error: DASHBOARD_INVALID_ORDER_GROUP_TYPE_ERROR };
+        return { ok: false, error: DASHBOARD_ERRORS.INVALID_ORDER_GROUP_TYPE };
     }
 
     const openOrders = await fetchManagedOpenOrdersSnapshot();
     const sourceOrders = getDashboardManagedOrdersByType(openOrders, normalizedType);
     if (sourceOrders.length === 0) {
-        return { ok: false, error: `Tidak ada order ${normalizedType.toUpperCase()} terbuka.` };
+        return { 
+            ok: false, 
+            error: DASHBOARD_ERRORS.NO_ORDERS_FOUND(normalizedType) 
+        };
     }
 
     await cancelDashboardManagedOrdersByType(normalizedType, sourceOrders, DASHBOARD_CANCEL_REASON_GROUP);
 
-    return { ok: true, message: `${sourceOrders.length} order ${normalizedType.toUpperCase()} berhasil dibatalkan.` };
+    return { 
+        ok: true, 
+        message: DASHBOARD_SUCCESS_MESSAGES.ORDERS_CANCELLED(sourceOrders.length, normalizedType) 
+    };
 };
 
 const { startWebDashboard } = createRuntimeDashboardHelpers({
