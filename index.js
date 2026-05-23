@@ -96,7 +96,7 @@ let exchangeHealth = {
 let lastRecoveryBlockLogAt = 0;
 const logPath = path.join(__dirname, 'trades.csv');
 let db = null;
-const BALANCE_CACHE_TTL = toFiniteNumber(process.env.BALANCE_CACHE_TTL, 5000);
+const BALANCE_CACHE_TTL = 15000;
 const TICKER_CACHE_TTL = 800;
 const OHLCV_CACHE_TTL = 1500;
 const SYNC_LOG_TTL = 15000;
@@ -189,10 +189,9 @@ const clearRuntimeTimers = () => {
         [configReloadTimer, () => { configReloadTimer = null; }]
     ];
     for (const [timer, resetTimer] of timers) {
-        if (timer) {
-            clearInterval(timer);
-            resetTimer();
-        }
+        if (!timer) continue;
+        clearInterval(timer);
+        resetTimer();
     }
 };
 
@@ -480,17 +479,8 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
             }
         }
 
-        const pair = db?.pair;
-        if (!pair) {
-            console.warn("[SYNC][WARN] No trading pair configured for balance sync");
-            return null;
-        }
-        const [baseAssetRaw = ""] = String(pair).split("/");
+        const [baseAssetRaw = ""] = String(db?.pair || "").split("/");
         const baseAsset = baseAssetRaw.trim();
-        if (!baseAsset) {
-            console.warn(`[SYNC][WARN] Invalid pair format: ${pair}`);
-            return null;
-        }
         const baseTotal = resolveSpotAssetTotalBalance(spotBalances, baseAsset);
         if (!Number.isFinite(baseTotal)) return null;
 
@@ -1175,10 +1165,8 @@ const {
     configAutoReloadIntervalMs: CONFIG_AUTO_RELOAD_INTERVAL_MS
 });
 
-const hasPositionMutationInFlight = () => isPlacingOrder || isClosingPosition || isSyncingPosition || isSyncingGridOrders;
-
 const syncPositionWithExchange = async () => {
-    if (isSyncingPosition || isClosingPosition || hasPositionMutationInFlight()) return;
+    if (isSyncingPosition || isClosingPosition || isPlacingOrder) return;
     isSyncingPosition = true;
     try {
         if (!db || !exchange) return;
@@ -1215,10 +1203,9 @@ const syncPositionWithExchange = async () => {
         if (!shouldPersist) {
             getPositionMapKeys(nextPositionsMap).forEach((key) => {
                 if (!currentPositionsMap[key]) return;
-                const updatedPosition = { ...currentPositionsMap[key], exchangePnlSnapshot: nextPositionsMap[key].exchangePnlSnapshot };
-                currentPositionsMap[key] = updatedPosition;
+                currentPositionsMap[key].exchangePnlSnapshot = nextPositionsMap[key].exchangePnlSnapshot;
             });
-            setActivePositionsMap({ ...currentPositionsMap });
+            setActivePositionsMap(currentPositionsMap);
             await ensureManagedOrdersForPositions(currentPositionsMap);
             markPositionSyncHealthy();
             return;
@@ -1240,7 +1227,6 @@ const syncPositionWithExchange = async () => {
     } catch (error) {
         markExchangeUnhealthy(error, "position sync");
         console.error("[SYNC][ERROR] Position sync failed:", error.message);
-        if (error?.stack) console.error("[SYNC][ERROR] Stack:", error.stack);
     }
     finally { isSyncingPosition = false; }
 };
