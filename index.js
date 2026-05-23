@@ -744,19 +744,6 @@ const mergeRuntimeConfig = (nextConfig) => {
     const hasActiveTradeState = getPositionMapCount(currentPositionsMap) > 0;
     nextConfig.activePosition = mergeTrackedPositions(currentPositionsMap, nextPositionsMap);
 
-    // AUTO-CALCULATE PAIR-SPECIFIC PARAMETERS
-    // If pair or gridOrderSize changed, automatically recalculate all related parameters
-    const pairChanged = didConfigFieldChange(db, nextConfig, "pair");
-    const gridOrderSizeChanged = didConfigFieldChange(db, nextConfig, "gridOrderSizeUsdt");
-    
-    if ((pairChanged || gridOrderSizeChanged) && nextConfig.pair && toFiniteNumber(nextConfig.gridOrderSizeUsdt, 0) > 0) {
-        const autoPairConfig = recalculatePairSpecificConfig(nextConfig);
-        if (autoPairConfig) {
-            Object.assign(nextConfig, autoPairConfig);
-            console.log(`[CONFIG][INFO] Auto-calculated pair-specific parameters for ${nextConfig.pair}`);
-        }
-    }
-
     if (hasActiveTradeState) {
         RUNTIME_PROTECTED_CONFIG_KEYS.forEach((key) => {
             if (nextConfig[key] !== db[key]) {
@@ -1136,150 +1123,6 @@ const { startWebDashboard } = createRuntimeDashboardHelpers({
     cancelDashboardOrderGroup
 });
 
-// PAIR-SPECIFIC PROFILE SYSTEM
-// Define volatility and risk profiles for different pair categories
-const PAIR_PROFILES = {
-    // Stable major pairs (BTC, ETH) - Low volatility, high volume
-    major: {
-        volatilityCategory: "low",
-        riskLevel: 0.8,
-        gridLevels: 15,
-        gridLookbackCandles: 200,
-        gridRangePercent: 2.5,
-        gridEntryBufferPercent: 0.3,
-        gridTakeProfitLevels: 5,
-        gridStopLossLevels: 3,
-        gridOrdersPerSide: 5,
-        gridAutoOrdersCap: 150,
-        targetProfitAtrMultiplier: 1.8,
-        targetProfitMinUsdt: 0.05,
-        targetProfitMaxUsdt: 2.0,
-        stopLossAtrMultiplier: 1.4,
-        stopLossMinPercent: 1.2,
-        stopLossMaxPercent: 2.8,
-        gridStopLossPercent: 2.0,
-        riskRewardRatio: 1.5,
-        minVolumeRatio: 1.05,
-        timeframe: "5m"
-    },
-    // Mid-cap pairs (Common alts) - Medium volatility
-    midcap: {
-        volatilityCategory: "medium",
-        riskLevel: 1.2,
-        gridLevels: 12,
-        gridLookbackCandles: 180,
-        gridRangePercent: 3.5,
-        gridEntryBufferPercent: 0.5,
-        gridTakeProfitLevels: 4,
-        gridStopLossLevels: 3,
-        gridOrdersPerSide: 4,
-        gridAutoOrdersCap: 120,
-        targetProfitAtrMultiplier: 1.9,
-        targetProfitMinUsdt: 0.05,
-        targetProfitMaxUsdt: 1.5,
-        stopLossAtrMultiplier: 1.5,
-        stopLossMinPercent: 1.5,
-        stopLossMaxPercent: 3.5,
-        gridStopLossPercent: 2.8,
-        riskRewardRatio: 1.35,
-        minVolumeRatio: 1.1,
-        timeframe: "5m"
-    },
-    // Small-cap/volatile pairs - High volatility
-    smallcap: {
-        volatilityCategory: "high",
-        riskLevel: 1.5,
-        gridLevels: 10,
-        gridLookbackCandles: 150,
-        gridRangePercent: 5.0,
-        gridEntryBufferPercent: 0.8,
-        gridTakeProfitLevels: 3,
-        gridStopLossLevels: 2,
-        gridOrdersPerSide: 3,
-        gridAutoOrdersCap: 100,
-        targetProfitAtrMultiplier: 2.0,
-        targetProfitMinUsdt: 0.05,
-        targetProfitMaxUsdt: 1.0,
-        stopLossAtrMultiplier: 1.6,
-        stopLossMinPercent: 2.0,
-        stopLossMaxPercent: 4.5,
-        gridStopLossPercent: 3.5,
-        riskRewardRatio: 1.2,
-        minVolumeRatio: 1.15,
-        timeframe: "5m"
-    }
-};
-
-// Auto-detect pair category based on pair name
-const detectPairCategory = (pair) => {
-    if (!pair) return "midcap";
-    const symbol = String(pair).toUpperCase();
-    
-    // Major pairs (largest by market cap)
-    if (symbol.includes("BTC") || symbol.includes("ETH") || symbol.includes("BNB") || symbol.includes("SOL")) {
-        return "major";
-    }
-    
-    // Common mid-cap pairs (use general heuristics or lookups)
-    if (symbol.match(/^(ADA|XRP|DOGE|MATIC|AVAX|LINK|DOT|LITECOIN|ATOM)/)) {
-        return "midcap";
-    }
-    
-    // Default to smallcap for others
-    return "smallcap";
-};
-
-// Get pair-specific profile
-const getPairProfile = (pair) => {
-    const category = detectPairCategory(pair);
-    return PAIR_PROFILES[category] || PAIR_PROFILES.midcap;
-};
-
-// Calculate TP and SL based on pair profile and grid order size
-const calculatePairSpecificParameters = (pair, gridOrderSizeUsdt) => {
-    const profile = getPairProfile(pair);
-    const orderSizeMultiplier = Math.max(1, gridOrderSizeUsdt / 10); // Adjust if order size is larger
-    
-    return {
-        pair,
-        gridOrderSizeUsdt,
-        gridLevels: profile.gridLevels,
-        gridLookbackCandles: profile.gridLookbackCandles,
-        gridRangePercent: profile.gridRangePercent,
-        gridEntryBufferPercent: profile.gridEntryBufferPercent,
-        gridTakeProfitLevels: profile.gridTakeProfitLevels,
-        gridStopLossLevels: profile.gridStopLossLevels,
-        gridOrdersPerSide: profile.gridOrdersPerSide,
-        gridAutoOrdersCap: profile.gridAutoOrdersCap,
-        gridTimeframe: profile.timeframe,
-        gridStopLossPercent: profile.gridStopLossPercent,
-        autoTargetProfitEnabled: true,
-        targetProfitAtrMultiplier: profile.targetProfitAtrMultiplier,
-        targetProfitMinUsdt: profile.targetProfitMinUsdt * orderSizeMultiplier,
-        targetProfitMaxUsdt: profile.targetProfitMaxUsdt * orderSizeMultiplier,
-        autoStopLossEnabled: true,
-        stopLossAtrMultiplier: profile.stopLossAtrMultiplier,
-        stopLossMinPercent: profile.stopLossMinPercent,
-        stopLossMaxPercent: profile.stopLossMaxPercent,
-        riskRewardRatio: profile.riskRewardRatio,
-        trailingEnabled: true,
-        trailingActivateATR: 1.8,
-        trailingOffsetATR: 0.9,
-        entryRsiPeriod: 14,
-        entryRsiLongThreshold: 38,
-        entryRsiShortThreshold: 62,
-        entryAdxPeriod: 14,
-        entryAdxMax: 26,
-        entryBbPeriod: 20,
-        entryBbStdDev: 2,
-        entryBbLongThreshold: 0.18,
-        entryBbShortThreshold: 0.82,
-        minVolumeRatio: profile.minVolumeRatio,
-        volumePeriod: 20,
-        atrPeriod: 14
-    };
-};
-
 const AUTO_PAIR_GRID_PRESETS = {
     universal: {
         strategy: "spot_grid",
@@ -1323,57 +1166,10 @@ const AUTO_PAIR_GRID_PRESETS = {
 };
 
 const applyAutoPresetToConfig = (config) => {
-    // If pair and gridOrderSize are set, use pair-specific automatic calculation
-    if (config.pair && toFiniteNumber(config.gridOrderSizeUsdt, 0) > 0) {
-        const pairParams = calculatePairSpecificParameters(
-            config.pair,
-            toFiniteNumber(config.gridOrderSizeUsdt, 10)
-        );
-        
-        // Merge pair-specific parameters with existing config (preserve user overrides)
-        const autoConfig = {
-            ...config,
-            ...pairParams,
-            strategy: config.strategy || "spot_grid"
-        };
-        
-        const autoPresetResult = applyAutoPairGridPreset(autoConfig, AUTO_PAIR_GRID_PRESETS);
-        return {
-            config: normalizeConfig(autoPresetResult.config),
-            autoPresetResult,
-            pairProfile: detectPairCategory(config.pair),
-            autoPairCalculated: true
-        };
-    }
-    
-    // Fallback to universal preset
     const autoPresetResult = applyAutoPairGridPreset(config, AUTO_PAIR_GRID_PRESETS);
     return {
         config: normalizeConfig(autoPresetResult.config),
-        autoPresetResult,
-        autoPairCalculated: false
-    };
-};
-
-// Helper function to recalculate grid parameters when pair or gridOrderSize changes
-const recalculatePairSpecificConfig = (currentConfig) => {
-    const pair = currentConfig?.pair;
-    const gridOrderSizeUsdt = toFiniteNumber(currentConfig?.gridOrderSizeUsdt, 0);
-    
-    if (!pair || gridOrderSizeUsdt <= 0) {
-        console.log("[CONFIG][INFO] Skipping pair-specific auto-calculation: pair or gridOrderSize not properly set");
-        return null;
-    }
-    
-    console.log(`[CONFIG][INFO] Auto-calculating parameters for pair ${pair} with order size $${gridOrderSizeUsdt.toFixed(2)}`);
-    
-    const pairProfile = detectPairCategory(pair);
-    const pairParams = calculatePairSpecificParameters(pair, gridOrderSizeUsdt);
-    
-    return {
-        ...pairParams,
-        pairProfile,
-        lastAutoCalculatedAt: Date.now()
+        autoPresetResult
     };
 };
 
