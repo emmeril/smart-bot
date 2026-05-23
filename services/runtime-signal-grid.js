@@ -43,6 +43,7 @@ const createRuntimeSignalGridHelpers = ({
     getRecentTrades,
     resolveEffectiveGridOrderSizeUsdt,
     resolveEffectiveGridOrdersPerSide,
+    applySmartAutoParameters,
     fetchOpenGridOrders,
     cancelDuplicateManagedOrders,
     cancelGridOrders,
@@ -104,7 +105,8 @@ const createRuntimeSignalGridHelpers = ({
         const currentLevelHigh = levels[upperIndex];
         const buffer = snapshot.currentPrice * (params.gridEntryBufferPercent / 100);
         const distanceFromMidSteps = (snapshot.currentPrice - referencePrice) / step;
-        const volumeOk = snapshot.volumeRatio >= db.minVolumeRatio;
+        const minVolumeRatio = toFiniteNumber(params.minVolumeRatio, db.minVolumeRatio);
+        const volumeOk = snapshot.volumeRatio >= minVolumeRatio;
         const adxOk = !Number.isFinite(snapshot.currentAdx) || snapshot.currentAdx <= params.entryAdxMax;
         const rsiLongOk = !Number.isFinite(snapshot.currentRsi) || snapshot.currentRsi <= params.entryRsiLongThreshold;
         const rsiShortOk = !Number.isFinite(snapshot.currentRsi) || snapshot.currentRsi >= params.entryRsiShortThreshold;
@@ -154,6 +156,10 @@ const createRuntimeSignalGridHelpers = ({
         if (canShort && !shortPlanValid) {
             console.warn("[GRID][WARN] Short setup rejected because TP/SL would be invalid after precision rounding.");
         }
+        const smartAutoLines = params.smartAuto?.enabled ? [
+            `   Smart Auto Regime: ${params.smartAuto.regime.volatilityLabel}/${params.smartAuto.regime.trendLabel}/${params.smartAuto.regime.liquidityLabel}`,
+            `   Smart Auto TP/SL: TP ${params.smartAuto.targetProfitAtrMultiplier}x ATR | SL ${params.smartAuto.stopLossAtrMultiplier}x ATR | RR ${params.smartAuto.riskRewardRatio} | Trail ${params.smartAuto.trailingActivateATR}/${params.smartAuto.trailingOffsetATR}x ATR`
+        ] : [];
 
         return {
             canLong: safeCanLong,
@@ -164,6 +170,7 @@ const createRuntimeSignalGridHelpers = ({
             longPlan: safeCanLong ? { targetPrice: longTargetPrice, stopLossPrice: longStopPrice, gridIndex: lowerIndex } : null,
             shortPlan: safeCanShort ? { targetPrice: shortTargetPrice, stopLossPrice: shortStopPrice, gridIndex: upperIndex } : null,
             extraDetailLines: [
+                ...smartAutoLines,
                 `   Reference Price: ${referencePrice.toFixed(6)}`,
                 `   Grid Range: ${lowerBound.toFixed(6)} - ${upperBound.toFixed(6)} | Width ${params.configuredGridRangePercent <= 0 ? `AUTO ${params.gridRangePercent}%` : `${params.gridRangePercent}%`}`,
                 `   Grid Levels: ${params.configuredGridLevels <= 0 ? `AUTO ${params.gridLevels}` : params.gridLevels} | Step: ${step.toFixed(6)}`,
@@ -175,7 +182,7 @@ const createRuntimeSignalGridHelpers = ({
                 `   RSI ${params.entryRsiPeriod}: ${Number.isFinite(snapshot.currentRsi) ? snapshot.currentRsi.toFixed(2) : "N/A"} | Long <= ${params.entryRsiLongThreshold} -> ${rsiLongOk ? "[OK]" : "[NO]"} | Short >= ${params.entryRsiShortThreshold} -> ${rsiShortOk ? "[OK]" : "[NO]"}`,
                 `   Bollinger %B ${params.entryBbPeriod},${params.entryBbStdDev}: ${Number.isFinite(snapshot.bbPercentB) ? snapshot.bbPercentB.toFixed(3) : "N/A"} | Long <= ${params.entryBbLongThreshold} -> ${bbLongOk ? "[OK]" : "[NO]"} | Short >= ${params.entryBbShortThreshold} -> ${bbShortOk ? "[OK]" : "[NO]"}`,
                 `   MACD Histogram: ${Number.isFinite(snapshot.macdHistogram) ? snapshot.macdHistogram.toFixed(6) : "N/A"} | Long ${momentumLongOk ? "[OK]" : "[NO]"} | Short ${momentumShortOk ? "[OK]" : "[NO]"}`,
-                `   Volume Ratio: ${snapshot.volumeRatio.toFixed(2)}x (min ${db.minVolumeRatio}x) -> ${volumeOk ? "[OK]" : "[NO]"}`,
+                `   Volume Ratio: ${snapshot.volumeRatio.toFixed(2)}x (min ${minVolumeRatio}x) -> ${volumeOk ? "[OK]" : "[NO]"}`,
                 `   Session Filter: ${sessionOk ? "[OK]" : "[NO]"}`,
                 `   Long Grid Re-entry: ${meanReversionLong ? "[OK]" : "[NO]"}`,
                 `   Short Grid Re-entry: ${meanReversionShort ? "[OK]" : "[NO]"}`,
@@ -276,7 +283,7 @@ const createRuntimeSignalGridHelpers = ({
                 setLastLogTime(now);
             }
 
-            const params = getSignalParameters();
+            let params = getSignalParameters();
             const ohlcv = await getOHLCV(params.neededCandles);
             if (ohlcv.length < params.neededCandles) {
                 console.log(`[SIGNAL][WARN] Not enough OHLCV data: ${ohlcv.length} < ${params.neededCandles}`);
@@ -287,6 +294,9 @@ const createRuntimeSignalGridHelpers = ({
             if (!snapshot || snapshot.invalidAtr) {
                 console.log("[SIGNAL][WARN] Invalid data for signal");
                 return {};
+            }
+            if (typeof applySmartAutoParameters === "function") {
+                params = applySmartAutoParameters(params, snapshot);
             }
 
             const [orderBook, recentTrades] = await Promise.all([
@@ -330,10 +340,10 @@ const createRuntimeSignalGridHelpers = ({
                     enabled: true,
                     currentPrice: snapshot.currentPrice,
                     candidate: {
-                        tpAtr: Math.max(0.1, toFiniteNumber(db.targetProfitAtrMultiplier, 2.4)),
-                        slAtr: Math.max(0.05, toFiniteNumber(db.stopLossAtrMultiplier, 1.6)),
-                        trailingActivateATR: Math.max(0.2, toFiniteNumber(db.trailingActivateATR, 1.5)),
-                        trailingOffsetATR: Math.max(0.1, toFiniteNumber(db.trailingOffsetATR, 0.75))
+                        tpAtr: Math.max(0.1, toFiniteNumber(params.smartAuto?.targetProfitAtrMultiplier, db.targetProfitAtrMultiplier)),
+                        slAtr: Math.max(0.05, toFiniteNumber(params.smartAuto?.stopLossAtrMultiplier, db.stopLossAtrMultiplier)),
+                        trailingActivateATR: Math.max(0.2, toFiniteNumber(params.smartAuto?.trailingActivateATR, db.trailingActivateATR)),
+                        trailingOffsetATR: Math.max(0.1, toFiniteNumber(params.smartAuto?.trailingOffsetATR, db.trailingOffsetATR))
                     },
                     regime: {
                         zScore: !Number.isFinite(snapshot.bbBasis) || !Number.isFinite(snapshot.currentPrice) || !Number.isFinite(snapshot.currentStdDev) || snapshot.currentStdDev <= 0
@@ -386,7 +396,7 @@ const createRuntimeSignalGridHelpers = ({
         setIsSyncingGridOrders(true);
 
         try {
-            const params = getSignalParameters();
+            let params = getSignalParameters();
             const ohlcv = await getOHLCV(params.neededCandles);
             if (ohlcv.length < params.neededCandles) {
                 console.log(`[GRID][INFO] Not enough OHLCV data to manage ladder: ${ohlcv.length} < ${params.neededCandles}`);
@@ -397,6 +407,9 @@ const createRuntimeSignalGridHelpers = ({
             if (!snapshot || snapshot.invalidAtr) {
                 console.log("[GRID][INFO] Invalid market snapshot. Ladder sync skipped.");
                 return;
+            }
+            if (typeof applySmartAutoParameters === "function") {
+                params = applySmartAutoParameters(params, snapshot);
             }
 
             const availableUsdt = await getAvailableUSDTBalance();
