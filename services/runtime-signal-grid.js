@@ -60,6 +60,15 @@ const createRuntimeSignalGridHelpers = ({
     getActivePositionByKey,
     placeOrder
 }) => {
+    const gridRuntimeStability = {
+        targetSideOrders: null,
+        pendingSideOrders: null,
+        pendingSideOrdersStreak: 0,
+        lastRebuildAt: 0
+    };
+    const GRID_RUNTIME_HYSTERESIS_CYCLES = 3;
+    const GRID_RUNTIME_REBUILD_COOLDOWN_MS = 90 * 1000;
+
     const buildGridExposureSignature = (openPositions = [], trackedPositions = getActivePositionsList()) => JSON.stringify({
         mode: getAccountPositionMode()?.label || "UNKNOWN",
         exchange: (openPositions || []).map((position) => ({
@@ -441,7 +450,37 @@ const createRuntimeSignalGridHelpers = ({
                 market: exchange?.markets?.[db?.pair],
                 gridLevels: params.gridLevels
             });
-            params.gridOrdersPerSide = adjustedOrdersMeta.count;
+
+            const rawSideOrders = Math.max(0, Math.trunc(adjustedOrdersMeta.count));
+            if (!Number.isFinite(gridRuntimeStability.targetSideOrders) || gridRuntimeStability.targetSideOrders === null) {
+                gridRuntimeStability.targetSideOrders = rawSideOrders;
+                gridRuntimeStability.pendingSideOrders = null;
+                gridRuntimeStability.pendingSideOrdersStreak = 0;
+            } else if (rawSideOrders !== gridRuntimeStability.targetSideOrders) {
+                if (gridRuntimeStability.pendingSideOrders !== rawSideOrders) {
+                    gridRuntimeStability.pendingSideOrders = rawSideOrders;
+                    gridRuntimeStability.pendingSideOrdersStreak = 1;
+                } else {
+                    gridRuntimeStability.pendingSideOrdersStreak += 1;
+                }
+
+                if (gridRuntimeStability.pendingSideOrdersStreak >= GRID_RUNTIME_HYSTERESIS_CYCLES) {
+                    const targetSideOrders = gridRuntimeStability.targetSideOrders;
+                    const direction = rawSideOrders > targetSideOrders ? 1 : -1;
+                    const nextSideOrders = Math.max(0, targetSideOrders + direction);
+                    gridRuntimeStability.targetSideOrders = nextSideOrders;
+                    if (nextSideOrders === rawSideOrders) {
+                        gridRuntimeStability.pendingSideOrders = null;
+                        gridRuntimeStability.pendingSideOrdersStreak = 0;
+                    }
+                    console.log(`[GRID][INFO] Stabilized side orders: ${targetSideOrders} -> ${nextSideOrders} (raw ${rawSideOrders})`);
+                }
+            } else {
+                gridRuntimeStability.pendingSideOrders = null;
+                gridRuntimeStability.pendingSideOrdersStreak = 0;
+            }
+
+            params.gridOrdersPerSide = Math.max(0, Math.trunc(gridRuntimeStability.targetSideOrders || 0));
             let openGridOrders = await fetchOpenGridOrders();
             openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
 
@@ -531,7 +570,17 @@ const createRuntimeSignalGridHelpers = ({
 
             const desiredIds = new Set(desiredOrders.map((order) => order.clientOrderId));
             const staleOrders = openGridOrders.filter((order) => !desiredIds.has(getExchangeClientOrderId(order)));
-            if (staleOrders.length > 0) await cancelGridOrders(staleOrders, "REBUILD");
+            const now = Date.now();
+            const isRebuildCooldownActive = staleOrders.length > 0 && (now - gridRuntimeStability.lastRebuildAt) < GRID_RUNTIME_REBUILD_COOLDOWN_MS;
+            if (isRebuildCooldownActive) {
+                const waitSeconds = Math.max(1, Math.ceil((GRID_RUNTIME_REBUILD_COOLDOWN_MS - (now - gridRuntimeStability.lastRebuildAt)) / 1000));
+                console.log(`[GRID][INFO] Rebuild cooldown active (${waitSeconds}s). Keeping current ladder until cooldown expires.`);
+                return;
+            }
+            if (staleOrders.length > 0) {
+                await cancelGridOrders(staleOrders, "REBUILD");
+                gridRuntimeStability.lastRebuildAt = Date.now();
+            }
 
             if (staleOrders.length > 0) {
                 openGridOrders = await fetchOpenGridOrders();
