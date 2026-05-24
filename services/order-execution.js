@@ -1117,9 +1117,9 @@ const createOrderExecutionHelpers = ({
         const metrics = getMetrics();
         const db = getDb();
         const spotPair = getSpotPair(db.pair);
-        if (!Number.isFinite(position?.targetPrice) || position.targetPrice <= 0) return null;
-        if (!Number.isFinite(position?.stopLossPrice) || position.stopLossPrice <= 0) return null;
-        if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
+        if (!Number.isFinite(position?.targetPrice) || position.targetPrice <= 0) return { blocked: true, reason: "TP price is invalid." };
+        if (!Number.isFinite(position?.stopLossPrice) || position.stopLossPrice <= 0) return { blocked: true, reason: "SL price is invalid." };
+        if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return { blocked: true, reason: "Position quantity is invalid." };
 
         const closeSide = position.side === "buy" ? "sell" : "buy";
         let quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
@@ -1526,7 +1526,16 @@ const createOrderExecutionHelpers = ({
                 await tryClearSpotStalePositionWithoutExit(positionKey, position, `OCO_BLOCKED: ${nextReason}`);
                 return;
             }
-            if (!placedOco?.tpOrder || !placedOco?.slOrder) return;
+            if (!placedOco?.tpOrder || !placedOco?.slOrder) {
+                const nextReason = "OCO placement returned without complete TP/SL legs.";
+                console.warn(`[OCO][WARN] OCO replacement paused for ${positionKey}: ${nextReason}`);
+                position.ocoBlockedReason = nextReason;
+                position.ocoBlockedFingerprint = protectionFingerprint;
+                upsertActivePosition(position);
+                await saveDB();
+                await tryClearSpotStalePositionWithoutExit(positionKey, position, `OCO_BLOCKED: ${nextReason}`);
+                return;
+            }
             position.tpOrderId = placedOco.tpOrder.id || null;
             position.tpClientOrderId = getExchangeClientOrderId(placedOco.tpOrder) || getTpClientOrderId(position);
             position.slOrderId = placedOco.slOrder.id || null;
