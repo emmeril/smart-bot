@@ -424,6 +424,8 @@ const createRuntimeSignalGridHelpers = ({
             }
 
             const availableUsdt = await getAvailableUSDTBalance();
+            let openGridOrders = await fetchOpenGridOrders();
+            openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
             const effectiveSizeMeta = resolveEffectiveGridOrderSizeUsdt({
                 availableUsdt,
                 configuredOrderSizeUsdt: params.gridOrderSizeUsdt,
@@ -433,8 +435,9 @@ const createRuntimeSignalGridHelpers = ({
                 gridLevels: params.gridLevels
             });
             params.gridOrderSizeUsdt = effectiveSizeMeta.orderSizeUsdt;
+            const effectiveAvailableUsdt = availableUsdt + (openGridOrders.length * Math.max(0, params.gridOrderSizeUsdt));
             const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
-                availableUsdt,
+                availableUsdt: effectiveAvailableUsdt,
                 configuredOrdersPerSide: params.gridOrdersPerSide,
                 perOrderMargin: params.gridOrderSizeUsdt,
                 referencePrice: snapshot.currentPrice,
@@ -445,7 +448,7 @@ const createRuntimeSignalGridHelpers = ({
                 params.gridLevels = Math.max(2, Math.trunc(effectiveOrdersMeta.count));
             }
             const adjustedOrdersMeta = resolveEffectiveGridOrdersPerSide({
-                availableUsdt,
+                availableUsdt: effectiveAvailableUsdt,
                 configuredOrdersPerSide: params.gridOrdersPerSide,
                 perOrderMargin: params.gridOrderSizeUsdt,
                 referencePrice: snapshot.currentPrice,
@@ -502,8 +505,6 @@ const createRuntimeSignalGridHelpers = ({
             }
 
             params.gridOrdersPerSide = Math.max(0, Math.trunc(gridRuntimeStability.targetSideOrders || 0));
-            let openGridOrders = await fetchOpenGridOrders();
-            openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
 
             if (effectiveSizeMeta.orderSizeUsdt <= 0 || adjustedOrdersMeta.count <= 0) {
                 if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "INSUFFICIENT_BALANCE");
