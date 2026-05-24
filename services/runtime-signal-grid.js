@@ -65,7 +65,8 @@ const createRuntimeSignalGridHelpers = ({
         pendingSideOrders: null,
         pendingSideOrdersStreak: 0,
         lastRebuildAt: 0,
-        lastRebuildCooldownLogAt: 0
+        lastRebuildCooldownLogAt: 0,
+        stableUpsizeStreak: 0
     };
     const GRID_RUNTIME_HYSTERESIS_CYCLES = 3;
     const GRID_RUNTIME_REBUILD_COOLDOWN_MS = 90 * 1000;
@@ -453,22 +454,26 @@ const createRuntimeSignalGridHelpers = ({
             });
 
             const rawSideOrders = Math.max(0, Math.trunc(adjustedOrdersMeta.count));
-            if (!Number.isFinite(gridRuntimeStability.targetSideOrders) || gridRuntimeStability.targetSideOrders === null) {
+            const targetSideOrders = Number.isFinite(gridRuntimeStability.targetSideOrders)
+                ? Math.max(0, Math.trunc(gridRuntimeStability.targetSideOrders))
+                : null;
+            const isHardCapped = adjustedOrdersMeta.mode === "CAPPED" && rawSideOrders < adjustedOrdersMeta.maxConfigured;
+
+            if (targetSideOrders === null) {
                 gridRuntimeStability.targetSideOrders = rawSideOrders;
                 gridRuntimeStability.pendingSideOrders = null;
                 gridRuntimeStability.pendingSideOrdersStreak = 0;
-            } else if (rawSideOrders !== gridRuntimeStability.targetSideOrders) {
+                gridRuntimeStability.stableUpsizeStreak = 0;
+            } else if (rawSideOrders < targetSideOrders) {
+                gridRuntimeStability.stableUpsizeStreak = 0;
                 if (gridRuntimeStability.pendingSideOrders !== rawSideOrders) {
                     gridRuntimeStability.pendingSideOrders = rawSideOrders;
                     gridRuntimeStability.pendingSideOrdersStreak = 1;
                 } else {
                     gridRuntimeStability.pendingSideOrdersStreak += 1;
                 }
-
                 if (gridRuntimeStability.pendingSideOrdersStreak >= GRID_RUNTIME_HYSTERESIS_CYCLES) {
-                    const targetSideOrders = gridRuntimeStability.targetSideOrders;
-                    const direction = rawSideOrders > targetSideOrders ? 1 : -1;
-                    const nextSideOrders = Math.max(0, targetSideOrders + direction);
+                    const nextSideOrders = Math.max(0, targetSideOrders - 1);
                     gridRuntimeStability.targetSideOrders = nextSideOrders;
                     if (nextSideOrders === rawSideOrders) {
                         gridRuntimeStability.pendingSideOrders = null;
@@ -476,9 +481,24 @@ const createRuntimeSignalGridHelpers = ({
                     }
                     console.log(`[GRID][INFO] Stabilized side orders: ${targetSideOrders} -> ${nextSideOrders} (raw ${rawSideOrders})`);
                 }
+            } else if (rawSideOrders > targetSideOrders) {
+                gridRuntimeStability.pendingSideOrders = null;
+                gridRuntimeStability.pendingSideOrdersStreak = 0;
+                if (isHardCapped) {
+                    gridRuntimeStability.stableUpsizeStreak = 0;
+                } else {
+                    gridRuntimeStability.stableUpsizeStreak += 1;
+                    if (gridRuntimeStability.stableUpsizeStreak >= GRID_RUNTIME_HYSTERESIS_CYCLES * 2) {
+                        const nextSideOrders = Math.min(rawSideOrders, targetSideOrders + 1);
+                        gridRuntimeStability.targetSideOrders = nextSideOrders;
+                        if (nextSideOrders === rawSideOrders) gridRuntimeStability.stableUpsizeStreak = 0;
+                        console.log(`[GRID][INFO] Stabilized side orders: ${targetSideOrders} -> ${nextSideOrders} (raw ${rawSideOrders})`);
+                    }
+                }
             } else {
                 gridRuntimeStability.pendingSideOrders = null;
                 gridRuntimeStability.pendingSideOrdersStreak = 0;
+                gridRuntimeStability.stableUpsizeStreak = 0;
             }
 
             params.gridOrdersPerSide = Math.max(0, Math.trunc(gridRuntimeStability.targetSideOrders || 0));
