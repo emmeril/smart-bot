@@ -192,7 +192,6 @@ const createGridRuntimeHelpers = ({
         });
         const gridTakeProfitLevels = Math.max(0, Math.trunc(toFiniteNumber(db.gridTakeProfitLevels, defaultConfig.gridTakeProfitLevels)));
         const neededCandles = Math.max(gridLookbackCandles + 5, volumePeriod + 10, atrPeriod + 30, entryBbPeriod + 30, entryAdxPeriod + 40, 180);
-        const runtimeSideOrders = Math.max(effectiveOrdersMeta.count, buyOrders);
         return {
             strategy: "spot_grid",
             volumePeriod,
