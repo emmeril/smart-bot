@@ -117,7 +117,9 @@ const createOrderExecutionHelpers = ({
     const tryClearSpotStalePositionWithoutExit = async (positionKey, position, reason) => {
         if (!isSpotMarginMode()) return false;
         if (String(position?.side || "").toLowerCase() !== "buy") return false;
+        const exchange = getExchange();
         const db = getDb();
+        const spotPair = getSpotPair(db?.pair);
         const [baseAssetRaw = ""] = String(db?.pair || "").split("/");
         const baseAsset = baseAssetRaw.trim();
         if (!baseAsset || typeof fetchSpotBalances !== "function") return false;
@@ -125,11 +127,41 @@ const createOrderExecutionHelpers = ({
         const baseFree = toFiniteNumber(balances?.[baseAsset]?.free ?? balances?.[baseAsset], NaN);
         const trackedQty = toFiniteNumber(position?.quantity, NaN);
         if (!Number.isFinite(baseFree) || !Number.isFinite(trackedQty) || trackedQty <= 0) return false;
-        const dustTolerance = Math.max(0, trackedQty * 0.1);
-        if (baseFree > dustTolerance) return false;
+        const marketInfo = exchange?.markets?.[spotPair] || exchange?.markets?.[db?.pair] || null;
+
+        const formattedDustQty = toFiniteNumber(formatAmountToMarketPrecision(marketInfo, baseFree), NaN);
+        const tpPrice = toFiniteNumber(position?.targetPrice, NaN);
+        const slPrice = toFiniteNumber(position?.stopLossPrice, NaN);
+        const hasProtectionPrices = Number.isFinite(tpPrice) && tpPrice > 0 && Number.isFinite(slPrice) && slPrice > 0;
+        const tpValidation = Number.isFinite(formattedDustQty) && Number.isFinite(tpPrice)
+            ? validateOrderSize(marketInfo, formattedDustQty, tpPrice, { orderType: "LIMIT" })
+            : null;
+        const slValidation = Number.isFinite(formattedDustQty) && Number.isFinite(slPrice)
+            ? validateOrderSize(marketInfo, formattedDustQty, slPrice, { orderType: "STOP_LOSS_LIMIT" })
+            : null;
+        const hasValidationFailure = (validation) => validation && (validation.valid === false || validation.ok === false);
+        const minTradableQty = toFiniteNumber(marketInfo?.limits?.amount?.min, NaN);
+        const isDustByMinQtyOnly = !hasProtectionPrices
+            && Number.isFinite(formattedDustQty)
+            && Number.isFinite(minTradableQty)
+            && minTradableQty > 0
+            && formattedDustQty > 0
+            && formattedDustQty < minTradableQty;
+        const isDustByExchangeRules = hasValidationFailure(tpValidation) || hasValidationFailure(slValidation) || isDustByMinQtyOnly;
+
+        if (!isDustByExchangeRules) return false;
+        const exchangeReason = isDustByExchangeRules
+            ? [tpValidation, slValidation]
+                .filter(hasValidationFailure)
+                .map((validation) => validation?.reason)
+                .concat(isDustByMinQtyOnly ? [`LOT_SIZE minQty fallback: ${formattedDustQty} < ${minTradableQty}`] : [])
+                .filter((value, index, arr) => value && arr.indexOf(value) === index)
+                .join(" | ")
+            : "";
         console.warn(
             `[POSITION][WARN] Clearing stale active ${positionKey}: ${reason}. `
-            + `Base free ${baseAsset}=${baseFree} while tracked qty=${trackedQty}.`
+            + `Base free ${baseAsset}=${baseFree} (formatted=${formattedDustQty}) while tracked qty=${trackedQty}`
+            + `${isDustByExchangeRules ? ` (fails exchange rules: ${exchangeReason || "unknown"})` : ""}.`
         );
         removeActivePositionByKey(positionKey);
         await saveDB();
@@ -1094,9 +1126,9 @@ const createOrderExecutionHelpers = ({
         const metrics = getMetrics();
         const db = getDb();
         const spotPair = getSpotPair(db.pair);
-        if (!Number.isFinite(position?.targetPrice) || position.targetPrice <= 0) return null;
-        if (!Number.isFinite(position?.stopLossPrice) || position.stopLossPrice <= 0) return null;
-        if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return null;
+        if (!Number.isFinite(position?.targetPrice) || position.targetPrice <= 0) return { blocked: true, reason: "TP price is invalid." };
+        if (!Number.isFinite(position?.stopLossPrice) || position.stopLossPrice <= 0) return { blocked: true, reason: "SL price is invalid." };
+        if (!Number.isFinite(position?.quantity) || position.quantity <= 0) return { blocked: true, reason: "Position quantity is invalid." };
 
         const closeSide = position.side === "buy" ? "sell" : "buy";
         let quantity = formatAmountToMarketPrecision(db.pair, position.quantity);
@@ -1121,11 +1153,20 @@ const createOrderExecutionHelpers = ({
             const feeBufferRate = resolveSpotSellFeeBufferRate(marketInfo);
             const qtyAfterFeeBuffer = formatAmountToMarketPrecision(db.pair, Math.max(0, quantity * (1 - feeBufferRate)));
             if (Number.isFinite(qtyAfterFeeBuffer) && qtyAfterFeeBuffer > 0 && qtyAfterFeeBuffer < quantity) {
-                console.log(
-                    `[OCO][INFO] Applying sell fee buffer ${(feeBufferRate * 100).toFixed(4)}% `
-                    + `for ${baseAsset || "base asset"}: qty ${quantity} -> ${qtyAfterFeeBuffer}`
-                );
-                quantity = qtyAfterFeeBuffer;
+                const bufferedTpValidation = validateOrderSize(marketInfo, qtyAfterFeeBuffer, targetPrice, { orderType: "LIMIT" });
+                const bufferedSlValidation = validateOrderSize(marketInfo, qtyAfterFeeBuffer, stopPrice, { orderType: "STOP_LOSS_LIMIT" });
+                if (bufferedTpValidation.valid && bufferedSlValidation.valid) {
+                    console.log(
+                        `[OCO][INFO] Applying sell fee buffer ${(feeBufferRate * 100).toFixed(4)}% `
+                        + `for ${baseAsset || "base asset"}: qty ${quantity} -> ${qtyAfterFeeBuffer}`
+                    );
+                    quantity = qtyAfterFeeBuffer;
+                } else {
+                    console.log(
+                        `[OCO][INFO] Ignoring sell fee buffer ${(feeBufferRate * 100).toFixed(4)}% `
+                        + `for ${baseAsset || "base asset"} because adjusted qty ${qtyAfterFeeBuffer} fails exchange filters.`
+                    );
+                }
             }
         }
 
@@ -1408,8 +1449,11 @@ const createOrderExecutionHelpers = ({
     const syncOcoExitOrder = async (positionKey, sourcePosition) => {
         return await runManagedOrderSync(`OCO:${positionKey}`, async () => {
             const position = { ...sourcePosition };
-            if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
-            if (!Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
+            if (!position) return;
+            if (!Number.isFinite(position.targetPrice) || position.targetPrice <= 0 || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) {
+                await tryClearSpotStalePositionWithoutExit(positionKey, position, "OCO_BLOCKED: Missing TP/SL on active position.");
+                return;
+            }
             const didClampStopLoss = await clampStopLossOutsideGridZone(position);
             if (didClampStopLoss) {
                 upsertActivePosition(position);
@@ -1494,7 +1538,16 @@ const createOrderExecutionHelpers = ({
                 await tryClearSpotStalePositionWithoutExit(positionKey, position, `OCO_BLOCKED: ${nextReason}`);
                 return;
             }
-            if (!placedOco?.tpOrder || !placedOco?.slOrder) return;
+            if (!placedOco?.tpOrder || !placedOco?.slOrder) {
+                const nextReason = "OCO placement returned without complete TP/SL legs.";
+                console.warn(`[OCO][WARN] OCO replacement paused for ${positionKey}: ${nextReason}`);
+                position.ocoBlockedReason = nextReason;
+                position.ocoBlockedFingerprint = protectionFingerprint;
+                upsertActivePosition(position);
+                await saveDB();
+                await tryClearSpotStalePositionWithoutExit(positionKey, position, `OCO_BLOCKED: ${nextReason}`);
+                return;
+            }
             position.tpOrderId = placedOco.tpOrder.id || null;
             position.tpClientOrderId = getExchangeClientOrderId(placedOco.tpOrder) || getTpClientOrderId(position);
             position.slOrderId = placedOco.slOrder.id || null;
