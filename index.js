@@ -112,6 +112,7 @@ const GRID_CLIENT_ORDER_PREFIX = "smartgrid";
 const TP_CLIENT_ORDER_PREFIX = "smarttp";
 const SL_CLIENT_ORDER_PREFIX = "smartsl";
 const ORDER_SAMPLE_LIMIT = 4;
+const getSpotPair = (pair) => String(pair || "").split(":")[0];
 
 let metrics = {
     windowStart: Date.now(),
