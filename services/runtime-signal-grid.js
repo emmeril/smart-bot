@@ -429,7 +429,7 @@ const createRuntimeSignalGridHelpers = ({
             const effectiveSizeMeta = resolveEffectiveGridOrderSizeUsdt({
                 availableUsdt,
                 configuredOrderSizeUsdt: params.gridOrderSizeUsdt,
-                configuredOrdersPerSide: params.gridOrdersPerSide,
+                configuredOrdersPerSide: params.configuredGridOrdersPerSide,
                 referencePrice: snapshot.currentPrice,
                 market: exchange?.markets?.[db?.pair],
                 gridLevels: params.gridLevels
@@ -438,7 +438,7 @@ const createRuntimeSignalGridHelpers = ({
             const effectiveAvailableUsdt = availableUsdt + (openGridOrders.length * Math.max(0, params.gridOrderSizeUsdt));
             const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
                 availableUsdt: effectiveAvailableUsdt,
-                configuredOrdersPerSide: params.gridOrdersPerSide,
+                configuredOrdersPerSide: params.configuredGridOrdersPerSide,
                 perOrderMargin: params.gridOrderSizeUsdt,
                 referencePrice: snapshot.currentPrice,
                 market: exchange?.markets?.[db?.pair],
@@ -449,7 +449,7 @@ const createRuntimeSignalGridHelpers = ({
             }
             const adjustedOrdersMeta = resolveEffectiveGridOrdersPerSide({
                 availableUsdt: effectiveAvailableUsdt,
-                configuredOrdersPerSide: params.gridOrdersPerSide,
+                configuredOrdersPerSide: params.configuredGridOrdersPerSide,
                 perOrderMargin: params.gridOrderSizeUsdt,
                 referencePrice: snapshot.currentPrice,
                 market: exchange?.markets?.[db?.pair],
