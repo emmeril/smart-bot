@@ -213,6 +213,7 @@ const createGridRuntimeHelpers = ({
             configuredGridEntryBufferPercent: Math.max(0, toFiniteNumber(db.gridEntryBufferPercent, defaultConfig.gridEntryBufferPercent)),
             gridLevels,
             gridTakeProfitLevels,
+            configuredGridOrdersPerSide: Math.max(0, Math.trunc(toFiniteNumber(db.gridOrdersPerSide, defaultConfig.gridOrdersPerSide))),
             gridOrdersPerSide: Math.max(0, Math.trunc(toFiniteNumber(db.gridOrdersPerSide, defaultConfig.gridOrdersPerSide))),
             gridOrderSizeUsdt: Math.max(0, toFiniteNumber(db.gridOrderSizeUsdt, defaultConfig.gridOrderSizeUsdt)),
             gridRangePercent,
@@ -894,10 +895,7 @@ const createGridRuntimeHelpers = ({
 
         nextConfig.marginMode = "spot";
 
-        const activeGridFingerprint = String(nextConfig.activeGridState?.fingerprint || "");
-        const expectedGridFingerprint = buildGridStateFingerprintForConfig(nextConfig);
-        if (activeGridFingerprint !== expectedGridFingerprint || changed) {
-            if (nextConfig.activeGridState !== null) changed = true;
+        if (changed && nextConfig.activeGridState !== null) {
             nextConfig.activeGridState = null;
         }
 
