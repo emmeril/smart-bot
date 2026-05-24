@@ -311,7 +311,8 @@ const {
     getMetrics: () => metrics,
     getDb: () => db,
     getGridRuntimeSummary: (...args) => getGridRuntimeSummary(...args),
-    getAccountPositionMode: () => accountPositionMode
+    getAccountPositionMode: () => accountPositionMode,
+    fetchManagedOpenOrdersSnapshot: (...args) => fetchManagedOpenOrdersSnapshot(...args)
 });
 
 const {
@@ -1513,7 +1514,7 @@ const {
         webServer = await startWebDashboard(webServer);
         await bootstrapRuntime();
         const totalUSDT = await getTotalUSDTBalance(true);
-        printStartupBanner(totalUSDT);
+        await printStartupBanner(totalUSDT);
         lastTradeAt = getLastTradeTimestampFromLog();
 
         mainLoopTimer = setInterval(async () => {

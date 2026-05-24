@@ -2,7 +2,8 @@ const createRuntimeReportingHelpers = ({
     getMetrics,
     getDb,
     getGridRuntimeSummary,
-    getAccountPositionMode
+    getAccountPositionMode,
+    fetchManagedOpenOrdersSnapshot
 }) => {
     const resetMetricWindow = () => {
         const metrics = getMetrics();
@@ -33,9 +34,12 @@ const createRuntimeReportingHelpers = ({
         }
     };
 
-    const printStartupBanner = (totalUSDT) => {
+    const printStartupBanner = async (totalUSDT) => {
         const db = getDb();
-        const gridSummary = getGridRuntimeSummary();
+        const managedOrders = typeof fetchManagedOpenOrdersSnapshot === "function"
+            ? await fetchManagedOpenOrdersSnapshot()
+            : null;
+        const gridSummary = getGridRuntimeSummary(NaN, managedOrders);
         const accountPositionMode = getAccountPositionMode();
         const formatGridTpSlLabel = (levels, fallbackLabel, unitLabel) => (
             levels <= 0 ? fallbackLabel : `${levels} ${unitLabel}`
