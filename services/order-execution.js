@@ -1262,15 +1262,22 @@ const createOrderExecutionHelpers = ({
         return Math.max(baseTolerance, feeBufferQty + precisionStep);
     };
 
+    const resolveExpectedOcoQuantity = (position) => {
+        const trackedQuantity = toFiniteNumber(position?.quantity, NaN);
+        const ocoQuantity = toFiniteNumber(position?.ocoQuantity, NaN);
+        const tolerance = getOcoQuantityTolerance(position);
+        if (!Number.isFinite(trackedQuantity) || trackedQuantity <= 0) return ocoQuantity;
+        if (!Number.isFinite(ocoQuantity) || ocoQuantity <= 0) return trackedQuantity;
+        if (Math.abs(ocoQuantity - trackedQuantity) <= tolerance) return ocoQuantity;
+        return trackedQuantity;
+    };
+
     const hasMatchingTpOrder = (order, position) => {
         if (!order) return false;
         const orderPrice = toFiniteNumber(order.price, NaN);
         const orderAmount = getOrderQuantity(order);
         const quantityTolerance = getOcoQuantityTolerance(position);
-        const expectedOcoQuantity = toFiniteNumber(position?.ocoQuantity, NaN);
-        const expectedQuantity = Number.isFinite(expectedOcoQuantity) && expectedOcoQuantity > 0
-            ? expectedOcoQuantity
-            : position.quantity;
+        const expectedQuantity = resolveExpectedOcoQuantity(position);
         const quantityMatches = !Number.isFinite(orderAmount)
             ? true
             : Math.abs(orderAmount - expectedQuantity) <= quantityTolerance;
@@ -1287,10 +1294,7 @@ const createOrderExecutionHelpers = ({
         const orderStopPrice = getOrderTriggerPrice(order);
         const orderAmount = getOrderQuantity(order);
         const closePositionOrder = isClosePositionManagedOrder(order, orderAmount);
-        const expectedOcoQuantity = toFiniteNumber(position?.ocoQuantity, NaN);
-        const expectedQuantity = Number.isFinite(expectedOcoQuantity) && expectedOcoQuantity > 0
-            ? expectedOcoQuantity
-            : position.quantity;
+        const expectedQuantity = resolveExpectedOcoQuantity(position);
         if (!isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice)) return false;
         if (closePositionOrder) return true;
         if (!Number.isFinite(orderAmount)) return true;
@@ -1572,5 +1576,4 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
 
