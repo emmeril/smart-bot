@@ -894,10 +894,7 @@ const createGridRuntimeHelpers = ({
 
         nextConfig.marginMode = "spot";
 
-        const activeGridFingerprint = String(nextConfig.activeGridState?.fingerprint || "");
-        const expectedGridFingerprint = buildGridStateFingerprintForConfig(nextConfig);
-        if (activeGridFingerprint !== expectedGridFingerprint || changed) {
-            if (nextConfig.activeGridState !== null) changed = true;
+        if (changed && nextConfig.activeGridState !== null) {
             nextConfig.activeGridState = null;
         }
 

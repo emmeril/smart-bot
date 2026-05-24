@@ -64,7 +64,8 @@ const createRuntimeSignalGridHelpers = ({
         targetSideOrders: null,
         pendingSideOrders: null,
         pendingSideOrdersStreak: 0,
-        lastRebuildAt: 0
+        lastRebuildAt: 0,
+        lastRebuildCooldownLogAt: 0
     };
     const GRID_RUNTIME_HYSTERESIS_CYCLES = 3;
     const GRID_RUNTIME_REBUILD_COOLDOWN_MS = 90 * 1000;
@@ -573,8 +574,11 @@ const createRuntimeSignalGridHelpers = ({
             const now = Date.now();
             const isRebuildCooldownActive = staleOrders.length > 0 && (now - gridRuntimeStability.lastRebuildAt) < GRID_RUNTIME_REBUILD_COOLDOWN_MS;
             if (isRebuildCooldownActive) {
-                const waitSeconds = Math.max(1, Math.ceil((GRID_RUNTIME_REBUILD_COOLDOWN_MS - (now - gridRuntimeStability.lastRebuildAt)) / 1000));
-                console.log(`[GRID][INFO] Rebuild cooldown active (${waitSeconds}s). Keeping current ladder until cooldown expires.`);
+                if (now - gridRuntimeStability.lastRebuildCooldownLogAt >= gridSyncLogTtl) {
+                    const waitSeconds = Math.max(1, Math.ceil((GRID_RUNTIME_REBUILD_COOLDOWN_MS - (now - gridRuntimeStability.lastRebuildAt)) / 1000));
+                    console.log(`[GRID][INFO] Rebuild cooldown active (${waitSeconds}s). Keeping current ladder until cooldown expires.`);
+                    gridRuntimeStability.lastRebuildCooldownLogAt = now;
+                }
                 return;
             }
             if (staleOrders.length > 0) {
