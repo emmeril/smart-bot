@@ -113,6 +113,28 @@ const createOrderExecutionHelpers = ({
         if (candidates.length === 0) return 0;
         return Math.min(...candidates);
     };
+
+    const tryClearSpotStalePositionWithoutExit = async (positionKey, position, reason) => {
+        if (!isSpotMarginMode()) return false;
+        if (String(position?.side || "").toLowerCase() !== "buy") return false;
+        const db = getDb();
+        const [baseAssetRaw = ""] = String(db?.pair || "").split("/");
+        const baseAsset = baseAssetRaw.trim();
+        if (!baseAsset || typeof fetchSpotBalances !== "function") return false;
+        const balances = await fetchSpotBalances();
+        const baseFree = toFiniteNumber(balances?.[baseAsset]?.free ?? balances?.[baseAsset], NaN);
+        const trackedQty = toFiniteNumber(position?.quantity, NaN);
+        if (!Number.isFinite(baseFree) || !Number.isFinite(trackedQty) || trackedQty <= 0) return false;
+        const dustTolerance = Math.max(0, trackedQty * 0.1);
+        if (baseFree > dustTolerance) return false;
+        console.warn(
+            `[POSITION][WARN] Clearing stale active ${positionKey}: ${reason}. `
+            + `Base free ${baseAsset}=${baseFree} while tracked qty=${trackedQty}.`
+        );
+        removeActivePositionByKey(positionKey);
+        await saveDB();
+        return true;
+    };
     const getRecoveryMetrics = () => {
         const metrics = getMetrics();
         if (!metrics || typeof metrics !== "object") return null;
@@ -1469,6 +1491,7 @@ const createOrderExecutionHelpers = ({
                     upsertActivePosition(position);
                     await saveDB();
                 }
+                await tryClearSpotStalePositionWithoutExit(positionKey, position, `OCO_BLOCKED: ${nextReason}`);
                 return;
             }
             if (!placedOco?.tpOrder || !placedOco?.slOrder) return;

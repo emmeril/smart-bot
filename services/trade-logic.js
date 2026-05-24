@@ -52,6 +52,37 @@ const createTradeLogicHelpers = ({
     };
 
     const getOrderFillSnapshot = (order, fallbackPrice, fallbackQuantity) => {
+        const resolveNetSpotQuantityAfterFee = (rawQuantity) => {
+            if (!Number.isFinite(rawQuantity) || rawQuantity <= 0) return rawQuantity;
+            const side = String(order?.side || order?.info?.side || "").toLowerCase();
+            if (side !== "buy") return rawQuantity;
+            const feeCandidates = [];
+            const directFeeCurrency = String(order?.fee?.currency || "").toUpperCase();
+            const baseAsset = String(order?.symbol || "").split("/")[0].toUpperCase();
+            const directFeeCost = toFiniteNumber(order?.fee?.cost, NaN);
+            if (Number.isFinite(directFeeCost) && directFeeCost > 0 && (!directFeeCurrency || !baseAsset || directFeeCurrency === baseAsset)) {
+                feeCandidates.push(directFeeCost);
+            }
+            if (Array.isArray(order?.fees)) {
+                for (const fee of order.fees) {
+                    const feeCost = toFiniteNumber(fee?.cost, NaN);
+                    const feeCurrency = String(fee?.currency || "").toUpperCase();
+                    if (Number.isFinite(feeCost) && feeCost > 0 && (!feeCurrency || !baseAsset || feeCurrency === baseAsset)) {
+                        feeCandidates.push(feeCost);
+                    }
+                }
+            }
+            const infoCommission = toFiniteNumber(order?.info?.commission, NaN);
+            const infoCommissionAsset = String(order?.info?.commissionAsset || "").toUpperCase();
+            if (Number.isFinite(infoCommission) && infoCommission > 0 && (!infoCommissionAsset || !baseAsset || infoCommissionAsset === baseAsset)) {
+                feeCandidates.push(infoCommission);
+            }
+            if (feeCandidates.length === 0) return rawQuantity;
+            const totalFeeInBase = feeCandidates.reduce((sum, value) => sum + value, 0);
+            const netQuantity = Math.max(0, rawQuantity - totalFeeInBase);
+            return netQuantity > 0 ? netQuantity : rawQuantity;
+        };
+
         const resolvedOrderQuantity = (() => {
             const directFilled = toFiniteNumber(order?.filled, NaN);
             if (Number.isFinite(directFilled) && directFilled > 0) return Math.abs(directFilled);
@@ -64,9 +95,10 @@ const createTradeLogicHelpers = ({
             return NaN;
         })();
         const resolvedFallbackQuantity = toFiniteNumber(fallbackQuantity, NaN);
-        const snapshotQuantity = Number.isFinite(resolvedOrderQuantity) && resolvedOrderQuantity > 0
+        const grossSnapshotQuantity = Number.isFinite(resolvedOrderQuantity) && resolvedOrderQuantity > 0
             ? resolvedOrderQuantity
             : resolvedFallbackQuantity;
+        const snapshotQuantity = resolveNetSpotQuantityAfterFee(grossSnapshotQuantity);
         return {
             price: getResolvedOrderPrice(order, fallbackPrice, snapshotQuantity),
             quantity: snapshotQuantity
