@@ -12,6 +12,7 @@ const createFonnteNotifierHelpers = ({
     const recentMessageMap = new Map();
     const DEDUPE_WINDOW_MS = 120000;
 
+
     const normalizeTargetList = (value) => (
         String(value || "")
             .split(",")
@@ -319,9 +320,13 @@ const createFonnteNotifierHelpers = ({
         reason,
         occurredAt
     }) => {
-        if (String(event || "").toUpperCase().trim() !== "GRID_FILLED") {
-            return { ok: true, skipped: true, reason: "Trade update disabled except GRID_FILLED event" };
+        const normalizedEvent = String(event || "").toUpperCase().trim();
+        const allowedTradeEvents = new Set(["OPEN", "GRID_FILLED", "PARTIAL_CLOSE"]);
+
+        if (!allowedTradeEvents.has(normalizedEvent)) {
+            return { ok: true, skipped: true, reason: `Unsupported trade update event: ${normalizedEvent || "UNKNOWN"}` };
         }
+
         const message = buildTradeUpdateMessage({
             event,
             position,
