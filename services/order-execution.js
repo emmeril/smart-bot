@@ -117,7 +117,9 @@ const createOrderExecutionHelpers = ({
     const tryClearSpotStalePositionWithoutExit = async (positionKey, position, reason) => {
         if (!isSpotMarginMode()) return false;
         if (String(position?.side || "").toLowerCase() !== "buy") return false;
+        const exchange = getExchange();
         const db = getDb();
+        const spotPair = getSpotPair(db?.pair);
         const [baseAssetRaw = ""] = String(db?.pair || "").split("/");
         const baseAsset = baseAssetRaw.trim();
         if (!baseAsset || typeof fetchSpotBalances !== "function") return false;
@@ -125,11 +127,32 @@ const createOrderExecutionHelpers = ({
         const baseFree = toFiniteNumber(balances?.[baseAsset]?.free ?? balances?.[baseAsset], NaN);
         const trackedQty = toFiniteNumber(position?.quantity, NaN);
         if (!Number.isFinite(baseFree) || !Number.isFinite(trackedQty) || trackedQty <= 0) return false;
-        const dustTolerance = Math.max(0, trackedQty * 0.1);
-        if (baseFree > dustTolerance) return false;
+        const marketInfo = exchange?.markets?.[spotPair] || exchange?.markets?.[db?.pair] || null;
+
+        const formattedDustQty = toFiniteNumber(formatAmountToMarketPrecision(marketInfo, baseFree), NaN);
+        const tpPrice = toFiniteNumber(position?.targetPrice, NaN);
+        const slPrice = toFiniteNumber(position?.stopLossPrice, NaN);
+        const tpValidation = Number.isFinite(formattedDustQty) && Number.isFinite(tpPrice)
+            ? validateOrderSize(marketInfo, formattedDustQty, tpPrice, { orderType: "LIMIT" })
+            : null;
+        const slValidation = Number.isFinite(formattedDustQty) && Number.isFinite(slPrice)
+            ? validateOrderSize(marketInfo, formattedDustQty, slPrice, { orderType: "STOP_LOSS_LIMIT" })
+            : null;
+        const hasValidationFailure = (validation) => validation && validation.ok === false;
+        const isDustByExchangeRules = hasValidationFailure(tpValidation) || hasValidationFailure(slValidation);
+
+        if (!isDustByExchangeRules) return false;
+        const exchangeReason = isDustByExchangeRules
+            ? [tpValidation, slValidation]
+                .filter(hasValidationFailure)
+                .map((validation) => validation?.reason)
+                .filter((value, index, arr) => value && arr.indexOf(value) === index)
+                .join(" | ")
+            : "";
         console.warn(
             `[POSITION][WARN] Clearing stale active ${positionKey}: ${reason}. `
-            + `Base free ${baseAsset}=${baseFree} while tracked qty=${trackedQty}.`
+            + `Base free ${baseAsset}=${baseFree} (formatted=${formattedDustQty}) while tracked qty=${trackedQty}`
+            + `${isDustByExchangeRules ? ` (fails exchange rules: ${exchangeReason || "unknown"})` : ""}.`
         );
         removeActivePositionByKey(positionKey);
         await saveDB();
@@ -1121,11 +1144,20 @@ const createOrderExecutionHelpers = ({
             const feeBufferRate = resolveSpotSellFeeBufferRate(marketInfo);
             const qtyAfterFeeBuffer = formatAmountToMarketPrecision(db.pair, Math.max(0, quantity * (1 - feeBufferRate)));
             if (Number.isFinite(qtyAfterFeeBuffer) && qtyAfterFeeBuffer > 0 && qtyAfterFeeBuffer < quantity) {
-                console.log(
-                    `[OCO][INFO] Applying sell fee buffer ${(feeBufferRate * 100).toFixed(4)}% `
-                    + `for ${baseAsset || "base asset"}: qty ${quantity} -> ${qtyAfterFeeBuffer}`
-                );
-                quantity = qtyAfterFeeBuffer;
+                const bufferedTpValidation = validateOrderSize(marketInfo, qtyAfterFeeBuffer, targetPrice, { orderType: "LIMIT" });
+                const bufferedSlValidation = validateOrderSize(marketInfo, qtyAfterFeeBuffer, stopPrice, { orderType: "STOP_LOSS_LIMIT" });
+                if (bufferedTpValidation.valid && bufferedSlValidation.valid) {
+                    console.log(
+                        `[OCO][INFO] Applying sell fee buffer ${(feeBufferRate * 100).toFixed(4)}% `
+                        + `for ${baseAsset || "base asset"}: qty ${quantity} -> ${qtyAfterFeeBuffer}`
+                    );
+                    quantity = qtyAfterFeeBuffer;
+                } else {
+                    console.log(
+                        `[OCO][INFO] Ignoring sell fee buffer ${(feeBufferRate * 100).toFixed(4)}% `
+                        + `for ${baseAsset || "base asset"} because adjusted qty ${qtyAfterFeeBuffer} fails exchange filters.`
+                    );
+                }
             }
         }
 
