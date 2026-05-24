@@ -192,6 +192,7 @@ const createGridRuntimeHelpers = ({
         });
         const gridTakeProfitLevels = Math.max(0, Math.trunc(toFiniteNumber(db.gridTakeProfitLevels, defaultConfig.gridTakeProfitLevels)));
         const neededCandles = Math.max(gridLookbackCandles + 5, volumePeriod + 10, atrPeriod + 30, entryBbPeriod + 30, entryAdxPeriod + 40, 180);
+        const runtimeSideOrders = Math.max(effectiveOrdersMeta.count, buyOrders);
         return {
             strategy: "spot_grid",
             volumePeriod,
@@ -213,6 +214,7 @@ const createGridRuntimeHelpers = ({
             configuredGridEntryBufferPercent: Math.max(0, toFiniteNumber(db.gridEntryBufferPercent, defaultConfig.gridEntryBufferPercent)),
             gridLevels,
             gridTakeProfitLevels,
+            configuredGridOrdersPerSide: Math.max(0, Math.trunc(toFiniteNumber(db.gridOrdersPerSide, defaultConfig.gridOrdersPerSide))),
             gridOrdersPerSide: Math.max(0, Math.trunc(toFiniteNumber(db.gridOrdersPerSide, defaultConfig.gridOrdersPerSide))),
             gridOrderSizeUsdt: Math.max(0, toFiniteNumber(db.gridOrderSizeUsdt, defaultConfig.gridOrderSizeUsdt)),
             gridRangePercent,
@@ -802,8 +804,9 @@ const createGridRuntimeHelpers = ({
             market: exchange?.markets?.[db?.pair],
             gridLevels: effectiveGridLevels
         });
+        const effectiveAvailableUsdt = availableUsdt + (gridOrders.length * Math.max(0, effectiveSizeMeta.orderSizeUsdt));
         const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
-            availableUsdt,
+            availableUsdt: effectiveAvailableUsdt,
             configuredOrdersPerSide: db.gridOrdersPerSide,
             perOrderMargin: effectiveSizeMeta.orderSizeUsdt,
             referencePrice,
@@ -827,13 +830,13 @@ const createGridRuntimeHelpers = ({
             stepLabel: hasLockedGrid ? step.toFixed(6) : "N/A",
             slotLabel,
             ladderLabel: `${buyOrders} buy / ${sellOrders} sell`,
-            effectiveOrdersPerSide: effectiveOrdersMeta.count,
+            effectiveOrdersPerSide: runtimeSideOrders,
             configuredOrdersPerSideCap: effectiveOrdersMeta.maxConfigured,
             ordersMode: effectiveOrdersMeta.mode,
             effectiveOrderSizeUsdt: effectiveSizeMeta.orderSizeUsdt,
             minOrderSizeUsdt: effectiveSizeMeta.minOrderSizeUsdt,
             sizeMode: effectiveSizeMeta.mode,
-            availableUsdtLabel: Number.isFinite(availableUsdt) ? availableUsdt.toFixed(2) : "N/A"
+            availableUsdtLabel: Number.isFinite(availableUsdt) ? `${availableUsdt.toFixed(2)} (effective ${effectiveAvailableUsdt.toFixed(2)})` : "N/A"
         };
     };
 
@@ -894,10 +897,7 @@ const createGridRuntimeHelpers = ({
 
         nextConfig.marginMode = "spot";
 
-        const activeGridFingerprint = String(nextConfig.activeGridState?.fingerprint || "");
-        const expectedGridFingerprint = buildGridStateFingerprintForConfig(nextConfig);
-        if (activeGridFingerprint !== expectedGridFingerprint || changed) {
-            if (nextConfig.activeGridState !== null) changed = true;
+        if (changed && nextConfig.activeGridState !== null) {
             nextConfig.activeGridState = null;
         }
 
