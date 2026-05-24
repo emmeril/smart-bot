@@ -213,6 +213,7 @@ const createGridRuntimeHelpers = ({
             configuredGridEntryBufferPercent: Math.max(0, toFiniteNumber(db.gridEntryBufferPercent, defaultConfig.gridEntryBufferPercent)),
             gridLevels,
             gridTakeProfitLevels,
+            configuredGridOrdersPerSide: Math.max(0, Math.trunc(toFiniteNumber(db.gridOrdersPerSide, defaultConfig.gridOrdersPerSide))),
             gridOrdersPerSide: Math.max(0, Math.trunc(toFiniteNumber(db.gridOrdersPerSide, defaultConfig.gridOrdersPerSide))),
             gridOrderSizeUsdt: Math.max(0, toFiniteNumber(db.gridOrderSizeUsdt, defaultConfig.gridOrderSizeUsdt)),
             gridRangePercent,
@@ -802,8 +803,9 @@ const createGridRuntimeHelpers = ({
             market: exchange?.markets?.[db?.pair],
             gridLevels: effectiveGridLevels
         });
+        const effectiveAvailableUsdt = availableUsdt + (gridOrders.length * Math.max(0, effectiveSizeMeta.orderSizeUsdt));
         const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
-            availableUsdt,
+            availableUsdt: effectiveAvailableUsdt,
             configuredOrdersPerSide: db.gridOrdersPerSide,
             perOrderMargin: effectiveSizeMeta.orderSizeUsdt,
             referencePrice,
@@ -833,7 +835,7 @@ const createGridRuntimeHelpers = ({
             effectiveOrderSizeUsdt: effectiveSizeMeta.orderSizeUsdt,
             minOrderSizeUsdt: effectiveSizeMeta.minOrderSizeUsdt,
             sizeMode: effectiveSizeMeta.mode,
-            availableUsdtLabel: Number.isFinite(availableUsdt) ? availableUsdt.toFixed(2) : "N/A"
+            availableUsdtLabel: Number.isFinite(availableUsdt) ? `${availableUsdt.toFixed(2)} (effective ${effectiveAvailableUsdt.toFixed(2)})` : "N/A"
         };
     };
 
@@ -894,10 +896,7 @@ const createGridRuntimeHelpers = ({
 
         nextConfig.marginMode = "spot";
 
-        const activeGridFingerprint = String(nextConfig.activeGridState?.fingerprint || "");
-        const expectedGridFingerprint = buildGridStateFingerprintForConfig(nextConfig);
-        if (activeGridFingerprint !== expectedGridFingerprint || changed) {
-            if (nextConfig.activeGridState !== null) changed = true;
+        if (changed && nextConfig.activeGridState !== null) {
             nextConfig.activeGridState = null;
         }
 
