@@ -39,6 +39,7 @@ const createOrderExecutionHelpers = ({
     const managedOrderSyncChains = new Map();
     const protectionUpdateStateByKey = new Map();
     const PROTECTION_UPDATE_SUPPRESS_MS = 90 * 1000;
+    const OCO_BLOCKED_STALE_CLEAR_RETRY_THRESHOLD = 3;
     const ORDER_REQUEST_TIMEOUT_MS = 12000;
     const DUPLICATE_LOOKUP_ATTEMPTS = 3;
     const DUPLICATE_LOOKUP_DELAY_MS = 150;
@@ -1466,6 +1467,20 @@ const createOrderExecutionHelpers = ({
             ].join("|");
 
             if (position.ocoBlockedReason && position.ocoBlockedFingerprint === protectionFingerprint) {
+                const blockedRetryCount = Math.max(0, Number(position.ocoBlockedRetryCount || 0)) + 1;
+                position.ocoBlockedRetryCount = blockedRetryCount;
+                upsertActivePosition(position);
+                await saveDB();
+                if (blockedRetryCount >= OCO_BLOCKED_STALE_CLEAR_RETRY_THRESHOLD) {
+                    position.ocoBlockedRetryCount = 0;
+                    upsertActivePosition(position);
+                    await saveDB();
+                    await tryClearSpotStalePositionWithoutExit(
+                        positionKey,
+                        position,
+                        `OCO_BLOCKED_RECHECK: ${position.ocoBlockedReason}`
+                    );
+                }
                 return;
             }
 
@@ -1532,6 +1547,7 @@ const createOrderExecutionHelpers = ({
                     console.warn(`[OCO][WARN] OCO replacement paused for ${positionKey}: ${nextReason}`);
                     position.ocoBlockedReason = nextReason;
                     position.ocoBlockedFingerprint = protectionFingerprint;
+                    position.ocoBlockedRetryCount = 0;
                     upsertActivePosition(position);
                     await saveDB();
                 }
@@ -1543,6 +1559,7 @@ const createOrderExecutionHelpers = ({
                 console.warn(`[OCO][WARN] OCO replacement paused for ${positionKey}: ${nextReason}`);
                 position.ocoBlockedReason = nextReason;
                 position.ocoBlockedFingerprint = protectionFingerprint;
+                position.ocoBlockedRetryCount = 0;
                 upsertActivePosition(position);
                 await saveDB();
                 await tryClearSpotStalePositionWithoutExit(positionKey, position, `OCO_BLOCKED: ${nextReason}`);
@@ -1555,6 +1572,7 @@ const createOrderExecutionHelpers = ({
             position.ocoQuantity = getOrderQuantity(placedOco.tpOrder);
             position.ocoBlockedReason = null;
             position.ocoBlockedFingerprint = null;
+            position.ocoBlockedRetryCount = 0;
             upsertActivePosition(position);
             await saveDB();
             console.log(`[OCO] Attached exchange OCO exit to ${positionKey}`);
