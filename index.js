@@ -556,12 +556,34 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
             }
         }
 
+        const nextTargetProfitUSDT = Number.isFinite(toFiniteNumber(position?.targetProfitUSDT, NaN))
+            ? Math.abs(toFiniteNumber(position.targetProfitUSDT, 0))
+            : Math.abs(toFiniteNumber(db?.gridTargetProfitUsdt, 0));
+        const fallbackStopLossUSDT = Math.abs((formattedQty * nextEntryPrice) * (Math.max(0, toFiniteNumber(db?.gridStopLossPercent, 0)) / 100));
+        const nextStopLossUSDTAbs = Number.isFinite(toFiniteNumber(position?.stopLossUSDT, NaN))
+            ? Math.abs(toFiniteNumber(position.stopLossUSDT, 0))
+            : fallbackStopLossUSDT;
+        const side = String(position?.side || "").toLowerCase();
+        const isBuySide = side !== "sell";
+        const nextTargetDistance = formattedQty > 0 ? (nextTargetProfitUSDT / formattedQty) : NaN;
+        const nextStopDistance = formattedQty > 0 ? (nextStopLossUSDTAbs / formattedQty) : NaN;
+        const nextTargetPrice = Number.isFinite(nextTargetDistance) && nextTargetDistance > 0
+            ? formatPriceToMarketPrecision(db?.pair, isBuySide ? (nextEntryPrice + nextTargetDistance) : (nextEntryPrice - nextTargetDistance))
+            : toFiniteNumber(position?.targetPrice, NaN);
+        const nextStopLossPrice = Number.isFinite(nextStopDistance) && nextStopDistance > 0
+            ? formatPriceToMarketPrecision(db?.pair, isBuySide ? (nextEntryPrice - nextStopDistance) : (nextEntryPrice + nextStopDistance))
+            : toFiniteNumber(position?.stopLossPrice, NaN);
+
         return {
             type: "update",
             nextPosition: {
                 ...position,
                 quantity: formattedQty,
-                entryPrice: nextEntryPrice
+                entryPrice: nextEntryPrice,
+                targetPrice: nextTargetPrice,
+                stopLossPrice: nextStopLossPrice,
+                targetProfitUSDT: nextTargetProfitUSDT,
+                stopLossUSDT: -Math.abs(nextStopLossUSDTAbs)
             }
         };
     };
