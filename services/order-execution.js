@@ -1262,15 +1262,35 @@ const createOrderExecutionHelpers = ({
         return Math.max(baseTolerance, feeBufferQty + precisionStep);
     };
 
+    const resolveExpectedOcoQuantity = (position) => {
+        const db = getDb();
+        const exchange = getExchange();
+        const spotPair = getSpotPair(db?.pair);
+        const marketInfo = exchange?.markets?.[spotPair] || exchange?.markets?.[db?.pair];
+        const trackedQuantity = toFiniteNumber(position?.quantity, NaN);
+        const ocoQuantity = toFiniteNumber(position?.ocoQuantity, NaN);
+        const closeSide = String(position?.side || "").toLowerCase() === "buy" ? "sell" : "buy";
+        const tolerance = getOcoQuantityTolerance(position);
+        if (!Number.isFinite(trackedQuantity) || trackedQuantity <= 0) return ocoQuantity;
+        if (isSpotMarginMode() && closeSide === "sell") {
+            const feeBufferRate = Math.max(0, toFiniteNumber(resolveSpotSellFeeBufferRate(marketInfo), 0));
+            const bufferedQty = formatAmountToMarketPrecision(db?.pair, Math.max(0, trackedQuantity * (1 - feeBufferRate)));
+            if (Number.isFinite(bufferedQty) && bufferedQty > 0) {
+                if (Number.isFinite(ocoQuantity) && ocoQuantity > 0 && Math.abs(ocoQuantity - bufferedQty) <= tolerance) return ocoQuantity;
+                return bufferedQty;
+            }
+        }
+        if (!Number.isFinite(ocoQuantity) || ocoQuantity <= 0) return trackedQuantity;
+        if (Math.abs(ocoQuantity - trackedQuantity) <= tolerance) return ocoQuantity;
+        return trackedQuantity;
+    };
+
     const hasMatchingTpOrder = (order, position) => {
         if (!order) return false;
         const orderPrice = toFiniteNumber(order.price, NaN);
         const orderAmount = getOrderQuantity(order);
         const quantityTolerance = getOcoQuantityTolerance(position);
-        const expectedOcoQuantity = toFiniteNumber(position?.ocoQuantity, NaN);
-        const expectedQuantity = Number.isFinite(expectedOcoQuantity) && expectedOcoQuantity > 0
-            ? expectedOcoQuantity
-            : position.quantity;
+        const expectedQuantity = resolveExpectedOcoQuantity(position);
         const quantityMatches = !Number.isFinite(orderAmount)
             ? true
             : Math.abs(orderAmount - expectedQuantity) <= quantityTolerance;
@@ -1287,10 +1307,7 @@ const createOrderExecutionHelpers = ({
         const orderStopPrice = getOrderTriggerPrice(order);
         const orderAmount = getOrderQuantity(order);
         const closePositionOrder = isClosePositionManagedOrder(order, orderAmount);
-        const expectedOcoQuantity = toFiniteNumber(position?.ocoQuantity, NaN);
-        const expectedQuantity = Number.isFinite(expectedOcoQuantity) && expectedOcoQuantity > 0
-            ? expectedOcoQuantity
-            : position.quantity;
+        const expectedQuantity = resolveExpectedOcoQuantity(position);
         if (!isManagedOrderPriceMatch(position.stopLossPrice, orderStopPrice)) return false;
         if (closePositionOrder) return true;
         if (!Number.isFinite(orderAmount)) return true;
@@ -1409,7 +1426,7 @@ const createOrderExecutionHelpers = ({
                     position.tpClientOrderId !== nextTpClientOrderId ||
                     position.slOrderId !== nextSlOrderId ||
                     position.slClientOrderId !== nextSlClientOrderId ||
-                    position.ocoQuantity !== getOrderQuantity(matchingTpOrder) ||
+                    Math.abs(toFiniteNumber(position.ocoQuantity, NaN) - toFiniteNumber(getOrderQuantity(matchingTpOrder), NaN)) > getOcoQuantityTolerance(position) ||
                     position.targetPrice !== nextTargetPrice ||
                     position.stopLossPrice !== nextStopLossPrice
                 ) {
@@ -1572,5 +1589,3 @@ const createOrderExecutionHelpers = ({
 };
 
 module.exports = { createOrderExecutionHelpers };
-
-
