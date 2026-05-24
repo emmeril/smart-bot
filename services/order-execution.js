@@ -132,6 +132,7 @@ const createOrderExecutionHelpers = ({
         const formattedDustQty = toFiniteNumber(formatAmountToMarketPrecision(marketInfo, baseFree), NaN);
         const tpPrice = toFiniteNumber(position?.targetPrice, NaN);
         const slPrice = toFiniteNumber(position?.stopLossPrice, NaN);
+        const hasProtectionPrices = Number.isFinite(tpPrice) && tpPrice > 0 && Number.isFinite(slPrice) && slPrice > 0;
         const tpValidation = Number.isFinite(formattedDustQty) && Number.isFinite(tpPrice)
             ? validateOrderSize(marketInfo, formattedDustQty, tpPrice, { orderType: "LIMIT" })
             : null;
@@ -139,13 +140,21 @@ const createOrderExecutionHelpers = ({
             ? validateOrderSize(marketInfo, formattedDustQty, slPrice, { orderType: "STOP_LOSS_LIMIT" })
             : null;
         const hasValidationFailure = (validation) => validation && (validation.valid === false || validation.ok === false);
-        const isDustByExchangeRules = hasValidationFailure(tpValidation) || hasValidationFailure(slValidation);
+        const minTradableQty = toFiniteNumber(marketInfo?.limits?.amount?.min, NaN);
+        const isDustByMinQtyOnly = !hasProtectionPrices
+            && Number.isFinite(formattedDustQty)
+            && Number.isFinite(minTradableQty)
+            && minTradableQty > 0
+            && formattedDustQty > 0
+            && formattedDustQty < minTradableQty;
+        const isDustByExchangeRules = hasValidationFailure(tpValidation) || hasValidationFailure(slValidation) || isDustByMinQtyOnly;
 
         if (!isDustByExchangeRules) return false;
         const exchangeReason = isDustByExchangeRules
             ? [tpValidation, slValidation]
                 .filter(hasValidationFailure)
                 .map((validation) => validation?.reason)
+                .concat(isDustByMinQtyOnly ? [`LOT_SIZE minQty fallback: ${formattedDustQty} < ${minTradableQty}`] : [])
                 .filter((value, index, arr) => value && arr.indexOf(value) === index)
                 .join(" | ")
             : "";
@@ -1440,8 +1449,11 @@ const createOrderExecutionHelpers = ({
     const syncOcoExitOrder = async (positionKey, sourcePosition) => {
         return await runManagedOrderSync(`OCO:${positionKey}`, async () => {
             const position = { ...sourcePosition };
-            if (!position || !Number.isFinite(position.targetPrice) || position.targetPrice <= 0) return;
-            if (!Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) return;
+            if (!position) return;
+            if (!Number.isFinite(position.targetPrice) || position.targetPrice <= 0 || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) {
+                await tryClearSpotStalePositionWithoutExit(positionKey, position, "OCO_BLOCKED: Missing TP/SL on active position.");
+                return;
+            }
             const didClampStopLoss = await clampStopLossOutsideGridZone(position);
             if (didClampStopLoss) {
                 upsertActivePosition(position);
