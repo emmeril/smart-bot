@@ -138,7 +138,7 @@ const createOrderExecutionHelpers = ({
         const slValidation = Number.isFinite(formattedDustQty) && Number.isFinite(slPrice)
             ? validateOrderSize(marketInfo, formattedDustQty, slPrice, { orderType: "STOP_LOSS_LIMIT" })
             : null;
-        const hasValidationFailure = (validation) => validation && validation.ok === false;
+        const hasValidationFailure = (validation) => validation && (validation.valid === false || validation.ok === false);
         const isDustByExchangeRules = hasValidationFailure(tpValidation) || hasValidationFailure(slValidation);
 
         if (!isDustByExchangeRules) return false;
