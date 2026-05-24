@@ -572,7 +572,7 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
             positionsMap[positionKey] = aggregateSyncResult.nextPosition;
             upsertActivePosition(aggregateSyncResult.nextPosition);
             didSyncAggregateQuantity = true;
-            console.log(`[SYNC][INFO] Aggregate wallet sync updated ${positionKey} qty ${currentPosition.quantity} -> ${aggregateSyncResult.nextPosition.quantity}`);
+            console.log(`[SYNC][INFO] Aggregate wallet sync updated ${positionKey} qty ${currentPosition.quantity} -> ${aggregateSyncResult.nextPosition.quantity}, entry ${currentPosition.entryPrice} -> ${aggregateSyncResult.nextPosition.entryPrice}`);
         }
 
         const positionAfterAggregateSync = positionsMap[positionKey] || currentPosition;
