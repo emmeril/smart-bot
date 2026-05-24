@@ -9,7 +9,8 @@ const createDashboardConfigHelpers = ({
     refreshRuntimeSchedulers,
     syncExchangeRuntimeSettings,
     buildDashboardPayload,
-    applyAutoPresetToConfig
+    applyAutoPresetToConfig,
+    cancelOpenGridOrdersOnPairChange
 }) => {
     let dashboardConfigOperationChain = Promise.resolve();
 
@@ -65,6 +66,14 @@ const createDashboardConfigHelpers = ({
 
         const current = { ...currentDb };
         const payload = pickEditableConfig(incoming);
+        const currentPair = String(current?.pair || "").trim().toUpperCase();
+        const requestedPair = Object.prototype.hasOwnProperty.call(payload, "pair")
+            ? String(payload?.pair || "").trim().toUpperCase()
+            : "";
+
+        if (hasAnyActivePosition() && requestedPair && requestedPair !== currentPair) {
+            throw new Error("Cannot change pair while positions are active. Close active positions first.");
+        }
         const merged = { ...current, ...payload };
         const protectedRuntimeValues = new Map();
 
@@ -85,6 +94,14 @@ const createDashboardConfigHelpers = ({
         applyDashboardRuntimeState(nextConfig, current);
         replaceConfigObject(currentDb, nextConfig);
         await persistRuntimeConfigChanges(current);
+        const previousPair = currentPair;
+        const nextPair = String(nextConfig?.pair || "").trim().toUpperCase();
+        if (previousPair && nextPair && previousPair !== nextPair && typeof cancelOpenGridOrdersOnPairChange === "function") {
+            await cancelOpenGridOrdersOnPairChange({
+                fromPair: previousPair,
+                toPair: nextPair
+            });
+        }
         return buildDashboardPayload();
     });
 
