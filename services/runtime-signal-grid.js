@@ -535,16 +535,17 @@ const createRuntimeSignalGridHelpers = ({
                     );
             }
             if (adjustedOrdersMeta.count < adjustedOrdersMeta.maxConfigured) {
+                const sizingBalanceLabel = `free ${availableUsdt.toFixed(2)} | effective ${effectiveAvailableUsdt.toFixed(2)} USDT`;
                 maybeLogGridSizingStateExternal
                     ? maybeLogGridSizingStateExternal(
                         "COUNT",
-                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
-                        `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}`
+                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | ${sizingBalanceLabel}`,
+                        `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}:${effectiveAvailableUsdt.toFixed(2)}`
                     )
                     : maybeLogGridSizingState(
                         "COUNT",
-                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
-                        `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}`
+                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | ${sizingBalanceLabel}`,
+                        `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}:${effectiveAvailableUsdt.toFixed(2)}`
                     );
             }
 
