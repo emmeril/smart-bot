@@ -1073,17 +1073,7 @@ const {
         if (!exchange) return;
         await setMarginMode();
     },
-    buildDashboardPayload,
-    cancelOpenGridOrdersOnPairChange: async ({ fromPair, toPair }) => {
-        try {
-            const openGridOrders = await fetchOpenGridOrders();
-            if (openGridOrders.length === 0) return;
-            await cancelGridOrders(openGridOrders, `PAIR_SWITCH_${fromPair}_TO_${toPair}`);
-            console.log(`[DASHBOARD][INFO] Pair changed ${fromPair} -> ${toPair}. Canceled ${openGridOrders.length} open grid order(s).`);
-        } catch (error) {
-            console.warn(`[DASHBOARD][WARN] Pair changed ${fromPair} -> ${toPair}, but failed to cancel open grid orders: ${error.message}`);
-        }
-    }
+    buildDashboardPayload
 });
 
 const removeDashboardPosition = async (positionKey) => {
