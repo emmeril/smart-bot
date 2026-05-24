@@ -466,6 +466,44 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
         return Number.isFinite(flat) ? flat : NaN;
     };
 
+    const resolveRecentSpotBuyAveragePrice = async (addedQty) => {
+        if (!Number.isFinite(addedQty) || addedQty <= 0) return NaN;
+        if (!exchange || typeof exchange.fetchMyTrades !== "function") return NaN;
+        if (exchange.options?.smartBotPrivateAuthFailed) return NaN;
+        if (exchange.has && exchange.has.fetchMyTrades === false) return NaN;
+        const symbol = getSpotPair(db?.pair);
+        if (!symbol) return NaN;
+        try {
+            const lookbackMs = 15 * 60 * 1000;
+            const since = Date.now() - lookbackMs;
+            const trades = await exchange.fetchMyTrades(symbol, since, 100);
+            if (!Array.isArray(trades) || trades.length === 0) return NaN;
+
+            let remainingQty = addedQty;
+            let weightedCost = 0;
+            const sortedRecent = trades
+                .filter((trade) => String(trade?.side || "").toLowerCase() === "buy")
+                .sort((a, b) => toFiniteNumber(b?.timestamp, 0) - toFiniteNumber(a?.timestamp, 0));
+
+            for (const trade of sortedRecent) {
+                const tradeQty = toFiniteNumber(trade?.amount, NaN);
+                const tradePrice = toFiniteNumber(trade?.price, NaN);
+                if (!Number.isFinite(tradeQty) || tradeQty <= 0 || !Number.isFinite(tradePrice) || tradePrice <= 0) continue;
+                const takeQty = Math.min(remainingQty, tradeQty);
+                weightedCost += takeQty * tradePrice;
+                remainingQty -= takeQty;
+                if (remainingQty <= POSITION_SYNC_QTY_TOLERANCE) break;
+            }
+
+            const filledQty = addedQty - Math.max(0, remainingQty);
+            if (filledQty <= POSITION_SYNC_QTY_TOLERANCE) return NaN;
+            return weightedCost / filledQty;
+        } catch (tradeFetchError) {
+            console.warn(`[SYNC][WARN] Failed to fetch recent trades for aggregate entry-price blend: ${tradeFetchError.message}`);
+            return NaN;
+        }
+    };
+
     const syncSpotAggregatePositionQuantity = async (positionKey, position) => {
         if (!isSpotRuntime || !position) return null;
         if (String(position?.side || "").toLowerCase() !== "buy") return null;
@@ -497,19 +535,22 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
 
         let nextEntryPrice = trackedEntryPrice;
         if (formattedQty > trackedQty && trackedQty > 0 && Number.isFinite(trackedEntryPrice) && trackedEntryPrice > 0) {
-            if (!Number.isFinite(spotTickerPrice) || spotTickerPrice <= 0) {
-                try {
-                    spotTickerPrice = await getPrice();
-                } catch (tickerError) {
-                    console.warn(`[SYNC][WARN] Failed to fetch ticker for aggregate entry-price blend: ${tickerError.message}`);
-                    spotTickerPrice = NaN;
+            const addedQty = Math.max(0, formattedQty - trackedQty);
+            if (addedQty > 0) {
+                let fillPrice = await resolveRecentSpotBuyAveragePrice(addedQty);
+                if (!Number.isFinite(fillPrice) || fillPrice <= 0) {
+                    if (!Number.isFinite(spotTickerPrice) || spotTickerPrice <= 0) {
+                        try {
+                            spotTickerPrice = await getPrice();
+                        } catch (tickerError) {
+                            console.warn(`[SYNC][WARN] Failed to fetch ticker for aggregate entry-price blend: ${tickerError.message}`);
+                            spotTickerPrice = NaN;
+                        }
+                    }
+                    fillPrice = spotTickerPrice;
                 }
-            }
-
-            if (Number.isFinite(spotTickerPrice) && spotTickerPrice > 0) {
-                const addedQty = Math.max(0, formattedQty - trackedQty);
-                if (addedQty > 0) {
-                    const blendedEntryPrice = ((trackedEntryPrice * trackedQty) + (spotTickerPrice * addedQty)) / formattedQty;
+                if (Number.isFinite(fillPrice) && fillPrice > 0) {
+                    const blendedEntryPrice = ((trackedEntryPrice * trackedQty) + (fillPrice * addedQty)) / formattedQty;
                     if (Number.isFinite(blendedEntryPrice) && blendedEntryPrice > 0) nextEntryPrice = blendedEntryPrice;
                 }
             }
