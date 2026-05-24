@@ -75,6 +75,26 @@ const createOrderExecutionHelpers = ({
     };
 
     const describeError = (error) => String(error?.message || error || "Unknown error");
+    const extractExchangeErrorCode = (error) => {
+        const directCode = toFiniteNumber(error?.code, NaN);
+        if (Number.isFinite(directCode)) return directCode;
+        const payload = describeError(error);
+        const match = payload.match(/"code"\s*:\s*(-?\d+)/);
+        return match ? Number(match[1]) : NaN;
+    };
+    const formatExchangeError = (error) => {
+        const code = extractExchangeErrorCode(error);
+        const message = describeError(error);
+        const knownHints = {
+            "-1013": "invalid quantity/price filter (LOT_SIZE, PRICE_FILTER, MIN_NOTIONAL).",
+            "-2010": "order rejected by exchange (insufficient balance/filter violation/duplicate rules).",
+            "-1021": "timestamp drift; sync server time and retry.",
+            "-4116": "duplicate clientOrderId."
+        };
+        const hint = Number.isFinite(code) ? knownHints[String(code)] : null;
+        const codeLabel = Number.isFinite(code) ? `code=${code}` : "code=UNKNOWN";
+        return hint ? `${codeLabel} | ${message} | hint=${hint}` : `${codeLabel} | ${message}`;
+    };
     const resolveSpotSellFeeBufferRate = (marketInfo) => {
         const feeCandidates = [
             marketInfo?.taker,
@@ -839,7 +859,7 @@ const createOrderExecutionHelpers = ({
                         console.log(`[GRID][INFO] Retry succeeded: placed ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price}`);
                         return true;
                     } catch (retryError) {
-                        console.error(`[GRID][ERROR] Retry failed for ${gridOrder.clientOrderId}: ${describeError(retryError)}`);
+                        console.error(`[GRID][ERROR] Retry failed for ${gridOrder.clientOrderId}: ${formatExchangeError(retryError)}`);
                         const retryExistingOrder = await waitForExistingOrderByClientOrderId({
                             clientOrderId: gridOrder.clientOrderId,
                             symbol: db.pair,
@@ -862,7 +882,7 @@ const createOrderExecutionHelpers = ({
                 return false;
             }
 
-            console.error(`[GRID][ERROR] Failed to place ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price}: ${describeError(error)}`);
+            console.error(`[GRID][ERROR] Failed to place ${gridOrder.side.toUpperCase()} limit @ ${gridOrder.price}: ${formatExchangeError(error)}`);
             return false;
         }
         });
@@ -958,7 +978,7 @@ const createOrderExecutionHelpers = ({
                         console.log(`[TP][INFO] Retry succeeded: placed reduce-only TP ${closeSide.toUpperCase()} @ ${position.targetPrice} for qty ${quantity}`);
                         return attachClientOrderIdFallback(retryOrder, clientOrderId);
                     } catch (retryError) {
-                        console.error(`[TP][ERROR] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
+                        console.error(`[TP][ERROR] Retry failed for ${clientOrderId}: ${formatExchangeError(retryError)}`);
                         await syncPositionWithExchange();
                         return null;
                     }
@@ -986,7 +1006,7 @@ const createOrderExecutionHelpers = ({
                     console.log(`[TP][INFO] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
                     return attachClientOrderIdFallback(retryOrder, replacementClientOrderId);
                 } catch (replacementError) {
-                    console.error(`[TP][ERROR] Replacement retry failed for ${replacementClientOrderId}: ${describeError(replacementError)}`);
+                    console.error(`[TP][ERROR] Replacement retry failed for ${replacementClientOrderId}: ${formatExchangeError(replacementError)}`);
                     await syncPositionWithExchange();
                     return null;
                 }
@@ -1085,7 +1105,7 @@ const createOrderExecutionHelpers = ({
                         console.log(`[SL][INFO] Retry succeeded: placed STOP_LOSS_LIMIT ${closeSide.toUpperCase()} @ stop ${params.stopPrice} limit ${limitPrice}`);
                         return attachClientOrderIdFallback(retryOrder, clientOrderId);
                     } catch (retryError) {
-                        console.error(`[SL][ERROR] Retry failed for ${clientOrderId}: ${describeError(retryError)}`);
+                        console.error(`[SL][ERROR] Retry failed for ${clientOrderId}: ${formatExchangeError(retryError)}`);
                         await syncPositionWithExchange();
                         return null;
                     }
@@ -1113,7 +1133,7 @@ const createOrderExecutionHelpers = ({
                     console.log(`[SL][INFO] Replacement succeeded with clientOrderId ${replacementClientOrderId}.`);
                     return attachClientOrderIdFallback(retryOrder, replacementClientOrderId);
                 } catch (replacementError) {
-                    console.error(`[SL][ERROR] Replacement retry failed for ${replacementClientOrderId}: ${describeError(replacementError)}`);
+                    console.error(`[SL][ERROR] Replacement retry failed for ${replacementClientOrderId}: ${formatExchangeError(replacementError)}`);
                     await syncPositionWithExchange();
                     return null;
                 }
