@@ -803,8 +803,9 @@ const createGridRuntimeHelpers = ({
             market: exchange?.markets?.[db?.pair],
             gridLevels: effectiveGridLevels
         });
+        const effectiveAvailableUsdt = availableUsdt + (gridOrders.length * Math.max(0, effectiveSizeMeta.orderSizeUsdt));
         const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
-            availableUsdt,
+            availableUsdt: effectiveAvailableUsdt,
             configuredOrdersPerSide: db.gridOrdersPerSide,
             perOrderMargin: effectiveSizeMeta.orderSizeUsdt,
             referencePrice,
@@ -834,7 +835,7 @@ const createGridRuntimeHelpers = ({
             effectiveOrderSizeUsdt: effectiveSizeMeta.orderSizeUsdt,
             minOrderSizeUsdt: effectiveSizeMeta.minOrderSizeUsdt,
             sizeMode: effectiveSizeMeta.mode,
-            availableUsdtLabel: Number.isFinite(availableUsdt) ? availableUsdt.toFixed(2) : "N/A"
+            availableUsdtLabel: Number.isFinite(availableUsdt) ? `${availableUsdt.toFixed(2)} (effective ${effectiveAvailableUsdt.toFixed(2)})` : "N/A"
         };
     };
 
