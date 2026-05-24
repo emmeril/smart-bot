@@ -321,7 +321,7 @@ const createFonnteNotifierHelpers = ({
         occurredAt
     }) => {
         const normalizedEvent = String(event || "").toUpperCase().trim();
-        const allowedTradeEvents = new Set(["OPEN", "GRID_FILLED", "PARTIAL_CLOSE"]);
+        const allowedTradeEvents = new Set(["GRID_FILLED", "PARTIAL_CLOSE"]);
 
         if (!allowedTradeEvents.has(normalizedEvent)) {
             return { ok: true, skipped: true, reason: `Unsupported trade update event: ${normalizedEvent || "UNKNOWN"}` };
