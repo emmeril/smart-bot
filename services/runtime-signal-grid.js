@@ -534,21 +534,6 @@ const createRuntimeSignalGridHelpers = ({
                         `SIZE:${effectiveSizeMeta.orderSizeUsdt.toFixed(4)}:${availableUsdt.toFixed(2)}`
                     );
             }
-            if (adjustedOrdersMeta.count < adjustedOrdersMeta.maxConfigured) {
-                const sizingBalanceLabel = `free ${availableUsdt.toFixed(2)} | effective ${effectiveAvailableUsdt.toFixed(2)} USDT`;
-                maybeLogGridSizingStateExternal
-                    ? maybeLogGridSizingStateExternal(
-                        "COUNT",
-                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | ${sizingBalanceLabel}`,
-                        `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}:${effectiveAvailableUsdt.toFixed(2)}`
-                    )
-                    : maybeLogGridSizingState(
-                        "COUNT",
-                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | ${sizingBalanceLabel}`,
-                        `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}:${effectiveAvailableUsdt.toFixed(2)}`
-                    );
-            }
-
             const openPositions = await fetchOpenExchangePositions();
             const trackedPositions = getActivePositionsList();
             const plannedExposureSignature = buildGridExposureSignature(openPositions, trackedPositions);
@@ -561,6 +546,21 @@ const createRuntimeSignalGridHelpers = ({
 
             const desiredOrdersRaw = buildGridEntryOrders(snapshot, params, lockedGridState);
             const desiredOrdersForRuntime = filterGridOrdersForActiveExposure(desiredOrdersRaw, openPositions, trackedPositions);
+            if (adjustedOrdersMeta.count < adjustedOrdersMeta.maxConfigured) {
+                const sizingBalanceLabel = `free ${availableUsdt.toFixed(2)} | effective ${effectiveAvailableUsdt.toFixed(2)} USDT`;
+                const runtimeSideOrders = desiredOrdersForRuntime.length;
+                maybeLogGridSizingStateExternal
+                    ? maybeLogGridSizingStateExternal(
+                        "COUNT",
+                        `[GRID] Auto-adjusted side orders: ${runtimeSideOrders}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | sizing ${adjustedOrdersMeta.count} | ${sizingBalanceLabel}`,
+                        `COUNT:${runtimeSideOrders}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${adjustedOrdersMeta.count}:${availableUsdt.toFixed(2)}:${effectiveAvailableUsdt.toFixed(2)}`
+                    )
+                    : maybeLogGridSizingState(
+                        "COUNT",
+                        `[GRID] Auto-adjusted side orders: ${runtimeSideOrders}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | sizing ${adjustedOrdersMeta.count} | ${sizingBalanceLabel}`,
+                        `COUNT:${runtimeSideOrders}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${adjustedOrdersMeta.count}:${availableUsdt.toFixed(2)}:${effectiveAvailableUsdt.toFixed(2)}`
+                    );
+            }
             if (desiredOrdersForRuntime.length !== desiredOrdersRaw.length) {
                 const accountPositionMode = getAccountPositionMode();
                 const exposureLogKey = `${accountPositionMode.label}:${desiredOrdersForRuntime.length}/${desiredOrdersRaw.length}`;
