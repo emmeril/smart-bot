@@ -1292,17 +1292,6 @@
         card.appendChild(list);
         form.appendChild(card);
       }
-      const pairInput = form.elements.pair;
-      const activePositionsCount = Math.max(0, Math.trunc(Number(state?.status?.activePositions ?? 0)));
-      if (pairInput) {
-        const shouldLockPair = activePositionsCount > 0;
-        pairInput.disabled = shouldLockPair;
-        if (shouldLockPair) {
-          pairInput.title = "Pair dikunci saat ada posisi aktif. Tutup semua posisi dulu untuk ganti pair.";
-        } else {
-          pairInput.title = "";
-        }
-      }
       formDirty = false;
     }
 
