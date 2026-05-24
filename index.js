@@ -441,6 +441,7 @@ const markPositionSyncHealthy = () => {
 const ensureManagedOrdersForPositions = async (positionsMap) => {
     const isSpotRuntime = isSpotRuntimeMode();
     let spotBalances = null;
+    let spotTickerPrice = NaN;
     let didSyncAggregateQuantity = false;
 
     const resolveMarketMinQty = (pair) => {
@@ -489,18 +490,37 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
         if (!Number.isFinite(formattedQty)) return null;
 
         const trackedQty = toFiniteNumber(position?.quantity, NaN);
+        const trackedEntryPrice = toFiniteNumber(position?.entryPrice, NaN);
         if (!Number.isFinite(trackedQty)) return null;
         if (Math.abs(formattedQty - trackedQty) <= POSITION_SYNC_QTY_TOLERANCE) return { type: "unchanged" };
         if (formattedQty <= 0) return { type: "unchanged" };
-        if (formattedQty > trackedQty) {
-            return { type: "unchanged" };
+
+        let nextEntryPrice = trackedEntryPrice;
+        if (formattedQty > trackedQty && trackedQty > 0 && Number.isFinite(trackedEntryPrice) && trackedEntryPrice > 0) {
+            if (!Number.isFinite(spotTickerPrice) || spotTickerPrice <= 0) {
+                try {
+                    spotTickerPrice = await getPrice();
+                } catch (tickerError) {
+                    console.warn(`[SYNC][WARN] Failed to fetch ticker for aggregate entry-price blend: ${tickerError.message}`);
+                    spotTickerPrice = NaN;
+                }
+            }
+
+            if (Number.isFinite(spotTickerPrice) && spotTickerPrice > 0) {
+                const addedQty = Math.max(0, formattedQty - trackedQty);
+                if (addedQty > 0) {
+                    const blendedEntryPrice = ((trackedEntryPrice * trackedQty) + (spotTickerPrice * addedQty)) / formattedQty;
+                    if (Number.isFinite(blendedEntryPrice) && blendedEntryPrice > 0) nextEntryPrice = blendedEntryPrice;
+                }
+            }
         }
 
         return {
             type: "update",
             nextPosition: {
                 ...position,
-                quantity: formattedQty
+                quantity: formattedQty,
+                entryPrice: nextEntryPrice
             }
         };
     };
