@@ -60,6 +60,17 @@ const createRuntimeSignalGridHelpers = ({
     getActivePositionByKey,
     placeOrder
 }) => {
+    const gridRuntimeStability = {
+        targetSideOrders: null,
+        pendingSideOrders: null,
+        pendingSideOrdersStreak: 0,
+        lastRebuildAt: 0,
+        lastRebuildCooldownLogAt: 0,
+        stableUpsizeStreak: 0
+    };
+    const GRID_RUNTIME_HYSTERESIS_CYCLES = 3;
+    const GRID_RUNTIME_REBUILD_COOLDOWN_MS = 90 * 1000;
+
     const buildGridExposureSignature = (openPositions = [], trackedPositions = getActivePositionsList()) => JSON.stringify({
         mode: getAccountPositionMode()?.label || "UNKNOWN",
         exchange: (openPositions || []).map((position) => ({
@@ -413,18 +424,21 @@ const createRuntimeSignalGridHelpers = ({
             }
 
             const availableUsdt = await getAvailableUSDTBalance();
+            let openGridOrders = await fetchOpenGridOrders();
+            openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
             const effectiveSizeMeta = resolveEffectiveGridOrderSizeUsdt({
                 availableUsdt,
                 configuredOrderSizeUsdt: params.gridOrderSizeUsdt,
-                configuredOrdersPerSide: params.gridOrdersPerSide,
+                configuredOrdersPerSide: params.configuredGridOrdersPerSide,
                 referencePrice: snapshot.currentPrice,
                 market: exchange?.markets?.[db?.pair],
                 gridLevels: params.gridLevels
             });
             params.gridOrderSizeUsdt = effectiveSizeMeta.orderSizeUsdt;
+            const effectiveAvailableUsdt = availableUsdt + (openGridOrders.length * Math.max(0, params.gridOrderSizeUsdt));
             const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
-                availableUsdt,
-                configuredOrdersPerSide: params.gridOrdersPerSide,
+                availableUsdt: effectiveAvailableUsdt,
+                configuredOrdersPerSide: params.configuredGridOrdersPerSide,
                 perOrderMargin: params.gridOrderSizeUsdt,
                 referencePrice: snapshot.currentPrice,
                 market: exchange?.markets?.[db?.pair],
@@ -434,16 +448,63 @@ const createRuntimeSignalGridHelpers = ({
                 params.gridLevels = Math.max(2, Math.trunc(effectiveOrdersMeta.count));
             }
             const adjustedOrdersMeta = resolveEffectiveGridOrdersPerSide({
-                availableUsdt,
-                configuredOrdersPerSide: params.gridOrdersPerSide,
+                availableUsdt: effectiveAvailableUsdt,
+                configuredOrdersPerSide: params.configuredGridOrdersPerSide,
                 perOrderMargin: params.gridOrderSizeUsdt,
                 referencePrice: snapshot.currentPrice,
                 market: exchange?.markets?.[db?.pair],
                 gridLevels: params.gridLevels
             });
-            params.gridOrdersPerSide = adjustedOrdersMeta.count;
-            let openGridOrders = await fetchOpenGridOrders();
-            openGridOrders = await cancelDuplicateManagedOrders(openGridOrders, "GRID_DUPLICATE", "GRID");
+
+            const rawSideOrders = Math.max(0, Math.trunc(adjustedOrdersMeta.count));
+            const targetSideOrders = Number.isFinite(gridRuntimeStability.targetSideOrders)
+                ? Math.max(0, Math.trunc(gridRuntimeStability.targetSideOrders))
+                : null;
+            const isHardCapped = adjustedOrdersMeta.mode === "CAPPED" && rawSideOrders < adjustedOrdersMeta.maxConfigured;
+
+            if (targetSideOrders === null) {
+                gridRuntimeStability.targetSideOrders = rawSideOrders;
+                gridRuntimeStability.pendingSideOrders = null;
+                gridRuntimeStability.pendingSideOrdersStreak = 0;
+                gridRuntimeStability.stableUpsizeStreak = 0;
+            } else if (rawSideOrders < targetSideOrders) {
+                gridRuntimeStability.stableUpsizeStreak = 0;
+                if (gridRuntimeStability.pendingSideOrders !== rawSideOrders) {
+                    gridRuntimeStability.pendingSideOrders = rawSideOrders;
+                    gridRuntimeStability.pendingSideOrdersStreak = 1;
+                } else {
+                    gridRuntimeStability.pendingSideOrdersStreak += 1;
+                }
+                if (gridRuntimeStability.pendingSideOrdersStreak >= GRID_RUNTIME_HYSTERESIS_CYCLES) {
+                    const nextSideOrders = Math.max(0, targetSideOrders - 1);
+                    gridRuntimeStability.targetSideOrders = nextSideOrders;
+                    if (nextSideOrders === rawSideOrders) {
+                        gridRuntimeStability.pendingSideOrders = null;
+                        gridRuntimeStability.pendingSideOrdersStreak = 0;
+                    }
+                    console.log(`[GRID][INFO] Stabilized side orders: ${targetSideOrders} -> ${nextSideOrders} (raw ${rawSideOrders})`);
+                }
+            } else if (rawSideOrders > targetSideOrders) {
+                gridRuntimeStability.pendingSideOrders = null;
+                gridRuntimeStability.pendingSideOrdersStreak = 0;
+                if (isHardCapped) {
+                    gridRuntimeStability.stableUpsizeStreak = 0;
+                } else {
+                    gridRuntimeStability.stableUpsizeStreak += 1;
+                    if (gridRuntimeStability.stableUpsizeStreak >= GRID_RUNTIME_HYSTERESIS_CYCLES * 2) {
+                        const nextSideOrders = Math.min(rawSideOrders, targetSideOrders + 1);
+                        gridRuntimeStability.targetSideOrders = nextSideOrders;
+                        if (nextSideOrders === rawSideOrders) gridRuntimeStability.stableUpsizeStreak = 0;
+                        console.log(`[GRID][INFO] Stabilized side orders: ${targetSideOrders} -> ${nextSideOrders} (raw ${rawSideOrders})`);
+                    }
+                }
+            } else {
+                gridRuntimeStability.pendingSideOrders = null;
+                gridRuntimeStability.pendingSideOrdersStreak = 0;
+                gridRuntimeStability.stableUpsizeStreak = 0;
+            }
+
+            params.gridOrdersPerSide = Math.max(0, Math.trunc(gridRuntimeStability.targetSideOrders || 0));
 
             if (effectiveSizeMeta.orderSizeUsdt <= 0 || adjustedOrdersMeta.count <= 0) {
                 if (openGridOrders.length > 0) await cancelGridOrders(openGridOrders, "INSUFFICIENT_BALANCE");
@@ -474,16 +535,17 @@ const createRuntimeSignalGridHelpers = ({
                     );
             }
             if (adjustedOrdersMeta.count < adjustedOrdersMeta.maxConfigured) {
+                const sizingBalanceLabel = `free ${availableUsdt.toFixed(2)} | effective ${effectiveAvailableUsdt.toFixed(2)} USDT`;
                 maybeLogGridSizingStateExternal
                     ? maybeLogGridSizingStateExternal(
                         "COUNT",
-                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
-                        `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}`
+                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | ${sizingBalanceLabel}`,
+                        `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}:${effectiveAvailableUsdt.toFixed(2)}`
                     )
                     : maybeLogGridSizingState(
                         "COUNT",
-                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | available ${availableUsdt.toFixed(2)} USDT`,
-                        `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}`
+                        `[GRID] Auto-adjusted side orders: ${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured} per side | mode ${adjustedOrdersMeta.mode} | ${sizingBalanceLabel}`,
+                        `COUNT:${adjustedOrdersMeta.count}/${adjustedOrdersMeta.maxConfigured}:${adjustedOrdersMeta.mode}:${availableUsdt.toFixed(2)}:${effectiveAvailableUsdt.toFixed(2)}`
                     );
             }
 
@@ -531,7 +593,20 @@ const createRuntimeSignalGridHelpers = ({
 
             const desiredIds = new Set(desiredOrders.map((order) => order.clientOrderId));
             const staleOrders = openGridOrders.filter((order) => !desiredIds.has(getExchangeClientOrderId(order)));
-            if (staleOrders.length > 0) await cancelGridOrders(staleOrders, "REBUILD");
+            const now = Date.now();
+            const isRebuildCooldownActive = staleOrders.length > 0 && (now - gridRuntimeStability.lastRebuildAt) < GRID_RUNTIME_REBUILD_COOLDOWN_MS;
+            if (isRebuildCooldownActive) {
+                if (now - gridRuntimeStability.lastRebuildCooldownLogAt >= gridSyncLogTtl) {
+                    const waitSeconds = Math.max(1, Math.ceil((GRID_RUNTIME_REBUILD_COOLDOWN_MS - (now - gridRuntimeStability.lastRebuildAt)) / 1000));
+                    console.log(`[GRID][INFO] Rebuild cooldown active (${waitSeconds}s). Keeping current ladder until cooldown expires.`);
+                    gridRuntimeStability.lastRebuildCooldownLogAt = now;
+                }
+                return;
+            }
+            if (staleOrders.length > 0) {
+                await cancelGridOrders(staleOrders, "REBUILD");
+                gridRuntimeStability.lastRebuildAt = Date.now();
+            }
 
             if (staleOrders.length > 0) {
                 openGridOrders = await fetchOpenGridOrders();
