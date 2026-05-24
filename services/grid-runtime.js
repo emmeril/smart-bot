@@ -813,6 +813,7 @@ const createGridRuntimeHelpers = ({
             market: exchange?.markets?.[db?.pair],
             gridLevels: effectiveGridLevels
         });
+        const runtimeSideOrders = Math.max(effectiveOrdersMeta.count, buyOrders);
 
         return {
             presetName,
