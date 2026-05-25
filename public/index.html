@@ -474,6 +474,7 @@
       .shell { gap: 16px; }
       .hero { grid-template-columns: minmax(0, 1fr) minmax(280px, 0.76fr); padding: 16px; }
       .hero-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .live-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
       .live-lists { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); }
       .config-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .live-panel, .form-panel, .footer-panel { padding: 16px; }
@@ -582,6 +583,16 @@
             </div>
             <div class="live-grid">
               <article class="live-card">
+                <span class="label">Harga Saat Ini</span>
+                <strong id="liveCurrentPrice">-</strong>
+                <span id="liveCurrentPriceMeta">Memuat harga...</span>
+              </article>
+              <article class="live-card">
+                <span class="label">Balance USDT</span>
+                <strong id="liveBalanceValue">-</strong>
+                <span id="liveBalanceMeta">Memuat saldo...</span>
+              </article>
+              <article class="live-card">
                 <span class="label">Posisi Aktif</span>
                 <strong id="livePositionsCount">-</strong>
                 <span id="livePositionsMeta">Memuat data posisi...</span>
@@ -666,6 +677,10 @@
     const signalPositionMode = document.getElementById("signalPositionMode");
     const signalGridState = document.getElementById("signalGridState");
     const signalExchange = document.getElementById("signalExchange");
+    const liveCurrentPrice = document.getElementById("liveCurrentPrice");
+    const liveCurrentPriceMeta = document.getElementById("liveCurrentPriceMeta");
+    const liveBalanceValue = document.getElementById("liveBalanceValue");
+    const liveBalanceMeta = document.getElementById("liveBalanceMeta");
     const livePositionsCount = document.getElementById("livePositionsCount");
     const livePositionsMeta = document.getElementById("livePositionsMeta");
     const livePnlValue = document.getElementById("livePnlValue");
@@ -1069,6 +1084,7 @@
       const positions = Array.isArray(data.activePositions) ? data.activePositions : [];
       const openOrders = data.openOrders || { grid: [], tp: [], sl: [] };
       const orderCounts = data.orderCounts || { grid: 0, tp: 0, sl: 0, total: 0 };
+      const balance = data.balance || {};
       const orderRecovery = data.orderRecovery || {};
       const duplicateDetected = Number(orderRecovery.duplicateDetected || 0);
       const duplicateResolved = Number(orderRecovery.duplicateResolved || 0);
@@ -1084,6 +1100,10 @@
       renderPnLBreakdown(data);
 
       const activePair = String(data.pair || "-");
+      liveCurrentPrice.textContent = formatPrice(data.currentPrice);
+      liveCurrentPriceMeta.textContent = activePair;
+      liveBalanceValue.textContent = `${formatNumber(balance.totalUSDT)} USDT`;
+      liveBalanceMeta.textContent = `Free: ${formatNumber(balance.availableUSDT)} USDT`;
       livePositionsCount.textContent = `${positions.length} ${activePair}`;
       livePositionsMeta.textContent = "";
       livePnlValue.textContent = formatLiveCurrency(dailyPnl) + " USDT";

@@ -18,7 +18,9 @@ const createDashboardStatusHelpers = ({
     fetchManagedOpenOrdersSnapshot,
     calculatePositionPnL,
     buildDailyPnlSnapshot,
-    syncDailyPnlWithExchange
+    syncDailyPnlWithExchange,
+    getTotalUSDTBalance,
+    getAvailableUSDTBalance
 }) => {
     const resolveSpotPairOptions = () => {
         const exchange = getExchange();
@@ -137,6 +139,8 @@ const createDashboardStatusHelpers = ({
         }
 
         let currentPrice = NaN;
+        let totalUSDTBalance = NaN;
+        let availableUSDTBalance = NaN;
         let exchangePositions = [];
         let managedOrders = { grid: [], tp: [], sl: [] };
 
@@ -145,6 +149,18 @@ const createDashboardStatusHelpers = ({
                 currentPrice = await getPrice();
             } catch {
                 currentPrice = NaN;
+            }
+
+            try {
+                totalUSDTBalance = typeof getTotalUSDTBalance === "function" ? await getTotalUSDTBalance() : NaN;
+            } catch {
+                totalUSDTBalance = NaN;
+            }
+
+            try {
+                availableUSDTBalance = typeof getAvailableUSDTBalance === "function" ? await getAvailableUSDTBalance() : NaN;
+            } catch {
+                availableUSDTBalance = NaN;
             }
 
             try {
@@ -193,6 +209,10 @@ const createDashboardStatusHelpers = ({
             serverTime: Date.now(),
             pair: db.pair,
             currentPrice: Number.isFinite(currentPrice) ? currentPrice : null,
+            balance: {
+                totalUSDT: Number.isFinite(totalUSDTBalance) ? totalUSDTBalance : null,
+                availableUSDT: Number.isFinite(availableUSDTBalance) ? availableUSDTBalance : null
+            },
             botRunning: !getIsShuttingDown(),
             exchangeConnected: Boolean(getExchange()),
             exchangeHealthy: Boolean(getExchangeHealth()?.isHealthy),

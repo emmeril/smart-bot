@@ -1049,7 +1049,9 @@ const {
     fetchManagedOpenOrdersSnapshot: (...args) => fetchManagedOpenOrdersSnapshot(...args),
     calculatePositionPnL,
     buildDailyPnlSnapshot: (...args) => buildDailyPnlSnapshot(...args),
-    syncDailyPnlWithExchange: (...args) => syncDailyPnlWithExchange(...args)
+    syncDailyPnlWithExchange: (...args) => syncDailyPnlWithExchange(...args),
+    getTotalUSDTBalance: (...args) => getTotalUSDTBalance(...args),
+    getAvailableUSDTBalance: (...args) => getAvailableUSDTBalance(...args)
 });
 
 const {
