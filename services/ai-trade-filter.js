@@ -6,6 +6,7 @@ const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite";
 const DEFAULT_TIMEOUT_MS = 12000;
 const DEFAULT_CACHE_TTL_MS = 60000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 2000;
+const DEFAULT_GRID_REVIEW_MIN_INTERVAL_MS = 15000;
 
 const truthy = (value) => ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
 
@@ -90,6 +91,7 @@ const createAiTradeFilter = ({
     timeoutMs = process.env.AI_SIGNAL_TIMEOUT_MS,
     cacheTtlMs = process.env.AI_SIGNAL_CACHE_TTL_MS,
     maxOutputTokens = process.env.AI_SIGNAL_MAX_OUTPUT_TOKENS,
+    gridReviewMinIntervalMs = process.env.AI_GRID_REVIEW_MIN_INTERVAL_MS,
     fetchFn = globalThis.fetch
 } = {}) => {
     const normalizedProvider = String(provider || DEFAULT_PROVIDER).toLowerCase().trim();
@@ -110,7 +112,11 @@ const createAiTradeFilter = ({
     const requestTimeoutMs = Math.max(1000, Math.trunc(safeNumber(timeoutMs, DEFAULT_TIMEOUT_MS)));
     const cacheWindowMs = Math.max(0, Math.trunc(safeNumber(cacheTtlMs, DEFAULT_CACHE_TTL_MS)));
     const outputTokenLimit = Math.max(500, Math.trunc(safeNumber(maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS)));
+    const gridReviewCooldownMs = Math.max(0, Math.trunc(safeNumber(gridReviewMinIntervalMs, DEFAULT_GRID_REVIEW_MIN_INTERVAL_MS)));
     const cache = new Map();
+    let lastGridReviewAt = 0;
+    let lastGridReviewSignature = "";
+    let lastGridReviewResult = null;
     const instructions = [
         "You are a conservative trading risk filter for an automated spot crypto bot.",
         "Use only the supplied quantitative data. Do not browse, predict news, or invent missing data.",
@@ -259,6 +265,28 @@ const createAiTradeFilter = ({
 
     const filterGridOrders = async ({ db, snapshot, params, gridState, desiredOrders }) => {
         if (!isEnabled() || !Array.isArray(desiredOrders) || desiredOrders.length === 0) return desiredOrders || [];
+        const gridReviewSignature = JSON.stringify({
+            pair: db?.pair,
+            timeframe: db?.gridTimeframe,
+            levels: safeNumber(params?.gridLevels),
+            rangePercent: safeNumber(params?.gridRangePercent),
+            entryBufferPercent: safeNumber(params?.gridEntryBufferPercent),
+            referencePrice: safeNumber(gridState?.referencePrice),
+            lowerBound: safeNumber(gridState?.lowerBound),
+            upperBound: safeNumber(gridState?.upperBound),
+            orderIds: desiredOrders.map((order) => String(order?.clientOrderId || "")),
+            orderSides: desiredOrders.map((order) => String(order?.side || "")),
+            orderLevels: desiredOrders.map((order) => safeNumber(order?.levelIndex))
+        });
+        const now = Date.now();
+        if (
+            lastGridReviewResult &&
+            gridReviewCooldownMs > 0 &&
+            gridReviewSignature === lastGridReviewSignature &&
+            now - lastGridReviewAt < gridReviewCooldownMs
+        ) {
+            return lastGridReviewResult;
+        }
         const compactOrders = desiredOrders.map(compactOrder);
         const payload = {
             type: "grid_order_review",
@@ -331,10 +359,17 @@ const createAiTradeFilter = ({
             const approvedIds = approvedOrders.map((order) => order.clientOrderId).join(", ") || "-";
             const rejectedIds = rejectedOrders.map((order) => order.clientOrderId).join(", ") || "-";
             console.log(`[AI][INFO] Grid review result: approved=${approvedOrders.length}/${desiredOrders.length} [${approvedIds}] | rejected=${rejectedOrders.length} [${rejectedIds}]`);
+            lastGridReviewAt = now;
+            lastGridReviewSignature = gridReviewSignature;
+            lastGridReviewResult = approvedOrders;
             return approvedOrders;
         } catch (error) {
             console.warn(`[AI][WARN] Grid review failed: ${error.message}`);
-            return failOpenOnError ? desiredOrders : [];
+            const fallback = failOpenOnError ? desiredOrders : [];
+            lastGridReviewAt = now;
+            lastGridReviewSignature = gridReviewSignature;
+            lastGridReviewResult = fallback;
+            return fallback;
         }
     };
 
