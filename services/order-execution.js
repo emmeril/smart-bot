@@ -134,6 +134,15 @@ const createOrderExecutionHelpers = ({
         if (candidates.length === 0) return 0;
         return Math.min(...candidates);
     };
+    const resolveMarketMinNotional = (marketInfo) => {
+        const filters = Array.isArray(marketInfo?.info?.filters) ? marketInfo.info.filters : [];
+        const minNotionalFilter = filters.find((filter) => String(filter?.filterType || "").toUpperCase() === "MIN_NOTIONAL");
+        const notionalFilter = filters.find((filter) => String(filter?.filterType || "").toUpperCase() === "NOTIONAL");
+        return toFiniteNumber(
+            marketInfo?.limits?.cost?.min,
+            toFiniteNumber(notionalFilter?.minNotional, toFiniteNumber(minNotionalFilter?.minNotional, NaN))
+        );
+    };
 
     const tryClearSpotStalePositionWithoutExit = async (positionKey, position, reason) => {
         if (!isSpotMarginMode()) return false;
@@ -162,13 +171,26 @@ const createOrderExecutionHelpers = ({
             : null;
         const hasValidationFailure = (validation) => validation && (validation.valid === false || validation.ok === false);
         const minTradableQty = toFiniteNumber(marketInfo?.limits?.amount?.min, NaN);
+        const minNotional = resolveMarketMinNotional(marketInfo);
+        const notionalReferencePrice = Number.isFinite(tpPrice) && tpPrice > 0
+            ? tpPrice
+            : toFiniteNumber(position?.entryPrice, NaN);
+        const dustNotional = Number.isFinite(formattedDustQty) && Number.isFinite(notionalReferencePrice)
+            ? formattedDustQty * notionalReferencePrice
+            : NaN;
         const isDustByMinQtyOnly = !hasProtectionPrices
             && Number.isFinite(formattedDustQty)
             && Number.isFinite(minTradableQty)
             && minTradableQty > 0
             && formattedDustQty > 0
             && formattedDustQty < minTradableQty;
-        const isDustByExchangeRules = hasValidationFailure(tpValidation) || hasValidationFailure(slValidation) || isDustByMinQtyOnly;
+        const isDustByMinNotional = !hasProtectionPrices
+            && Number.isFinite(dustNotional)
+            && Number.isFinite(minNotional)
+            && minNotional > 0
+            && dustNotional > 0
+            && dustNotional < minNotional;
+        const isDustByExchangeRules = hasValidationFailure(tpValidation) || hasValidationFailure(slValidation) || isDustByMinQtyOnly || isDustByMinNotional;
 
         if (!isDustByExchangeRules) return false;
         const exchangeReason = isDustByExchangeRules
@@ -176,6 +198,7 @@ const createOrderExecutionHelpers = ({
                 .filter(hasValidationFailure)
                 .map((validation) => validation?.reason)
                 .concat(isDustByMinQtyOnly ? [`LOT_SIZE minQty fallback: ${formattedDustQty} < ${minTradableQty}`] : [])
+                .concat(isDustByMinNotional ? [`MIN_NOTIONAL fallback: ${dustNotional} < ${minNotional}`] : [])
                 .filter((value, index, arr) => value && arr.indexOf(value) === index)
                 .join(" | ")
             : "";
