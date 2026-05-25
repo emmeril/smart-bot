@@ -142,8 +142,6 @@ const checkConfig = (config) => {
         "trailingEnabled",
         "autoStopLossEnabled",
         "autoTargetProfitEnabled",
-        "allowLong",
-        "allowShort",
         "monitoringInterval",
         "coolingPeriod",
         "maxTradesPerDay"
@@ -165,12 +163,6 @@ const checkConfig = (config) => {
     }
     if (!/^.+\/.+$/.test(String(normalized.pair || ""))) {
         pushIssue(issues, "fail", `Pair '${normalized.pair}' is not in BASE/QUOTE format.`);
-    }
-    if (normalized.allowShort === true) {
-        pushIssue(issues, "warn", "allowShort is enabled in spot mode; confirm you really want sell ladders on held base balance.");
-    }
-    if (normalized.allowLong !== true && normalized.allowShort !== true) {
-        pushIssue(issues, "warn", "Both allowLong and allowShort are disabled; the bot will have no entry direction.");
     }
     if (normalized.sessionStartUTC === normalized.sessionEndUTC) {
         pushIssue(issues, "warn", "sessionStartUTC and sessionEndUTC are equal; trading window may be effectively closed except at one hour.");
