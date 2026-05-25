@@ -25,6 +25,12 @@ const safeNumber = (value, fallback = null) => {
     return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const normalizeForSignature = (value, precision = 5) => {
+    const numeric = safeNumber(value, null);
+    if (!Number.isFinite(numeric)) return null;
+    return Number(numeric.toFixed(precision));
+};
+
 const compactOrder = (order) => ({
     clientOrderId: String(order?.clientOrderId || ""),
     side: String(order?.side || ""),
@@ -271,12 +277,21 @@ const createAiTradeFilter = ({
             levels: safeNumber(params?.gridLevels),
             rangePercent: safeNumber(params?.gridRangePercent),
             entryBufferPercent: safeNumber(params?.gridEntryBufferPercent),
-            referencePrice: safeNumber(gridState?.referencePrice),
-            lowerBound: safeNumber(gridState?.lowerBound),
-            upperBound: safeNumber(gridState?.upperBound),
-            orderIds: desiredOrders.map((order) => String(order?.clientOrderId || "")),
-            orderSides: desiredOrders.map((order) => String(order?.side || "")),
-            orderLevels: desiredOrders.map((order) => safeNumber(order?.levelIndex))
+            priceContext: {
+                currentPrice: normalizeForSignature(snapshot?.currentPrice, 4),
+                currentRsi: normalizeForSignature(snapshot?.currentRsi, 2),
+                currentAdx: normalizeForSignature(snapshot?.currentAdx, 2),
+                bbPercentB: normalizeForSignature(snapshot?.bbPercentB, 3)
+            },
+            orders: desiredOrders.map((order) => ({
+                clientOrderId: String(order?.clientOrderId || ""),
+                side: String(order?.side || ""),
+                levelIndex: safeNumber(order?.levelIndex),
+                price: normalizeForSignature(order?.price, 6),
+                targetPrice: normalizeForSignature(order?.targetPrice, 6),
+                stopLossPrice: normalizeForSignature(order?.stopLossPrice, 6),
+                orderSizeUsdt: normalizeForSignature(order?.orderSizeUsdt, 4)
+            }))
         });
         const now = Date.now();
         if (
