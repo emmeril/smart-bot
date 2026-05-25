@@ -274,6 +274,32 @@ const createRuntimeSignalGridHelpers = ({
         setLastGridSyncLogAt(now);
     };
 
+    const getGridOrderSide = (order) => String(order?.side || order?.info?.side || "").toLowerCase();
+
+    const getGridOrderPrice = (order) => (
+        toFiniteNumber(order?.price, toFiniteNumber(order?.info?.price, toFiniteNumber(order?.info?.origPrice, NaN)))
+    );
+
+    const getGridOrderPriceTolerance = (gridState, desiredPrice) => {
+        const step = Math.abs(toFiniteNumber(gridState?.step, NaN));
+        const price = Math.abs(toFiniteNumber(desiredPrice, NaN));
+        const stepTolerance = Number.isFinite(step) && step > 0 ? step * 0.02 : 0;
+        const priceTolerance = Number.isFinite(price) && price > 0 ? price * 0.00005 : 0;
+        return Math.max(stepTolerance, priceTolerance, 1e-12);
+    };
+
+    const isEquivalentGridOrder = (openOrder, desiredOrder, gridState) => {
+        const openSide = getGridOrderSide(openOrder);
+        const desiredSide = String(desiredOrder?.side || "").toLowerCase();
+        if (!openSide || !desiredSide || openSide !== desiredSide) return false;
+
+        const openPrice = getGridOrderPrice(openOrder);
+        const desiredPrice = toFiniteNumber(desiredOrder?.price, NaN);
+        if (!Number.isFinite(openPrice) || !Number.isFinite(desiredPrice)) return false;
+
+        return Math.abs(openPrice - desiredPrice) <= getGridOrderPriceTolerance(gridState, desiredPrice);
+    };
+
     const maybeLogGridSizingState = (channel, message, stateKey) => {
         const now = Date.now();
         const gridSizingStateLogCache = getGridSizingStateLogCache();
@@ -596,7 +622,10 @@ const createRuntimeSignalGridHelpers = ({
             }
 
             const desiredIds = new Set(desiredOrders.map((order) => order.clientOrderId));
-            const staleOrders = openGridOrders.filter((order) => !desiredIds.has(getExchangeClientOrderId(order)));
+            const staleOrders = openGridOrders.filter((order) => (
+                !desiredIds.has(getExchangeClientOrderId(order)) &&
+                !desiredOrders.some((desiredOrder) => isEquivalentGridOrder(order, desiredOrder, lockedGridState))
+            ));
             const now = Date.now();
             const isRebuildCooldownActive = staleOrders.length > 0 && (now - gridRuntimeStability.lastRebuildAt) < GRID_RUNTIME_REBUILD_COOLDOWN_MS;
             if (isRebuildCooldownActive) {
@@ -626,7 +655,10 @@ const createRuntimeSignalGridHelpers = ({
             }
 
             const openOrderIds = new Set(openGridOrders.map((order) => getExchangeClientOrderId(order)));
-            const newDesiredOrders = desiredOrders.filter((desiredOrder) => !openOrderIds.has(desiredOrder.clientOrderId));
+            const newDesiredOrders = desiredOrders.filter((desiredOrder) => (
+                !openOrderIds.has(desiredOrder.clientOrderId) &&
+                !openGridOrders.some((openOrder) => isEquivalentGridOrder(openOrder, desiredOrder, lockedGridState))
+            ));
             const approvedNewOrders = typeof filterGridOrdersWithAi === "function"
                 ? await filterGridOrdersWithAi({ db, snapshot, params, gridState: lockedGridState, desiredOrders: newDesiredOrders })
                 : newDesiredOrders;
