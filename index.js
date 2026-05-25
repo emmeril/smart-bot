@@ -34,6 +34,7 @@ const {
     CONFIG_AUTO_RELOAD_INTERVAL_MS
 } = require("./services/database-config");
 const { createDashboardConfigHelpers } = require("./services/dashboard-config");
+const { createDashboardOrderHelpers } = require("./services/dashboard-orders");
 const { createDashboardStatusHelpers } = require("./services/dashboard-status");
 const { createDashboardSessionHelpers } = require("./services/dashboard-session");
 const { createExchangePositionHelpers } = require("./services/exchange-position");
@@ -94,7 +95,7 @@ let exchangeHealth = {
     lastContext: ""
 };
 let lastRecoveryBlockLogAt = 0;
-const logPath = path.join(__dirname, 'trades.csv');
+const logPath = path.join(__dirname, "trades.csv");
 let db = null;
 const BALANCE_CACHE_TTL = 15000;
 const TICKER_CACHE_TTL = 800;
@@ -146,39 +147,45 @@ const {
     getIsSyncingPosition: () => isSyncingPosition
 });
 
-const formatAmountToMarketPrecision = (symbol, amount) => {
-    const numericAmount = Number(amount);
-    if (!exchange || !symbol || !Number.isFinite(numericAmount)) return NaN;
-    try { return Number.parseFloat(exchange.amountToPrecision(symbol, numericAmount)); } catch { return numericAmount; }
+const formatToMarketPrecision = (symbol, value, formatterName) => {
+    const numericValue = Number(value);
+    if (!exchange || !symbol || !Number.isFinite(numericValue)) return NaN;
+
+    try {
+        return Number.parseFloat(exchange[formatterName](symbol, numericValue));
+    } catch {
+        return numericValue;
+    }
 };
 
-const formatPriceToMarketPrecision = (symbol, price) => {
-    const numericPrice = Number(price);
-    if (!exchange || !symbol || !Number.isFinite(numericPrice)) return NaN;
-    try { return Number.parseFloat(exchange.priceToPrecision(symbol, numericPrice)); } catch { return numericPrice; }
-};
+const formatAmountToMarketPrecision = (symbol, amount) => (
+    formatToMarketPrecision(symbol, amount, "amountToPrecision")
+);
+const formatPriceToMarketPrecision = (symbol, price) => (
+    formatToMarketPrecision(symbol, price, "priceToPrecision")
+);
 
 const calcATR = (highs, lows, closes, period) => {
     if (!Number.isFinite(period) || period <= 0 || !Array.isArray(highs) || !Array.isArray(lows) || !Array.isArray(closes) || closes.length <= period) {
         return Array.isArray(closes) ? Array(closes.length).fill(null) : [];
     }
 
-    const out = Array(closes.length).fill(null);
-    const tr = Array(closes.length).fill(0);
+    const atrValues = Array(closes.length).fill(null);
+    const trueRanges = Array(closes.length).fill(0);
     for (let i = 1; i < closes.length; i++) {
-        const hl = highs[i] - lows[i];
-        const hc = Math.abs(highs[i] - closes[i - 1]);
-        const lc = Math.abs(lows[i] - closes[i - 1]);
-        tr[i] = Math.max(hl, hc, lc);
+        const highLowRange = highs[i] - lows[i];
+        const highCloseRange = Math.abs(highs[i] - closes[i - 1]);
+        const lowCloseRange = Math.abs(lows[i] - closes[i - 1]);
+        trueRanges[i] = Math.max(highLowRange, highCloseRange, lowCloseRange);
     }
 
-    let seed = 0;
-    for (let i = 1; i <= period; i++) seed += tr[i];
-    out[period] = seed / period;
+    let seedRangeSum = 0;
+    for (let i = 1; i <= period; i++) seedRangeSum += trueRanges[i];
+    atrValues[period] = seedRangeSum / period;
     for (let i = period + 1; i < closes.length; i++) {
-        out[i] = ((out[i - 1] * (period - 1)) + tr[i]) / period;
+        atrValues[i] = ((atrValues[i - 1] * (period - 1)) + trueRanges[i]) / period;
     }
-    return out;
+    return atrValues;
 };
 
 const clearRuntimeTimers = () => {
@@ -201,8 +208,11 @@ const { getDefaultConfig } = createRuntimeConfigHelpers({
 });
 
 const normalizeSymbol = (symbol) => String(symbol || "").toUpperCase().trim();
-const isSpotRuntimeMode = () => String(db?.marginMode || "spot").toLowerCase() === "spot"
-    || String(exchange?.options?.defaultType || "spot").toLowerCase() === "spot";
+const isSpotRuntimeMode = () => {
+    const configuredMarginMode = String(db?.marginMode || "spot").toLowerCase();
+    const exchangeDefaultType = String(exchange?.options?.defaultType || "spot").toLowerCase();
+    return configuredMarginMode === "spot" || exchangeDefaultType === "spot";
+};
 
 const {
     safeParseJSON,
@@ -1084,78 +1094,16 @@ const removeDashboardPosition = async (positionKey) => {
     return { ok: true, message: `Permintaan hapus posisi ${normalizedKey} sudah dikirim.` };
 };
 
-const DASHBOARD_ORDER_TYPES = ["grid", "tp", "sl"];
-const DASHBOARD_CANCEL_REASON_SINGLE = "DASHBOARD_CANCEL";
-const DASHBOARD_CANCEL_REASON_GROUP = "DASHBOARD_CANCEL_GROUP";
-const DASHBOARD_INVALID_ORDER_TYPE_ERROR = "Tipe order tidak valid. Gunakan grid, tp, atau sl.";
-const DASHBOARD_INVALID_ORDER_GROUP_TYPE_ERROR = "Tipe grup order tidak valid. Gunakan grid, tp, atau sl.";
-const DASHBOARD_ORDER_NOT_FOUND_ERROR = "Order tidak ditemukan atau sudah tertutup.";
-const DASHBOARD_ORDER_COLLECTION_BY_TYPE = {
-    grid: "grid",
-    tp: "tp",
-    sl: "sl"
-};
-
-const getDashboardManagedOrdersByType = (openOrders, normalizedType) => {
-    const collectionKey = DASHBOARD_ORDER_COLLECTION_BY_TYPE[normalizedType];
-    if (!collectionKey) return [];
-    return openOrders?.[collectionKey] || [];
-};
-
-const normalizeDashboardOrderType = (orderType) => String(orderType || "").toLowerCase();
-
-const DASHBOARD_CANCEL_BY_TYPE = {
-    grid: cancelGridOrders,
-    tp: cancelTpOrders,
-    sl: cancelSlOrders
-};
-
-const cancelDashboardManagedOrdersByType = async (normalizedType, orders, reason) => {
-    const cancelHandler = DASHBOARD_CANCEL_BY_TYPE[normalizedType];
-    if (!cancelHandler) return;
-    await cancelHandler(orders, reason);
-};
-
-const cancelDashboardOrder = async ({ orderType, clientOrderId, orderId }) => {
-    const normalizedType = normalizeDashboardOrderType(orderType);
-    if (!DASHBOARD_ORDER_TYPES.includes(normalizedType)) {
-        return { ok: false, error: DASHBOARD_INVALID_ORDER_TYPE_ERROR };
-    }
-
-    const openOrders = await fetchManagedOpenOrdersSnapshot();
-    const sourceOrders = getDashboardManagedOrdersByType(openOrders, normalizedType);
-    const targetOrder = sourceOrders.find((order) => {
-        const currentClientOrderId = String(getExchangeClientOrderId(order) || "");
-        const currentOrderId = String(order?.id || "");
-        return (clientOrderId && currentClientOrderId === clientOrderId) || (orderId && currentOrderId === orderId);
-    });
-
-    if (!targetOrder) {
-        return { ok: false, error: DASHBOARD_ORDER_NOT_FOUND_ERROR };
-    }
-
-    await cancelDashboardManagedOrdersByType(normalizedType, [targetOrder], DASHBOARD_CANCEL_REASON_SINGLE);
-
-    const reference = getExchangeClientOrderId(targetOrder) || targetOrder.id || "order";
-    return { ok: true, message: `Order ${reference} berhasil dibatalkan.` };
-};
-
-const cancelDashboardOrderGroup = async (orderType) => {
-    const normalizedType = normalizeDashboardOrderType(orderType);
-    if (!DASHBOARD_ORDER_TYPES.includes(normalizedType)) {
-        return { ok: false, error: DASHBOARD_INVALID_ORDER_GROUP_TYPE_ERROR };
-    }
-
-    const openOrders = await fetchManagedOpenOrdersSnapshot();
-    const sourceOrders = getDashboardManagedOrdersByType(openOrders, normalizedType);
-    if (sourceOrders.length === 0) {
-        return { ok: false, error: `Tidak ada order ${normalizedType.toUpperCase()} terbuka.` };
-    }
-
-    await cancelDashboardManagedOrdersByType(normalizedType, sourceOrders, DASHBOARD_CANCEL_REASON_GROUP);
-
-    return { ok: true, message: `${sourceOrders.length} order ${normalizedType.toUpperCase()} berhasil dibatalkan.` };
-};
+const {
+    cancelDashboardOrder,
+    cancelDashboardOrderGroup
+} = createDashboardOrderHelpers({
+    fetchManagedOpenOrdersSnapshot,
+    getExchangeClientOrderId,
+    cancelGridOrders,
+    cancelTpOrders,
+    cancelSlOrders
+});
 
 const { startWebDashboard } = createRuntimeDashboardHelpers({
     publicDir: path.join(__dirname, "public"),
@@ -1509,7 +1457,20 @@ const {
     exitProcess: (code) => process.exit(code)
 });
 
-(async () => {
+const runMainLoopTick = async () => {
+    if (!shouldRunMainLoopTick({ isShuttingDown, isProcessing })) return;
+
+    isProcessing = true;
+    try {
+        await runTradingCycle();
+    } catch (error) {
+        console.error("[APP][ERROR] Main loop failed:", error.message);
+    } finally {
+        isProcessing = false;
+    }
+};
+
+const startApplication = async () => {
     try {
         if (!(await initializeDB())) process.exit(1);
         webServer = await startWebDashboard(webServer);
@@ -1518,18 +1479,13 @@ const {
         await printStartupBanner(totalUSDT);
         lastTradeAt = getLastTradeTimestampFromLog();
 
-        mainLoopTimer = setInterval(async () => {
-            if (!shouldRunMainLoopTick({ isShuttingDown, isProcessing })) return;
-            isProcessing = true;
-            try { await runTradingCycle(); }
-            catch (error) { console.error("[APP][ERROR] Main loop failed:", error.message); }
-            finally { isProcessing = false; }
-        }, 2000);
-
+        mainLoopTimer = setInterval(runMainLoopTick, 2000);
         registerRuntimeCommands();
     } catch (error) {
         console.error("[APP][ERROR] Bot startup failed:", error.message);
         if (error?.stack) console.error("[APP][ERROR] Startup stack trace:\n" + error.stack);
         process.exit(1);
     }
-})();
+};
+
+startApplication();
