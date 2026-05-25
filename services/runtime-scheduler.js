@@ -1,3 +1,5 @@
+const { AsyncMutex } = require("./async-lock");
+
 const createRuntimeSchedulerHelpers = ({
     initializeExchange,
     detectPositionMode,
@@ -9,6 +11,8 @@ const createRuntimeSchedulerHelpers = ({
     startConfigAutoReload,
     shutdown
 }) => {
+    const recurringTaskLocks = new Map();
+
     const normalizeRecurringTaskArgs = (
         labelOrCallback,
         callbackOrAssignTimer,
@@ -55,17 +59,17 @@ const createRuntimeSchedulerHelpers = ({
         }
         assignInterval(desiredInterval);
         if (label) console.log(`${label}${desiredInterval}ms`);
-        const runnerState = { running: false };
+        const taskKey = label || callback;
+        if (!recurringTaskLocks.has(taskKey)) recurringTaskLocks.set(taskKey, new AsyncMutex());
+        const taskLock = recurringTaskLocks.get(taskKey);
         const nextTimer = setInterval(async () => {
-            if (runnerState.running) return;
-            runnerState.running = true;
-            try {
-                await callback();
-            } catch (error) {
-                console.error("[SCHEDULER][ERROR] Recurring task failed:", error?.message || error);
-            } finally {
-                runnerState.running = false;
-            }
+            await taskLock.tryRunExclusive(async () => {
+                try {
+                    await callback();
+                } catch (error) {
+                    console.error("[SCHEDULER][ERROR] Recurring task failed:", error?.message || error);
+                }
+            });
         }, desiredInterval);
         assignTimer(nextTimer);
         return nextTimer;

@@ -48,6 +48,7 @@ const { createTradeLogicHelpers } = require("./services/trade-logic");
 const { createPositionStateHelpers } = require("./services/position-state");
 const { createRuntimeSchedulerHelpers } = require("./services/runtime-scheduler");
 const { shouldRunMainLoopTick } = require("./services/main-loop-guard");
+const { AsyncMutex } = require("./services/async-lock");
 
 let isProcessing = false;
 let isPlacingOrder = false;
@@ -157,6 +158,8 @@ const formatToMarketPrecision = (symbol, value, formatterName) => {
         return numericValue;
     }
 };
+const positionSyncLock = new AsyncMutex();
+const mainLoopLock = new AsyncMutex();
 
 const formatAmountToMarketPrecision = (symbol, amount) => (
     formatToMarketPrecision(symbol, amount, "amountToPrecision")
@@ -1204,7 +1207,7 @@ const {
     configAutoReloadIntervalMs: CONFIG_AUTO_RELOAD_INTERVAL_MS
 });
 
-const syncPositionWithExchange = async () => {
+const syncPositionWithExchangeInternal = async () => {
     if (isSyncingPosition || isClosingPosition || isPlacingOrder) return;
     isSyncingPosition = true;
     try {
@@ -1269,6 +1272,10 @@ const syncPositionWithExchange = async () => {
     }
     finally { isSyncingPosition = false; }
 };
+
+const syncPositionWithExchange = async () => (
+    await positionSyncLock.tryRunExclusive(syncPositionWithExchangeInternal)
+);
 
 const {
     initializeExchange,
@@ -1460,16 +1467,18 @@ const {
 });
 
 const runMainLoopTick = async () => {
-    if (!shouldRunMainLoopTick({ isShuttingDown, isProcessing })) return;
+    await mainLoopLock.tryRunExclusive(async () => {
+        if (!shouldRunMainLoopTick({ isShuttingDown, isProcessing })) return;
 
-    isProcessing = true;
-    try {
-        await runTradingCycle();
-    } catch (error) {
-        console.error("[APP][ERROR] Main loop failed:", error.message);
-    } finally {
-        isProcessing = false;
-    }
+        isProcessing = true;
+        try {
+            await runTradingCycle();
+        } catch (error) {
+            console.error("[APP][ERROR] Main loop failed:", error.message);
+        } finally {
+            isProcessing = false;
+        }
+    });
 };
 
 const startApplication = async () => {

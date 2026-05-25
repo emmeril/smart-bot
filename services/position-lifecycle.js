@@ -1,3 +1,5 @@
+const { AsyncMutex } = require("./async-lock");
+
 const createPositionLifecycleHelpers = ({
     getDb,
     getExchange,
@@ -33,6 +35,13 @@ const createPositionLifecycleHelpers = ({
     const getLifecyclePositionKey = (positionKey = null, position = null) => (
         toPositionMapKey(positionKey || position?.positionSide || getTrackedPositionSideLabel(position))
     );
+    const closeLocksByKey = new Map();
+
+    const getCloseLock = (positionKey) => {
+        const lockKey = toPositionMapKey(positionKey);
+        if (!closeLocksByKey.has(lockKey)) closeLocksByKey.set(lockKey, new AsyncMutex());
+        return closeLocksByKey.get(lockKey);
+    };
 
     const getLifecycleIdentity = (position) => JSON.stringify([
         String(position?.positionSide || getTrackedPositionSideLabel(position) || ""),
@@ -216,7 +225,7 @@ const createPositionLifecycleHelpers = ({
         return true;
     };
 
-    const closePosition = async (positionKey, reason) => {
+    const closePositionInternal = async (positionKey, reason) => {
         const exchange = getExchange();
         const metrics = getMetrics();
         const db = getDb();
@@ -332,8 +341,13 @@ const createPositionLifecycleHelpers = ({
         } finally {
             closingPositionKeys.delete(closeLockKey);
             setIsClosingPosition(closingPositionKeys.size > 0);
+            if (closingPositionKeys.size === 0) closeLocksByKey.delete(closeLockKey);
         }
     };
+
+    const closePosition = async (positionKey, reason) => (
+        await getCloseLock(positionKey).tryRunExclusive(() => closePositionInternal(positionKey, reason))
+    );
 
     return {
         clearMissingPositionState,

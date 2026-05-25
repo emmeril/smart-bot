@@ -1,3 +1,5 @@
+const { AsyncMutex } = require("./async-lock");
+
 const createConfigRuntimeHelpers = ({
     getDb,
     setDb,
@@ -19,20 +21,10 @@ const createConfigRuntimeHelpers = ({
     configAutoReloadIntervalMs
 }) => {
     let lastKnownDashboardConfigSignature = "";
-    let configOperationChain = Promise.resolve();
+    const configOperationLock = new AsyncMutex();
 
     const runConfigOperation = async (operation) => {
-        const previousOperation = configOperationChain.catch(() => {});
-        let releaseOperation = () => {};
-        configOperationChain = new Promise((resolve) => {
-            releaseOperation = resolve;
-        });
-        await previousOperation;
-        try {
-            return await operation();
-        } finally {
-            releaseOperation();
-        }
+        return await configOperationLock.runExclusive(operation);
     };
 
     const buildDashboardConfigSignature = (config) => JSON.stringify(

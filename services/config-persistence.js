@@ -8,9 +8,15 @@ const createConfigPersistenceHelpers = ({ getConfigRow, withSqliteBusyRetry, Con
         let configRow = await getConfigRow();
         if (configRow) return configRow;
 
-        configRow = await withSqliteBusyRetry(() => Config.create(getDefaultConfig()));
-        logCreated();
-        return configRow;
+        try {
+            configRow = await withSqliteBusyRetry(() => Config.create({ id: 1, ...getDefaultConfig() }));
+            logCreated();
+            return configRow;
+        } catch (error) {
+            const retryRow = await getConfigRow();
+            if (retryRow) return retryRow;
+            throw error;
+        }
     };
 
     const persistConfig = async (config) => {

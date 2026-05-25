@@ -1,3 +1,5 @@
+const { AsyncMutex } = require("./async-lock");
+
 const createRuntimeSignalGridHelpers = ({
     getDb,
     getAccountPositionMode,
@@ -70,6 +72,7 @@ const createRuntimeSignalGridHelpers = ({
     };
     const GRID_RUNTIME_HYSTERESIS_CYCLES = 3;
     const GRID_RUNTIME_REBUILD_COOLDOWN_MS = 90 * 1000;
+    const gridSyncLock = new AsyncMutex();
 
     const buildGridExposureSignature = (openPositions = [], trackedPositions = getActivePositionsList()) => JSON.stringify({
         mode: getAccountPositionMode()?.label || "UNKNOWN",
@@ -399,7 +402,7 @@ const createRuntimeSignalGridHelpers = ({
         }
     };
 
-    const syncGridOrders = async () => {
+    const syncGridOrdersInternal = async () => {
         const db = getDb();
         const exchange = getExchange();
         if (!db || String(db.strategy || "spot_grid").toLowerCase() !== "spot_grid") return;
@@ -630,6 +633,10 @@ const createRuntimeSignalGridHelpers = ({
             setIsSyncingGridOrders(false);
         }
     };
+
+    const syncGridOrders = async () => (
+        await gridSyncLock.tryRunExclusive(syncGridOrdersInternal)
+    );
 
     return {
         evaluateGridSignal,

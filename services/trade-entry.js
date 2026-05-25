@@ -1,3 +1,5 @@
+const { AsyncMutex } = require("./async-lock");
+
 const createTradeEntryHelpers = ({
     getDb,
     getExchange,
@@ -32,10 +34,13 @@ const createTradeEntryHelpers = ({
     syncPositionWithExchange,
     notifyTradeUpdate
 }) => {
-    const placeOrder = async (side, signalData = {}) => {
+    const placeOrderLock = new AsyncMutex();
+
+    const placeOrderInternal = async (side, signalData = {}) => {
         const db = getDb();
         const exchange = getExchange();
         const metrics = getMetrics();
+        let didMarkPlacingOrder = false;
         try {
             if (!db || getIsPlacingOrder() || getIsClosingPosition()) return;
             const targetPositionKey = getOrderPositionSide(side);
@@ -85,6 +90,7 @@ const createTradeEntryHelpers = ({
                 }
             }
             setIsPlacingOrder(true);
+            didMarkPlacingOrder = true;
             console.log(`[ORDER][INFO] Attempting to place ${side.toUpperCase()} order...`);
             await setMarginMode();
             const openExchangePositions = await fetchOpenExchangePositions();
@@ -290,9 +296,13 @@ const createTradeEntryHelpers = ({
         } catch (error) {
             console.error("[ORDER][ERROR] Order failed:", error.message);
         } finally {
-            setIsPlacingOrder(false);
+            if (didMarkPlacingOrder) setIsPlacingOrder(false);
         }
     };
+
+    const placeOrder = async (side, signalData = {}) => (
+        await placeOrderLock.tryRunExclusive(() => placeOrderInternal(side, signalData))
+    );
 
     return { placeOrder };
 };
