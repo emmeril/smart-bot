@@ -481,23 +481,24 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
         return Number.isFinite(flat) ? flat : NaN;
     };
 
-    const resolveRecentSpotBuyAveragePrice = async (addedQty) => {
-        if (!Number.isFinite(addedQty) || addedQty <= 0) return NaN;
-        if (!exchange || typeof exchange.fetchMyTrades !== "function") return NaN;
-        if (exchange.options?.smartBotPrivateAuthFailed) return NaN;
-        if (exchange.has && exchange.has.fetchMyTrades === false) return NaN;
+    const resolveRecentSpotAveragePrice = async (side, targetQty) => {
+        if (!Number.isFinite(targetQty) || targetQty <= 0) return { price: NaN, quantity: 0 };
+        if (!exchange || typeof exchange.fetchMyTrades !== "function") return { price: NaN, quantity: 0 };
+        if (exchange.options?.smartBotPrivateAuthFailed) return { price: NaN, quantity: 0 };
+        if (exchange.has && exchange.has.fetchMyTrades === false) return { price: NaN, quantity: 0 };
         const symbol = getSpotPair(db?.pair);
-        if (!symbol) return NaN;
+        if (!symbol) return { price: NaN, quantity: 0 };
         try {
             const lookbackMs = 15 * 60 * 1000;
             const since = Date.now() - lookbackMs;
             const trades = await exchange.fetchMyTrades(symbol, since, 100);
-            if (!Array.isArray(trades) || trades.length === 0) return NaN;
+            if (!Array.isArray(trades) || trades.length === 0) return { price: NaN, quantity: 0 };
 
-            let remainingQty = addedQty;
+            let remainingQty = targetQty;
             let weightedCost = 0;
+            const normalizedSide = String(side || "").toLowerCase();
             const sortedRecent = trades
-                .filter((trade) => String(trade?.side || "").toLowerCase() === "buy")
+                .filter((trade) => String(trade?.side || "").toLowerCase() === normalizedSide)
                 .sort((a, b) => toFiniteNumber(b?.timestamp, 0) - toFiniteNumber(a?.timestamp, 0));
 
             for (const trade of sortedRecent) {
@@ -510,13 +511,113 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
                 if (remainingQty <= POSITION_SYNC_QTY_TOLERANCE) break;
             }
 
-            const filledQty = addedQty - Math.max(0, remainingQty);
-            if (filledQty <= POSITION_SYNC_QTY_TOLERANCE) return NaN;
-            return weightedCost / filledQty;
+            const filledQty = targetQty - Math.max(0, remainingQty);
+            if (filledQty <= POSITION_SYNC_QTY_TOLERANCE) return { price: NaN, quantity: 0 };
+            return { price: weightedCost / filledQty, quantity: filledQty };
         } catch (tradeFetchError) {
-            console.warn(`[SYNC][WARN] Failed to fetch recent trades for aggregate entry-price blend: ${tradeFetchError.message}`);
-            return NaN;
+            console.warn(`[SYNC][WARN] Failed to fetch recent ${side} trades for aggregate quantity sync: ${tradeFetchError.message}`);
+            return { price: NaN, quantity: 0 };
         }
+    };
+
+    const resolveRecentSpotBuyAveragePrice = async (addedQty) => {
+        const result = await resolveRecentSpotAveragePrice("buy", addedQty);
+        return result.price;
+    };
+
+    const resolveSpotReductionExitPrice = async (position, closedQty) => {
+        const recentSell = await resolveRecentSpotAveragePrice("sell", closedQty);
+        if (Number.isFinite(recentSell.price) && recentSell.price > 0) {
+            return {
+                exitPrice: recentSell.price,
+                filledQty: Number.isFinite(recentSell.quantity) && recentSell.quantity > 0 ? recentSell.quantity : closedQty,
+                source: "exchange_trades"
+            };
+        }
+
+        if (!Number.isFinite(spotTickerPrice) || spotTickerPrice <= 0) {
+            try {
+                spotTickerPrice = await getPrice();
+            } catch (tickerError) {
+                console.warn(`[SYNC][WARN] Failed to fetch ticker for aggregate reduction PnL: ${tickerError.message}`);
+                spotTickerPrice = NaN;
+            }
+        }
+
+        const targetPrice = toFiniteNumber(position?.targetPrice, NaN);
+        const stopLossPrice = toFiniteNumber(position?.stopLossPrice, NaN);
+        const currentPrice = spotTickerPrice;
+        let exitPrice = currentPrice;
+        if (String(position?.side || "").toLowerCase() === "buy") {
+            if (Number.isFinite(targetPrice) && Number.isFinite(currentPrice) && currentPrice >= targetPrice) exitPrice = targetPrice;
+            else if (Number.isFinite(stopLossPrice) && stopLossPrice > 0 && Number.isFinite(currentPrice) && currentPrice <= stopLossPrice) exitPrice = stopLossPrice;
+        }
+
+        return {
+            exitPrice,
+            filledQty: closedQty,
+            source: "estimated"
+        };
+    };
+
+    const applySpotAggregateReductionPnl = async (positionKey, position, remainingQty) => {
+        const trackedQty = toFiniteNumber(position?.quantity, NaN);
+        if (!Number.isFinite(trackedQty) || trackedQty <= 0) return null;
+        const closedQty = trackedQty - remainingQty;
+        if (closedQty <= POSITION_SYNC_QTY_TOLERANCE) return null;
+
+        const { exitPrice, filledQty, source } = await resolveSpotReductionExitPrice(position, closedQty);
+        if (!Number.isFinite(exitPrice) || exitPrice <= 0) return null;
+
+        const realizedPnL = calculatePositionPnL(position, exitPrice, filledQty);
+        const netProfitUSDT = toFiniteNumber(realizedPnL?.realizedProfitUSDT, 0);
+        const entryValue = Math.max(1e-8, toFiniteNumber(position?.entryPrice, 0) * filledQty);
+        const profitPercent = entryValue > 0 ? (netProfitUSDT / entryValue) * 100 : toFiniteNumber(realizedPnL?.profitPercent, 0);
+        const isEstimated = source !== "exchange_trades";
+
+        await applyDailyPnlDelta({
+            pnlDelta: netProfitUSDT,
+            tradeDelta: 1,
+            source: isEstimated ? "estimated" : "local"
+        });
+
+        metrics.trades.closed++;
+        if (netProfitUSDT > 0) metrics.trades.wins++;
+        else if (netProfitUSDT < 0) metrics.trades.losses++;
+
+        logTrade(
+            position.side === "buy" ? "LONG" : "SHORT",
+            position.entryPrice,
+            exitPrice,
+            isEstimated ? "CLOSE_UNCONFIRMED:SPOT_AGGREGATE_REDUCTION" : "CLOSE:SPOT_AGGREGATE_REDUCTION",
+            netProfitUSDT,
+            position.strategy || null
+        );
+
+        await notifyPositionClosed({
+            position: {
+                ...position,
+                symbol: db.pair
+            },
+            reason: isEstimated ? "SPOT_OCO_SYNC_ESTIMATED" : "SPOT_OCO_SYNC_FILLED",
+            exitPrice,
+            netProfitUSDT,
+            profitPercent,
+            totalAccumulatedPnlUSDT: toFiniteNumber(db?.dailyPnL, 0) + toFiniteNumber(db?.estimatedPnL, 0),
+            closedAt: Date.now(),
+            closeFillSnapshot: {
+                price: exitPrice,
+                quantity: filledQty
+            },
+            positionKey
+        });
+
+        console.log(
+            `[SYNC][INFO] Realized spot aggregate reduction ${positionKey}: closed ${filledQty} @ ${exitPrice} `
+            + `PnL ${netProfitUSDT.toFixed(4)} USDT (${profitPercent.toFixed(2)}%) source=${source}`
+        );
+
+        return { closedQty: filledQty, exitPrice, netProfitUSDT, profitPercent, source };
     };
 
     const syncSpotAggregatePositionQuantity = async (positionKey, position) => {
@@ -547,6 +648,28 @@ const ensureManagedOrdersForPositions = async (positionsMap) => {
         if (!Number.isFinite(trackedQty)) return null;
         if (Math.abs(formattedQty - trackedQty) <= POSITION_SYNC_QTY_TOLERANCE) return { type: "unchanged" };
         if (formattedQty <= 0) return { type: "unchanged" };
+
+        if (formattedQty < trackedQty) {
+            await applySpotAggregateReductionPnl(positionKey, position, formattedQty);
+            const targetPrice = toFiniteNumber(position?.targetPrice, NaN);
+            const stopLossPrice = toFiniteNumber(position?.stopLossPrice, NaN);
+            return {
+                type: "update",
+                nextPosition: {
+                    ...position,
+                    quantity: formattedQty,
+                    entryPrice: trackedEntryPrice,
+                    targetPrice,
+                    stopLossPrice,
+                    targetProfitUSDT: Number.isFinite(targetPrice) && Number.isFinite(trackedEntryPrice)
+                        ? Math.abs(targetPrice - trackedEntryPrice) * formattedQty
+                        : toFiniteNumber(position?.targetProfitUSDT, NaN),
+                    stopLossUSDT: Number.isFinite(stopLossPrice) && stopLossPrice > 0 && Number.isFinite(trackedEntryPrice)
+                        ? -Math.abs(stopLossPrice - trackedEntryPrice) * formattedQty
+                        : toFiniteNumber(position?.stopLossUSDT, NaN)
+                }
+            };
+        }
 
         let nextEntryPrice = trackedEntryPrice;
         if (formattedQty > trackedQty && trackedQty > 0 && Number.isFinite(trackedEntryPrice) && trackedEntryPrice > 0) {
