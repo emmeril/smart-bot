@@ -92,7 +92,7 @@ const createPositionLifecycleHelpers = ({
             if (typeof applyDailyPnlDelta === "function") await applyDailyPnlDelta({
                 pnlDelta: estimatedPnL.realizedProfitUSDT,
                 tradeDelta: 1,
-                source: "estimated"
+                source: "local"
             });
             else {
                 db.estimatedPnL = toFiniteNumber(db.estimatedPnL, 0) + estimatedPnL.realizedProfitUSDT;
@@ -125,7 +125,7 @@ const createPositionLifecycleHelpers = ({
                     positionKey: trackedKey
                 });
             }
-            console.warn(`[POSITION][WARN] Removed local position using estimated exit price because no confirmed exchange exit price was available (${reason}).`);
+            console.warn(`[POSITION][WARN] Removed local position using estimated exit price and booked it into realized PnL because no confirmed exchange exit price was available (${reason}).`);
             return true;
         }
 
