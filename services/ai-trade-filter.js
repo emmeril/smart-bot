@@ -315,15 +315,23 @@ const createAiTradeFilter = ({
             });
             const decisions = new Map((Array.isArray(result?.orderDecisions) ? result.orderDecisions : [])
                 .map((decision) => [String(decision?.clientOrderId || ""), decision]));
-            return desiredOrders.filter((order) => {
+            const approvedOrders = [];
+            const rejectedOrders = [];
+            desiredOrders.forEach((order) => {
                 const decision = decisions.get(String(order?.clientOrderId || ""));
                 const confidence = safeNumber(decision?.confidence, 0);
                 const approved = Boolean(decision?.approved) && confidence >= confidenceFloor;
                 if (!approved) {
                     console.log(`[AI][INFO] Rejected grid order ${order.clientOrderId}: ${decision?.reason || "low confidence"}`);
+                    rejectedOrders.push(order);
+                    return;
                 }
-                return approved;
+                approvedOrders.push(order);
             });
+            const approvedIds = approvedOrders.map((order) => order.clientOrderId).join(", ") || "-";
+            const rejectedIds = rejectedOrders.map((order) => order.clientOrderId).join(", ") || "-";
+            console.log(`[AI][INFO] Grid review result: approved=${approvedOrders.length}/${desiredOrders.length} [${approvedIds}] | rejected=${rejectedOrders.length} [${rejectedIds}]`);
+            return approvedOrders;
         } catch (error) {
             console.warn(`[AI][WARN] Grid review failed: ${error.message}`);
             return failOpenOnError ? desiredOrders : [];
