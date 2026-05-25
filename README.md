@@ -106,7 +106,7 @@ Keterangan env:
 - `DASHBOARD_PASSWORD`: password login dashboard
 - `DASHBOARD_SESSION_SECRET`: secret untuk cookie sesi dashboard
 - `FONNTE_NOTIFICATIONS_ENABLED`: aktif/nonaktif notifikasi WhatsApp
-- `FONNTE_NOTIFY_PROTECTION_UPDATES`: notifikasi tambahan saat TP/SL protection diperbarui
+- `FONNTE_NOTIFY_PROTECTION_UPDATES`: notifikasi tambahan saat TP/SL protection diperbarui. Default `false`; alert proteksi gagal/blocked tetap dikirim saat notifikasi Fonnte aktif.
 - `CONFIG_AUTO_RELOAD_INTERVAL_MS`: interval pembacaan ulang konfigurasi dari database
 
 Jika kredensial dashboard tidak diisi, aplikasi memakai default lokal:

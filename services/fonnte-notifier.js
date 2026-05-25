@@ -6,7 +6,8 @@ const createFonnteNotifierHelpers = ({
     target = process.env.FONNTE_TARGET || process.env.ADMIN_PHONE || "",
     endpoint = process.env.FONNTE_ENDPOINT || DEFAULT_FONNTE_ENDPOINT,
     countryCode = process.env.FONNTE_COUNTRY_CODE || "62",
-    enabled = process.env.FONNTE_NOTIFICATIONS_ENABLED
+    enabled = process.env.FONNTE_NOTIFICATIONS_ENABLED,
+    protectionUpdatesEnabled = process.env.FONNTE_NOTIFY_PROTECTION_UPDATES
 } = {}) => {
     let sendQueue = Promise.resolve();
     const recentMessageMap = new Map();
@@ -23,6 +24,7 @@ const createFonnteNotifierHelpers = ({
 
     const normalizedTarget = normalizeTargetList(target);
     const isEnabled = () => Boolean(token && normalizedTarget && String(enabled || "1").toLowerCase() !== "false");
+    const shouldNotifyProtectionUpdates = () => String(protectionUpdatesEnabled || "false").toLowerCase() === "true";
 
     const formatNumber = (value, digits = 4) => {
         const numeric = Number(value);
@@ -80,6 +82,7 @@ const createFonnteNotifierHelpers = ({
         if (normalized === "OPEN") return { code: "OPEN", label: "Posisi Dibuka" };
         if (normalized === "PARTIAL_CLOSE") return { code: "PARTIAL_CLOSE", label: "Posisi Ditutup Sebagian" };
         if (normalized === "TP_SL_UPDATED") return { code: "TP_SL_UPDATED", label: "Proteksi TP/SL Diperbarui" };
+        if (normalized === "PROTECTION_BLOCKED") return { code: "PROTECTION_BLOCKED", label: "Proteksi TP/SL Bermasalah" };
         return { code: normalized || "UPDATE", label: "Update Posisi" };
     };
 
@@ -119,31 +122,56 @@ const createFonnteNotifierHelpers = ({
     }) => {
         const entryPrice = Number(position?.entryPrice);
         const positionQty = Number(position?.quantity);
+        const protectedQty = Number(position?.ocoQuantity);
         const snapshotQty = Number(closeFillSnapshot?.quantity);
         const orderFilledQty = Number(order?.filled);
         const orderExecutedQty = Number(order?.info?.executedQty);
         const orderAmountQty = Number(order?.amount);
-        const closeQuantityCandidates = [
-            positionQty,
+        const actualCloseQuantityCandidates = [
             snapshotQty,
             orderFilledQty,
             orderExecutedQty,
             orderAmountQty
         ].filter((qty) => Number.isFinite(qty) && qty > 0);
-        const closeQuantity = closeQuantityCandidates.length > 0
-            ? Math.max(...closeQuantityCandidates)
+        const closeQuantity = actualCloseQuantityCandidates.length > 0
+            ? Math.max(...actualCloseQuantityCandidates)
+            : (Number.isFinite(positionQty) && positionQty > 0 ? positionQty : NaN);
+        const hasPositionQty = Number.isFinite(positionQty) && positionQty > 0;
+        const hasCloseQty = Number.isFinite(closeQuantity) && closeQuantity > 0;
+        const hasProtectedQty = Number.isFinite(protectedQty) && protectedQty > 0;
+        const closeQtyDiffersFromPosition = hasCloseQty
+            && hasPositionQty
+            && Math.abs(closeQuantity - positionQty) > 0.000001;
+        const protectedQtyDiffersFromPosition = hasProtectedQty
+            && hasPositionQty
+            && Math.abs(protectedQty - positionQty) > 0.000001;
+        const remainingQty = closeQtyDiffersFromPosition
+            ? Math.max(0, positionQty - closeQuantity)
             : NaN;
         const symbol = String(position?.symbol || position?.pair || process.env.TRADING_PAIR || "").trim();
-
-        return [
+        const closeReason = resolveCloseReason(reason);
+        const lines = [
             "*POSISI CLOSED*",
             `Pasangan: ${symbol || "N/A"}`,
-            `Harga entry: ${formatNumber(entryPrice)}`,
-            `Qty: ${formatNumber(closeQuantity, 6)}`,
+            `Alasan: ${closeReason.label}`,
+            `Harga entry: ${formatNumber(entryPrice)}`
+        ];
+
+        if (closeQtyDiffersFromPosition) {
+            lines.push(`Qty closed: ${formatNumber(closeQuantity, 6)}`);
+            lines.push(`Qty posisi lokal: ${formatNumber(positionQty, 6)}`);
+            if (protectedQtyDiffersFromPosition) lines.push(`Qty OCO/protected: ${formatNumber(protectedQty, 6)}`);
+            lines.push(`Sisa setelah close: ${formatNumber(remainingQty, 6)}`);
+        } else {
+            lines.push(`Qty closed: ${formatNumber(closeQuantity, 6)}`);
+        }
+
+        lines.push(
             `P/L: ${formatSignedNumber(netProfitUSDT)} USDT (${formatSignedNumber(profitPercent, 2)}%)`,
             `Total akumulasi P/L: ${formatSignedNumber(totalAccumulatedPnlUSDT)} USDT`,
             `Waktu: ${formatTime(closedAt)}`
-        ].join("\n");
+        );
+        return lines.join("\n");
     };
 
     const buildTradeUpdateMessage = ({
@@ -159,19 +187,49 @@ const createFonnteNotifierHelpers = ({
     }) => {
         const symbol = String(position?.symbol || position?.pair || process.env.TRADING_PAIR || "").trim();
         const eventTime = Number.isFinite(Number(occurredAt)) ? Number(occurredAt) : Date.now();
+        const tradeEvent = resolveTradeEvent(event);
+        const reasonLabel = tradeEvent.code === "TP_SL_UPDATED"
+            ? resolveProtectionUpdateReasonLabel(reason)
+            : String(reason || "").trim();
+        const eventQty = Number(quantity);
+        const positionQty = Number(position?.quantity);
+        const protectedQty = Number(position?.ocoQuantity);
+        const hasEventQty = Number.isFinite(eventQty);
+        const hasPositionQty = Number.isFinite(positionQty);
+        const hasProtectedQty = Number.isFinite(protectedQty) && protectedQty > 0;
+        const eventQtyDiffersFromPosition = hasEventQty
+            && hasPositionQty
+            && Math.abs(eventQty - positionQty) > 0.000001;
+        const protectedQtyDiffersFromPosition = hasProtectedQty
+            && hasPositionQty
+            && Math.abs(protectedQty - positionQty) > 0.000001;
 
         const lines = [
-            "*UPDATE TRADE:*",
+            `*${tradeEvent.label.toUpperCase()}:*`,
             `Pasangan: ${symbol || "N/A"}`,
             `Harga entry: ${formatNumber(entryPrice)}`
         ];
 
-        if (Number.isFinite(Number(quantity))) {
-            lines.push(`Qty: ${formatNumber(quantity, 6)}`);
+        if (tradeEvent.code === "GRID_FILLED" && eventQtyDiffersFromPosition) {
+            lines.push(`Qty fill: ${formatNumber(eventQty, 6)}`);
+            lines.push(`Qty posisi: ${formatNumber(positionQty, 6)}`);
+        } else if (protectedQtyDiffersFromPosition) {
+            lines.push(`Qty posisi: ${formatNumber(positionQty, 6)}`);
+        } else if (hasEventQty) {
+            lines.push(`Qty: ${formatNumber(eventQty, 6)}`);
+        } else if (hasPositionQty) {
+            lines.push(`Qty posisi: ${formatNumber(positionQty, 6)}`);
+        }
+
+        if (protectedQtyDiffersFromPosition) {
+            const uncoveredQty = Math.max(0, positionQty - protectedQty);
+            lines.push(`Qty OCO/protected: ${formatNumber(protectedQty, 6)}`);
+            lines.push(`Sisa belum ter-cover: ${formatNumber(uncoveredQty, 6)}`);
         }
 
         lines.push(`TP: ${formatNumber(position?.targetPrice)}`);
         lines.push(`SL: ${formatNumber(position?.stopLossPrice)}`);
+        if (reasonLabel) lines.push(`Info: ${reasonLabel}`);
         lines.push(`Waktu: ${formatTime(eventTime)}`);
         return lines.join("\n");
     };
@@ -321,7 +379,8 @@ const createFonnteNotifierHelpers = ({
         occurredAt
     }) => {
         const normalizedEvent = String(event || "").toUpperCase().trim();
-        const allowedTradeEvents = new Set(["GRID_FILLED", "PARTIAL_CLOSE"]);
+        const allowedTradeEvents = new Set(["GRID_FILLED", "PARTIAL_CLOSE", "PROTECTION_BLOCKED"]);
+        if (shouldNotifyProtectionUpdates()) allowedTradeEvents.add("TP_SL_UPDATED");
 
         if (!allowedTradeEvents.has(normalizedEvent)) {
             return { ok: true, skipped: true, reason: `Unsupported trade update event: ${normalizedEvent || "UNKNOWN"}` };

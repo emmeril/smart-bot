@@ -368,6 +368,26 @@ const createOrderExecutionHelpers = ({
         });
     };
 
+    const notifyProtectionBlocked = async ({
+        position,
+        positionKey,
+        reason
+    }) => {
+        if (typeof notifyTradeUpdate !== "function") return;
+        const db = getDb();
+        await notifyTradeUpdate({
+            event: "PROTECTION_BLOCKED",
+            position: {
+                ...position,
+                symbol: db?.pair || position?.symbol
+            },
+            entryPrice: position?.entryPrice,
+            quantity: position?.quantity,
+            reason: `${reason} | key=${positionKey}`,
+            occurredAt: Date.now()
+        });
+    };
+
     const isUnknownOrderLookupError = (error) => {
         const message = String(error?.message || error || "").toLowerCase();
         return message.includes("order does not exist")
@@ -659,14 +679,17 @@ const createOrderExecutionHelpers = ({
         await ensureReduceOnlyTakeProfitOrder(positionKey, position);
         await ensureReduceOnlyStopLossOrder(positionKey, position);
         if (typeof notifyTradeUpdate === "function") {
+            const notifiedPosition = typeof getActivePositionByKey === "function"
+                ? (getActivePositionByKey(positionKey) || position)
+                : position;
             await notifyTradeUpdate({
                 event: "GRID_FILLED",
                 position: {
-                    ...position,
+                    ...notifiedPosition,
                     symbol: db.pair
                 },
-                entryPrice: position.entryPrice,
-                quantity: position.quantity,
+                entryPrice: notifiedPosition.entryPrice,
+                quantity: filledPosition.quantity,
                 reason: `GRID_FILLED:${gridClientOrderId}`,
                 occurredAt: Date.now()
             });
@@ -1593,6 +1616,11 @@ const createOrderExecutionHelpers = ({
                     position.ocoBlockedRetryCount = 0;
                     upsertActivePosition(position);
                     await saveDB();
+                    await notifyProtectionBlocked({
+                        position,
+                        positionKey,
+                        reason: nextReason
+                    });
                 }
                 await tryClearSpotStalePositionWithoutExit(positionKey, position, `OCO_BLOCKED: ${nextReason}`);
                 return;
@@ -1605,6 +1633,11 @@ const createOrderExecutionHelpers = ({
                 position.ocoBlockedRetryCount = 0;
                 upsertActivePosition(position);
                 await saveDB();
+                await notifyProtectionBlocked({
+                    position,
+                    positionKey,
+                    reason: nextReason
+                });
                 await tryClearSpotStalePositionWithoutExit(positionKey, position, `OCO_BLOCKED: ${nextReason}`);
                 return;
             }
