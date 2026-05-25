@@ -57,6 +57,7 @@ const createRuntimeSignalGridHelpers = ({
     buildGridEntryOrders,
     filterGridOrdersForActiveExposure,
     getExchangeClientOrderId,
+    filterGridOrdersWithAi,
     placeGridEntryOrder,
     hasAnyActivePosition,
     getActivePositionByKey,
@@ -625,8 +626,11 @@ const createRuntimeSignalGridHelpers = ({
             }
 
             const openOrderIds = new Set(openGridOrders.map((order) => getExchangeClientOrderId(order)));
-            for (const desiredOrder of desiredOrders) {
-                if (openOrderIds.has(desiredOrder.clientOrderId)) continue;
+            const newDesiredOrders = desiredOrders.filter((desiredOrder) => !openOrderIds.has(desiredOrder.clientOrderId));
+            const approvedNewOrders = typeof filterGridOrdersWithAi === "function"
+                ? await filterGridOrdersWithAi({ db, snapshot, params, gridState: lockedGridState, desiredOrders: newDesiredOrders })
+                : newDesiredOrders;
+            for (const desiredOrder of approvedNewOrders) {
                 await placeGridEntryOrder(desiredOrder);
             }
         } finally {

@@ -15,6 +15,7 @@ const { createRuntimeMonitoringHelpers } = require("./services/runtime-monitorin
 const { createRuntimeMarketDataHelpers } = require("./services/runtime-market-data");
 const { createRuntimePositionUtils } = require("./services/runtime-position-utils");
 const { createRuntimeSignalGridHelpers } = require("./services/runtime-signal-grid");
+const { createAiTradeFilter } = require("./services/ai-trade-filter");
 const { createFonnteNotifierHelpers } = require("./services/fonnte-notifier");
 const {
     sequelize,
@@ -343,6 +344,8 @@ const isGridEntryOrder = (order) => getExchangeClientOrderId(order).startsWith(G
 const isTpReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWith(TP_CLIENT_ORDER_PREFIX);
 const isSlReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWith(SL_CLIENT_ORDER_PREFIX);
 const isTriggerManagedOrder = (order, label = "") => label === "SL" || isSlReduceOnlyOrder(order) || String(order?.type || "").toUpperCase().includes("STOP");
+
+const aiTradeFilter = createAiTradeFilter();
 
 const {
     notifyPositionClosed,
@@ -1142,6 +1145,7 @@ const {
     hasAnyActivePosition: () => hasAnyActivePosition(),
     getLastTradeTimestampFromLog: (...args) => getLastTradeTimestampFromLog(...args),
     analyzeSignal: (...args) => analyzeSignal(...args),
+    reviewSignalWithAi: (...args) => aiTradeFilter.reviewSignal(...args),
     getActivePositionByKey: (...args) => getActivePositionByKey(...args),
     placeOrder: (...args) => placeOrder(...args),
     syncPositionWithExchange: (...args) => syncPositionWithExchange(...args),
@@ -1479,6 +1483,7 @@ const {
     buildGridEntryOrders: (...args) => buildGridEntryOrders(...args),
     filterGridOrdersForActiveExposure: (...args) => filterGridOrdersForActiveExposure(...args),
     getExchangeClientOrderId,
+    filterGridOrdersWithAi: (...args) => aiTradeFilter.filterGridOrders(...args),
     placeGridEntryOrder: (...args) => placeGridEntryOrder(...args),
     hasAnyActivePosition: () => hasAnyActivePosition(),
     getActivePositionByKey: (...args) => getActivePositionByKey(...args),

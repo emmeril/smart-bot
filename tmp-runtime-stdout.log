@@ -1,0 +1,86 @@
+[DB][INFO] Database synced
+[DB][INFO] Runtime DB initialized successfully
+[WEB][INFO] Dashboard available at http://localhost:45171
+[EXCHANGE][INFO] Connected
+[EXCHANGE][INFO] Spot mode enabled (no hedge/position side state).
+[MARGIN][INFO] Spot trading mode: margin configuration skipped.
+[SYNC][INFO] Checking positions for DOGE/USDT...
+[RECOVERY][INFO] Exchange healthy again after position sync. Trading entries resumed.
+[MONITOR] Real-time P&L monitoring interval: 500ms
+[SYNC] Position sync interval: 15000ms
+
+======================================================================
+BINANCE-STYLE SPOT GRID BOT
+======================================================================
+Balance: $22.81
+Pair: DOGE/USDT
+Strategy: SPOT_GRID on 5m
+Preset Profile: UNIVERSAL
+Position Mode: SPOT
+Grid: AUTO 10 levels | lookback 200 candles | range AUTO 4.63% | buffer AUTO 0.144%
+Grid TP/SL: AUTO_NEXT_GRID / AUTO_RANGE | mode FULL_AUTO 7/200 order(s) per side
+Grid Order Size: mode FULL_AUTO 1.0200 USDT
+Min Valid Order Size: 1.0200 USDT
+Available USDT: 15.00 (effective 22.14)
+Locked Grid Range: 0.099081 - 0.104789
+Grid Step: 0.000300
+Volume filter: 1.05x over 20 periods
+Session: 0-23 UTC
+Trailing ATR: 1.8/0.9x
+Mode: SPOT
+======================================================================
+
+[GRID] Auto-sized order amount: 1.0400 USDT per order | available 15.00 USDT
+[GRID] Auto-adjusted side orders: 14/200 per side | mode FULL_AUTO | sizing 19 | free 15.00 | effective 22.28 USDT
+[GRID][INFO] Desired ladder=14 | Open grid orders=7
+[GRID][INFO] Cancelling 7 grid order(s) (REBUILD)...
+[AI][INFO] Rejected grid order smartgrid_buy_13_010299: Price is too close to upper BB, potential reversal expected.
+[AI][INFO] Rejected grid order smartgrid_buy_12_010269: Price is too close to upper BB, potential reversal expected.
+[AI][INFO] Rejected grid order smartgrid_buy_11_010239: Price is too close to upper BB, potential reversal expected.
+[AI][INFO] Rejected grid order smartgrid_buy_10_010209: Price is too close to upper BB, potential reversal expected.
+[AI][INFO] Rejected grid order smartgrid_buy_9_010178: Price is too close to upper BB, potential reversal expected.
+[AI][INFO] Rejected grid order smartgrid_buy_8_010148: Price is too close to upper BB, potential reversal expected.
+[AI][INFO] Rejected grid order smartgrid_buy_7_010118: Price is too close to upper BB, potential reversal expected.
+[AI][INFO] Rejected grid order smartgrid_buy_6_010088: Price is too close to upper BB, potential reversal expected.
+[AI][INFO] Rejected grid order smartgrid_buy_5_010058: Price is too close to upper BB, potential reversal expected.
+[AI][INFO] Rejected grid order smartgrid_buy_4_010028: Price is too close to upper BB, potential reversal expected.
+[GRID][INFO] Placed BUY limit @ 0.09998 size 1.1000 USDT | OCO exit plan TP 0.10028 | SL 0.09855
+[GRID][INFO] Placed BUY limit @ 0.09968 size 1.1000 USDT | OCO exit plan TP 0.09998 | SL 0.09855
+[GRID][INFO] INIT: locking range 0.099081 - 0.104789 | step 0.000317
+[GRID] Auto-adjusted side orders: 13/200 per side | mode FULL_AUTO | sizing 18 | free 15.00 | effective 21.24 USDT
+[GRID][INFO] Rebuild cooldown active (81s). Keeping current ladder until cooldown expires.
+[SYNC][INFO] Checking positions for DOGE/USDT...
+[GRID] Auto-sized order amount: 1.0400 USDT per order | available 0.84 USDT
+[GRID][INFO] INIT: locking range 0.099081 - 0.104789 | step 0.000634
+[GRID] Auto-adjusted side orders: 7/200 per side | mode FULL_AUTO | sizing 6 | free 0.84 | effective 7.08 USDT
+[GRID][INFO] Desired ladder=7 | Open grid orders=6
+[GRID][INFO] Stabilized side orders: 19 -> 18 (raw 6)
+[GRID][INFO] Stabilized side orders: 18 -> 17 (raw 6)
+[GRID][INFO] Stabilized side orders: 17 -> 16 (raw 6)
+[GRID][INFO] Stabilized side orders: 16 -> 15 (raw 6)
+[GRID][INFO] Stabilized side orders: 15 -> 14 (raw 6)
+[GRID][INFO] Rebuild cooldown active (65s). Keeping current ladder until cooldown expires.
+[SYNC][INFO] Checking positions for DOGE/USDT...
+[GRID][INFO] Stabilized side orders: 14 -> 13 (raw 6)
+[GRID][INFO] Stabilized side orders: 13 -> 12 (raw 6)
+[GRID][INFO] Stabilized side orders: 12 -> 11 (raw 6)
+[GRID][INFO] Desired ladder=7 | Open grid orders=6
+[GRID][INFO] Stabilized side orders: 11 -> 10 (raw 6)
+[GRID][INFO] Stabilized side orders: 10 -> 9 (raw 6)
+[GRID][INFO] Stabilized side orders: 9 -> 8 (raw 6)
+[GRID][INFO] Stabilized side orders: 8 -> 7 (raw 6)
+[SYNC][INFO] Checking positions for DOGE/USDT...
+[GRID][INFO] Stabilized side orders: 7 -> 6 (raw 6)
+[GRID] Auto-adjusted side orders: 6/200 per side | mode FULL_AUTO | sizing 6 | free 0.84 | effective 7.08 USDT
+[GRID][INFO] Rebuild cooldown active (49s). Keeping current ladder until cooldown expires.
+[GRID] Auto-sized order amount: 1.0400 USDT per order | available 0.84 USDT
+[GRID][INFO] Desired ladder=6 | Open grid orders=6
+[METRICS][INFO] 62s | API=96 (ticker:0, ohlcv:25, bal:4, pos:0, order:67) | Grid=active (signal scan bypassed in spot_grid mode) | Trades today O/C/W/L=0/0/0/0 (WR 0.0%)
+[SYNC][INFO] Checking positions for DOGE/USDT...
+[GRID][INFO] Rebuild cooldown active (33s). Keeping current ladder until cooldown expires.
+[GRID][INFO] Desired ladder=6 | Open grid orders=6
+[SYNC][INFO] Checking positions for DOGE/USDT...
+[GRID] Auto-adjusted side orders: 6/200 per side | mode FULL_AUTO | sizing 6 | free 0.84 | effective 7.08 USDT
+[GRID][INFO] Rebuild cooldown active (17s). Keeping current ladder until cooldown expires.
+[GRID] Auto-sized order amount: 1.0400 USDT per order | available 0.84 USDT
+[GRID][INFO] Desired ladder=6 | Open grid orders=6

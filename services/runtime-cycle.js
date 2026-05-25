@@ -20,6 +20,7 @@ const createRuntimeCycleHelpers = ({
     hasAnyActivePosition,
     getLastTradeTimestampFromLog,
     analyzeSignal,
+    reviewSignalWithAi,
     getActivePositionByKey,
     placeOrder,
     syncPositionWithExchange,
@@ -114,7 +115,19 @@ const createRuntimeCycleHelpers = ({
         if (hasAnyActivePosition() || coolingBlocked) return;
 
         const signal = await analyzeSignal();
-        if (signal.canLong && !getActivePositionByKey("BOTH")) await placeOrder("buy", signal);
+        if (signal.canLong && !getActivePositionByKey("BOTH")) {
+            if (typeof reviewSignalWithAi === "function") {
+                const aiReview = await reviewSignalWithAi({ db, side: "buy", signal });
+                if (!aiReview?.approved) {
+                    console.log(`[AI][INFO] BUY signal rejected: ${aiReview?.reason || "AI filter did not approve"}`);
+                    return;
+                }
+                if (!aiReview.skipped) {
+                    console.log(`[AI][INFO] BUY signal approved (${Number(aiReview.confidence || 0).toFixed(2)}): ${aiReview.reason}`);
+                }
+            }
+            await placeOrder("buy", signal);
+        }
     };
 
     const startMetricsReporting = (currentTimer, setMetricsTimer) => {
