@@ -1376,8 +1376,9 @@ const {
     configAutoReloadIntervalMs: CONFIG_AUTO_RELOAD_INTERVAL_MS
 });
 
-const syncPositionWithExchangeInternal = async () => {
-    if (isSyncingPosition || isClosingPosition || isPlacingOrder) return;
+const syncPositionWithExchangeInternal = async (options = {}) => {
+    const allowDuringOrderPlacement = Boolean(options?.allowDuringOrderPlacement);
+    if (isSyncingPosition || isClosingPosition || (!allowDuringOrderPlacement && isPlacingOrder)) return;
     isSyncingPosition = true;
     try {
         if (!db || !exchange) return;
@@ -1442,8 +1443,8 @@ const syncPositionWithExchangeInternal = async () => {
     finally { isSyncingPosition = false; }
 };
 
-const syncPositionWithExchange = async () => (
-    await positionSyncLock.tryRunExclusive(syncPositionWithExchangeInternal)
+const syncPositionWithExchange = async (options = {}) => (
+    await positionSyncLock.tryRunExclusive(() => syncPositionWithExchangeInternal(options))
 );
 
 const {

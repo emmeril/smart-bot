@@ -51,10 +51,12 @@ const createTradeEntryHelpers = ({
             ) {
                 return;
             }
+            setIsPlacingOrder(true);
+            didMarkPlacingOrder = true;
             const targetPositionKey = getOrderPositionSide(side);
             const existingLocalPosition = getActivePositionByKey(targetPositionKey);
             if (existingLocalPosition) {
-                await syncPositionWithExchange();
+                await syncPositionWithExchange({ allowDuringOrderPlacement: true });
                 const refreshedLocalPosition = getActivePositionByKey(targetPositionKey);
                 if (refreshedLocalPosition) {
                     const isSpotRuntime = String(db?.marginMode || "spot").toLowerCase() === "spot";
@@ -97,8 +99,6 @@ const createTradeEntryHelpers = ({
                     }
                 }
             }
-            setIsPlacingOrder(true);
-            didMarkPlacingOrder = true;
             console.log(`[ORDER][INFO] Attempting to place ${side.toUpperCase()} order...`);
             await setMarginMode();
             const openExchangePositions = await fetchOpenExchangePositions();
