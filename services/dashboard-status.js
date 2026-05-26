@@ -90,6 +90,7 @@ const createDashboardStatusHelpers = ({
             lastUpdated: toFiniteNumber(db?.lastUpdated, 0),
             lastDailyReset: toFiniteNumber(db?.lastDailyReset, 0),
             pair: db?.pair || defaultConfig.pair,
+            pendingPair: db?.pendingPair || null,
             strategy: db?.strategy || defaultConfig.strategy,
             marginMode: db?.marginMode || defaultConfig.marginMode,
             orderRecovery
@@ -228,6 +229,7 @@ const createDashboardStatusHelpers = ({
             accumulatedRealizedPnL,
             unrealizedPnL,
             totalPnL: accumulatedRealizedPnL + unrealizedPnL,
+            pendingPair: db.pendingPair || null,
             activePositions,
             exchangePositionsCount: exchangePositions.length,
             openOrders,

@@ -102,6 +102,8 @@ const createConfigModelHelpers = ({
         const isValidTimeframe = (value) => typeof value === "string" && /^[1-9]\d*[mhdwM]$/.test(value.trim());
         const rawPair = typeof normalized.pair === "string" ? normalized.pair.trim() : "";
         normalized.pair = rawPair || defaults.pair;
+        const rawPendingPair = typeof normalized.pendingPair === "string" ? normalized.pendingPair.trim() : "";
+        normalized.pendingPair = rawPendingPair || null;
         const rawStrategy = typeof normalized.strategy === "string" ? normalized.strategy.trim().toLowerCase() : "";
         normalized.strategy = rawStrategy === "spot_grid" ? "spot_grid" : defaults.strategy;
         normalized.marginMode = defaults.marginMode;
@@ -254,6 +256,7 @@ const createConfigModelHelpers = ({
                 ? "UPDATE Configs SET gridTimeframe = COALESCE(breakoutTimeframe, '5m') WHERE gridTimeframe IS NULL OR gridTimeframe = '';"
                 : null
         });
+        await addColumnIfMissing({ column: "pendingPair", sql: "ALTER TABLE Configs ADD COLUMN pendingPair VARCHAR(255) DEFAULT NULL;" });
         await addColumnIfMissing({ column: "activeGridState", sql: "ALTER TABLE Configs ADD COLUMN activeGridState TEXT DEFAULT NULL;" });
         await addColumnIfMissing({ column: "estimatedPnL", sql: "ALTER TABLE Configs ADD COLUMN estimatedPnL FLOAT DEFAULT 0;" });
         await addColumnIfMissing({ column: "estimatedTrades", sql: "ALTER TABLE Configs ADD COLUMN estimatedTrades INTEGER DEFAULT 0;" });

@@ -66,21 +66,16 @@ const createDashboardConfigHelpers = ({
         const current = { ...currentDb };
         const payload = pickEditableConfig(incoming);
         const merged = { ...current, ...payload };
-        const protectedRuntimeValues = new Map();
-
-        if (hasAnyActivePosition()) {
-            for (const key of protectedKeys) {
-                if (Object.prototype.hasOwnProperty.call(payload, key)) {
-                    protectedRuntimeValues.set(key, current[key]);
-                }
-            }
-        }
+        const requestedPair = typeof payload.pair === "string" ? payload.pair.trim() : "";
+        const currentPair = typeof currentDb.pair === "string" ? currentDb.pair.trim() : "";
 
         const { config: nextConfig } = applyAutoPresetToConfig(merged);
-        if (protectedRuntimeValues.size > 0) {
-            for (const [key, value] of protectedRuntimeValues.entries()) {
-                nextConfig[key] = value;
-            }
+        if (hasAnyActivePosition() && requestedPair && requestedPair !== currentPair) {
+            nextConfig.pair = currentPair;
+            nextConfig.pendingPair = requestedPair;
+        } else if (requestedPair && requestedPair !== currentPair) {
+            nextConfig.pair = requestedPair;
+            nextConfig.pendingPair = null;
         }
         applyDashboardRuntimeState(nextConfig, current);
         replaceConfigObject(currentDb, nextConfig);

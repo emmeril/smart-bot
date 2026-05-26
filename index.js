@@ -372,6 +372,7 @@ const {
     fetchOpenOrdersSnapshot,
     cancelManagedOrders,
     cancelGridOrders,
+    cancelGridOrdersForSymbol,
     cancelTpOrders,
     cancelSlOrders,
     cancelOrderByClientOrderId
@@ -1055,6 +1056,40 @@ const applyRuntimeConfigChanges = async (previousConfig = null) => {
     if (hasRuntimePositionMutationInFlight()) return false;
 
     let runtimeChanged = false;
+    const previousPair = normalizeSymbol(previousConfig.pair);
+    const nextPair = normalizeSymbol(db.pair);
+    const pendingPair = normalizeSymbol(db.pendingPair);
+    const hasActiveTradeState = hasAnyActivePosition();
+
+    if (hasActiveTradeState) {
+        if (previousPair && nextPair && previousPair !== nextPair) {
+            db.pendingPair = nextPair;
+            db.pair = previousPair;
+            runtimeChanged = true;
+            console.log(`[CONFIG][INFO] Pair change queued ${previousPair} -> ${nextPair} until local active state is empty.`);
+        } else if (pendingPair && pendingPair !== previousPair) {
+            console.log(`[CONFIG][INFO] Pending pair ${pendingPair} is waiting for local active state to clear.`);
+        }
+    } else if (pendingPair && pendingPair !== nextPair) {
+        const oldPair = nextPair || previousPair;
+        db.pair = pendingPair;
+        db.pendingPair = null;
+        runtimeChanged = true;
+        if (oldPair && oldPair !== pendingPair) {
+            await cancelGridOrdersForSymbol(oldPair, "PAIR_CHANGED");
+            console.log(`[CONFIG][INFO] Activated queued pair ${pendingPair} and cleared old pair grid orders for ${oldPair}.`);
+        } else {
+            console.log(`[CONFIG][INFO] Activated queued pair ${pendingPair}.`);
+        }
+    } else if (!hasActiveTradeState && pendingPair && pendingPair === nextPair) {
+        db.pendingPair = null;
+        runtimeChanged = true;
+        console.log(`[CONFIG][INFO] Cleared stale pending pair marker for ${nextPair}.`);
+    } else if (previousPair && nextPair && previousPair !== nextPair) {
+        await cancelGridOrdersForSymbol(previousPair, "PAIR_CHANGED");
+        console.log(`[CONFIG][INFO] Pair changed ${previousPair} -> ${nextPair}. Cleared old pair grid orders.`);
+    }
+
     const shouldResetGridState = Array.from(CONFIG_KEYS_REQUIRING_GRID_REBUILD).some((key) => didConfigFieldChange(previousConfig, db, key));
     if (shouldResetGridState && db.activeGridState) {
         db.activeGridState = null;

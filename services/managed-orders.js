@@ -87,11 +87,17 @@ const createManagedOrdersHelpers = ({
         return { regularOrders, triggerOrders, triggerOrdersFetchFailed };
     };
 
+    const fetchOpenGridOrdersBySymbol = async (symbol) => {
+        const normalizedSymbol = normalizeSymbol(symbol);
+        if (!normalizedSymbol) return [];
+        const { regularOrders } = await fetchOpenOrdersSnapshot(symbol);
+        return regularOrders.filter((order) => normalizeSymbol(order.symbol) === normalizedSymbol && isGridEntryOrder(order));
+    };
+
     const fetchOpenGridOrders = async () => {
         const currentDb = getDb();
         if (!currentDb?.pair) return [];
-        const { regularOrders } = await fetchOpenOrdersSnapshot(currentDb.pair);
-        return regularOrders.filter((order) => normalizeSymbol(order.symbol) === normalizeSymbol(currentDb.pair) && isGridEntryOrder(order));
+        return await fetchOpenGridOrdersBySymbol(currentDb.pair);
     };
 
     const findOpenGridOrderByClientOrderId = async (clientOrderId) => {
@@ -135,11 +141,11 @@ const createManagedOrdersHelpers = ({
         };
     };
 
-    const cancelManagedOrders = async (orders, reason, label, cancelOptions = undefined) => {
+    const cancelManagedOrders = async (orders, reason, label, cancelOptions = undefined, symbol = getDb()?.pair) => {
         if (!Array.isArray(orders) || orders.length === 0) return;
         const exchange = getExchange();
         const metrics = getMetrics();
-        const currentDb = getDb();
+        const cancelSymbol = symbol || getDb()?.pair;
         console.log(`[${label}][INFO] Cancelling ${orders.length} ${label.toLowerCase()} order(s) (${reason})...`);
         for (const order of orders) {
             try {
@@ -148,7 +154,7 @@ const createManagedOrdersHelpers = ({
                     console.warn(`[${label}][WARN] Failed to cancel ${label.toLowerCase()} order without exchange id.`);
                     continue;
                 }
-                await exchange.cancelOrder(orderId, currentDb.pair, cancelOptions);
+                await exchange.cancelOrder(orderId, cancelSymbol, cancelOptions);
                 metrics.api.orders++;
             } catch (error) {
                 if (isUnknownOrderCancelError(error)) {
@@ -160,9 +166,14 @@ const createManagedOrdersHelpers = ({
         }
     };
 
-    const cancelGridOrders = async (orders, reason = "SYNC") => cancelManagedOrders(orders, reason, "GRID");
-    const cancelTpOrders = async (orders, reason = "TP_SYNC") => cancelManagedOrders(orders, reason, "TP");
-    const cancelSlOrders = async (orders, reason = "SL_SYNC") => cancelManagedOrders(orders, reason, "SL", { trigger: true });
+    const cancelGridOrders = async (orders, reason = "SYNC", symbol = undefined) => cancelManagedOrders(orders, reason, "GRID", undefined, symbol);
+    const cancelGridOrdersForSymbol = async (symbol, reason = "PAIR_CHANGED") => {
+        const orders = await fetchOpenGridOrdersBySymbol(symbol);
+        if (orders.length === 0) return;
+        await cancelGridOrders(orders, reason, symbol);
+    };
+    const cancelTpOrders = async (orders, reason = "TP_SYNC", symbol = undefined) => cancelManagedOrders(orders, reason, "TP", undefined, symbol);
+    const cancelSlOrders = async (orders, reason = "SL_SYNC", symbol = undefined) => cancelManagedOrders(orders, reason, "SL", { trigger: true }, symbol);
 
     const cancelManagedOrdersForPosition = async (position, reason = "POSITION_CLEANUP") => {
         if (!position) return;
@@ -175,7 +186,7 @@ const createManagedOrdersHelpers = ({
         if (matchingSlOrders.length > 0) await cancelSlOrders(matchingSlOrders, reason);
     };
 
-    const cancelDuplicateManagedOrders = async (orders, cancelReason, label = "ORDER") => {
+    const cancelDuplicateManagedOrders = async (orders, cancelReason, label = "ORDER", symbol = getDb()?.pair) => {
         if (!Array.isArray(orders) || orders.length <= 1) return orders || [];
 
         const seen = new Set();
@@ -183,7 +194,7 @@ const createManagedOrdersHelpers = ({
         const duplicateOrders = [];
         const exchange = getExchange();
         const metrics = getMetrics();
-        const currentDb = getDb();
+        const cancelSymbol = symbol || getDb()?.pair;
 
         for (const order of orders) {
             const clientOrderId = getExchangeClientOrderId(order);
@@ -209,7 +220,7 @@ const createManagedOrdersHelpers = ({
                         console.warn(`[${label}][WARN] Failed to cancel duplicate ${label.toLowerCase()} order without exchange id.`);
                         continue;
                     }
-                    await exchange.cancelOrder(duplicateOrderId, currentDb.pair, cancelParams);
+                    await exchange.cancelOrder(duplicateOrderId, cancelSymbol, cancelParams);
                     metrics.api.orders++;
                 } catch (error) {
                     if (isUnknownOrderCancelError(error)) {
@@ -263,6 +274,7 @@ const createManagedOrdersHelpers = ({
         fetchOpenOrdersSnapshot,
         cancelManagedOrders,
         cancelGridOrders,
+        cancelGridOrdersForSymbol,
         cancelTpOrders,
         cancelSlOrders,
         cancelOrderByClientOrderId

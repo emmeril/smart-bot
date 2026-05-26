@@ -10,6 +10,7 @@ const sequelize = new Sequelize({
 const Config = sequelize.define("Config", {
     strategy: { type: DataTypes.STRING, defaultValue: "spot_grid" },
     pair: { type: DataTypes.STRING, defaultValue: "DOGE/USDT" },
+    pendingPair: { type: DataTypes.STRING, defaultValue: null },
     gridOrderSizeUsdt: { type: DataTypes.FLOAT, defaultValue: 0 },
     gridTargetProfitUsdt: { type: DataTypes.FLOAT, defaultValue: 0.15 },
     maxTradesPerDay: { type: DataTypes.INTEGER, defaultValue: 8 },
@@ -74,6 +75,7 @@ const VALID_MARGIN_MODES = ["spot"];
 const DEFAULT_CONFIG = {
     strategy: "spot_grid",
     pair: "DOGE/USDT",
+    pendingPair: null,
     gridOrderSizeUsdt: 0,
     gridTargetProfitUsdt: 0.15,
     maxTradesPerDay: 8,
