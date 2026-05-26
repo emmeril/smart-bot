@@ -551,18 +551,29 @@ const createAiTradeFilter = ({
     }
 
     const isEnabled = () => Boolean(shouldUseAi && providerClient && providerClient.isReady());
+    const logAiTrace = (tag, message) => {
+        console.log(`[AI][${tag}] ${message}`);
+    };
 
     const callModel = async ({ schema, payload, cacheKey }) => {
-        if (!isEnabled()) return null;
+        if (!isEnabled()) {
+            logAiTrace("SKIP", `${schema?.name || "unknown"} AI disabled`);
+            return null;
+        }
         const now = Date.now();
         const scopedCacheKey = `${cacheScope}:${cacheKey}`;
         const cached = cache.get(scopedCacheKey);
-        if (cached && now - cached.at <= cacheWindowMs) return cached.value;
+        if (cached && now - cached.at <= cacheWindowMs) {
+            logAiTrace("CACHE", `${schema?.name || "unknown"} cache hit (${now - cached.at}ms old)`);
+            return cached.value;
+        }
 
+        logAiTrace("CALL", `${schema?.name || "unknown"} request -> ${resolvedProviderName}/${resolvedModel}`);
         const parsedJson = await withTimeout(async (signal) => {
             return await providerClient.callStructuredJson({ schema, payload, signal });
         }, requestTimeoutMs);
         cache.set(scopedCacheKey, { at: now, value: parsedJson });
+        logAiTrace("CALL", `${schema?.name || "unknown"} response cached`);
         return parsedJson;
     };
 
@@ -570,7 +581,7 @@ const createAiTradeFilter = ({
         if (!isEnabled()) return { approved: true, skipped: true, reason: "AI filter disabled" };
         const prefilter = evaluateSignalPrefilter({ db, side, signal });
         if (prefilter) {
-            console.log(`[AI][INFO] Signal prefilter rejected: ${prefilter.reason}`);
+            logAiTrace("SKIP", `signal prefilter rejected: ${prefilter.reason}`);
             return prefilter;
         }
         const payload = {
@@ -628,7 +639,7 @@ const createAiTradeFilter = ({
             const rejectedSummary = prefilter.rejectedOrders
                 .map(({ order, reason }) => `${String(order?.clientOrderId || "N/A")}=${reason}`)
                 .join(" | ");
-            console.log(`[AI][INFO] Grid prefilter rejected ${prefilter.rejectedOrders.length}/${desiredOrders.length}: ${rejectedSummary}`);
+            logAiTrace("SKIP", `grid prefilter rejected ${prefilter.rejectedOrders.length}/${desiredOrders.length}: ${rejectedSummary}`);
         }
         if (prefilter.acceptedOrders.length === 0) {
             return [];
@@ -690,6 +701,7 @@ const createAiTradeFilter = ({
             return lastGridReviewResult;
         }
         const compactOrders = reviewableOrders.map(compactOrder);
+        logAiTrace("CALL", `grid review request ${reviewableOrders.length} order(s) -> ${resolvedProviderName}/${resolvedModel}`);
         const payload = {
             type: "grid_order_review",
             pair: db?.pair,
@@ -766,7 +778,7 @@ const createAiTradeFilter = ({
                 const confidence = safeNumber(decision?.confidence, 0);
                 const approved = Boolean(decision?.approved) && confidence >= confidenceFloor;
                 if (!approved) {
-                    console.log(`[AI][INFO] Rejected grid order ${order.clientOrderId}: ${decision?.reason || "low confidence"}`);
+                    logAiTrace("INFO", `rejected grid order ${order.clientOrderId}: ${decision?.reason || "low confidence"}`);
                     rejectedOrders.push(order);
                     return;
                 }
@@ -774,7 +786,7 @@ const createAiTradeFilter = ({
             });
             const approvedIds = approvedOrders.map((order) => order.clientOrderId).join(", ") || "-";
             const rejectedIds = rejectedOrders.map((order) => order.clientOrderId).join(", ") || "-";
-            console.log(`[AI][INFO] Grid review result: approved=${approvedOrders.length}/${reviewableOrders.length} [${approvedIds}] | rejected=${rejectedOrders.length} [${rejectedIds}]`);
+            logAiTrace("INFO", `grid review result: approved=${approvedOrders.length}/${reviewableOrders.length} [${approvedIds}] | rejected=${rejectedOrders.length} [${rejectedIds}]`);
             lastGridReviewAt = now;
             lastGridReviewSignature = gridReviewSignature;
             lastGridReviewResult = approvedOrders;
