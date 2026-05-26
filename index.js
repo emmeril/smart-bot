@@ -345,7 +345,9 @@ const isTpReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWit
 const isSlReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWith(SL_CLIENT_ORDER_PREFIX);
 const isTriggerManagedOrder = (order, label = "") => label === "SL" || isSlReduceOnlyOrder(order) || String(order?.type || "").toUpperCase().includes("STOP");
 
-const aiTradeFilter = createAiTradeFilter();
+const aiTradeFilter = createAiTradeFilter({
+    provider: process.env.AI_PROVIDER
+});
 
 const {
     notifyPositionClosed,
