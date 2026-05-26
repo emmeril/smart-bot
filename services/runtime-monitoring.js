@@ -27,6 +27,7 @@ const createRuntimeMonitoringHelpers = ({
     evaluatePositionExit,
     closePosition,
     maybeLogPositionPnL,
+    notifyTradeUpdate,
     getPositionSyncTimer,
     setPositionSyncTimer,
     getCurrentPositionSyncInterval,
@@ -77,6 +78,20 @@ const createRuntimeMonitoringHelpers = ({
                         upsertActivePosition(position);
                         await maybePersistActivePositionRuntimeState();
                         await ensureReduceOnlyStopLossOrder(positionKey, position);
+                        const stopLossChanged = previousRuntimeState.stopLossPrice !== position.stopLossPrice
+                            || previousRuntimeState.stopLossUSDT !== position.stopLossUSDT;
+                        if (stopLossChanged && typeof notifyTradeUpdate === "function") {
+                            await notifyTradeUpdate({
+                                event: "TP_SL_UPDATED",
+                                position: {
+                                    ...position,
+                                    symbol: getDb()?.pair || position?.symbol
+                                },
+                                entryPrice: position.entryPrice,
+                                quantity: position.quantity,
+                                occurredAt: Date.now()
+                            });
+                        }
                         managedOrdersSnapshot = await fetchManagedOpenOrdersSnapshot();
                     }
 

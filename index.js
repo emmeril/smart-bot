@@ -1562,6 +1562,7 @@ const {
     evaluatePositionExit: (...args) => evaluatePositionExit(...args),
     closePosition: (...args) => closePosition(...args),
     maybeLogPositionPnL: (...args) => maybeLogPositionPnL(...args),
+    notifyTradeUpdate: (...args) => notifyTradeUpdate(...args),
     getPositionSyncTimer: () => positionSyncTimer,
     setPositionSyncTimer: (value) => { positionSyncTimer = value; },
     getCurrentPositionSyncInterval: () => currentPositionSyncInterval,
