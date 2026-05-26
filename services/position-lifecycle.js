@@ -68,10 +68,69 @@ const createPositionLifecycleHelpers = ({
         toFiniteNumber(state?.dailyPnL, 0) + toFiniteNumber(state?.estimatedPnL, 0)
     );
 
-    const clearMissingPositionState = async (position, reason, positionKey = null) => {
+    const resolveFallbackClosedPositionPnl = ({ position, pnlState = null, exitPrice = null }) => {
+        const entryPrice = toFiniteNumber(position?.entryPrice, 0);
+        const quantity = toFiniteNumber(position?.quantity, 0);
+        const entryValue = Math.max(1e-8, entryPrice * quantity);
+
+        const stateNetProfitUSDT = toFiniteNumber(pnlState?.netProfitUSDT, NaN);
+        if (Number.isFinite(stateNetProfitUSDT)) {
+            return {
+                netProfitUSDT: stateNetProfitUSDT,
+                profitPercent: entryValue > 0
+                    ? (stateNetProfitUSDT / entryValue) * 100
+                    : toFiniteNumber(pnlState?.profitPercent, 0),
+                exitPrice: Number.isFinite(exitPrice) && exitPrice > 0 ? exitPrice : null,
+                source: "state"
+            };
+        }
+
+        if (Number.isFinite(exitPrice) && exitPrice > 0) {
+            const realizedPnL = calculatePositionPnL(position, exitPrice);
+            const netProfitUSDT = toFiniteNumber(realizedPnL?.realizedProfitUSDT, 0);
+            return {
+                netProfitUSDT,
+                profitPercent: entryValue > 0 ? (netProfitUSDT / entryValue) * 100 : toFiniteNumber(realizedPnL?.profitPercent, 0),
+                exitPrice,
+                source: "price"
+            };
+        }
+
+        const snapshotMarkPrice = toFiniteNumber(position?.exchangePnlSnapshot?.markPrice, NaN);
+        if (Number.isFinite(snapshotMarkPrice) && snapshotMarkPrice > 0) {
+            const realizedPnL = calculatePositionPnL(position, snapshotMarkPrice);
+            const netProfitUSDT = toFiniteNumber(realizedPnL?.realizedProfitUSDT, 0);
+            return {
+                netProfitUSDT,
+                profitPercent: entryValue > 0 ? (netProfitUSDT / entryValue) * 100 : toFiniteNumber(realizedPnL?.profitPercent, 0),
+                exitPrice: snapshotMarkPrice,
+                source: "snapshot_mark"
+            };
+        }
+
+        const snapshotNetProfitUSDT = toFiniteNumber(position?.exchangePnlSnapshot?.netProfitUSDT, NaN);
+        if (Number.isFinite(snapshotNetProfitUSDT)) {
+            return {
+                netProfitUSDT: snapshotNetProfitUSDT,
+                profitPercent: entryValue > 0
+                    ? (snapshotNetProfitUSDT / entryValue) * 100
+                    : toFiniteNumber(position?.exchangePnlSnapshot?.profitPercent, 0),
+                exitPrice: Number.isFinite(position?.exchangePnlSnapshot?.currentPrice)
+                    ? toFiniteNumber(position.exchangePnlSnapshot.currentPrice, null)
+                    : null,
+                source: "snapshot_pnl"
+            };
+        }
+
+        return null;
+    };
+
+    const clearMissingPositionState = async (position, reason, positionKey = null, options = {}) => {
         const db = getDb();
         const metrics = getMetrics();
         const trackedKey = getLifecyclePositionKey(positionKey, position);
+        const fallbackExitPrice = toFiniteNumber(options?.fallbackExitPrice, NaN);
+        const fallbackPnlState = options?.pnlState || null;
         if (!canMutateTrackedPosition(position, trackedKey)) {
             console.log(`[POSITION][INFO] Skipping stale missing-position cleanup for ${trackedKey}.`);
             return false;
@@ -86,27 +145,34 @@ const createPositionLifecycleHelpers = ({
             return false;
         }
         removeActivePositionByKey(trackedKey);
-        const estimatedExitPrice = await getPrice(true);
-        if (Number.isFinite(estimatedExitPrice) && estimatedExitPrice > 0) {
-            const estimatedPnL = calculatePositionPnL(position, estimatedExitPrice);
+        const estimatedExitPrice = Number.isFinite(fallbackExitPrice) && fallbackExitPrice > 0
+            ? fallbackExitPrice
+            : await getPrice(true);
+        const resolvedPnl = resolveFallbackClosedPositionPnl({
+            position,
+            pnlState: fallbackPnlState,
+            exitPrice: estimatedExitPrice
+        });
+
+        if (resolvedPnl) {
             if (typeof applyDailyPnlDelta === "function") await applyDailyPnlDelta({
-                pnlDelta: estimatedPnL.realizedProfitUSDT,
+                pnlDelta: resolvedPnl.netProfitUSDT,
                 tradeDelta: 1,
                 source: "local"
             });
             else {
-                db.estimatedPnL = toFiniteNumber(db.estimatedPnL, 0) + estimatedPnL.realizedProfitUSDT;
-                db.estimatedTrades = Math.max(0, Math.trunc(toFiniteNumber(db.estimatedTrades, 0))) + 1;
+                db.dailyPnL = toFiniteNumber(db.dailyPnL, 0) + resolvedPnl.netProfitUSDT;
+                db.dailyTrades = Math.max(0, Math.trunc(toFiniteNumber(db.dailyTrades, 0))) + 1;
             }
             metrics.trades.closed++;
-            if (estimatedPnL.realizedProfitUSDT > 0) metrics.trades.wins++;
-            else if (estimatedPnL.realizedProfitUSDT < 0) metrics.trades.losses++;
+            if (resolvedPnl.netProfitUSDT > 0) metrics.trades.wins++;
+            else if (resolvedPnl.netProfitUSDT < 0) metrics.trades.losses++;
             logTrade(
                 position.side === "buy" ? "LONG" : "SHORT",
                 position.entryPrice,
-                estimatedExitPrice,
+                Number.isFinite(resolvedPnl.exitPrice) ? resolvedPnl.exitPrice : "",
                 `CLOSE_UNCONFIRMED:${reason}`,
-                estimatedPnL.realizedProfitUSDT,
+                resolvedPnl.netProfitUSDT,
                 position.strategy || null
             );
             if (typeof notifyPositionClosed === "function") {
@@ -116,16 +182,17 @@ const createPositionLifecycleHelpers = ({
                         symbol: db.pair
                     },
                     reason,
-                    exitPrice: estimatedExitPrice,
-                    netProfitUSDT: estimatedPnL.realizedProfitUSDT,
-                    profitPercent: estimatedPnL.profitPercent,
+                    exitPrice: Number.isFinite(resolvedPnl.exitPrice) ? resolvedPnl.exitPrice : null,
+                    netProfitUSDT: resolvedPnl.netProfitUSDT,
+                    profitPercent: resolvedPnl.profitPercent,
                     totalAccumulatedPnlUSDT: getAccumulatedPnlForNotification(db),
                     closedAt: Date.now(),
                     estimatedExitPrice: true,
                     positionKey: trackedKey
                 });
             }
-            console.warn(`[POSITION][WARN] Removed local position using estimated exit price and booked it into realized PnL because no confirmed exchange exit price was available (${reason}).`);
+            console.warn(`[POSITION][WARN] Removed local position using ${resolvedPnl.source} PnL and booked it into realized PnL because no confirmed exchange exit price was available (${reason}).`);
+            await saveDB();
             return true;
         }
 
@@ -265,7 +332,10 @@ const createPositionLifecycleHelpers = ({
             const reasonLooksExchangeFilled = reason === "PROFIT_TARGET" || reason === "STOP_LOSS";
             if (reasonLooksExchangeFilled && hasAttachedSpotExit && matchingTpOrders.length === 0 && matchingSlOrders.length === 0) {
                 console.log("[POSITION][INFO] Spot OCO exit is no longer open. Removing local active position using estimated fill state.");
-                await clearMissingPositionState(position, `SPOT_OCO_${reason}`, closeLockKey);
+                await clearMissingPositionState(position, `SPOT_OCO_${reason}`, closeLockKey, {
+                    pnlState: runningPnlState,
+                    fallbackExitPrice: runningPnlPrice
+                });
                 return;
             }
             if (matchingTpOrders.length > 0) await cancelTpOrders(matchingTpOrders, "MANUAL_CLOSE");
@@ -291,7 +361,10 @@ const createPositionLifecycleHelpers = ({
                     const fallbackReason = reasonLooksExchangeFilled
                         ? `EXCHANGE_FILLED_${reason}`
                         : "POSITION_MISSING";
-                    await clearMissingPositionState(position, fallbackReason, closeLockKey);
+                    await clearMissingPositionState(position, fallbackReason, closeLockKey, {
+                        pnlState: runningPnlState,
+                        fallbackExitPrice: runningPnlPrice
+                    });
                     return;
                 }
                 throw error;
