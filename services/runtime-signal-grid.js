@@ -17,6 +17,7 @@ const createRuntimeSignalGridHelpers = ({
     getLastGridSizingSkipReason,
     setLastGridSizingSkipReason,
     getGridSizingStateLogCache,
+    getBalanceCache,
     signalDetailLogTtl,
     gridSyncLogTtl,
     gridSizingSkipLogTtl,
@@ -74,6 +75,19 @@ const createRuntimeSignalGridHelpers = ({
     const GRID_RUNTIME_HYSTERESIS_CYCLES = 3;
     const GRID_RUNTIME_REBUILD_COOLDOWN_MS = 90 * 1000;
     const gridSyncLock = new AsyncMutex();
+
+    const resolveCappedEffectiveAvailableUsdt = (availableUsdt, lockedOrderCount, orderSizeUsdt) => {
+        const safeAvailableUsdt = Math.max(0, toFiniteNumber(availableUsdt, 0));
+        const safeLockedOrderCount = Math.max(0, Math.trunc(toFiniteNumber(lockedOrderCount, 0)));
+        const safeOrderSizeUsdt = Math.max(0, toFiniteNumber(orderSizeUsdt, 0));
+        const estimatedLockedUsdt = safeLockedOrderCount * safeOrderSizeUsdt;
+        const rawEffectiveUsdt = safeAvailableUsdt + estimatedLockedUsdt;
+        const balanceCache = typeof getBalanceCache === "function" ? getBalanceCache() : null;
+        const totalUsdt = toFiniteNumber(balanceCache?.totalUSDT, safeAvailableUsdt);
+        return Number.isFinite(totalUsdt) && totalUsdt > 0
+            ? Math.min(rawEffectiveUsdt, totalUsdt)
+            : rawEffectiveUsdt;
+    };
 
     const buildGridExposureSignature = (openPositions = [], trackedPositions = getActivePositionsList()) => JSON.stringify({
         mode: getAccountPositionMode()?.label || "UNKNOWN",
@@ -484,7 +498,11 @@ const createRuntimeSignalGridHelpers = ({
                 gridLevels: params.gridLevels
             });
             params.gridOrderSizeUsdt = effectiveSizeMeta.orderSizeUsdt;
-            const effectiveAvailableUsdt = availableUsdt + (openGridOrders.length * Math.max(0, params.gridOrderSizeUsdt));
+            const effectiveAvailableUsdt = resolveCappedEffectiveAvailableUsdt(
+                availableUsdt,
+                openGridOrders.length,
+                params.gridOrderSizeUsdt
+            );
             const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
                 availableUsdt: effectiveAvailableUsdt,
                 configuredOrdersPerSide: params.configuredGridOrdersPerSide,
@@ -596,7 +614,7 @@ const createRuntimeSignalGridHelpers = ({
             const desiredOrdersRaw = buildGridEntryOrders(snapshot, params, lockedGridState);
             const desiredOrdersForRuntime = filterGridOrdersForActiveExposure(desiredOrdersRaw, openPositions, trackedPositions);
             if (adjustedOrdersMeta.count < adjustedOrdersMeta.maxConfigured) {
-                const sizingBalanceLabel = `free ${availableUsdt.toFixed(2)} | effective ${effectiveAvailableUsdt.toFixed(2)} USDT`;
+                const sizingBalanceLabel = `free ${availableUsdt.toFixed(2)} | effective est. ${effectiveAvailableUsdt.toFixed(2)} USDT`;
                 const runtimeSideOrders = desiredOrdersForRuntime.length;
                 maybeLogGridSizingStateExternal
                     ? maybeLogGridSizingStateExternal(

@@ -794,6 +794,7 @@ const createGridRuntimeHelpers = ({
         const buyOrders = gridOrders.filter((order) => String(order?.side || "").toLowerCase() === "buy").length;
         const sellOrders = gridOrders.filter((order) => String(order?.side || "").toLowerCase() === "sell").length;
         const availableUsdt = Number.isFinite(balanceCache.availableUSDT) ? balanceCache.availableUSDT : balanceCache.totalUSDT;
+        const totalUsdt = Number.isFinite(balanceCache.totalUSDT) ? balanceCache.totalUSDT : availableUsdt;
         const referencePrice = Number.isFinite(currentPrice) && currentPrice > 0 ? currentPrice : (hasLockedGrid ? (lowerBound + upperBound) / 2 : tickerCache.price);
         const effectiveSizeMeta = resolveEffectiveGridOrderSizeUsdt({
             availableUsdt,
@@ -803,7 +804,11 @@ const createGridRuntimeHelpers = ({
             market: exchange?.markets?.[db?.pair],
             gridLevels: effectiveGridLevels
         });
-        const effectiveAvailableUsdt = availableUsdt + (gridOrders.length * Math.max(0, effectiveSizeMeta.orderSizeUsdt));
+        const estimatedLockedUsdt = gridOrders.length * Math.max(0, effectiveSizeMeta.orderSizeUsdt);
+        const effectiveAvailableUsdtRaw = availableUsdt + estimatedLockedUsdt;
+        const effectiveAvailableUsdt = Number.isFinite(totalUsdt) && totalUsdt > 0
+            ? Math.min(effectiveAvailableUsdtRaw, totalUsdt)
+            : effectiveAvailableUsdtRaw;
         const effectiveOrdersMeta = resolveEffectiveGridOrdersPerSide({
             availableUsdt: effectiveAvailableUsdt,
             configuredOrdersPerSide: db.gridOrdersPerSide,
@@ -836,7 +841,9 @@ const createGridRuntimeHelpers = ({
             effectiveOrderSizeUsdt: effectiveSizeMeta.orderSizeUsdt,
             minOrderSizeUsdt: effectiveSizeMeta.minOrderSizeUsdt,
             sizeMode: effectiveSizeMeta.mode,
-            availableUsdtLabel: Number.isFinite(availableUsdt) ? `${availableUsdt.toFixed(2)} (effective ${effectiveAvailableUsdt.toFixed(2)})` : "N/A"
+            availableUsdtLabel: Number.isFinite(availableUsdt)
+                ? `${availableUsdt.toFixed(2)} (effective est. ${effectiveAvailableUsdt.toFixed(2)})`
+                : "N/A"
         };
     };
 

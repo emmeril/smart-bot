@@ -1465,6 +1465,7 @@ const {
     getSignalCount: () => signalCount,
     setSignalCount: (value) => { signalCount = value; },
     getMetrics: () => metrics,
+    getBalanceCache: () => balanceCache,
     getLastLogTime: () => lastLogTime,
     setLastLogTime: (value) => { lastLogTime = value; },
     getLastSignalDetailLogAt: () => lastSignalDetailLogAt,
