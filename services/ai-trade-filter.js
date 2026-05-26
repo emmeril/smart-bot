@@ -1,6 +1,7 @@
 const DEFAULT_GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite";
 const DEFAULT_AI_PROVIDER = "gemini";
+const AI_CACHE_SCHEMA_VERSION = 2;
 const DEFAULT_TIMEOUT_MS = 12000;
 const DEFAULT_CACHE_TTL_MS = 60000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 2000;
@@ -271,6 +272,81 @@ const evaluateGridOrderPrefilter = ({ snapshot, gridState, desiredOrders }) => {
     };
 };
 
+const isNonEmptyReason = (reason) => {
+    const text = String(reason || "").trim();
+    return text.length > 0;
+};
+
+const validateSignalReviewResult = (result) => {
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+        throw new Error("AI response must be a JSON object");
+    }
+    const confidence = safeNumber(result?.confidence, NaN);
+    if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+        throw new Error("AI response confidence is invalid");
+    }
+    if (typeof result?.approved !== "boolean") {
+        throw new Error("AI response approved flag is invalid");
+    }
+    if (!isNonEmptyReason(result?.reason)) {
+        throw new Error("AI response reason is missing");
+    }
+    return {
+        approved: Boolean(result.approved),
+        confidence,
+        reason: String(result.reason).trim()
+    };
+};
+
+const validateGridReviewResult = (result, reviewableOrders = []) => {
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+        throw new Error("AI grid response must be a JSON object");
+    }
+    const orderDecisions = Array.isArray(result?.orderDecisions) ? result.orderDecisions : null;
+    if (!orderDecisions) {
+        throw new Error("AI grid response is missing orderDecisions");
+    }
+    if (orderDecisions.length !== reviewableOrders.length) {
+        throw new Error("AI grid response decision count does not match reviewable orders");
+    }
+    const reviewableIds = new Set(reviewableOrders.map((order) => String(order?.clientOrderId || "")));
+    const seenIds = new Set();
+    const normalizedDecisions = [];
+    for (const decision of orderDecisions) {
+        if (!decision || typeof decision !== "object" || Array.isArray(decision)) {
+            throw new Error("AI grid decision must be an object");
+        }
+        const clientOrderId = String(decision?.clientOrderId || "").trim();
+        if (!clientOrderId || !reviewableIds.has(clientOrderId)) {
+            throw new Error(`AI grid decision references unknown order ${clientOrderId || "N/A"}`);
+        }
+        if (seenIds.has(clientOrderId)) {
+            throw new Error(`AI grid decision duplicated order ${clientOrderId}`);
+        }
+        const confidence = safeNumber(decision?.confidence, NaN);
+        if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+            throw new Error(`AI grid decision confidence is invalid for ${clientOrderId}`);
+        }
+        if (typeof decision?.approved !== "boolean") {
+            throw new Error(`AI grid decision approved flag is invalid for ${clientOrderId}`);
+        }
+        if (!isNonEmptyReason(decision?.reason)) {
+            throw new Error(`AI grid decision reason is missing for ${clientOrderId}`);
+        }
+        seenIds.add(clientOrderId);
+        normalizedDecisions.push({
+            clientOrderId,
+            approved: Boolean(decision.approved),
+            confidence,
+            reason: String(decision.reason).trim()
+        });
+    }
+    if (seenIds.size !== reviewableOrders.length) {
+        throw new Error("AI grid response does not cover every reviewable order");
+    }
+    return normalizedDecisions;
+};
+
 const splitKeyList = (value) => String(value || "")
     .split(/[\n,;]/)
     .map((entry) => entry.trim())
@@ -440,6 +516,14 @@ const createAiTradeFilter = ({
     const outputTokenLimit = Math.max(500, Math.trunc(safeNumber(maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS)));
     const gridReviewCooldownMs = Math.max(0, Math.trunc(safeNumber(gridReviewMinIntervalMs, DEFAULT_GRID_REVIEW_MIN_INTERVAL_MS)));
     const cache = new Map();
+    const cacheScope = JSON.stringify({
+        version: AI_CACHE_SCHEMA_VERSION,
+        provider: resolvedProviderName,
+        model: resolvedModel,
+        endpoint: resolvedEndpoint,
+        confidenceFloor,
+        outputTokenLimit
+    });
     let lastGridReviewAt = 0;
     let lastGridReviewSignature = "";
     let lastGridReviewResult = null;
@@ -471,13 +555,14 @@ const createAiTradeFilter = ({
     const callModel = async ({ schema, payload, cacheKey }) => {
         if (!isEnabled()) return null;
         const now = Date.now();
-        const cached = cache.get(cacheKey);
+        const scopedCacheKey = `${cacheScope}:${cacheKey}`;
+        const cached = cache.get(scopedCacheKey);
         if (cached && now - cached.at <= cacheWindowMs) return cached.value;
 
         const parsedJson = await withTimeout(async (signal) => {
             return await providerClient.callStructuredJson({ schema, payload, signal });
         }, requestTimeoutMs);
-        cache.set(cacheKey, { at: now, value: parsedJson });
+        cache.set(scopedCacheKey, { at: now, value: parsedJson });
         return parsedJson;
     };
 
@@ -511,7 +596,7 @@ const createAiTradeFilter = ({
         };
 
         try {
-            const result = await callModel({
+            const result = validateSignalReviewResult(await callModel({
                 cacheKey: `signal:${JSON.stringify(payload)}`,
                 payload,
                 schema: {
@@ -527,10 +612,9 @@ const createAiTradeFilter = ({
                         }
                     }
                 }
-            });
-            const confidence = safeNumber(result?.confidence, 0);
-            const approved = Boolean(result?.approved) && confidence >= confidenceFloor;
-            return { approved, confidence, reason: String(result?.reason || "No AI reason returned") };
+            }));
+            const approved = Boolean(result?.approved) && result.confidence >= confidenceFloor;
+            return { approved, confidence: result.confidence, reason: result.reason };
         } catch (error) {
             console.warn(`[AI][WARN] Signal review failed: ${error.message}`);
             return { approved: failOpenOnError, confidence: 0, reason: "AI review failed" };
@@ -551,11 +635,24 @@ const createAiTradeFilter = ({
         }
         const reviewableOrders = prefilter.acceptedOrders;
         const gridReviewSignature = JSON.stringify({
+            version: AI_CACHE_SCHEMA_VERSION,
             pair: db?.pair,
             timeframe: db?.gridTimeframe,
             levels: safeNumber(params?.gridLevels),
             rangePercent: safeNumber(params?.gridRangePercent),
             entryBufferPercent: safeNumber(params?.gridEntryBufferPercent),
+            risk: {
+                minVolumeRatio: safeNumber(db?.minVolumeRatio),
+                entryAdxMax: safeNumber(db?.entryAdxMax),
+                entryRsiLongThreshold: safeNumber(db?.entryRsiLongThreshold),
+                entryRsiShortThreshold: safeNumber(db?.entryRsiShortThreshold),
+                entryBbLongThreshold: safeNumber(db?.entryBbLongThreshold),
+                entryBbShortThreshold: safeNumber(db?.entryBbShortThreshold),
+                sessionStartUTC: safeNumber(db?.sessionStartUTC),
+                sessionEndUTC: safeNumber(db?.sessionEndUTC),
+                maxTradesPerDay: safeNumber(db?.maxTradesPerDay),
+                dailyTrades: safeNumber(db?.dailyTrades)
+            },
             market: {
                 currentPrice: normalizeForSignature(snapshot?.currentPrice, 4),
                 currentATR: normalizeForSignature(snapshot?.currentATR, 6),
@@ -633,7 +730,7 @@ const createAiTradeFilter = ({
         };
 
         try {
-            const result = await callModel({
+            const normalizedDecisions = validateGridReviewResult(await callModel({
                 cacheKey: `grid:${JSON.stringify(payload)}`,
                 payload,
                 schema: {
@@ -660,9 +757,8 @@ const createAiTradeFilter = ({
                         }
                     }
                 }
-            });
-            const decisions = new Map((Array.isArray(result?.orderDecisions) ? result.orderDecisions : [])
-                .map((decision) => [String(decision?.clientOrderId || ""), decision]));
+            }), reviewableOrders);
+            const decisions = new Map(normalizedDecisions.map((decision) => [decision.clientOrderId, decision]));
             const approvedOrders = [];
             const rejectedOrders = [];
             reviewableOrders.forEach((order) => {
@@ -701,6 +797,12 @@ const createAiTradeFilter = ({
             model: resolvedModel,
             endpoint: resolvedEndpoint
         }),
+        invalidateCache: () => {
+            cache.clear();
+            lastGridReviewAt = 0;
+            lastGridReviewSignature = "";
+            lastGridReviewResult = null;
+        },
         reviewSignal,
         filterGridOrders
     };
