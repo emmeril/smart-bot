@@ -319,6 +319,31 @@ const createOrderExecutionHelpers = ({
         return nextOrder;
     };
 
+    const resolveLatestTrackedPositionSnapshot = (positionKey, sourcePosition) => {
+        const latestPosition = typeof getActivePositionByKey === "function"
+            ? getActivePositionByKey(positionKey)
+            : null;
+        if (latestPosition && sourcePosition) {
+            return { ...sourcePosition, ...latestPosition };
+        }
+        return { ...(latestPosition || sourcePosition || {}) };
+    };
+
+    const normalizeManagedPositionSnapshot = (position) => {
+        if (!position || typeof position !== "object") return position;
+        const db = getDb();
+        const normalizedPosition = { ...position };
+        const normalizedQty = formatAmountToMarketPrecision(db?.pair, Number(normalizedPosition.quantity));
+        if (Number.isFinite(normalizedQty) && normalizedQty > 0) normalizedPosition.quantity = normalizedQty;
+        const normalizedTargetPrice = formatPriceToMarketPrecision(db?.pair, Number(normalizedPosition.targetPrice));
+        if (Number.isFinite(normalizedTargetPrice) && normalizedTargetPrice > 0) normalizedPosition.targetPrice = normalizedTargetPrice;
+        const normalizedStopLossPrice = formatPriceToMarketPrecision(db?.pair, Number(normalizedPosition.stopLossPrice));
+        if (Number.isFinite(normalizedStopLossPrice) && normalizedStopLossPrice > 0) normalizedPosition.stopLossPrice = normalizedStopLossPrice;
+        const normalizedOcoQty = formatAmountToMarketPrecision(db?.pair, Number(normalizedPosition.ocoQuantity));
+        if (Number.isFinite(normalizedOcoQty) && normalizedOcoQty > 0) normalizedPosition.ocoQuantity = normalizedOcoQty;
+        return normalizedPosition;
+    };
+
     const getSpotPair = (pair) => String(pair || "").split(":")[0];
 
     const notifyProtectionUpdate = async ({
@@ -1544,7 +1569,7 @@ const createOrderExecutionHelpers = ({
 
     const syncOcoExitOrder = async (positionKey, sourcePosition) => {
         return await runManagedOrderSync(`OCO:${positionKey}`, async () => {
-            const position = { ...sourcePosition };
+            const position = normalizeManagedPositionSnapshot(resolveLatestTrackedPositionSnapshot(positionKey, sourcePosition));
             if (!position) return;
             if (!Number.isFinite(position.targetPrice) || position.targetPrice <= 0 || !Number.isFinite(position.stopLossPrice) || position.stopLossPrice <= 0) {
                 await tryClearSpotStalePositionWithoutExit(positionKey, position, "OCO_BLOCKED: Missing TP/SL on active position.");
