@@ -476,6 +476,7 @@ Dependency utama:
 Catatan AI:
 
 - filter AI trade memakai Gemini melalui `GEMINI_API_KEY`
+- backup key bisa diisi lewat `GEMINI_API_KEYS` (pisahkan dengan koma atau baris baru) atau `GEMINI_API_KEY_2`, `GEMINI_API_KEY_3`, dan seterusnya
 - OpenAI sudah dihapus dari konfigurasi proyek ini
 
 ## Disclaimer

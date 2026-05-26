@@ -50,6 +50,41 @@ const compactSnapshot = (snapshot) => ({
     hourUTC: safeNumber(snapshot?.hourUTC)
 });
 
+const splitKeyList = (value) => String(value || "")
+    .split(/[\n,;]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+const uniqueStrings = (values) => {
+    const seen = new Set();
+    const result = [];
+    for (const value of values) {
+        const normalized = String(value || "").trim();
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        result.push(normalized);
+    }
+    return result;
+};
+
+const collectGeminiApiKeys = ({ apiKey } = {}) => {
+    const envIndexedKeys = Object.entries(process.env)
+        .filter(([key]) => /^GEMINI_API_KEY_\d+$/.test(key))
+        .sort(([leftKey], [rightKey]) => {
+            const leftIndex = Number.parseInt(leftKey.split("_").pop(), 10);
+            const rightIndex = Number.parseInt(rightKey.split("_").pop(), 10);
+            return leftIndex - rightIndex;
+        })
+        .flatMap(([, value]) => splitKeyList(value));
+
+    return uniqueStrings([
+        ...splitKeyList(apiKey),
+        ...splitKeyList(process.env.GEMINI_API_KEYS),
+        ...splitKeyList(process.env.GEMINI_API_KEY),
+        ...envIndexedKeys
+    ]);
+};
+
 const extractGeminiResponseText = (payload) => {
     const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
     for (const candidate of candidates) {
@@ -84,7 +119,7 @@ const createAiTradeFilter = ({
     gridReviewMinIntervalMs = process.env.AI_GRID_REVIEW_MIN_INTERVAL_MS,
     fetchFn = globalThis.fetch
 } = {}) => {
-    const resolvedApiKey = apiKey || process.env.GEMINI_API_KEY;
+    const resolvedApiKeys = collectGeminiApiKeys({ apiKey });
     const resolvedEndpoint = endpoint || (process.env.GEMINI_API_ENDPOINT || DEFAULT_GEMINI_ENDPOINT);
     const resolvedModel = model || (process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL);
     const shouldUseAi = truthy(enabled);
@@ -106,7 +141,7 @@ const createAiTradeFilter = ({
         "Keep every reason short, ideally under 12 words."
     ].join(" ");
 
-    const isEnabled = () => Boolean(shouldUseAi && resolvedApiKey && typeof fetchFn === "function");
+    const isEnabled = () => Boolean(shouldUseAi && resolvedApiKeys.length > 0 && typeof fetchFn === "function");
 
     const buildGeminiUrl = () => {
         const base = String(resolvedEndpoint || DEFAULT_GEMINI_ENDPOINT).replace(/\/$/, "");
@@ -114,12 +149,18 @@ const createAiTradeFilter = ({
         return `${base}/${resolvedModel}:generateContent`;
     };
 
-    const callGemini = async ({ schema, payload, signal }) => {
+    const isRetryableGeminiError = (error) => {
+        const status = Number(error?.status);
+        if (!Number.isFinite(status)) return true;
+        return [401, 403, 408, 429, 500, 502, 503, 504].includes(status);
+    };
+
+    const callGemini = async ({ schema, payload, signal, apiKey }) => {
         const response = await fetchFn(buildGeminiUrl(), {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "x-goog-api-key": resolvedApiKey
+                "x-goog-api-key": apiKey
             },
             signal,
             body: JSON.stringify({
@@ -140,11 +181,30 @@ const createAiTradeFilter = ({
 
         if (!response.ok) {
             const body = await response.text().catch(() => "");
-            throw new Error(`Gemini ${response.status}: ${body.slice(0, 200)}`);
+            const error = new Error(`Gemini ${response.status}: ${body.slice(0, 200)}`);
+            error.status = response.status;
+            throw error;
         }
 
         const parsedResponse = await response.json();
         return parseJsonObject(extractGeminiResponseText(parsedResponse));
+    };
+
+    const callGeminiWithFallbacks = async ({ schema, payload, signal }) => {
+        const apiKeys = resolvedApiKeys.length > 0 ? resolvedApiKeys : [""];
+        let lastError = null;
+        for (let i = 0; i < apiKeys.length; i++) {
+            const apiKey = apiKeys[i];
+            try {
+                return await callGemini({ schema, payload, signal, apiKey });
+            } catch (error) {
+                lastError = error;
+                const hasMoreKeys = i < apiKeys.length - 1;
+                if (!hasMoreKeys || !isRetryableGeminiError(error)) break;
+                console.warn(`[AI][WARN] Gemini key ${i + 1} failed: ${error.message}. Trying backup key.`);
+            }
+        }
+        throw lastError || new Error("Gemini request failed");
     };
 
     const callModel = async ({ schema, payload, cacheKey }) => {
@@ -154,7 +214,7 @@ const createAiTradeFilter = ({
         if (cached && now - cached.at <= cacheWindowMs) return cached.value;
 
         const parsedJson = await withTimeout(async (signal) => {
-            return await callGemini({ schema, payload, signal });
+            return await callGeminiWithFallbacks({ schema, payload, signal });
         }, requestTimeoutMs);
         cache.set(cacheKey, { at: now, value: parsedJson });
         return parsedJson;

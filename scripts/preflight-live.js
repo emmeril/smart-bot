@@ -42,6 +42,36 @@ const withSqliteBusyRetry = async (fn, { attempts = 5, delayMs = 150 } = {}) => 
     throw lastError;
 };
 
+const splitKeyList = (value) => String(value || "")
+    .split(/[\n,;]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+const uniqueStrings = (values) => {
+    const seen = new Set();
+    const result = [];
+    for (const value of values) {
+        const normalized = String(value || "").trim();
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        result.push(normalized);
+    }
+    return result;
+};
+
+const collectGeminiApiKeys = () => {
+    const envIndexedKeys = Object.entries(process.env)
+        .filter(([key]) => /^GEMINI_API_KEY_\d+$/.test(key))
+        .sort(([leftKey], [rightKey]) => Number.parseInt(leftKey.split("_").pop(), 10) - Number.parseInt(rightKey.split("_").pop(), 10))
+        .flatMap(([, value]) => splitKeyList(value));
+
+    return uniqueStrings([
+        ...splitKeyList(process.env.GEMINI_API_KEYS),
+        ...splitKeyList(process.env.GEMINI_API_KEY),
+        ...envIndexedKeys
+    ]);
+};
+
 const {
     hydrateConfig,
     normalizeConfig,
@@ -90,6 +120,8 @@ const checkEnv = () => {
     const fonnteEnabled = String(process.env.FONNTE_NOTIFICATIONS_ENABLED || "").trim().toLowerCase() === "true";
     const fonnteToken = String(process.env.FONNTE_TOKEN || "").trim();
     const fonnteTarget = String(process.env.FONNTE_TARGET || process.env.ADMIN_PHONE || "").trim();
+    const aiFilterEnabled = String(process.env.AI_SIGNAL_FILTER_ENABLED || "").trim().toLowerCase() === "true";
+    const geminiApiKeys = collectGeminiApiKeys();
 
     if (!apiKey) pushIssue(issues, "fail", "API_KEY is missing.");
     if (!apiSecret) pushIssue(issues, "fail", "API_SECRET is missing.");
@@ -114,6 +146,13 @@ const checkEnv = () => {
 
     if (fonnteEnabled && (!fonnteToken || !fonnteTarget)) {
         pushIssue(issues, "warn", "Fonnte notifications are enabled but token or target is missing.");
+    }
+
+    if (aiFilterEnabled && geminiApiKeys.length === 0) {
+        pushIssue(issues, "warn", "AI signal filter is enabled but no Gemini API key is configured.");
+    }
+    if (aiFilterEnabled && geminiApiKeys.length === 1) {
+        pushIssue(issues, "warn", "AI signal filter has only one Gemini API key configured; add backup keys to reduce quota interruptions.");
     }
 
     return issues;
