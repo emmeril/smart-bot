@@ -6,6 +6,7 @@ const DEFAULT_TIMEOUT_MS = 12000;
 const DEFAULT_CACHE_TTL_MS = 60000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 2000;
 const DEFAULT_GRID_REVIEW_MIN_INTERVAL_MS = 15000;
+const DEFAULT_GRID_REJECT_COOLDOWN_MS = 5 * 60 * 1000;
 
 const truthy = (value) => ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
 
@@ -568,6 +569,7 @@ const createAiTradeFilter = ({
     cacheTtlMs = process.env.AI_SIGNAL_CACHE_TTL_MS,
     maxOutputTokens = process.env.AI_SIGNAL_MAX_OUTPUT_TOKENS,
     gridReviewMinIntervalMs = process.env.AI_GRID_REVIEW_MIN_INTERVAL_MS,
+    gridRejectCooldownMs = process.env.AI_GRID_REJECT_COOLDOWN_MS,
     fetchFn = globalThis.fetch
 } = {}) => {
     const resolvedProviderName = normalizeProviderName(provider || apiProvider);
@@ -581,7 +583,9 @@ const createAiTradeFilter = ({
     const cacheWindowMs = Math.max(0, Math.trunc(safeNumber(cacheTtlMs, DEFAULT_CACHE_TTL_MS)));
     const outputTokenLimit = Math.max(500, Math.trunc(safeNumber(maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS)));
     const gridReviewCooldownMs = Math.max(0, Math.trunc(safeNumber(gridReviewMinIntervalMs, DEFAULT_GRID_REVIEW_MIN_INTERVAL_MS)));
+    const gridRejectCooldownWindowMs = Math.max(0, Math.trunc(safeNumber(gridRejectCooldownMs, DEFAULT_GRID_REJECT_COOLDOWN_MS)));
     const cache = new Map();
+    const gridRejectedOrderCooldowns = new Map();
     const cacheScope = JSON.stringify({
         version: AI_CACHE_SCHEMA_VERSION,
         provider: resolvedProviderName,
@@ -619,6 +623,42 @@ const createAiTradeFilter = ({
     const isEnabled = () => Boolean(shouldUseAi && providerClient && providerClient.isReady());
     const logAiTrace = (tag, message) => {
         console.log(`[AI][${tag}] ${message}`);
+    };
+
+    const pruneExpiredGridOrderCooldowns = (now = Date.now()) => {
+        for (const [clientOrderId, record] of gridRejectedOrderCooldowns.entries()) {
+            if (!record || !Number.isFinite(record.until) || record.until <= now) {
+                gridRejectedOrderCooldowns.delete(clientOrderId);
+            }
+        }
+    };
+
+    const getGridOrderCooldownRecord = (clientOrderId, now = Date.now()) => {
+        if (!clientOrderId) return null;
+        const record = gridRejectedOrderCooldowns.get(clientOrderId);
+        if (!record) return null;
+        if (!Number.isFinite(record.until) || record.until <= now) {
+            gridRejectedOrderCooldowns.delete(clientOrderId);
+            return null;
+        }
+        return record;
+    };
+
+    const markRejectedGridOrderCooldown = (order, reason, now = Date.now()) => {
+        const clientOrderId = String(order?.clientOrderId || "");
+        if (!clientOrderId || gridRejectCooldownWindowMs <= 0) return null;
+        const previousRecord = gridRejectedOrderCooldowns.get(clientOrderId);
+        const rejectCount = Math.max(1, Math.trunc(safeNumber(previousRecord?.rejectCount, 0)) + 1);
+        const backoffMultiplier = Math.min(3, Math.max(1, rejectCount));
+        const cooldownMs = Math.min(gridRejectCooldownWindowMs * backoffMultiplier, gridRejectCooldownWindowMs * 3);
+        const nextRecord = {
+            until: now + cooldownMs,
+            rejectCount,
+            lastRejectedAt: now,
+            reason: String(reason || "rejected")
+        };
+        gridRejectedOrderCooldowns.set(clientOrderId, nextRecord);
+        return nextRecord;
     };
 
     const callModel = async ({ schema, payload, cacheKey }) => {
@@ -770,7 +810,35 @@ const createAiTradeFilter = ({
         if (prefilter.acceptedOrders.length === 0) {
             return [];
         }
-        const reviewableOrders = prefilter.acceptedOrders;
+        const now = Date.now();
+        pruneExpiredGridOrderCooldowns(now);
+        const skippedByCooldown = [];
+        const reviewableOrders = prefilter.acceptedOrders.filter((order) => {
+            const clientOrderId = String(order?.clientOrderId || "");
+            const cooldownRecord = getGridOrderCooldownRecord(clientOrderId, now);
+            if (!cooldownRecord) return true;
+            skippedByCooldown.push({ order, cooldownRecord });
+            if (now - safeNumber(cooldownRecord.lastSkippedLogAt, 0) >= Math.max(gridReviewCooldownMs, 30000)) {
+                const waitSeconds = Math.max(1, Math.ceil((cooldownRecord.until - now) / 1000));
+                logAiTrace("SKIP", `grid order ${clientOrderId} cooling down ${waitSeconds}s after reject: ${cooldownRecord.reason}`);
+                cooldownRecord.lastSkippedLogAt = now;
+            }
+            return false;
+        });
+        if (reviewableOrders.length === 0) {
+            if (skippedByCooldown.length > 0) {
+                const skippedIds = skippedByCooldown.map(({ order }) => String(order?.clientOrderId || "N/A")).join(", ");
+                logAiTrace("SKIP", `grid review skipped ${skippedByCooldown.length}/${prefilter.acceptedOrders.length} order(s) due to cooldown: ${skippedIds}`);
+            }
+            lastGridReviewAt = now;
+            lastGridReviewSignature = "";
+            lastGridReviewResult = [];
+            return [];
+        }
+        if (skippedByCooldown.length > 0) {
+            const skippedIds = skippedByCooldown.map(({ order }) => String(order?.clientOrderId || "N/A")).join(", ");
+            logAiTrace("SKIP", `grid review bypassed ${skippedByCooldown.length}/${prefilter.acceptedOrders.length} cooldown order(s): ${skippedIds}`);
+        }
         const gridReviewSignature = JSON.stringify({
             version: AI_CACHE_SCHEMA_VERSION,
             pair: db?.pair,
@@ -817,7 +885,6 @@ const createAiTradeFilter = ({
                 orderSizeUsdt: normalizeForSignature(order?.orderSizeUsdt, 4)
             }))
         });
-        const now = Date.now();
         if (
             lastGridReviewResult &&
             gridReviewCooldownMs > 0 &&
@@ -905,6 +972,7 @@ const createAiTradeFilter = ({
                 const approved = Boolean(decision?.approved) && confidence >= confidenceFloor;
                 if (!approved) {
                     logAiTrace("INFO", `rejected grid order ${order.clientOrderId}: ${decision?.reason || "low confidence"}`);
+                    markRejectedGridOrderCooldown(order, decision?.reason || "low confidence", now);
                     rejectedOrders.push(order);
                     return;
                 }
@@ -937,6 +1005,7 @@ const createAiTradeFilter = ({
         }),
         invalidateCache: () => {
             cache.clear();
+            gridRejectedOrderCooldowns.clear();
             lastGridReviewAt = 0;
             lastGridReviewSignature = "";
             lastGridReviewResult = null;

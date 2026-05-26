@@ -346,7 +346,9 @@ const isSlReduceOnlyOrder = (order) => getExchangeClientOrderId(order).startsWit
 const isTriggerManagedOrder = (order, label = "") => label === "SL" || isSlReduceOnlyOrder(order) || String(order?.type || "").toUpperCase().includes("STOP");
 
 const aiTradeFilter = createAiTradeFilter({
-    provider: process.env.AI_PROVIDER
+    provider: process.env.AI_PROVIDER,
+    gridReviewMinIntervalMs: process.env.AI_GRID_REVIEW_MIN_INTERVAL_MS,
+    gridRejectCooldownMs: process.env.AI_GRID_REJECT_COOLDOWN_MS
 });
 
 const {
