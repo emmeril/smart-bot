@@ -531,6 +531,7 @@
           <section class="panel status-strip" aria-label="Ringkasan performa bot">
             <div class="status-item"><span class="status-label">Status bot</span><strong id="botStatus">Memuat...</strong></div>
             <div class="status-item"><span class="status-label">Pair aktif</span><strong id="pairStatus">-</strong></div>
+            <div class="status-item"><span class="status-label">Pair antrian</span><strong id="pendingPairStatus">-</strong></div>
             <div class="status-item"><span class="status-label">Mode eksekusi</span><strong id="marginStatus">-</strong></div>
             <div class="status-item"><span class="status-label">Update terakhir</span><strong id="updatedStatus">-</strong></div>
           </section>
@@ -558,6 +559,7 @@
               <h3>Aktivitas Runtime</h3>
               <div class="terminal-log">
                 <div><span>&gt;</span> Pair aktif: <strong id="runtimePair">-</strong></div>
+                <div><span>&gt;</span> Pair antrian: <strong id="runtimePendingPair">-</strong></div>
                 <div><span>&gt;</span> Engine status: <strong id="runtimeEngine">Memuat...</strong></div>
                 <div><span>&gt;</span> Posisi lokal: <strong id="runtimePositions">-</strong></div>
                 <div><span>&gt;</span> Daily trades: <strong id="runtimeTrades">-</strong></div>
@@ -664,12 +666,14 @@
     const statusCards = document.getElementById("statusCards");
     const botStatus = document.getElementById("botStatus");
     const pairStatus = document.getElementById("pairStatus");
+    const pendingPairStatus = document.getElementById("pendingPairStatus");
     const marginStatus = document.getElementById("marginStatus");
     const updatedStatus = document.getElementById("updatedStatus");
     const topbarStatus = document.getElementById("topbarStatus");
     const topbarMeta = document.getElementById("topbarMeta");
     const heroMode = document.getElementById("heroMode");
     const runtimePair = document.getElementById("runtimePair");
+    const runtimePendingPair = document.getElementById("runtimePendingPair");
     const runtimeEngine = document.getElementById("runtimeEngine");
     const runtimePositions = document.getElementById("runtimePositions");
     const runtimeTrades = document.getElementById("runtimeTrades");
@@ -934,12 +938,17 @@
       botStatus.textContent = runtimeStatus.label;
       botStatus.className = formatPill(runtimeStatus.label);
       pairStatus.textContent = status.pair || "-";
+      const pendingPairValue = status.pendingPair || "-";
+      pendingPairStatus.textContent = pendingPairValue;
       marginStatus.textContent = `${tradeModeValue} / ${positionModeValue}`;
       updatedStatus.textContent = formatDateTime(status.lastUpdated);
       topbarStatus.textContent = runtimeStatus.label === "Berjalan" ? "Runtime bot aktif" : runtimeStatus.label;
-      topbarMeta.textContent = "";
+      topbarMeta.textContent = status.pendingPair
+        ? `Pair antrian: ${status.pendingPair} menunggu local state kosong`
+        : "";
       if (heroMode) heroMode.textContent = `${tradeModeValue} / ${positionModeValue}`;
       runtimePair.textContent = status.pair || "-";
+      if (runtimePendingPair) runtimePendingPair.textContent = pendingPairValue;
       runtimeEngine.textContent = runtimeStatus.label;
       runtimeEngine.className = formatPill(runtimeStatus.label);
       runtimePositions.textContent = String(status.activePositions ?? "-");
@@ -1100,8 +1109,11 @@
       renderPnLBreakdown(data);
 
       const activePair = String(data.pair || "-");
+      const pendingPair = String(data.pendingPair || "");
       liveCurrentPrice.textContent = formatPrice(data.currentPrice);
-      liveCurrentPriceMeta.textContent = activePair;
+      liveCurrentPriceMeta.textContent = pendingPair && pendingPair !== activePair
+        ? `${activePair} · antre ${pendingPair}`
+        : activePair;
       liveBalanceValue.textContent = `${formatNumber(balance.totalUSDT)} USDT`;
       liveBalanceMeta.textContent = `Free: ${formatNumber(balance.availableUSDT)} USDT`;
       livePositionsCount.textContent = `${positions.length} ${activePair}`;
