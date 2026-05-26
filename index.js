@@ -800,6 +800,7 @@ const {
     formatPriceToMarketPrecision,
     validateOrderSize,
     buildOrderPlan,
+    getPrice: (...args) => getPrice(...args),
     buildExchangeOrderParams: (...args) => buildExchangeOrderParams(...args),
     getOrderPositionSide: (...args) => getOrderPositionSide(...args),
     getClosePositionSide: (...args) => getClosePositionSide(...args),
@@ -831,6 +832,7 @@ const {
     cancelTpOrders,
     cancelSlOrders,
     buildReplacementClientOrderId,
+    reviewOcoExitWithAi: (...args) => aiTradeFilter.reviewOcoExit(...args),
     notifyTradeUpdate: (...args) => notifyTradeUpdate(...args)
 });
 

@@ -114,6 +114,7 @@ File `.env.example` sudah menyiapkan variabel utama seperti:
 - `GEMINI_API_KEY`
 - `GEMINI_API_KEYS`
 - `AI_SIGNAL_FILTER_ENABLED`
+- `AI_SIGNAL_FILTER_ENABLED` juga dipakai untuk review AI pada OCO TP/SL spot
 - `FONNTE_TOKEN`
 - `FONNTE_TARGET`
 - `DASHBOARD_PORT`

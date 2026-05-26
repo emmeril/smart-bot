@@ -7,6 +7,7 @@ const createOrderExecutionHelpers = ({
     formatPriceToMarketPrecision,
     validateOrderSize,
     buildOrderPlan,
+    getPrice,
     buildExchangeOrderParams,
     getOrderPositionSide,
     getClosePositionSide,
@@ -34,6 +35,7 @@ const createOrderExecutionHelpers = ({
     cancelTpOrders,
     cancelSlOrders,
     buildReplacementClientOrderId,
+    reviewOcoExitWithAi,
     notifyTradeUpdate
 }) => {
     const managedOrderSyncChains = new Map();
@@ -1253,12 +1255,39 @@ const createOrderExecutionHelpers = ({
         const tpClientOrderId = position?.tpClientOrderId || getTpClientOrderId(position);
         const slClientOrderId = position?.slClientOrderId || getSlClientOrderId(position);
         const listClientOrderId = `smartoco_${String(position.positionSide || "SPOT").toLowerCase()}_${String(closeSide).slice(0, 1)}_${String(targetPrice).replace(/[^\d]/g, "")}`.slice(0, 36);
+        const currentPrice = typeof getPrice === "function"
+            ? toFiniteNumber(await getPrice(true).catch(() => NaN), NaN)
+            : NaN;
 
         const existingTpOrder = await findOpenOrderByClientOrderId(tpClientOrderId, db.pair);
         const existingSlOrder = await findOpenOrderByClientOrderId(slClientOrderId, db.pair);
         if (existingTpOrder && existingSlOrder) {
             console.log(`[OCO][INFO] Existing exchange OCO legs already active for ${listClientOrderId}. Reusing them.`);
             return { tpOrder: existingTpOrder, slOrder: existingSlOrder, listClientOrderId };
+        }
+
+        if (typeof reviewOcoExitWithAi === "function") {
+            const aiReview = await reviewOcoExitWithAi({
+                db,
+                position,
+                market: Number.isFinite(currentPrice) ? { currentPrice } : null,
+                exitPlan: {
+                    closeSide,
+                    quantity,
+                    entryPrice: Number.isFinite(currentPrice) ? currentPrice : position.entryPrice,
+                    targetPrice,
+                    stopPrice,
+                    stopLimitPrice,
+                    listClientOrderId,
+                    tpClientOrderId,
+                    slClientOrderId
+                }
+            });
+            if (!aiReview?.approved) {
+                console.warn(`[OCO][WARN] AI rejected OCO placement: ${aiReview?.reason || "no reason provided"}`);
+                return { blocked: true, reason: `AI ${aiReview?.reason || "rejected OCO setup"}` };
+            }
+            console.log(`[OCO][INFO] AI approved OCO placement with confidence ${Number(aiReview.confidence || 0).toFixed(2)}.`);
         }
 
         try {
