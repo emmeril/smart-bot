@@ -473,6 +473,11 @@ Dependency utama:
 - `sqlite3`
 - `technicalindicators`
 
+Catatan AI:
+
+- filter AI trade memakai Gemini melalui `GEMINI_API_KEY`
+- OpenAI sudah dihapus dari konfigurasi proyek ini
+
 ## Disclaimer
 
 Software ini berisiko tinggi jika dipakai pada akun real. Semua keputusan trading, kerugian, dan konsekuensi penggunaan sepenuhnya menjadi tanggung jawab pengguna. Lakukan pengujian bertahap dan pahami seluruh parameter sebelum dipakai untuk trading live.

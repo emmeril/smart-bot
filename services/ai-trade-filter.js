@@ -1,6 +1,3 @@
-const DEFAULT_ENDPOINT = "https://api.openai.com/v1/responses";
-const DEFAULT_MODEL = "gpt-4.1-mini";
-const DEFAULT_PROVIDER = "openai";
 const DEFAULT_GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite";
 const DEFAULT_TIMEOUT_MS = 12000;
@@ -53,18 +50,6 @@ const compactSnapshot = (snapshot) => ({
     hourUTC: safeNumber(snapshot?.hourUTC)
 });
 
-const extractResponseText = (payload) => {
-    if (typeof payload?.output_text === "string") return payload.output_text;
-    const output = Array.isArray(payload?.output) ? payload.output : [];
-    for (const item of output) {
-        const content = Array.isArray(item?.content) ? item.content : [];
-        for (const part of content) {
-            if (typeof part?.text === "string") return part.text;
-        }
-    }
-    return "";
-};
-
 const extractGeminiResponseText = (payload) => {
     const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
     for (const candidate of candidates) {
@@ -87,7 +72,6 @@ const parseJsonObject = (text) => {
 };
 
 const createAiTradeFilter = ({
-    provider = process.env.AI_PROVIDER || DEFAULT_PROVIDER,
     apiKey,
     endpoint,
     model,
@@ -100,18 +84,9 @@ const createAiTradeFilter = ({
     gridReviewMinIntervalMs = process.env.AI_GRID_REVIEW_MIN_INTERVAL_MS,
     fetchFn = globalThis.fetch
 } = {}) => {
-    const normalizedProvider = String(provider || DEFAULT_PROVIDER).toLowerCase().trim();
-    const resolvedApiKey = apiKey || (normalizedProvider === "gemini" ? process.env.GEMINI_API_KEY : process.env.OPENAI_API_KEY);
-    const resolvedEndpoint = endpoint || (
-        normalizedProvider === "gemini"
-            ? (process.env.GEMINI_API_ENDPOINT || DEFAULT_GEMINI_ENDPOINT)
-            : (process.env.OPENAI_API_ENDPOINT || DEFAULT_ENDPOINT)
-    );
-    const resolvedModel = model || (
-        normalizedProvider === "gemini"
-            ? (process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL)
-            : (process.env.OPENAI_MODEL || DEFAULT_MODEL)
-    );
+    const resolvedApiKey = apiKey || process.env.GEMINI_API_KEY;
+    const resolvedEndpoint = endpoint || (process.env.GEMINI_API_ENDPOINT || DEFAULT_GEMINI_ENDPOINT);
+    const resolvedModel = model || (process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL);
     const shouldUseAi = truthy(enabled);
     const failOpenOnError = truthy(failOpen);
     const confidenceFloor = Math.min(Math.max(safeNumber(minConfidence, 0.65), 0), 1);
@@ -137,39 +112,6 @@ const createAiTradeFilter = ({
         const base = String(resolvedEndpoint || DEFAULT_GEMINI_ENDPOINT).replace(/\/$/, "");
         if (base.includes(":generateContent")) return base;
         return `${base}/${resolvedModel}:generateContent`;
-    };
-
-    const callOpenAi = async ({ schema, payload, signal }) => {
-        const response = await fetchFn(resolvedEndpoint, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${resolvedApiKey}`
-            },
-            signal,
-            body: JSON.stringify({
-                model: resolvedModel,
-                instructions,
-                input: JSON.stringify(payload),
-                max_output_tokens: outputTokenLimit,
-                text: {
-                    format: {
-                        type: "json_schema",
-                        name: schema.name,
-                        strict: true,
-                        schema: schema.schema
-                    }
-                }
-            })
-        });
-
-        if (!response.ok) {
-            const body = await response.text().catch(() => "");
-            throw new Error(`OpenAI ${response.status}: ${body.slice(0, 200)}`);
-        }
-
-        const parsedResponse = await response.json();
-        return parseJsonObject(extractResponseText(parsedResponse));
     };
 
     const callGemini = async ({ schema, payload, signal }) => {
@@ -212,8 +154,7 @@ const createAiTradeFilter = ({
         if (cached && now - cached.at <= cacheWindowMs) return cached.value;
 
         const parsedJson = await withTimeout(async (signal) => {
-            if (normalizedProvider === "gemini") return await callGemini({ schema, payload, signal });
-            return await callOpenAi({ schema, payload, signal });
+            return await callGemini({ schema, payload, signal });
         }, requestTimeoutMs);
         cache.set(cacheKey, { at: now, value: parsedJson });
         return parsedJson;
@@ -390,7 +331,7 @@ const createAiTradeFilter = ({
 
     return {
         isEnabled,
-        getProvider: () => normalizedProvider,
+        getProvider: () => "gemini",
         reviewSignal,
         filterGridOrders
     };
