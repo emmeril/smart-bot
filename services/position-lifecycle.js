@@ -8,6 +8,7 @@ const createPositionLifecycleHelpers = ({
     getClosingPositionKeys,
     getIsClosingPosition,
     setIsClosingPosition,
+    hasRuntimePositionMutationInFlight,
     toPositionMapKey,
     hasAnyActivePosition,
     getActivePositionEntries,
@@ -301,7 +302,14 @@ const createPositionLifecycleHelpers = ({
         if (closingPositionKeys.has(closeLockKey)) return;
         closingPositionKeys.add(closeLockKey);
         try {
-            if (!db || !hasAnyActivePosition() || getIsClosingPosition()) return;
+            if (
+                !db
+                || !hasAnyActivePosition()
+                || getIsClosingPosition()
+                || (typeof hasRuntimePositionMutationInFlight === "function" && hasRuntimePositionMutationInFlight())
+            ) {
+                return;
+            }
             setIsClosingPosition(true);
             const trackedPosition = getActivePositionByKey(closeLockKey);
             if (!trackedPosition) return;

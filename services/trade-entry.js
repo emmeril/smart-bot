@@ -7,6 +7,7 @@ const createTradeEntryHelpers = ({
     getIsPlacingOrder,
     setIsPlacingOrder,
     getIsClosingPosition,
+    hasRuntimePositionMutationInFlight,
     getOrderPositionSide,
     getActivePositionByKey,
     setMarginMode,
@@ -42,7 +43,14 @@ const createTradeEntryHelpers = ({
         const metrics = getMetrics();
         let didMarkPlacingOrder = false;
         try {
-            if (!db || getIsPlacingOrder() || getIsClosingPosition()) return;
+            if (
+                !db
+                || getIsPlacingOrder()
+                || getIsClosingPosition()
+                || (typeof hasRuntimePositionMutationInFlight === "function" && hasRuntimePositionMutationInFlight())
+            ) {
+                return;
+            }
             const targetPositionKey = getOrderPositionSide(side);
             const existingLocalPosition = getActivePositionByKey(targetPositionKey);
             if (existingLocalPosition) {
