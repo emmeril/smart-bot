@@ -1045,8 +1045,8 @@
     function renderPnLBreakdown(data) {
       if (!data || data.ok === false) return;
       
-      const confirmedRealizedPnL = Number(data.confirmedRealizedPnL ?? data.dailyPnL || 0);
-      const pendingRealizedPnL = Number(data.pendingRealizedPnL ?? data.estimatedPnL || 0);
+      const confirmedRealizedPnL = Number((data.confirmedRealizedPnL ?? data.dailyPnL) || 0);
+      const pendingRealizedPnL = Number((data.pendingRealizedPnL ?? data.estimatedPnL) || 0);
       const realizedPnL = Number(data.accumulatedRealizedPnL ?? (confirmedRealizedPnL + pendingRealizedPnL));
       const unrealizedPnL = Number(data.unrealizedPnL || 0);
       const totalPnL = realizedPnL + unrealizedPnL;
