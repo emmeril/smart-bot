@@ -54,9 +54,15 @@ const createDashboardStatusHelpers = ({
         });
     };
 
-    const getAccumulatedRealizedPnl = (snapshot) => (
-        toFiniteNumber(snapshot?.dailyPnL, 0) + toFiniteNumber(snapshot?.estimatedPnL, 0)
-    );
+    const getRealizedPnlBreakdown = (snapshot) => {
+        const confirmedRealizedPnL = toFiniteNumber(snapshot?.dailyPnL, 0);
+        const pendingRealizedPnL = toFiniteNumber(snapshot?.estimatedPnL, 0);
+        return {
+            confirmedRealizedPnL,
+            pendingRealizedPnL,
+            accumulatedRealizedPnL: confirmedRealizedPnL + pendingRealizedPnL
+        };
+    };
 
     const buildDashboardStatus = () => {
         const db = getDb();
@@ -70,7 +76,7 @@ const createDashboardStatusHelpers = ({
             replacementAttempts: Math.max(0, Math.trunc(toFiniteNumber(recovery.replacementAttempts, 0))),
             replacementSucceeded: Math.max(0, Math.trunc(toFiniteNumber(recovery.replacementSucceeded, 0)))
         };
-        const accumulatedRealizedPnL = getAccumulatedRealizedPnl(db);
+        const { confirmedRealizedPnL, pendingRealizedPnL, accumulatedRealizedPnL } = getRealizedPnlBreakdown(db);
         return {
             botRunning: !getIsShuttingDown(),
             exchangeConnected: Boolean(getExchange()),
@@ -84,6 +90,8 @@ const createDashboardStatusHelpers = ({
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(db?.dailyTrades, 0))),
             estimatedPnL: toFiniteNumber(db?.estimatedPnL, 0),
             estimatedTrades: Math.max(0, Math.trunc(toFiniteNumber(db?.estimatedTrades, 0))),
+            confirmedRealizedPnL,
+            pendingRealizedPnL,
             accumulatedRealizedPnL,
             dailyPnlSource: String(db?.dailyPnlSource || "local").toLowerCase(),
             dailyPnlSyncedAt: toFiniteNumber(db?.dailyPnlSyncedAt, 0),
@@ -204,7 +212,7 @@ const createDashboardStatusHelpers = ({
             sl: managedOrders.sl.map(mapManagedOrder)
         };
 
-        const accumulatedRealizedPnL = getAccumulatedRealizedPnl(dailyPnlSnapshot);
+        const { confirmedRealizedPnL, pendingRealizedPnL, accumulatedRealizedPnL } = getRealizedPnlBreakdown(dailyPnlSnapshot);
         return {
             ok: true,
             serverTime: Date.now(),
@@ -224,6 +232,8 @@ const createDashboardStatusHelpers = ({
             dailyTrades: Math.max(0, Math.trunc(toFiniteNumber(dailyPnlSnapshot.dailyTrades, 0))),
             estimatedPnL: toFiniteNumber(dailyPnlSnapshot.estimatedPnL, 0),
             estimatedTrades: Math.max(0, Math.trunc(toFiniteNumber(dailyPnlSnapshot.estimatedTrades, 0))),
+            confirmedRealizedPnL,
+            pendingRealizedPnL,
             dailyPnlSource: String(dailyPnlSnapshot.dailyPnlSource || "local").toLowerCase(),
             dailyPnlSyncedAt: toFiniteNumber(dailyPnlSnapshot.dailyPnlSyncedAt, 0),
             accumulatedRealizedPnL,
