@@ -95,19 +95,6 @@ const createOrderExecutionHelpers = ({
         const codeLabel = Number.isFinite(code) ? `code=${code}` : "code=UNKNOWN";
         return hint ? `${codeLabel} | ${message} | hint=${hint}` : `${codeLabel} | ${message}`;
     };
-    const resolveSpotSellFeeBufferRate = (marketInfo) => {
-        const feeCandidates = [
-            marketInfo?.taker,
-            marketInfo?.maker,
-            marketInfo?.info?.takerCommission && (Number(marketInfo.info.takerCommission) / 10000),
-            marketInfo?.info?.makerCommission && (Number(marketInfo.info.makerCommission) / 10000)
-        ]
-            .map((value) => toFiniteNumber(value, NaN))
-            .filter((value) => Number.isFinite(value) && value > 0 && value < 1);
-        const baseRate = feeCandidates.length > 0 ? Math.max(...feeCandidates) : 0.001;
-        return Math.min(0.02, Math.max(0.0005, baseRate * 1.15));
-    };
-
     const resolveOrderSizeStep = (marketInfo) => {
         const rawCandidates = [
             marketInfo?.precision?.amount,
@@ -1217,24 +1204,6 @@ const createOrderExecutionHelpers = ({
                     quantity = clampedQty;
                 }
             }
-            const feeBufferRate = resolveSpotSellFeeBufferRate(marketInfo);
-            const qtyAfterFeeBuffer = formatAmountToMarketPrecision(db.pair, Math.max(0, quantity * (1 - feeBufferRate)));
-            if (Number.isFinite(qtyAfterFeeBuffer) && qtyAfterFeeBuffer > 0 && qtyAfterFeeBuffer < quantity) {
-                const bufferedTpValidation = validateOrderSize(marketInfo, qtyAfterFeeBuffer, targetPrice, { orderType: "LIMIT" });
-                const bufferedSlValidation = validateOrderSize(marketInfo, qtyAfterFeeBuffer, stopPrice, { orderType: "STOP_LOSS_LIMIT" });
-                if (bufferedTpValidation.valid && bufferedSlValidation.valid) {
-                    console.log(
-                        `[OCO][INFO] Applying sell fee buffer ${(feeBufferRate * 100).toFixed(4)}% `
-                        + `for ${baseAsset || "base asset"}: qty ${quantity} -> ${qtyAfterFeeBuffer}`
-                    );
-                    quantity = qtyAfterFeeBuffer;
-                } else {
-                    console.log(
-                        `[OCO][INFO] Ignoring sell fee buffer ${(feeBufferRate * 100).toFixed(4)}% `
-                        + `for ${baseAsset || "base asset"} because adjusted qty ${qtyAfterFeeBuffer} fails exchange filters.`
-                    );
-                }
-            }
         }
 
         const tpValidation = validateOrderSize(marketInfo, quantity, targetPrice, { orderType: "LIMIT" });
@@ -1379,37 +1348,15 @@ const createOrderExecutionHelpers = ({
     };
 
     const getOcoQuantityTolerance = (position) => {
-        const baseTolerance = Math.max(0, toFiniteNumber(getPositionSyncQtyTolerance(), 0));
-        if (!isSpotMarginMode()) return baseTolerance;
-        const db = getDb();
-        const spotPair = getSpotPair(db?.pair);
-        const exchange = getExchange();
-        const marketInfo = exchange?.markets?.[spotPair] || exchange?.markets?.[db?.pair];
-        const feeBufferRate = Math.max(0, toFiniteNumber(resolveSpotSellFeeBufferRate(marketInfo), 0));
-        if (!(feeBufferRate > 0) || !Number.isFinite(position?.quantity) || position.quantity <= 0) return baseTolerance;
-        const feeBufferQty = Number(position.quantity) * feeBufferRate;
-        const precisionStep = Math.max(0, toFiniteNumber(resolveOrderSizeStep(marketInfo), 0));
-        return Math.max(baseTolerance, feeBufferQty + precisionStep);
+        return Math.max(0, toFiniteNumber(getPositionSyncQtyTolerance(), 0));
     };
 
     const resolveExpectedOcoQuantity = (position) => {
         const db = getDb();
-        const exchange = getExchange();
-        const spotPair = getSpotPair(db?.pair);
-        const marketInfo = exchange?.markets?.[spotPair] || exchange?.markets?.[db?.pair];
         const trackedQuantity = toFiniteNumber(position?.quantity, NaN);
         const ocoQuantity = toFiniteNumber(position?.ocoQuantity, NaN);
-        const closeSide = String(position?.side || "").toLowerCase() === "buy" ? "sell" : "buy";
         const tolerance = getOcoQuantityTolerance(position);
         if (!Number.isFinite(trackedQuantity) || trackedQuantity <= 0) return ocoQuantity;
-        if (isSpotMarginMode() && closeSide === "sell") {
-            const feeBufferRate = Math.max(0, toFiniteNumber(resolveSpotSellFeeBufferRate(marketInfo), 0));
-            const bufferedQty = formatAmountToMarketPrecision(db?.pair, Math.max(0, trackedQuantity * (1 - feeBufferRate)));
-            if (Number.isFinite(bufferedQty) && bufferedQty > 0) {
-                if (Number.isFinite(ocoQuantity) && ocoQuantity > 0 && Math.abs(ocoQuantity - bufferedQty) <= tolerance) return ocoQuantity;
-                return bufferedQty;
-            }
-        }
         if (!Number.isFinite(ocoQuantity) || ocoQuantity <= 0) return trackedQuantity;
         if (Math.abs(ocoQuantity - trackedQuantity) <= tolerance) return ocoQuantity;
         return trackedQuantity;
