@@ -16,7 +16,6 @@ const { createRuntimeMarketDataHelpers } = require("./services/runtime-market-da
 const { createRuntimePositionUtils } = require("./services/runtime-position-utils");
 const { createRuntimeSignalGridHelpers } = require("./services/runtime-signal-grid");
 const { createAiTradeFilter } = require("./services/ai-trade-filter");
-const { createFonnteNotifierHelpers } = require("./services/fonnte-notifier");
 const {
     sequelize,
     Config,
@@ -351,16 +350,8 @@ const aiTradeFilter = createAiTradeFilter({
     gridRejectCooldownMs: process.env.AI_GRID_REJECT_COOLDOWN_MS
 });
 
-const {
-    notifyPositionClosed,
-    notifyTradeUpdate
-} = createFonnteNotifierHelpers({
-    token: process.env.FONNTE_TOKEN,
-    target: process.env.FONNTE_TARGET || process.env.ADMIN_PHONE,
-    endpoint: process.env.FONNTE_ENDPOINT,
-    countryCode: process.env.FONNTE_COUNTRY_CODE,
-    enabled: process.env.FONNTE_NOTIFICATIONS_ENABLED
-});
+const notifyPositionClosed = async () => ({ ok: true, skipped: true, reason: "Notifications are disabled" });
+const notifyTradeUpdate = async () => ({ ok: true, skipped: true, reason: "Notifications are disabled" });
 
 const {
     fetchOpenGridOrders,

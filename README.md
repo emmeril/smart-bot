@@ -8,7 +8,6 @@ Automated crypto trading bot berbasis Node.js untuk Binance Spot, dengan strateg
 - Strategi spot grid adaptif berbasis candle historis
 - State posisi, order, dan konfigurasi disimpan lokal di SQLite
 - Dashboard web untuk memantau status dan mengubah parameter runtime tanpa restart
-- Dukungan notifikasi WhatsApp via Fonnte
 - Opsi AI filter untuk review sinyal dan grid order
 - Ada smoke test untuk menjaga area runtime yang sensitif
 
@@ -115,8 +114,6 @@ File `.env.example` sudah menyiapkan variabel utama seperti:
 - `GEMINI_API_KEYS`
 - `AI_SIGNAL_FILTER_ENABLED`
 - `AI_SIGNAL_FILTER_ENABLED` juga dipakai untuk review AI pada OCO TP/SL spot
-- `FONNTE_TOKEN`
-- `FONNTE_TARGET`
 - `DASHBOARD_PORT`
 - `DASHBOARD_USERNAME`
 - `DASHBOARD_PASSWORD`
