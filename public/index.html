@@ -1045,10 +1045,11 @@
     function renderPnLBreakdown(data) {
       if (!data || data.ok === false) return;
       
-      const realizedPnL = Number(data.accumulatedRealizedPnL ?? (Number(data.dailyPnL || 0) + Number(data.estimatedPnL || 0)));
-      const estimatedPnL = Number(data.estimatedPnL || 0);
+      const confirmedRealizedPnL = Number((data.confirmedRealizedPnL ?? data.dailyPnL) || 0);
+      const pendingRealizedPnL = Number((data.pendingRealizedPnL ?? data.estimatedPnL) || 0);
+      const realizedPnL = Number(data.accumulatedRealizedPnL ?? (confirmedRealizedPnL + pendingRealizedPnL));
       const unrealizedPnL = Number(data.unrealizedPnL || 0);
-      const totalPnL = Number(data.totalPnL || realizedPnL + unrealizedPnL);
+      const totalPnL = realizedPnL + unrealizedPnL;
       
       const formatPnl = (value) => {
         const prefix = value >= 0 ? "+" : "";
@@ -1060,7 +1061,7 @@
       // Realized PnL
       realizedPnlValue.textContent = formatPnl(realizedPnL);
       realizedPnlValue.className = "pnl-display " + getPnlClass(realizedPnL);
-      realizedPnlMeta.textContent = "";
+      realizedPnlMeta.textContent = `Confirmed ${formatPnl(confirmedRealizedPnL)} • Pending ${formatPnl(pendingRealizedPnL)}`;
       
       // Unrealized PnL
       const activePosCount = Array.isArray(data.activePositions) ? data.activePositions.length : 0;
