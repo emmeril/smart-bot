@@ -91,19 +91,6 @@ const compactSignalDecision = (signal = {}) => ({
     } : null
 });
 
-const compactPosition = (position = {}) => ({
-    side: String(position?.side || ""),
-    positionSide: String(position?.positionSide || ""),
-    quantity: safeNumber(position?.quantity),
-    entryPrice: safeNumber(position?.entryPrice),
-    targetPrice: safeNumber(position?.targetPrice),
-    stopLossPrice: safeNumber(position?.stopLossPrice),
-    stopLossUSDT: safeNumber(position?.stopLossUSDT),
-    atrAtEntry: safeNumber(position?.atrAtEntry),
-    strategy: String(position?.strategy || ""),
-    marginMode: String(position?.marginMode || position?.settlementMode || "")
-});
-
 const compactOrderBookSnapshot = (orderBook = {}) => {
     const bestBidPrice = safeNumber(orderBook?.bids?.[0]?.[0]);
     const bestBidSize = safeNumber(orderBook?.bids?.[0]?.[1]);
@@ -286,38 +273,6 @@ const evaluateGridOrderPrefilter = ({ snapshot, gridState, desiredOrders }) => {
     };
 };
 
-const evaluateOcoExitPrefilter = ({ position, market, exitPlan }) => {
-    const normalizedSide = normalizeOrderSide(position?.side);
-    const entryPrice = safeNumber(market?.currentPrice, safeNumber(position?.entryPrice, safeNumber(exitPlan?.entryPrice, NaN)));
-    const targetPrice = safeNumber(position?.targetPrice, safeNumber(exitPlan?.targetPrice, NaN));
-    const stopLossPrice = safeNumber(position?.stopLossPrice, safeNumber(exitPlan?.stopPrice ?? exitPlan?.stopLossPrice, NaN));
-    const quantity = safeNumber(position?.quantity, safeNumber(exitPlan?.quantity, NaN));
-
-    if (!["buy", "sell"].includes(normalizedSide)) {
-        return createPrefilterResult(`Unsupported position side: ${String(position?.side || "N/A")}`);
-    }
-    if (!isFinitePositive(quantity)) {
-        return createPrefilterResult("Invalid OCO quantity");
-    }
-    if (!isFinitePositive(entryPrice)) {
-        return createPrefilterResult("Invalid OCO entry price");
-    }
-    if (!isFinitePositive(targetPrice) || !isFinitePositive(stopLossPrice)) {
-        return createPrefilterResult("Invalid OCO TP/SL");
-    }
-
-    const longDirectionOk = targetPrice > entryPrice && stopLossPrice < entryPrice;
-    const shortDirectionOk = targetPrice < entryPrice && stopLossPrice > entryPrice;
-    if (normalizedSide === "buy" && !longDirectionOk) {
-        return createPrefilterResult("Buy OCO TP/SL is not directional");
-    }
-    if (normalizedSide === "sell" && !shortDirectionOk) {
-        return createPrefilterResult("Sell OCO TP/SL is not directional");
-    }
-
-    return null;
-};
-
 const isNonEmptyReason = (reason) => {
     const text = String(reason || "").trim();
     return text.length > 0;
@@ -391,27 +346,6 @@ const validateGridReviewResult = (result, reviewableOrders = []) => {
         throw new Error("AI grid response does not cover every reviewable order");
     }
     return normalizedDecisions;
-};
-
-const validateOcoReviewResult = (result) => {
-    if (!result || typeof result !== "object" || Array.isArray(result)) {
-        throw new Error("AI OCO response must be a JSON object");
-    }
-    const confidence = safeNumber(result?.confidence, NaN);
-    if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
-        throw new Error("AI OCO response confidence is invalid");
-    }
-    if (typeof result?.approved !== "boolean") {
-        throw new Error("AI OCO response approved flag is invalid");
-    }
-    if (!isNonEmptyReason(result?.reason)) {
-        throw new Error("AI OCO response reason is missing");
-    }
-    return {
-        approved: Boolean(result.approved),
-        confidence,
-        reason: String(result.reason).trim()
-    };
 };
 
 const splitKeyList = (value) => String(value || "")
@@ -738,66 +672,6 @@ const createAiTradeFilter = ({
         }
     };
 
-    const reviewOcoExit = async ({ db, position, market, exitPlan }) => {
-        if (!isEnabled()) return { approved: true, skipped: true, reason: "AI filter disabled" };
-        const prefilter = evaluateOcoExitPrefilter({ position, market, exitPlan });
-        if (prefilter) {
-            logAiTrace("SKIP", `oco prefilter rejected: ${prefilter.reason}`);
-            return prefilter;
-        }
-
-        const normalizedSide = normalizeOrderSide(position?.side);
-        const payload = {
-            type: "spot_oco_exit_review",
-            pair: db?.pair,
-            strategy: position?.strategy || position?.settlementMode || "spot_oco",
-            market: compactSnapshot(market || position?.marketContext || {}),
-            position: compactPosition(position),
-            exitPlan: {
-                closeSide: String(exitPlan?.closeSide || (normalizedSide === "buy" ? "sell" : "buy")),
-                quantity: safeNumber(exitPlan?.quantity, safeNumber(position?.quantity)),
-                entryPrice: safeNumber(market?.currentPrice, safeNumber(position?.entryPrice, safeNumber(exitPlan?.entryPrice))),
-                targetPrice: safeNumber(exitPlan?.targetPrice, safeNumber(position?.targetPrice)),
-                stopPrice: safeNumber(exitPlan?.stopPrice, safeNumber(position?.stopLossPrice)),
-                stopLimitPrice: safeNumber(exitPlan?.stopLimitPrice),
-                listClientOrderId: String(exitPlan?.listClientOrderId || ""),
-                tpClientOrderId: String(exitPlan?.tpClientOrderId || ""),
-                slClientOrderId: String(exitPlan?.slClientOrderId || "")
-            },
-            risk: {
-                orderSizeUsdt: safeNumber(db?.gridOrderSizeUsdt),
-                maxTradesPerDay: safeNumber(db?.maxTradesPerDay),
-                dailyTrades: safeNumber(db?.dailyTrades),
-                marginMode: db?.marginMode
-            }
-        };
-
-        try {
-            const result = validateOcoReviewResult(await callModel({
-                cacheKey: `oco:${JSON.stringify(payload)}`,
-                payload,
-                schema: {
-                    name: "spot_oco_exit_review",
-                    schema: {
-                        type: "object",
-                        additionalProperties: false,
-                        required: ["approved", "confidence", "reason"],
-                        properties: {
-                            approved: { type: "boolean" },
-                            confidence: { type: "number", minimum: 0, maximum: 1 },
-                            reason: { type: "string" }
-                        }
-                    }
-                }
-            }));
-            const approved = Boolean(result?.approved) && result.confidence >= confidenceFloor;
-            return { approved, confidence: result.confidence, reason: result.reason };
-        } catch (error) {
-            console.warn(`[AI][WARN] OCO review failed: ${error.message}`);
-            return { approved: failOpenOnError, confidence: 0, reason: "AI review failed" };
-        }
-    };
-
     const filterGridOrders = async ({ db, snapshot, params, gridState, desiredOrders }) => {
         if (!isEnabled() || !Array.isArray(desiredOrders) || desiredOrders.length === 0) return desiredOrders || [];
         const prefilter = evaluateGridOrderPrefilter({ snapshot, gridState, desiredOrders });
@@ -1011,7 +885,6 @@ const createAiTradeFilter = ({
             lastGridReviewResult = null;
         },
         reviewSignal,
-        reviewOcoExit,
         filterGridOrders
     };
 };

@@ -825,7 +825,6 @@ const {
     cancelTpOrders,
     cancelSlOrders,
     buildReplacementClientOrderId,
-    reviewOcoExitWithAi: (...args) => aiTradeFilter.reviewOcoExit(...args),
     notifyTradeUpdate: (...args) => notifyTradeUpdate(...args)
 });
 
