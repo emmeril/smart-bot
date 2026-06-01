@@ -46,7 +46,6 @@ const createConfigModelHelpers = ({
         const numericRules = {
             gridOrderSizeUsdt: { min: 0, allowZero: true },
             gridTargetProfitUsdt: { min: 0, allowZero: false },
-            maxTradesPerDay: { min: 0, allowZero: false, integer: true },
             coolingPeriod: { min: 0, allowZero: true, integer: true }, monitoringInterval: { min: 200, allowZero: false, integer: true },
             gridStopLossPercent: { min: 0, allowZero: false }, gridLevels: { min: 0, allowZero: true, integer: true },
             gridLookbackCandles: { min: 20, allowZero: false, integer: true }, gridRangePercent: { min: 0, allowZero: true },

@@ -182,8 +182,7 @@ const checkConfig = (config) => {
         "autoStopLossEnabled",
         "autoTargetProfitEnabled",
         "monitoringInterval",
-        "coolingPeriod",
-        "maxTradesPerDay"
+        "coolingPeriod"
     ];
 
     const raw = config || {};

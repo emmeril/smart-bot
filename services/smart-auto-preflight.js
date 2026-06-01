@@ -207,7 +207,6 @@ const createSmartAutoPreflightHelpers = ({ toFiniteNumber, clamp }) => {
             : NaN;
         const dailyPnl = toFiniteNumber(db?.dailyPnL, 0) + toFiniteNumber(db?.estimatedPnL, 0);
         const dailyTrades = Math.max(0, Math.trunc(toFiniteNumber(db?.dailyTrades, 0)));
-        const maxTradesPerDay = Math.max(1, Math.trunc(toFiniteNumber(db?.maxTradesPerDay, 1)));
         const dailyLossLimitUsdt = resolveDailyLossLimitUsdt(db);
         const orderSize = toFiniteNumber(effectiveOrderSizeUsdt, toFiniteNumber(params?.gridOrderSizeUsdt, db?.gridOrderSizeUsdt));
         const ordersPerSide = Math.max(0, Math.trunc(toFiniteNumber(effectiveOrdersPerSide, params?.gridOrdersPerSide)));
@@ -248,10 +247,6 @@ const createSmartAutoPreflightHelpers = ({ toFiniteNumber, clamp }) => {
             reasons.push(`Grid step too tight (${Number.isFinite(gridStepPercent) ? gridStepPercent.toFixed(3) : "N/A"}%)`);
             score -= 25;
         }
-        if (dailyTrades >= maxTradesPerDay) {
-            reasons.push(`Daily trade limit reached (${dailyTrades}/${maxTradesPerDay})`);
-            score -= 40;
-        }
         if (dailyPnl <= -dailyLossLimitUsdt) {
             reasons.push(`Daily loss limit reached (${dailyPnl.toFixed(2)} <= -${dailyLossLimitUsdt.toFixed(2)} USDT)`);
             score -= 50;
@@ -288,7 +283,6 @@ const createSmartAutoPreflightHelpers = ({ toFiniteNumber, clamp }) => {
                 dailyPnl,
                 dailyLossLimitUsdt,
                 dailyTrades,
-                maxTradesPerDay,
                 orderSize,
                 ordersPerSide,
                 plannedExposureUsdt,
