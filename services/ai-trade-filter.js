@@ -85,7 +85,6 @@ const compactSignalDecision = (signal = {}) => ({
         }
     } : null,
     riskOverrides: signal?.riskOverrides ? {
-        maxTradesPerDay: safeNumber(signal.riskOverrides?.maxTradesPerDay),
         coolingPeriod: safeNumber(signal.riskOverrides?.coolingPeriod),
         gridStopLossPercent: safeNumber(signal.riskOverrides?.gridStopLossPercent)
     } : null
@@ -640,7 +639,6 @@ const createAiTradeFilter = ({
             signal: compactSignalDecision(signal),
             risk: {
                 orderSizeUsdt: safeNumber(db?.gridOrderSizeUsdt),
-                maxTradesPerDay: safeNumber(db?.maxTradesPerDay),
                 dailyTrades: safeNumber(db?.dailyTrades),
                 marginMode: db?.marginMode
             }
@@ -729,7 +727,6 @@ const createAiTradeFilter = ({
                 entryBbShortThreshold: safeNumber(db?.entryBbShortThreshold),
                 sessionStartUTC: safeNumber(db?.sessionStartUTC),
                 sessionEndUTC: safeNumber(db?.sessionEndUTC),
-                maxTradesPerDay: safeNumber(db?.maxTradesPerDay),
                 dailyTrades: safeNumber(db?.dailyTrades)
             },
             market: {
@@ -793,8 +790,7 @@ const createAiTradeFilter = ({
             risk: {
                 orderSizeUsdt: safeNumber(params?.gridOrderSizeUsdt),
                 ordersPerSide: safeNumber(params?.gridOrdersPerSide),
-                dailyTrades: safeNumber(db?.dailyTrades),
-                maxTradesPerDay: safeNumber(db?.maxTradesPerDay)
+                dailyTrades: safeNumber(db?.dailyTrades)
             },
             marketRegime: {
                 currentNatrPercent: safeNumber(snapshot?.currentNatrPercent),
