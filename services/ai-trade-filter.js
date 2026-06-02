@@ -7,6 +7,9 @@ const DEFAULT_CACHE_TTL_MS = 60000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 2000;
 const DEFAULT_GRID_REVIEW_MIN_INTERVAL_MS = 15000;
 const DEFAULT_GRID_REJECT_COOLDOWN_MS = 5 * 60 * 1000;
+const DEFAULT_REQUEST_MIN_INTERVAL_MS = 1200;
+const DEFAULT_RETRY_BASE_DELAY_MS = 3000;
+const DEFAULT_RETRY_MAX_DELAY_MS = 60000;
 
 const truthy = (value) => ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
 
@@ -20,9 +23,32 @@ const withTimeout = async (promiseFactory, timeoutMs) => {
     }
 };
 
+const sleepWithAbort = async (delayMs, signal) => {
+    const safeDelayMs = Math.max(0, Math.trunc(safeNumber(delayMs, 0)));
+    if (safeDelayMs <= 0) return;
+    if (signal?.aborted) throw new Error("AI request aborted");
+    await new Promise((resolve, reject) => {
+        const timeout = setTimeout(resolve, safeDelayMs);
+        const abort = () => {
+            clearTimeout(timeout);
+            reject(new Error("AI request aborted"));
+        };
+        if (signal) signal.addEventListener("abort", abort, { once: true });
+    });
+};
+
 const safeNumber = (value, fallback = null) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const parseRetryAfterMs = (value, now = Date.now()) => {
+    const rawValue = String(value || "").trim();
+    if (!rawValue) return NaN;
+    const seconds = Number(rawValue);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+    const retryDate = Date.parse(rawValue);
+    return Number.isFinite(retryDate) ? Math.max(0, retryDate - now) : NaN;
 };
 
 const normalizeForSignature = (value, precision = 5) => {
@@ -416,8 +442,15 @@ const createGeminiProvider = ({
     model,
     fetchFn,
     outputTokenLimit,
-    instructions
+    instructions,
+    requestMinIntervalMs,
+    retryBaseDelayMs,
+    retryMaxDelayMs
 }) => {
+    const keyBackoffs = new Map();
+    let nextRequestAt = 0;
+    let requestQueue = Promise.resolve();
+
     const buildUrl = () => {
         const base = String(endpoint || DEFAULT_GEMINI_ENDPOINT).replace(/\/$/, "");
         if (base.includes(":generateContent")) return base;
@@ -430,7 +463,67 @@ const createGeminiProvider = ({
         return [401, 403, 408, 429, 500, 502, 503, 504].includes(status);
     };
 
+    const getRetryAfterMs = (response) => {
+        const retryAfter = typeof response?.headers?.get === "function" ? response.headers.get("retry-after") : "";
+        return parseRetryAfterMs(retryAfter);
+    };
+
+    const getKeyBackoff = (apiKey, now = Date.now()) => {
+        const backoff = keyBackoffs.get(apiKey);
+        if (!backoff) return null;
+        if (!Number.isFinite(backoff.until) || backoff.until <= now) {
+            keyBackoffs.delete(apiKey);
+            return null;
+        }
+        return backoff;
+    };
+
+    const markKeyBackoff = (apiKey, error, now = Date.now()) => {
+        if (!apiKey || !isRetryableError(error)) return null;
+        const previous = keyBackoffs.get(apiKey);
+        const failures = Math.max(1, Math.trunc(safeNumber(previous?.failures, 0)) + 1);
+        const exponentialDelay = Math.min(
+            Math.max(0, retryMaxDelayMs),
+            Math.max(0, retryBaseDelayMs) * (2 ** Math.min(failures - 1, 5))
+        );
+        const retryAfterDelay = safeNumber(error?.retryAfterMs, NaN);
+        const delayMs = Number.isFinite(retryAfterDelay)
+            ? Math.min(Math.max(0, retryMaxDelayMs), Math.max(exponentialDelay, retryAfterDelay))
+            : exponentialDelay;
+        const record = {
+            until: now + delayMs,
+            failures,
+            status: safeNumber(error?.status, null)
+        };
+        if (delayMs > 0) keyBackoffs.set(apiKey, record);
+        return record;
+    };
+
+    const clearKeyBackoff = (apiKey) => {
+        if (apiKey) keyBackoffs.delete(apiKey);
+    };
+
+    const waitForGlobalPacing = async (signal) => {
+        const now = Date.now();
+        const waitMs = Math.max(0, nextRequestAt - now);
+        if (waitMs > 0) await sleepWithAbort(waitMs, signal);
+        nextRequestAt = Date.now() + requestMinIntervalMs;
+    };
+
+    const runQueued = async (task) => {
+        const previous = requestQueue.catch(() => {});
+        let releaseQueue = null;
+        requestQueue = new Promise((resolve) => { releaseQueue = resolve; });
+        await previous;
+        try {
+            return await task();
+        } finally {
+            releaseQueue();
+        }
+    };
+
     const callGemini = async ({ schema, payload, signal, apiKey }) => {
+        await waitForGlobalPacing(signal);
         const response = await fetchFn(buildUrl(), {
             method: "POST",
             headers: {
@@ -458,6 +551,7 @@ const createGeminiProvider = ({
             const body = await response.text().catch(() => "");
             const error = new Error(`Gemini ${response.status}: ${body.slice(0, 200)}`);
             error.status = response.status;
+            error.retryAfterMs = getRetryAfterMs(response);
             throw error;
         }
 
@@ -466,20 +560,37 @@ const createGeminiProvider = ({
     };
 
     const callStructuredJson = async ({ schema, payload, signal }) => {
-        const keys = apiKeys.length > 0 ? apiKeys : [""];
-        let lastError = null;
-        for (let i = 0; i < keys.length; i++) {
-            const apiKey = keys[i];
-            try {
-                return await callGemini({ schema, payload, signal, apiKey });
-            } catch (error) {
-                lastError = error;
-                const hasMoreKeys = i < keys.length - 1;
-                if (!hasMoreKeys || !isRetryableError(error)) break;
-                console.warn(`[AI][WARN] Gemini key ${i + 1} failed: ${error.message}. Trying backup key.`);
+        return await runQueued(async () => {
+            const keys = apiKeys.length > 0 ? apiKeys : [""];
+            let lastError = null;
+            let skippedBackoffCount = 0;
+            for (let i = 0; i < keys.length; i++) {
+                const apiKey = keys[i];
+                const keyBackoff = getKeyBackoff(apiKey);
+                if (keyBackoff) {
+                    skippedBackoffCount += 1;
+                    continue;
+                }
+                try {
+                    const result = await callGemini({ schema, payload, signal, apiKey });
+                    clearKeyBackoff(apiKey);
+                    return result;
+                } catch (error) {
+                    lastError = error;
+                    const backoffRecord = markKeyBackoff(apiKey, error);
+                    const hasMoreKeys = i < keys.length - 1;
+                    if (!hasMoreKeys || !isRetryableError(error)) break;
+                    const backoffText = backoffRecord
+                        ? ` Backing off key for ${Math.ceil((backoffRecord.until - Date.now()) / 1000)}s.`
+                        : "";
+                    console.warn(`[AI][WARN] Gemini key ${i + 1} failed: ${error.message}.${backoffText} Trying backup key.`);
+                }
             }
-        }
-        throw lastError || new Error("Gemini request failed");
+            if (skippedBackoffCount > 0) {
+                console.warn(`[AI][WARN] Skipped ${skippedBackoffCount} Gemini key(s) still in backoff.`);
+            }
+            throw lastError || new Error("Gemini request failed; every key is cooling down");
+        });
     };
 
     return {
@@ -503,6 +614,9 @@ const createAiTradeFilter = ({
     maxOutputTokens = process.env.AI_SIGNAL_MAX_OUTPUT_TOKENS,
     gridReviewMinIntervalMs = process.env.AI_GRID_REVIEW_MIN_INTERVAL_MS,
     gridRejectCooldownMs = process.env.AI_GRID_REJECT_COOLDOWN_MS,
+    requestMinIntervalMs = process.env.AI_REQUEST_MIN_INTERVAL_MS,
+    retryBaseDelayMs = process.env.AI_RETRY_BASE_DELAY_MS,
+    retryMaxDelayMs = process.env.AI_RETRY_MAX_DELAY_MS,
     fetchFn = globalThis.fetch
 } = {}) => {
     const resolvedProviderName = normalizeProviderName(provider || apiProvider);
@@ -517,6 +631,9 @@ const createAiTradeFilter = ({
     const outputTokenLimit = Math.max(500, Math.trunc(safeNumber(maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS)));
     const gridReviewCooldownMs = Math.max(0, Math.trunc(safeNumber(gridReviewMinIntervalMs, DEFAULT_GRID_REVIEW_MIN_INTERVAL_MS)));
     const gridRejectCooldownWindowMs = Math.max(0, Math.trunc(safeNumber(gridRejectCooldownMs, DEFAULT_GRID_REJECT_COOLDOWN_MS)));
+    const aiRequestMinIntervalMs = Math.max(0, Math.trunc(safeNumber(requestMinIntervalMs, DEFAULT_REQUEST_MIN_INTERVAL_MS)));
+    const aiRetryBaseDelayMs = Math.max(0, Math.trunc(safeNumber(retryBaseDelayMs, DEFAULT_RETRY_BASE_DELAY_MS)));
+    const aiRetryMaxDelayMs = Math.max(aiRetryBaseDelayMs, Math.trunc(safeNumber(retryMaxDelayMs, DEFAULT_RETRY_MAX_DELAY_MS)));
     const cache = new Map();
     const gridRejectedOrderCooldowns = new Map();
     const cacheScope = JSON.stringify({
@@ -525,7 +642,8 @@ const createAiTradeFilter = ({
         model: resolvedModel,
         endpoint: resolvedEndpoint,
         confidenceFloor,
-        outputTokenLimit
+        outputTokenLimit,
+        aiRequestMinIntervalMs
     });
     let lastGridReviewAt = 0;
     let lastGridReviewSignature = "";
@@ -544,7 +662,10 @@ const createAiTradeFilter = ({
             model: resolvedModel,
             fetchFn,
             outputTokenLimit,
-            instructions
+            instructions,
+            requestMinIntervalMs: aiRequestMinIntervalMs,
+            retryBaseDelayMs: aiRetryBaseDelayMs,
+            retryMaxDelayMs: aiRetryMaxDelayMs
         })
     };
     const providerClient = providerRegistry[resolvedProviderName] || null;
@@ -871,7 +992,10 @@ const createAiTradeFilter = ({
         getProviderConfig: () => ({
             provider: resolvedProviderName,
             model: resolvedModel,
-            endpoint: resolvedEndpoint
+            endpoint: resolvedEndpoint,
+            requestMinIntervalMs: aiRequestMinIntervalMs,
+            retryBaseDelayMs: aiRetryBaseDelayMs,
+            retryMaxDelayMs: aiRetryMaxDelayMs
         }),
         invalidateCache: () => {
             cache.clear();
